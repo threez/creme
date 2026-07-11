@@ -40,7 +40,7 @@ module LISP
       PRELUDE_SRC
 
     private def load_prelude : Nil
-      Reader.read_all(PRELUDE).each do |form|
+      Reader.read_all(PRELUDE, "<prelude>").each do |form|
         eval(form, @global)
       end
     end

@@ -1,4 +1,5 @@
 require "../../spec_helper"
+require "file_utils"
 
 private def run(src : String) : LISP::LispValue
   interp = LISP::Interpreter.new
@@ -40,9 +41,9 @@ describe "require" do
     end
   end
 
-  it "raises for a non-symbol argument" do
-    expect_raises(LISP::LispRuntimeError, /require: argument must be a symbol/) do
-      run(%((require "math")))
+  it "raises for a non-symbol, non-string argument" do
+    expect_raises(LISP::LispRuntimeError, /require: argument must be a symbol or a string path/) do
+      run(%((require 5)))
     end
   end
 end
@@ -74,12 +75,127 @@ describe "allowed_modules" do
   end
 end
 
+private def with_tmp_dir(&)
+  dir = File.tempname("crisp-require-spec", "")
+  Dir.mkdir_p(dir)
+  begin
+    yield dir
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+end
+
+describe "path-based require" do
+  it "loads a .lisp file and makes its top-level defines qualified-callable" do
+    with_tmp_dir do |dir|
+      File.write(File.join(dir, "greet.lisp"), %[(define (hello name) (string-append "hi " name))])
+      interp = LISP::Interpreter.new
+      w = LISP.run_source(interp, %[(require "#{dir}/greet.lisp") (greet:hello "Ada")]).write_string
+      w.should eq(%("hi Ada"))
+    end
+  end
+
+  it "resolves nested relative requires against the requiring file's own directory, not the caller's" do
+    with_tmp_dir do |dir|
+      Dir.mkdir_p(File.join(dir, "sub"))
+      File.write(File.join(dir, "sub", "leaf.lisp"), "(define answer 42)")
+      # top.lisp lives in sub/, so its relative "leaf.lisp" require must
+      # resolve against sub/, not against dir/ (where the top-level caller is).
+      File.write(File.join(dir, "sub", "top.lisp"), %[(require "leaf.lisp") (define value leaf:answer)])
+      interp = LISP::Interpreter.new
+      LISP.run_source(interp, %[(require "#{dir}/sub/top.lisp") top:value]).write_string.should eq("42")
+    end
+  end
+
+  it "is idempotent across re-requires of the same file regardless of relative spelling" do
+    with_tmp_dir do |dir|
+      File.write(File.join(dir, "m.lisp"), "(define x 1)")
+      interp = LISP::Interpreter.new
+      LISP.run_source(interp, %[(require "#{dir}/m.lisp") (require "#{dir}/./m.lisp") m:x]).write_string.should eq("1")
+    end
+  end
+
+  it "raises when two different files derive the same module name" do
+    with_tmp_dir do |dir|
+      Dir.mkdir_p(File.join(dir, "a"))
+      Dir.mkdir_p(File.join(dir, "b"))
+      File.write(File.join(dir, "a", "m.lisp"), "(define x 1)")
+      File.write(File.join(dir, "b", "m.lisp"), "(define x 2)")
+      interp = LISP::Interpreter.new
+      expect_raises(LISP::LispRuntimeError, /require: module 'm' already bound to/) do
+        LISP.run_source(interp, %[(require "#{dir}/a/m.lisp") (require "#{dir}/b/m.lisp")])
+      end
+    end
+  end
+
+  it "raises when the derived name collides with a built-in Crystal module" do
+    with_tmp_dir do |dir|
+      File.write(File.join(dir, "math.lisp"), "(define x 1)")
+      interp = LISP::Interpreter.new
+      expect_raises(LISP::LispRuntimeError, /require: module 'math' already bound to a built-in module/) do
+        LISP.run_source(interp, %[(require 'math) (require "#{dir}/math.lisp")])
+      end
+    end
+  end
+
+  it "raises 'file not found' for a missing path" do
+    interp = LISP::Interpreter.new
+    expect_raises(LISP::LispRuntimeError, /require: file not found/) do
+      LISP.run_source(interp, %[(require "/no/such/file.lisp")])
+    end
+  end
+
+  it "a Lisp-authored module can use prelude/global bindings (unlike Crystal-native modules)" do
+    with_tmp_dir do |dir|
+      File.write(File.join(dir, "listy.lisp"), "(define (double-all lst) (map (lambda (x) (* 2 x)) lst))")
+      interp = LISP::Interpreter.new
+      LISP.run_source(interp, %[(require "#{dir}/listy.lisp") (listy:double-all '(1 2 3))]).write_string.should eq("(2 4 6)")
+    end
+  end
+
+  describe "module_load_paths sandboxing" do
+    it "defaults to nil (unrestricted)" do
+      LISP::Interpreter.new.module_load_paths.should be_nil
+    end
+
+    it "denies all path-based requires by default under .sandboxed" do
+      interp = LISP::Interpreter.sandboxed
+      interp.module_load_paths.should eq([] of String)
+      with_tmp_dir do |dir|
+        File.write(File.join(dir, "m.lisp"), "(define x 1)")
+        expect_raises(LISP::LispRuntimeError, /require: path '.*' is not permitted/) do
+          LISP.run_source(interp, %[(require "#{dir}/m.lisp")])
+        end
+      end
+    end
+
+    it "allows loading from a configured base directory" do
+      with_tmp_dir do |dir|
+        File.write(File.join(dir, "m.lisp"), "(define x 1)")
+        interp = LISP::Interpreter.sandboxed(module_load_paths: [dir])
+        LISP.run_source(interp, %[(require "#{dir}/m.lisp") m:x]).write_string.should eq("1")
+      end
+    end
+
+    it "rejects a path that escapes the configured base directory via traversal" do
+      with_tmp_dir do |dir|
+        Dir.mkdir_p(File.join(dir, "allowed"))
+        File.write(File.join(dir, "outside.lisp"), "(define x 1)")
+        interp = LISP::Interpreter.sandboxed(module_load_paths: [File.join(dir, "allowed")])
+        expect_raises(LISP::LispRuntimeError, /require: path '.*' is not permitted/) do
+          LISP.run_source(interp, %[(require "#{dir}/allowed/../outside.lisp")])
+        end
+      end
+    end
+  end
+end
+
 describe "#available_modules" do
   it "lists every module the interpreter can require" do
     interp = LISP::Interpreter.new
     interp.available_modules.should contain("math")
     interp.available_modules.should contain("json")
     interp.available_modules.should contain("sql")
-    interp.available_modules.size.should eq(16)
+    interp.available_modules.size.should eq(17)
   end
 end

@@ -519,7 +519,7 @@ module LISP
         @stdout = captured
         begin
           result : LispValue = NIL
-          Reader.read_all(src.value).each { |form| result = eval(form, @global) }
+          Reader.read_all(src.value, "<eval-string>").each { |form| result = eval(form, @global) }
           printed = captured.to_s
           text = printed.empty? ? result.write_string : "#{printed}#{result.write_string}"
           LISP.a_to_list([Cons.new(LispStr.new("ok"), LispStr.new(text)).as(LispValue)])

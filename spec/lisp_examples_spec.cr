@@ -104,4 +104,8 @@ describe "integration: examples/*.lisp" do
   it "runs 25-rfc8439-secure-message.lisp end to end without raising" do
     run_example("examples/25-rfc8439-secure-message.lisp")
   end
+
+  it "runs 26-require-path-greeting-module.lisp end to end without raising" do
+    run_example("examples/26-require-path-greeting-module.lisp")
+  end
 end

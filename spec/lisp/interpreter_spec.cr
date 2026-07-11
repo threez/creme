@@ -330,6 +330,14 @@ describe LISP::Interpreter do
       LISP::Interpreter.sandboxed.allowed_modules.should eq([] of String)
     end
 
+    it "denies all path-based requires by default" do
+      LISP::Interpreter.sandboxed.module_load_paths.should eq([] of String)
+    end
+
+    it "still allows widening module_load_paths explicitly" do
+      LISP::Interpreter.sandboxed(module_load_paths: ["/tmp"]).module_load_paths.should eq(["/tmp"])
+    end
+
     it "sets a finite default max_steps" do
       LISP::Interpreter.sandboxed.max_steps.should eq(100_000)
     end

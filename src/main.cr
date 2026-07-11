@@ -1,5 +1,22 @@
 require "./lisp"
 
+def format_error(ex : LISP::LispError) : String
+  String.build do |io|
+    if pos = ex.pos
+      io << "Error: " << ex.message << " (" << pos.file << ':' << pos.line << ':' << pos.col << ')'
+    else
+      io << "Error: " << ex.message
+    end
+    ex.frames.reverse_each do |frame|
+      next if frame.name.empty?
+      io << '\n' << "  at " << frame.name
+      if fp = frame.pos
+        io << " (" << fp.file << ':' << fp.line << ':' << fp.col << ')'
+      end
+    end
+  end
+end
+
 def repl(interp : LISP::Interpreter) : Nil
   buffer = ""
   loop do
@@ -14,7 +31,7 @@ def repl(interp : LISP::Interpreter) : Nil
     next if buffer.strip.empty?
 
     begin
-      forms = LISP::Reader.read_all(buffer)
+      forms = LISP::Reader.read_all(buffer, "<repl>")
       buffer = ""
       forms.each do |form|
         result = interp.eval(form, interp.global)
@@ -27,7 +44,7 @@ def repl(interp : LISP::Interpreter) : Nil
       exit(ex.code)
     rescue ex : LISP::LispError
       buffer = ""
-      puts "Error: #{ex.message}"
+      puts format_error(ex)
     rescue ex
       buffer = ""
       puts "Internal error: #{ex.message}"
@@ -57,11 +74,11 @@ def main : Nil
       # read whole program from stdin
       src = STDIN.gets_to_end
       begin
-        LISP::Reader.read_all(src).each { |form| interp.eval(form, interp.global) }
+        LISP::Reader.read_all(src, "<stdin>").each { |form| interp.eval(form, interp.global) }
       rescue ex : LISP::LispExit
         exit(ex.code)
       rescue ex : LISP::LispError
-        STDERR.puts "Error: #{ex.message}"
+        STDERR.puts format_error(ex)
         exit 1
       rescue ex
         STDERR.puts "Internal error: #{ex.message}"
@@ -80,7 +97,7 @@ def main : Nil
     rescue ex : LISP::LispExit
       exit(ex.code)
     rescue ex : LISP::LispError
-      STDERR.puts "Error: #{ex.message}"
+      STDERR.puts format_error(ex)
       exit 1
     rescue ex
       STDERR.puts "Internal error: #{ex.message}"

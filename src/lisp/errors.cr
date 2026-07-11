@@ -3,7 +3,28 @@
 # ===========================================================================
 
 module LISP
+  # One entry in a Lisp-level call stack backtrace: the name of the callable
+  # active at that point, and where (in source) it was called from.
+  record Frame, name : String, pos : SourcePos?
+
   class LispError < Exception
+    # Lisp-level call stack at the point the error was raised, outermost
+    # first, plus the position of the raising form itself. Captured eagerly
+    # right here at construction time (not lazily while unwinding — that
+    # would need a `rescue` on every recursive `Interpreter#eval` call, which
+    # is expensive enough per-frame to blow the real C stack well before
+    # `max_eval_depth` is reached). Left empty for errors raised before any
+    # interpreter is active (e.g. LispParseError from the reader/lexer).
+    property frames : Array(Frame) = [] of Frame
+    property pos : SourcePos?
+
+    def initialize(message : String? = nil)
+      super(message)
+      if interp = Interpreter.current
+        @frames = interp.call_stack_snapshot
+        @pos = interp.current_pos
+      end
+    end
   end
 
   class LispParseError < LispError

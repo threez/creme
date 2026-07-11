@@ -11,51 +11,91 @@ module LISP
     property max_eval_depth : Int32
     property max_steps : Int32?
     property allowed_modules : Array(String)?
+    property module_load_paths : Array(String)?
     property stdout : IO
 
     def initialize(
       @max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH,
       @max_steps : Int32? = nil,
       @allowed_modules : Array(String)? = nil,
+      @module_load_paths : Array(String)? = nil,
       @stdout : IO = STDOUT,
     )
       @global = Env.new
       @packages = {} of String => Env
+      @package_sources = {} of String => String
+      @load_dirs = [] of String
       @eval_depth = 0
       @step_count = 0
       @gensym_counter = 0
       @classes = {} of String => LispClass
       @clos_enabled = false
+      @call_stack = [] of Frame
       install_builtins(@global)
       load_prelude
     end
 
     # Safe-by-default entry point for embedding untrusted/semi-trusted guest
-    # code: denies all `require` modules and captures stdout unless told
-    # otherwise, so a host can't accidentally embed a wide-open interpreter
-    # by forgetting to pass allowed_modules:.
+    # code: denies all `require` modules (both named and path-based) and
+    # captures stdout unless told otherwise, so a host can't accidentally
+    # embed a wide-open interpreter by forgetting to pass allowed_modules:.
     def self.sandboxed(
       allowed_modules : Array(String) = [] of String,
+      module_load_paths : Array(String) = [] of String,
       max_steps : Int32? = 100_000,
       max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH,
       stdout : IO = IO::Memory.new,
     ) : Interpreter
-      new(max_eval_depth: max_eval_depth, max_steps: max_steps, allowed_modules: allowed_modules, stdout: stdout)
+      new(max_eval_depth: max_eval_depth, max_steps: max_steps, allowed_modules: allowed_modules, module_load_paths: module_load_paths, stdout: stdout)
     end
 
     # ---- Evaluation (trampolined) --------------------------------------------
 
     def eval(expr : LispValue, env : Env) : LispValue
-      @step_count = 0 if @eval_depth == 0
+      top_level = @eval_depth == 0
+      @step_count = 0 if top_level
       @eval_depth += 1
+      Interpreter.push_current(self) if top_level
+      pos = expr.is_a?(Cons) ? expr.pos : nil
+      @call_stack << Frame.new("", pos)
       begin
         if @eval_depth > @max_eval_depth
           raise LispExecutionLimitError.new("recursion depth exceeded")
         end
         eval_core(expr, env)
       ensure
+        @call_stack.pop
         @eval_depth -= 1
+        Interpreter.pop_current if @eval_depth == 0
       end
+    end
+
+    # ---- Backtrace support ----------------------------------------------------
+
+    @@current_stack = [] of Interpreter
+
+    # The interpreter instance whose eval() call chain is currently active on
+    # this fiber, if any — used so a LispError can eagerly capture a
+    # backtrace at construction time without every raise site needing a
+    # reference to the interpreter.
+    def self.current : Interpreter?
+      @@current_stack.last?
+    end
+
+    def self.push_current(interp : Interpreter) : Nil
+      @@current_stack << interp
+    end
+
+    def self.pop_current : Nil
+      @@current_stack.pop?
+    end
+
+    def call_stack_snapshot : Array(Frame)
+      @call_stack.dup
+    end
+
+    def current_pos : SourcePos?
+      @call_stack.last?.try(&.pos)
     end
 
     private def eval_core(expr : LispValue, env : Env) : LispValue
@@ -263,6 +303,10 @@ module LISP
             call_env = Env.new(callee.env)
             bind_params(callee, args, call_env)
             body = callee.body
+            # Replace (not push) the current frame: this is a genuine tail
+            # call, so it must not grow the backtrace any more than it grows
+            # the Crystal stack.
+            @call_stack[-1] = Frame.new(callee.name, expr.pos)
             return NIL if body.empty?
             (0...body.size - 1).each { |i| eval(body[i], call_env) }
             expr = body[body.size - 1]
@@ -283,13 +327,14 @@ module LISP
             bind_params(lam, args, call_env)
             define_call_next_method(call_env, callee, chain, idx, args)
             body = lam.body
+            @call_stack[-1] = Frame.new(callee.name, expr.pos)
             return NIL if body.empty?
             (0...body.size - 1).each { |i| eval(body[i], call_env) }
             expr = body[body.size - 1]
             env = call_env
             next
           else
-            return apply(callee, args)
+            return apply(callee, args, expr.pos)
           end
         else
           return expr
@@ -299,17 +344,27 @@ module LISP
 
     # ---- Application ----------------------------------------------------------
 
-    def apply(callee : LispValue, args : Array(LispValue)) : LispValue
+    def apply(callee : LispValue, args : Array(LispValue), pos : SourcePos? = nil) : LispValue
       case callee
       when Builtin
         check_arity(callee, args)
-        callee.fn.call(args)
+        @call_stack << Frame.new(callee.name, pos)
+        begin
+          callee.fn.call(args)
+        ensure
+          @call_stack.pop
+        end
       when Lambda
         call_env = Env.new(callee.env)
         bind_params(callee, args, call_env)
-        result : LispValue = NIL
-        callee.body.each { |form| result = eval(form, call_env) }
-        result
+        @call_stack << Frame.new(callee.name, pos)
+        begin
+          result : LispValue = NIL
+          callee.body.each { |form| result = eval(form, call_env) }
+          result
+        ensure
+          @call_stack.pop
+        end
       when Macro
         raise LispRuntimeError.new("macro cannot be applied as a procedure: #{callee.name}")
       when GenericFunction
@@ -318,7 +373,12 @@ module LISP
         unless idx
           raise LispRuntimeError.new("#{callee.name}: no applicable method for #{args.first?.try(&.write_string) || "no arguments"}")
         end
-        apply_method_chain(callee, chain, idx, args)
+        @call_stack << Frame.new(callee.name, pos)
+        begin
+          apply_method_chain(callee, chain, idx, args)
+        ensure
+          @call_stack.pop
+        end
       else
         raise LispRuntimeError.new("not applicable: #{callee.write_string}")
       end

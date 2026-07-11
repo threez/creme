@@ -3,6 +3,11 @@
 # ===========================================================================
 
 module LISP
+  # Where a form came from in source text — attached only to Cons (per-form
+  # granularity), never to LispSym (interned/singleton-per-name, so it can't
+  # carry per-occurrence position).
+  record SourcePos, file : String, line : Int32, col : Int32
+
   abstract class LispValue
     # Human-readable form (strings unquoted).
     abstract def to_display(io : IO) : Nil
@@ -147,8 +152,9 @@ module LISP
   class Cons < LispValue
     property car : LispValue
     property cdr : LispValue
+    property pos : SourcePos?
 
-    def initialize(@car : LispValue, @cdr : LispValue)
+    def initialize(@car : LispValue, @cdr : LispValue, @pos : SourcePos? = nil)
     end
 
     def to_display(io : IO) : Nil

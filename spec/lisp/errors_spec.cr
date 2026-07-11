@@ -8,6 +8,12 @@ describe LISP::LispError do
   it "carries a message" do
     LISP::LispError.new("boom").message.should eq("boom")
   end
+
+  it "has empty frames and no position when no interpreter is currently evaluating" do
+    ex = LISP::LispError.new("boom")
+    ex.frames.should eq([] of LISP::Frame)
+    ex.pos.should be_nil
+  end
 end
 
 describe LISP::LispParseError do

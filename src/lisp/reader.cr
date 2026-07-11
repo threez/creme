@@ -11,8 +11,8 @@ module LISP
       @depth = 0
     end
 
-    def self.read_all(src : String) : Array(LispValue)
-      tokens = Lexer.tokenize(src)
+    def self.read_all(src : String, source_name : String = "<unknown>") : Array(LispValue)
+      tokens = Lexer.tokenize(src, source_name)
       reader = new(tokens)
       forms = [] of LispValue
       until reader.at_eof?
@@ -72,19 +72,19 @@ module LISP
         LispSym.of(t.text)
       when TokKind::Quote
         advance
-        wrap("quote")
+        wrap("quote", t)
       when TokKind::Quasiquote
         advance
-        wrap("quasiquote")
+        wrap("quasiquote", t)
       when TokKind::Unquote
         advance
-        wrap("unquote")
+        wrap("unquote", t)
       when TokKind::UnquoteSplicing
         advance
-        wrap("unquote-splicing")
+        wrap("unquote-splicing", t)
       when TokKind::LParen
         advance
-        read_list
+        read_list(t)
       when TokKind::VectorOpen
         advance
         read_vector
@@ -97,15 +97,15 @@ module LISP
       end
     end
 
-    private def wrap(sym : String) : LispValue
+    private def wrap(sym : String, opener : Token) : LispValue
       if current.kind == TokKind::EOF
         raise LispIncompleteError.new("unexpected end of input after #{sym}")
       end
       inner = read_form
-      LISP.a_to_list([LispSym.of(sym), inner] of LispValue)
+      stamp(LISP.a_to_list([LispSym.of(sym), inner] of LispValue), opener)
     end
 
-    private def read_list : LispValue
+    private def read_list(opener : Token) : LispValue
       elements = [] of LispValue
       tail : LispValue = NIL
       loop do
@@ -135,7 +135,20 @@ module LISP
           elements << read_form
         end
       end
-      LISP.a_to_list(elements, tail)
+      stamp(LISP.a_to_list(elements, tail), opener)
+    end
+
+    # Stamps only the spine Cons cells belonging to this list (not the cars,
+    # which — if themselves lists — were already stamped with their own
+    # opener's position when they were read).
+    private def stamp(list : LispValue, opener : Token) : LispValue
+      pos = SourcePos.new(opener.source, opener.line, opener.col)
+      cur = list
+      while cur.is_a?(Cons)
+        cur.pos = pos
+        cur = cur.cdr
+      end
+      list
     end
 
     private def read_vector : LispValue
