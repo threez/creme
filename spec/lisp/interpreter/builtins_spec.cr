@@ -348,6 +348,34 @@ describe "builtins: strings" do
     w(%((string=? "a" "a" "a"))).should eq("#t")
     w(%((string=? "a" "a" "b"))).should eq("#f")
   end
+
+  it "string<?/string>?/string<=?/string>=? compare lexicographically" do
+    w(%((string<? "a" "b" "c"))).should eq("#t")
+    w(%((string<? "a" "c" "b"))).should eq("#f")
+    w(%((string>? "c" "b" "a"))).should eq("#t")
+    w(%((string<=? "a" "a" "b"))).should eq("#t")
+    w(%((string>=? "b" "a" "a"))).should eq("#t")
+  end
+
+  it "string-ref indexes a character" do
+    w(%((string-ref "hello" 1))).should eq(%(#\\e))
+    expect_raises(LISP::LispRuntimeError, /string-ref: index out of range/) { w(%((string-ref "hi" 5))) }
+  end
+
+  it "string->list and list->string round-trip" do
+    w(%((string->list "ab"))).should eq(%((#\\a #\\b)))
+    w(%((list->string (list #\\a #\\b)))).should eq(%("ab"))
+  end
+
+  it "make-string fills with a char, defaulting to space" do
+    w(%((make-string 3 #\\z))).should eq(%("zzz"))
+    w(%((make-string 2))).should eq(%("  "))
+  end
+
+  it "char->integer and integer->char convert code points" do
+    w(%((char->integer #\\A))).should eq("65")
+    w(%((integer->char 97))).should eq(%(#\\a))
+  end
 end
 
 describe "builtins: I/O" do

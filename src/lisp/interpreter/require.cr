@@ -26,6 +26,7 @@ module LISP
         "file"       => ->install_file(Env),
         "time"       => ->install_time(Env),
         "string"     => ->install_string_ext(Env),
+        "format"     => ->install_format(Env),
         "random"     => ->install_random(Env),
         "digest"     => ->install_digest(Env),
         "env"        => ->install_env(Env),

@@ -390,6 +390,58 @@ module LISP
         TRUE.as(LispValue)
       end)
 
+      reg.call("string<?", 2, -1, ->(args : Array(LispValue)) : LispValue { string_chain_cmp(args, "string<?") { |lhs, rhs| lhs < rhs } })
+      reg.call("string>?", 2, -1, ->(args : Array(LispValue)) : LispValue { string_chain_cmp(args, "string>?") { |lhs, rhs| lhs > rhs } })
+      reg.call("string<=?", 2, -1, ->(args : Array(LispValue)) : LispValue { string_chain_cmp(args, "string<=?") { |lhs, rhs| lhs <= rhs } })
+      reg.call("string>=?", 2, -1, ->(args : Array(LispValue)) : LispValue { string_chain_cmp(args, "string>=?") { |lhs, rhs| lhs >= rhs } })
+
+      reg.call("string-ref", 2, 2, ->(args : Array(LispValue)) : LispValue do
+        s = args[0]
+        raise LispRuntimeError.new("string-ref: expected string, got #{s.write_string}") unless s.is_a?(LispStr)
+        idx = int_arg(args[1], "string-ref")
+        raise LispRuntimeError.new("string-ref: index out of range") if idx < 0 || idx >= s.value.size
+        LispChar.new(s.value[idx.to_i])
+      end)
+
+      reg.call("string->list", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        s = args[0]
+        raise LispRuntimeError.new("string->list: expected string, got #{s.write_string}") unless s.is_a?(LispStr)
+        LISP.a_to_list(s.value.chars.map { |chr| LispChar.new(chr).as(LispValue) })
+      end)
+
+      reg.call("list->string", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        buf = String::Builder.new
+        LISP.list_to_a(args[0]).each do |v|
+          raise LispRuntimeError.new("list->string: expected list of chars, got #{v.write_string}") unless v.is_a?(LispChar)
+          buf << v.value
+        end
+        LispStr.new(buf.to_s)
+      end)
+
+      reg.call("make-string", 1, 2, ->(args : Array(LispValue)) : LispValue do
+        len = int_arg(args[0], "make-string")
+        raise LispRuntimeError.new("make-string: length must be non-negative") if len < 0
+        fill = ' '
+        if args.size == 2
+          f = args[1]
+          raise LispRuntimeError.new("make-string: expected char, got #{f.write_string}") unless f.is_a?(LispChar)
+          fill = f.value
+        end
+        LispStr.new(fill.to_s * len)
+      end)
+
+      reg.call("char->integer", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        c = args[0]
+        raise LispRuntimeError.new("char->integer: expected char, got #{c.write_string}") unless c.is_a?(LispChar)
+        LispInt.new(c.value.ord.to_i64)
+      end)
+
+      reg.call("integer->char", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        n = int_arg(args[0], "integer->char")
+        raise LispRuntimeError.new("integer->char: code point out of range") if n < 0 || n > 0x10FFFF
+        LispChar.new(n.to_i32.chr)
+      end)
+
       # ---- I/O ----
       reg.call("display", 1, 1, ->(args : Array(LispValue)) : LispValue do
         emit(args[0].display_string)
@@ -484,6 +536,15 @@ module LISP
         raise LispRuntimeError.new("/: division by zero") if bf == 0.0
         LispFloat.new(LISP.as_f64(a, "/") / bf)
       end
+    end
+
+    private def string_chain_cmp(args : Array(LispValue), who : String, &block : String, String -> Bool) : LispValue
+      strs = args.map do |arg|
+        raise LispRuntimeError.new("#{who}: expected string, got #{arg.write_string}") unless arg.is_a?(LispStr)
+        arg.value
+      end
+      ok = (0...strs.size - 1).all? { |i| block.call(strs[i], strs[i + 1]) }
+      LispBool.of(ok)
     end
 
     private def int_arg(v : LispValue, who : String) : Int64
