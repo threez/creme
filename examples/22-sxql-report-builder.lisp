@@ -35,4 +35,16 @@
   (lambda (row) (println (cdr (assoc "region" row)) ": " (cdr (assoc "total" row))))
   (vector->list rows))
 
+;; The same builder/renderer above the sxql:select!/from/where/order-by
+;; macro DSL: a query is written as keyword-headed data and executed
+;; directly against `conn`, returning keyword-alist rows instead of a
+;; SQL string to run by hand.
+(println "North sales (amount desc):")
+(for-each
+  (lambda (row) (println (cdr (assoc :amount row))))
+  (sxql:select! conn (:amount)
+    (from :sale)
+    (where (:= :region "north"))
+    (order-by (:desc :amount))))
+
 (sql:close conn)

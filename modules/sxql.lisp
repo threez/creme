@@ -494,3 +494,87 @@
   (let ((box (vector '())))
     (let ((sql (render-statement stmt box)))
       (list sql (vector-ref box 0)))))
+
+;; ===========================================================================
+;; select!: a macro-based, connection-executing entry point on top of the
+;; builder above, mirroring the original CL sxql keyword-tree syntax, e.g.
+;;
+;;   (sxql:select! conn (:title :author :year)
+;;     (from :books)
+;;     (where (:and (:>= :year 1995) (:< :year 2010)))
+;;     (order-by (:desc :year)))
+;;
+;; select! is a macro: its fields/clause arguments are raw, unevaluated
+;; s-expressions (never looked up or called), which sxql-compile-tree walks
+;; and turns into calls against the *existing* builder functions above --
+;; nothing about the builder/renderer changes. Only `conn` is an ordinary,
+;; evaluated argument (spliced into the expansion as-is, so it evaluates
+;; normally, once, when the expanded code runs) -- there is no "current
+;; connection" box or other shared/global state.
+;; ===========================================================================
+
+;; A leading ':' is stripped so both :year and year identify the same raw
+;; SQL identifier once rendered (render-expr already treats any symbol as
+;; raw identifier text via symbol->string).
+(define (sxql-strip-colon sym)
+  (let ((s (symbol->string sym)))
+    (if (equal? s "")
+        sym
+        (if (equal? (substring s 0 1) ":")
+            (string->symbol (substring s 1 (string-length s)))
+            sym))))
+
+;; Fetches the existing qualified builder for a (stripped) tag, e.g. tag
+;; 'from -> the function bound to sxql:from. `eval` always evaluates in
+;; @global, but qualified-symbol resolution (sxql:from) is @packages-keyed
+;; regardless of env, so this reaches the sxql package's own bindings
+;; correctly even though eval itself never sees this file's local env.
+(define (sxql-lookup tag)
+  (eval (string->symbol (string-append "sxql:" (symbol->string tag)))))
+
+;; in/not-in's second operand is a literal list of values (e.g. ("a" "b")),
+;; not a nested tagged expression -- compile its elements individually
+;; instead of recursing into it as an operator call.
+(define (sxql-compile-call tag args)
+  (if (or (eq? tag 'in) (eq? tag 'not-in))
+      (apply (sxql-lookup tag) (list (sxql-compile-tree (car args)) (map sxql-compile-tree (cadr args))))
+      (apply (sxql-lookup tag) (map sxql-compile-tree args))))
+
+;; Recursively compiles a raw, unevaluated s-expression from a select!
+;; clause/field position into the same tagged-node/statement shapes the
+;; existing builder functions above already produce. A bare symbol (:year
+;; or year) becomes a plain identifier symbol; a list (tag arg...) — tag
+;; written either as `from` or `:from` — strips the tag's leading ':',
+;; compiles its args, and calls the existing qualified builder of the same
+;; name, e.g. (from :books) -> (sxql:from 'books). Anything else (a literal
+;; number/string) passes through unchanged.
+(define (sxql-compile-tree form)
+  (cond
+    ((symbol? form) (sxql-strip-colon form))
+    ((pair? form) (sxql-compile-call (sxql-strip-colon (car form)) (cdr form)))
+    (else form)))
+
+;; Converts one sql:query row (an alist of (LispStr-column-name . value),
+;; per src/lisp/modules/sql.cr) into an alist of (keyword-symbol . value)
+;; pairs, e.g. (("title" . "...")) -> ((:title . "...")).
+(define (sxql-row->kw-alist row)
+  (map (lambda (pair) (cons (string->symbol (string-append ":" (car pair))) (cdr pair))) row))
+
+;; Executes an already-built statement against `conn` and returns the
+;; converted rows. A plain function of its two arguments -- no hidden
+;; state -- reusing the exact yield + sql:query call shape.
+(define (run conn stmt)
+  (let* ((yielded (yield stmt))
+         (sql-str (car yielded))
+         (params (cadr yielded))
+         (rows (apply sql:query conn sql-str params)))
+    (map sxql-row->kw-alist (vector->list rows))))
+
+(defmacro select! (conn fields . clauses)
+  (let ((stmt (apply select (map sxql-compile-tree fields) (map sxql-compile-tree clauses))))
+    ;; The expansion below is evaluated back at the macro call site's own
+    ;; env (typically the caller's top-level env, not this file's env), so
+    ;; `run` must be referenced qualified (sxql:run) -- qualified-symbol
+    ;; resolution is @packages-keyed regardless of which env evaluates it,
+    ;; unlike a bare `run` which would only resolve inside this file's env.
+    (list 'sxql:run conn (list 'quote stmt))))
