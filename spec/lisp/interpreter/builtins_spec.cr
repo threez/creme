@@ -572,6 +572,24 @@ describe "builtins: blob" do
   end
 end
 
+describe "builtins: eval" do
+  it "evaluates a quoted form" do
+    w("(eval '(+ 1 2))").should eq("3")
+  end
+
+  it "evaluates a quasiquoted form built from data" do
+    w("(eval (list '+ 1 2))").should eq("3")
+  end
+
+  it "sees definitions made by earlier eval calls" do
+    w("(eval '(define x 10)) (eval 'x)").should eq("10")
+  end
+
+  it "propagates errors like a normal call" do
+    expect_raises(LISP::LispRuntimeError, /car:/) { w("(eval '(car 1))") }
+  end
+end
+
 describe "builtins: eval-string" do
   it "parses and evaluates a single form, tagging the printed result ok" do
     w(%((eval-string "(+ 1 2)"))).should eq(%((("ok" . "3"))))

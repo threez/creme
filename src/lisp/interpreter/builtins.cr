@@ -320,6 +320,10 @@ module LISP
         apply(f, call_args)
       end)
 
+      reg.call("eval", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        eval(args[0], @global)
+      end)
+
       # ---- Type predicates ----
       reg.call("number?", 1, 1, ->(args : Array(LispValue)) : LispValue { LispBool.of(args[0].is_a?(LispInt) || args[0].is_a?(LispFloat)) })
       reg.call("integer?", 1, 1, ->(args : Array(LispValue)) : LispValue { LispBool.of(args[0].is_a?(LispInt)) })
