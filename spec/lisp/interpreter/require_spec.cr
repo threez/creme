@@ -80,6 +80,6 @@ describe "#available_modules" do
     interp.available_modules.should contain("math")
     interp.available_modules.should contain("json")
     interp.available_modules.should contain("sql")
-    interp.available_modules.size.should eq(15)
+    interp.available_modules.size.should eq(16)
   end
 end

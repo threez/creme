@@ -489,6 +489,47 @@ module LISP
         NIL.as(LispValue)
       end)
 
+      # ---- Eval ----
+      # Parses `s` and evaluates every resulting form in the global env,
+      # catching any error so callers (e.g. a self-hosted REPL) never need a
+      # Lisp-level condition system to guard against evaluating arbitrary,
+      # error-prone user input. Returns `(("ok" . "printed-value"))` for the
+      # last form's printed (write_string) result, or
+      # `(("error" . "message"))` on parse or runtime failure — both
+      # branches carry a string, so callers never need to branch on the
+      # payload's type, only on which tag it's under.
+      #
+      # Also redirects @stdout to a throwaway IO::Memory for the duration
+      # of the call, restoring the previous stdout afterward: a host
+      # embedding this in a raw-mode/alt-screen terminal session (e.g. the
+      # tui module's REPL) cannot let evaluated code's own `display`/
+      # `print`/`write` calls reach the real terminal directly — those
+      # writes would land outside the host's own render loop and corrupt
+      # whatever's on screen. Anything printed is prepended to the "ok"
+      # payload instead, so it's never silently lost.
+      reg.call("eval-string", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        src = args[0]
+        raise LispRuntimeError.new("eval-string: expected string, got #{src.write_string}") unless src.is_a?(LispStr)
+        previous_stdout = @stdout
+        captured = IO::Memory.new
+        @stdout = captured
+        begin
+          result : LispValue = NIL
+          Reader.read_all(src.value).each { |form| result = eval(form, @global) }
+          printed = captured.to_s
+          text = printed.empty? ? result.write_string : "#{printed}#{result.write_string}"
+          LISP.a_to_list([Cons.new(LispStr.new("ok"), LispStr.new(text)).as(LispValue)])
+        rescue ex : LispExit
+          raise ex
+        rescue ex : LispError
+          LISP.a_to_list([Cons.new(LispStr.new("error"), LispStr.new(ex.message || "unknown error")).as(LispValue)])
+        rescue ex : Exception
+          LISP.a_to_list([Cons.new(LispStr.new("error"), LispStr.new(ex.message || "unknown error")).as(LispValue)])
+        ensure
+          @stdout = previous_stdout
+        end
+      end)
+
       # ---- Misc ----
       reg.call("error", 1, -1, ->(args : Array(LispValue)) : LispValue do
         buf = String::Builder.new

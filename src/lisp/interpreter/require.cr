@@ -34,6 +34,7 @@ module LISP
         "sql"        => ->install_sql(Env),
         "sxql"       => ->install_sxql(Env),
         "clos"       => ->install_clos(Env),
+        "tui"        => ->install_tui(Env),
       } of String => (Env -> Nil)
     end
 

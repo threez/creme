@@ -24,6 +24,7 @@ require "./lisp/modules/process"
 require "./lisp/modules/sql"
 require "./lisp/modules/sxql"
 require "./lisp/modules/clos"
+require "./lisp/modules/tui"
 require "./lisp/runner"
 require "./lisp/convert"
 

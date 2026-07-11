@@ -16,6 +16,9 @@ dependencies:
   sqlite3:
     github: crystal-lang/crystal-sqlite3
     version: ~> 0.23.0
+  tui:
+    github: threez/tui.cr
+    version: ~> 0.4.0
 
 development_dependencies:
   ameba:

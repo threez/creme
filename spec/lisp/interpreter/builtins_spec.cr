@@ -571,3 +571,57 @@ describe "builtins: blob" do
     end
   end
 end
+
+describe "builtins: eval-string" do
+  it "parses and evaluates a single form, tagging the printed result ok" do
+    w(%((eval-string "(+ 1 2)"))).should eq(%((("ok" . "3"))))
+  end
+
+  it "evaluates multiple forms in sequence, returning the last printed result" do
+    w(%((eval-string "(define x 10) (* x 2)"))).should eq(%((("ok" . "20"))))
+  end
+
+  it "sees definitions made by earlier eval-string calls" do
+    w(<<-LISP).should eq(%((("ok" . "5"))))
+      (eval-string "(define y 5)")
+      (eval-string "y")
+      LISP
+  end
+
+  it "catches a parse error and tags it error" do
+    w(%q|(eval-string "(+ 1 2")|).should match(/\(\("error" \. ".+"\)\)/)
+  end
+
+  it "catches a runtime error and tags it error" do
+    w(%((eval-string "(car 1)"))).should match(/\(\("error" \. ".+"\)\)/)
+  end
+
+  it "raises LispExit for (exit) rather than tagging it as an error" do
+    interp = LISP::Interpreter.new
+    expect_raises(LISP::LispExit) do
+      LISP.run_source(interp, %((eval-string "(exit 7)")))
+    end
+  end
+
+  it "raises for a non-string argument" do
+    expect_raises(LISP::LispRuntimeError, /eval-string: expected string/) { w("(eval-string 42)") }
+  end
+
+  it "captures display/print output into the ok payload instead of writing it to the real stdout" do
+    real_stdout = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: real_stdout)
+    result = LISP.run_source(interp, <<-LISP)
+      (eval-string "(display \\"hi \\") (+ 1 1)")
+      LISP
+    result.write_string.should eq(%((("ok" . "hi 2"))))
+    real_stdout.to_s.should eq("")
+  end
+
+  it "restores the interpreter's own stdout after eval-string returns" do
+    real_stdout = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: real_stdout)
+    LISP.run_source(interp, %((eval-string "1")))
+    LISP.run_source(interp, %((display "after")))
+    real_stdout.to_s.should eq("after")
+  end
+end

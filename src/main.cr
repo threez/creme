@@ -51,7 +51,7 @@ def main : Nil
   if args.empty?
     interp = LISP::Interpreter.new
     if STDIN.tty?
-      puts "crisp LISP — Crystal LISP interpreter. Ctrl-D or (exit) to quit."
+      puts "crisp — Crystal LISP interpreter. Ctrl-D or (exit) to quit."
       repl(interp)
     else
       # read whole program from stdin

@@ -96,4 +96,8 @@ describe "integration: examples/*.lisp" do
   it "runs 23-clos-library-catalog.lisp end to end without raising" do
     run_example("examples/23-clos-library-catalog.lisp")
   end
+
+  it "runs 24-tui-try-lisp.lisp end to end without raising" do
+    run_example("examples/24-tui-try-lisp.lisp")
+  end
 end
