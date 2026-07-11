@@ -18,7 +18,7 @@ module LISP
         s = args[0]
         raise LispRuntimeError.new("json:parse: expected string, got #{s.write_string}") unless s.is_a?(LispStr)
         begin
-          json_to_lisp(JSON.parse(s.value))
+          LISP.to_lisp(JSON.parse(s.value))
         rescue ex : JSON::ParseException
           raise LispRuntimeError.new("json:parse: invalid json: #{ex.message}")
         end
@@ -27,23 +27,6 @@ module LISP
       reg.call("stringify", 1, 1, ->(args : Array(LispValue)) : LispValue do
         LispStr.new(JSON.build { |json| json_write(args[0], json, "json:stringify") })
       end)
-    end
-
-    private def json_to_lisp(any : JSON::Any) : LispValue
-      raw = any.raw
-      case raw
-      when Nil     then NIL
-      when Bool    then LispBool.of(raw)
-      when Int64   then LispInt.new(raw)
-      when Float64 then LispFloat.new(raw)
-      when String  then LispStr.new(raw)
-      when Array(JSON::Any)
-        LispVector.new(raw.map { |x| json_to_lisp(x) })
-      when Hash(String, JSON::Any)
-        LISP.a_to_list(raw.map { |k, v| Cons.new(LispStr.new(k), json_to_lisp(v)).as(LispValue) })
-      else
-        raise LispRuntimeError.new("json:parse: unsupported json value")
-      end
     end
 
     # A Cons is written as a JSON object when it's a proper list whose every
@@ -69,6 +52,8 @@ module LISP
         json.number(v.value)
       when LispStr
         json.string(v.value)
+      when LispChar
+        json.string(v.value.to_s)
       when LispVector
         json.array do
           v.value.each { |e| json_write(e, json, who) }

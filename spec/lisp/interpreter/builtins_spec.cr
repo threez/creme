@@ -535,3 +535,39 @@ describe "builtins: vectors" do
     w("(eq? (vector 1 2 3) (vector 1 2 3))").should eq("#f")
   end
 end
+
+describe "builtins: blob" do
+  it "blob? distinguishes blobs from strings" do
+    w(%((blob? (string->blob "hi")))).should eq("#t")
+    w(%((blob? "hi"))).should eq("#f")
+  end
+
+  it "string->blob and blob->string round-trip" do
+    w(%((blob->string (string->blob "hello")))).should eq(%("hello"))
+  end
+
+  it "blob-size reports the byte count" do
+    w(%((blob-size (string->blob "hello")))).should eq("5")
+  end
+
+  it "equal? compares blobs by content, eq?/eqv? by identity" do
+    w(%((equal? (string->blob "hi") (string->blob "hi")))).should eq("#t")
+    w(%((eq? (string->blob "hi") (string->blob "hi")))).should eq("#f")
+  end
+
+  it "blob-size raises for a non-blob" do
+    expect_raises(LISP::LispRuntimeError, /blob-size: expected blob/) { w(%((blob-size "hi"))) }
+  end
+
+  it "string->blob raises for a non-string" do
+    expect_raises(LISP::LispRuntimeError, /string->blob: expected string/) { w("(string->blob 1)") }
+  end
+
+  it "blob->string raises cleanly on invalid UTF-8 bytes" do
+    interp = LISP::Interpreter.new
+    interp.global.define("bad-blob", LISP::LispBlob.new(Bytes[0xFF_u8, 0xFE_u8]))
+    expect_raises(LISP::LispRuntimeError, /blob->string:/) do
+      LISP.run_source(interp, "(blob->string bad-blob)")
+    end
+  end
+end

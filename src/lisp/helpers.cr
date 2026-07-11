@@ -80,6 +80,8 @@ module LISP
       lisp_equal?(a.car, b.car) && lisp_equal?(a.cdr, b.cdr)
     when LispVector
       b.is_a?(LispVector) && vector_equal?(a, b)
+    when LispBlob
+      b.is_a?(LispBlob) && a.value == b.value
     else
       a.same?(b)
     end

@@ -129,19 +129,7 @@ module LISP
     end
 
     private def db_any_to_lisp(v : DB::Any) : LispValue
-      case v
-      when Int64   then LispInt.new(v)
-      when Int32   then LispInt.new(v.to_i64)
-      when Float64 then LispFloat.new(v)
-      when Float32 then LispFloat.new(v.to_f64)
-      when String  then LispStr.new(v)
-      when Bool    then LispBool.of(v)
-      when Time    then LispStr.new(v.to_s)
-      when Bytes   then LispStr.new(String.new(v))
-      when Nil     then NIL
-      else
-        raise LispRuntimeError.new("sql: unsupported column value: #{v.inspect}")
-      end
+      LISP.to_lisp(v)
     end
   end
 end

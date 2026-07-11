@@ -46,4 +46,8 @@ describe "json module" do
       run(%((json:parse "{not json")))
     end
   end
+
+  it "stringifies a char as a 1-character string" do
+    w(%((json:stringify #\\a))).should eq("\"\\\"a\\\"\"")
+  end
 end

@@ -256,4 +256,21 @@ module LISP
       io << ')'
     end
   end
+
+  # Opaque binary data, modeled on CHICKEN Scheme's blob type — distinct from
+  # LispStr so binary data (e.g. a SQL BLOB column) never gets silently
+  # reinterpreted as text. Lives here rather than in a module file since it
+  # wraps a plain Crystal primitive (Bytes) and is shared across modules
+  # (sql, convert.cr), not tied to one external library the way LispRegex/
+  # LispDBConnection/LispBigDecimal are.
+  class LispBlob < LispValue
+    getter value : Bytes
+
+    def initialize(@value : Bytes)
+    end
+
+    def to_display(io : IO) : Nil
+      io << "#<blob:" << @value.size << " bytes>"
+    end
+  end
 end

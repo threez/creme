@@ -234,3 +234,18 @@ describe LISP::LispVector do
     LISP::LispVector.new.display_string.should eq("#()")
   end
 end
+
+describe LISP::LispBlob do
+  it "stores the given bytes" do
+    bytes = Bytes[1, 2, 3]
+    LISP::LispBlob.new(bytes).value.should eq(bytes)
+  end
+
+  it "displays as #<blob:N bytes>" do
+    LISP::LispBlob.new(Bytes[1, 2, 3]).display_string.should eq("#<blob:3 bytes>")
+  end
+
+  it "displays an empty blob" do
+    LISP::LispBlob.new(Bytes.empty).display_string.should eq("#<blob:0 bytes>")
+  end
+end

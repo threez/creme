@@ -167,6 +167,11 @@ describe "LISP.lisp_equal?" do
     LISP.lisp_equal?(lam, lam).should be_true
     LISP.lisp_equal?(lam, LISP::Lambda.new([] of String, nil, [] of LISP::LispValue, LISP::Env.new)).should be_false
   end
+
+  it "compares blobs by content" do
+    LISP.lisp_equal?(LISP::LispBlob.new(Bytes[1, 2]), LISP::LispBlob.new(Bytes[1, 2])).should be_true
+    LISP.lisp_equal?(LISP::LispBlob.new(Bytes[1, 2]), LISP::LispBlob.new(Bytes[1, 3])).should be_false
+  end
 end
 
 describe "LISP.lisp_eqv?" do
@@ -201,5 +206,14 @@ describe "LISP.lisp_eqv?" do
   it "is true for the same string object" do
     s = LISP::LispStr.new("a")
     LISP.lisp_eqv?(s, s).should be_true
+  end
+
+  it "is false for two distinct blob objects with equal content (identity only)" do
+    LISP.lisp_eqv?(LISP::LispBlob.new(Bytes[1, 2]), LISP::LispBlob.new(Bytes[1, 2])).should be_false
+  end
+
+  it "is true for the same blob object" do
+    b = LISP::LispBlob.new(Bytes[1, 2])
+    LISP.lisp_eqv?(b, b).should be_true
   end
 end

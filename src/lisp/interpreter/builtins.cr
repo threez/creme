@@ -232,6 +232,26 @@ module LISP
         LispVector.new(LISP.list_to_a(args[0]))
       end)
 
+      # ---- Blobs ----
+      reg.call("blob?", 1, 1, ->(args : Array(LispValue)) : LispValue { LispBool.of(args[0].is_a?(LispBlob)) })
+
+      reg.call("blob-size", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        LispInt.new(blob_arg(args[0], "blob-size").size.to_i64)
+      end)
+
+      reg.call("blob->string", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        bytes = blob_arg(args[0], "blob->string")
+        s = String.new(bytes)
+        raise LispRuntimeError.new("blob->string: invalid UTF-8 byte sequence") unless s.valid_encoding?
+        LispStr.new(s)
+      end)
+
+      reg.call("string->blob", 1, 1, ->(args : Array(LispValue)) : LispValue do
+        s = args[0]
+        raise LispRuntimeError.new("string->blob: expected string, got #{s.write_string}") unless s.is_a?(LispStr)
+        LispBlob.new(s.value.to_slice)
+      end)
+
       # ---- Higher-order ----
       reg.call("map", 2, -1, ->(args : Array(LispValue)) : LispValue do
         f = args[0]
@@ -563,6 +583,11 @@ module LISP
     private def vector_index_arg(v : LispValue, who : String) : Int32
       raise LispRuntimeError.new("#{who}: expected integer, got #{v.write_string}") unless v.is_a?(LispInt)
       v.value.to_i32
+    end
+
+    private def blob_arg(v : LispValue, who : String) : Bytes
+      raise LispRuntimeError.new("#{who}: expected blob, got #{v.write_string}") unless v.is_a?(LispBlob)
+      v.value
     end
 
     private def fold_minmax(args : Array(LispValue), who : String, is_min : Bool) : LispValue

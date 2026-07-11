@@ -60,6 +60,14 @@ describe "sql module" do
       LISP
   end
 
+  it "queries a BLOB column back as a blob, preserving its bytes" do
+    w(<<-LISP).should eq("(#t 3)")
+      (define conn (sql:open ":memory:"))
+      (define b (cdr (assoc "b" (vector-ref (sql:query conn "SELECT x'010203' AS b") 0))))
+      (list (blob? b) (blob-size b))
+      LISP
+  end
+
   it "returns a scalar value" do
     w(<<-LISP).should eq("2")
       (define conn (sql:open ":memory:"))

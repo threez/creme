@@ -6,7 +6,14 @@
 require "json"
 
 module LISP
-  alias Convertible = Nil | Bool | Int64 | Float64 | String |
+  # Bytes round-trips losslessly (via LispBlob, never ambiguous with anything
+  # else) — unlike e.g. Time, which stays one-directional (see to_lisp(Time)
+  # below) since a bare LispFloat can't tell "timestamp" from "plain number".
+  # A custom struct type can't join this closed alias, but a host can still
+  # convert it one-directionally: reopen `module LISP` and add your own
+  # `def self.to_lisp(v : YourType) : LispValue` overload, exactly like every
+  # file under src/lisp/modules/ already does to add builtins.
+  alias Convertible = Nil | Bool | Int64 | Float64 | String | Bytes |
                       Array(Convertible) | Hash(String, Convertible)
 
   # Crystal -> LispValue. Overloaded per concrete type (rather than a single
@@ -52,6 +59,17 @@ module LISP
     to_lisp(v.raw)
   end
 
+  # One-directional: this dialect has no LispTime, every time value is a bare
+  # epoch-second LispFloat (see modules/time.cr's time:now/time_from_epoch),
+  # so from_lisp can't distinguish a converted Time from an ordinary float.
+  def self.to_lisp(v : Time) : LispValue
+    LispFloat.new(v.to_unix_f)
+  end
+
+  def self.to_lisp(v : Bytes) : LispValue
+    LispBlob.new(v)
+  end
+
   # LispValue -> Crystal, generic/unknown-shape case. NIL maps to Crystal nil
   # (matching json:parse's existing null <-> NIL convention) — use
   # LISP.list_to_a directly when a value is known to be list-shaped and an
@@ -64,6 +82,8 @@ module LISP
     when LispFloat then v.value
     when LispStr   then v.value
     when LispChar  then v.value.to_s
+    when LispSym   then v.name
+    when LispBlob  then v.value
     when LispVector
       v.value.map { |e| from_lisp(e).as(Convertible) }
     when Cons

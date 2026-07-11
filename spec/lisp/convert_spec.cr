@@ -55,6 +55,16 @@ describe "LISP.to_lisp" do
     v = LISP::LispInt.new(9_i64)
     LISP.to_lisp(v).should be(v)
   end
+
+  it "converts a Time to an epoch-second LispFloat" do
+    t = Time.utc(2026, 1, 1)
+    LISP.to_lisp(t).as(LISP::LispFloat).value.should eq(t.to_unix_f)
+  end
+
+  it "converts Bytes to a LispBlob" do
+    bytes = Bytes[1, 2, 3]
+    LISP.to_lisp(bytes).as(LISP::LispBlob).value.should eq(bytes)
+  end
 end
 
 describe "LISP.from_lisp" do
@@ -121,6 +131,20 @@ describe "LISP.from_lisp" do
     expect_raises(LISP::LispRuntimeError, /cannot convert/) do
       LISP.from_lisp(lam)
     end
+  end
+
+  it "converts a LispSym to its name" do
+    LISP.from_lisp(LISP::LispSym.of("foo")).should eq("foo")
+  end
+
+  it "converts a list of symbols (previously raised entirely on the first element)" do
+    lst = LISP.a_to_list([LISP::LispSym.of("a"), LISP::LispSym.of("b")] of LISP::LispValue)
+    LISP.from_lisp(lst).should eq(["a", "b"])
+  end
+
+  it "converts a LispBlob back to Bytes" do
+    bytes = Bytes[1, 2, 3]
+    LISP.from_lisp(LISP::LispBlob.new(bytes)).should eq(bytes)
   end
 end
 
