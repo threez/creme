@@ -358,6 +358,78 @@ describe "builtins: I/O" do
     w("(print 1)").should eq("()")
     w("(println 1)").should eq("()")
   end
+
+  it "writes to the real STDOUT by default" do
+    LISP::Interpreter.new.stdout.should be(STDOUT)
+  end
+
+  it "captures display via a custom stdout" do
+    io = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: io)
+    LISP.run_source(interp, %((display "hello")))
+    io.to_s.should eq("hello")
+  end
+
+  it "captures write via a custom stdout" do
+    io = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: io)
+    LISP.run_source(interp, %((write "hello")))
+    io.to_s.should eq(%("hello"))
+  end
+
+  it "captures newline via a custom stdout" do
+    io = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: io)
+    LISP.run_source(interp, "(newline)")
+    io.to_s.should eq("\n")
+  end
+
+  it "captures print via a custom stdout, concatenated with no separator" do
+    io = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: io)
+    LISP.run_source(interp, "(print 1 2)")
+    io.to_s.should eq("12")
+  end
+
+  it "captures println via a custom stdout, with a trailing newline" do
+    io = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: io)
+    LISP.run_source(interp, "(println 1 2)")
+    io.to_s.should eq("12\n")
+  end
+
+  it "accumulates output across multiple run_source calls against the same stdout" do
+    io = IO::Memory.new
+    interp = LISP::Interpreter.new(stdout: io)
+    LISP.run_source(interp, %((display "a")))
+    LISP.run_source(interp, %((display "b")))
+    io.to_s.should eq("ab")
+  end
+end
+
+describe "builtins: exit" do
+  it "raises LispExit instead of terminating the process" do
+    interp = LISP::Interpreter.new
+    expect_raises(LISP::LispExit) do
+      LISP.run_source(interp, "(exit)")
+    end
+  end
+
+  it "defaults to code 0" do
+    interp = LISP::Interpreter.new
+    ex = expect_raises(LISP::LispExit) do
+      LISP.run_source(interp, "(exit)")
+    end
+    ex.code.should eq(0)
+  end
+
+  it "clamps the given code to 0..255" do
+    interp = LISP::Interpreter.new
+    ex = expect_raises(LISP::LispExit) do
+      LISP.run_source(interp, "(exit 300)")
+    end
+    ex.code.should eq(255)
+  end
 end
 
 describe "builtins: misc" do

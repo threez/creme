@@ -49,3 +49,39 @@ describe LISP::LispUserError do
     LISP::LispUserError.new("user raised").should be_a(LISP::LispError)
   end
 end
+
+describe LISP::LispExecutionLimitError do
+  it "is a LispRuntimeError" do
+    LISP::LispExecutionLimitError.new("limit hit").should be_a(LISP::LispRuntimeError)
+  end
+
+  it "is a LispError" do
+    LISP::LispExecutionLimitError.new("limit hit").should be_a(LISP::LispError)
+  end
+
+  it "carries a message" do
+    LISP::LispExecutionLimitError.new("limit hit").message.should eq("limit hit")
+  end
+end
+
+describe LISP::LispExit do
+  it "is an Exception" do
+    LISP::LispExit.new.should be_a(Exception)
+  end
+
+  it "is not a LispError" do
+    LISP::LispExit.new.should_not be_a(LISP::LispError)
+  end
+
+  it "defaults to code 0" do
+    LISP::LispExit.new.code.should eq(0)
+  end
+
+  it "carries the given code" do
+    LISP::LispExit.new(2).code.should eq(2)
+  end
+
+  it "carries a descriptive message" do
+    LISP::LispExit.new(3).message.should eq("exit(3)")
+  end
+end

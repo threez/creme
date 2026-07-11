@@ -35,8 +35,18 @@ module LISP
       } of String => (Env -> Nil)
     end
 
+    # All module names the interpreter knows how to (require ...), regardless
+    # of `allowed_modules`. Useful for building a deny-list-style allowlist,
+    # e.g. `interp.available_modules - ["process", "file", "sql", "env"]`.
+    def available_modules : Array(String)
+      module_installers.keys.to_a
+    end
+
     private def require_module(name : String) : Nil
       return if @packages.has_key?(name)
+      if (allowed = @allowed_modules) && !allowed.includes?(name)
+        raise LispRuntimeError.new("require: module '#{name}' is not permitted")
+      end
       installer = module_installers[name]?
       raise LispRuntimeError.new("require: unknown module '#{name}'") unless installer
       pkg_env = Env.new

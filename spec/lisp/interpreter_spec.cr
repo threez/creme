@@ -284,6 +284,73 @@ describe LISP::Interpreter do
     end
   end
 
+  describe "max_steps" do
+    it "defaults to nil (unbounded)" do
+      LISP::Interpreter.new.max_steps.should be_nil
+    end
+
+    it "is configurable via the constructor" do
+      LISP::Interpreter.new(max_steps: 10).max_steps.should eq(10)
+    end
+
+    it "is configurable after construction via the property setter" do
+      interp = LISP::Interpreter.new
+      interp.max_steps = 10
+      interp.max_steps.should eq(10)
+    end
+
+    it "raises LispExecutionLimitError for an infinite tail loop when set" do
+      interp = LISP::Interpreter.new(max_steps: 1000)
+      expect_raises(LISP::LispExecutionLimitError, /execution step limit exceeded/) do
+        LISP.run_source(interp, "(define (f) (f)) (f)")
+      end
+    end
+
+    it "does not raise for a normal script well under the limit" do
+      interp = LISP::Interpreter.new(max_steps: 100_000)
+      LISP.run_source(interp, "(define (sq x) (* x x)) (sq 5)").as(LISP::LispInt).value.should eq(25_i64)
+    end
+
+    it "does not interfere with max_eval_depth's own non-tail guard" do
+      interp = LISP::Interpreter.new(max_eval_depth: 10, max_steps: 1_000_000)
+      expect_raises(LISP::LispExecutionLimitError, /recursion depth exceeded/) do
+        LISP.run_source(interp, "(define (f n) (+ 1 (f (+ n 1)))) (f 0)")
+      end
+    end
+
+    it "resets its budget for each independent top-level call" do
+      interp = LISP::Interpreter.new(max_steps: 50)
+      LISP.run_source(interp, "(+ 1 1)")
+      LISP.run_source(interp, "(+ 2 2)").as(LISP::LispInt).value.should eq(4_i64)
+    end
+  end
+
+  describe ".sandboxed" do
+    it "denies all modules by default" do
+      LISP::Interpreter.sandboxed.allowed_modules.should eq([] of String)
+    end
+
+    it "sets a finite default max_steps" do
+      LISP::Interpreter.sandboxed.max_steps.should eq(100_000)
+    end
+
+    it "captures stdout by default instead of using the real STDOUT" do
+      LISP::Interpreter.sandboxed.stdout.should be_a(IO::Memory)
+    end
+
+    it "still allows widening allowed_modules explicitly" do
+      interp = LISP::Interpreter.sandboxed(allowed_modules: ["math"])
+      LISP.run_source(interp, "(require 'math) (math:sin 0)").as(LISP::LispFloat).value.should eq(0.0)
+    end
+
+    it "denies a module not in the explicit allowlist" do
+      interp = LISP::Interpreter.sandboxed(allowed_modules: ["math"])
+      expect_raises(LISP::LispRuntimeError, /require: module 'process' is not permitted/) do
+        LISP.run_source(interp, "(require 'process)")
+      end
+    end
+  end
+
   describe "#apply" do
     it "applies a Builtin" do
       interp = LISP::Interpreter.new

@@ -392,28 +392,28 @@ module LISP
 
       # ---- I/O ----
       reg.call("display", 1, 1, ->(args : Array(LispValue)) : LispValue do
-        print(args[0].display_string)
+        emit(args[0].display_string)
         NIL.as(LispValue)
       end)
 
       reg.call("write", 1, 1, ->(args : Array(LispValue)) : LispValue do
-        print(args[0].write_string)
+        emit(args[0].write_string)
         NIL.as(LispValue)
       end)
 
       reg.call("newline", 0, 0, ->(args : Array(LispValue)) : LispValue do
-        print("\n")
+        emit("\n")
         NIL.as(LispValue)
       end)
 
       reg.call("print", 0, -1, ->(args : Array(LispValue)) : LispValue do
-        args.each { |a| print(a.display_string) }
+        args.each { |a| emit(a.display_string) }
         NIL.as(LispValue)
       end)
 
       reg.call("println", 0, -1, ->(args : Array(LispValue)) : LispValue do
-        args.each { |a| print(a.display_string) }
-        print("\n")
+        args.each { |a| emit(a.display_string) }
+        emit("\n")
         NIL.as(LispValue)
       end)
 
@@ -435,7 +435,7 @@ module LISP
 
       reg.call("exit", 0, 1, ->(args : Array(LispValue)) : LispValue do
         code = args.empty? ? 0 : int_arg(args[0], "exit").clamp(0_i64, 255_i64).to_i
-        exit(code)
+        raise LispExit.new(code)
       end)
 
       # ---- Macros ----
@@ -449,6 +449,12 @@ module LISP
         @gensym_counter += 1
         LispSym.of("#{prefix}__#{@gensym_counter}")
       end)
+    end
+
+    # ---- I/O helper ----
+
+    private def emit(s : String) : Nil
+      @stdout.print(s)
     end
 
     # ---- Arithmetic helpers ----

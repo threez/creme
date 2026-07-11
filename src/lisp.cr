@@ -22,6 +22,7 @@ require "./lisp/modules/process"
 require "./lisp/modules/sql"
 require "./lisp/modules/sxql"
 require "./lisp/runner"
+require "./lisp/convert"
 
 module LISP
   VERSION = "0.1.0"

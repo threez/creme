@@ -35,7 +35,7 @@ LISP.run_source(interp, "(+ 1 2)")
 LISP.run_file(interp, "script.lisp")
 ```
 
-`LISP.run_source`/`LISP.run_file` are pure library entry points with no STDOUT/STDERR/process-exit side effects.
+`LISP.run_source`/`LISP.run_file` are pure library entry points with no STDOUT/STDERR/process-exit side effects. See [Embedding](#embedding) below for injecting host data, reading results back as native Crystal types, registering host callbacks, sandboxing, and execution limits.
 
 ## Usage
 
@@ -112,6 +112,79 @@ A `sql` + `sxql` example:
 
 (apply sql:query conn (first built) (second built))
 ```
+
+## Embedding
+
+Beyond the quick-start shown under [Installation](#as-a-crystal-library), a host application embedding the interpreter for templating, rule-engine, or dataset-filtering use cases has a few more building blocks available.
+
+### Injecting host data and isolating calls
+
+`run_source`/`run_file` take optional `bindings`/`parent` arguments, for running one warm `Interpreter` many times — once per dataset row, rule evaluation, or template render — without state leaking between calls:
+
+```crystal
+interp = LISP::Interpreter.new
+
+rows.each do |row|
+  bindings = {"name" => LISP.to_lisp(row.name), "age" => LISP.to_lisp(row.age)} of String => LISP::LispValue
+  result = LISP.run_source(interp, "(> age 18)", bindings: bindings)
+  puts LISP.truthy?(result)
+end
+```
+
+- Neither given: evaluates against `interp.global`, same as always — a script's own top-level `define`s persist for later calls (handy for a REPL-style session).
+- `bindings` given: evaluates against a fresh, isolated child of `interp.global` (or of `parent`, if also given), seeded with the bindings and discarded after the call — nothing leaks into `interp.global` or a later call, even an empty `{}` counts as "isolate this call."
+- `parent` given alone: evaluates directly against that env.
+- Both given: a fresh child of `parent`, seeded with `bindings` — register expensive callbacks once on a reusable `parent` env (see below), then reuse it as the chain root for many cheap, isolated calls.
+
+### Reading results back as native Crystal data
+
+`LISP.to_lisp`/`LISP.from_lisp` convert between `LISP::LispValue` and plain Crystal data (`Nil`, `Bool`, `Int64`, `Float64`, `String`, `Array`, `Hash(String, _)` — aliased as `LISP::Convertible`), so a rule/filter/template's result can be read back without touching `LispValue` at all:
+
+```crystal
+result = LISP.run_source(interp, "(filter active? people)", bindings: bindings)
+LISP.from_lisp(result) # => Array/Hash/String/Int64/Float64/Bool/nil, recursively
+```
+
+`Array`s convert to/from `LispVector`s; `Hash(String, _)`s convert to/from alists (`(key . value)` pairs, matching the `json`/`sql` module convention) — duplicate alist keys resolve first-occurrence-wins, matching `assoc`. `NIL` converts to Crystal `nil` (matching `json:parse`'s existing `null`/`NIL` convention) — use `LISP.list_to_a` directly instead when a value is known to be list-shaped and an empty result should read as `[]`.
+
+### Registering host callbacks
+
+`Env#define_fn` registers a Crystal callback as a callable Lisp procedure:
+
+```crystal
+interp.global.define_fn("lookup-tax-rate", 1, 1) do |args|
+  LISP.to_lisp(tax_table[args[0].as(LISP::LispStr).value])
+end
+```
+
+Callbacks are ordinary `LispValue`s (`Builtin`s), so they can also go straight into a per-call `bindings` hash instead of `interp.global`, without a separate API.
+
+### Sandboxing untrusted rule/template content
+
+For rule/template content from a less-trusted source (stored in a database, editable by end users), `Interpreter.sandboxed` gives safe-by-default construction — deny-all modules, a finite step budget, captured (not real) stdout — so a host doesn't need to remember every knob:
+
+```crystal
+interp = LISP::Interpreter.sandboxed(allowed_modules: ["string", "math"])
+```
+
+`Interpreter.new` itself defaults to today's unrestricted behavior (`allowed_modules: nil`) for backward compatibility — use `.sandboxed` when embedding content you don't fully trust. `allowed_modules` restricts `(require ...)`; `interp.available_modules` lists every module name the interpreter knows, for building a deny-list (`interp.available_modules - ["process", "file", "sql", "env"]`). `interp.stdout` (an `IO`) redirects/captures/suppresses `display`/`write`/`newline`/`print`/`println` output — swap in an `IO::Memory` per render to capture a template's printed output, or just to keep guest code from writing to the host process's real stdout.
+
+### Execution limits
+
+`max_eval_depth` (existing) bounds non-tail recursion; `max_steps` additionally bounds every trampoline step, closing the one gap `max_eval_depth` doesn't cover — an infinite *tail*-recursive script. Both raise `LISP::LispExecutionLimitError` (a `LispRuntimeError` subclass) when exceeded, distinguishable from an ordinary bug in the guest code:
+
+```crystal
+interp = LISP::Interpreter.new(max_steps: 100_000)
+```
+
+`(exit ...)` raises a catchable `LISP::LispExit` rather than terminating the host process — `src/main.cr` (the `crisp` CLI) is the only place that translates it back into a real process exit.
+
+### Known caveats
+
+- `(define ...)` as a script's last top-level form returns the defined *symbol*, not its value — end a script with an explicit expression if you need its value back.
+- `LISP.from_lisp` never returns a bare Crystal `nil` from anything except `NIL` itself.
+- `max_steps` resets per top-level form (per `run_source`/`run_file`/`apply` call), not once for an entire multi-form script.
+- This is `require`-gating, output redirection, and a step budget — not OS-level sandboxing. There's no CPU/memory ceiling beyond `max_steps`, and no protection against concurrent use of one `Interpreter` from multiple fibers (construct one per fiber instead).
 
 ## Development
 

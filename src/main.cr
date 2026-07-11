@@ -23,6 +23,8 @@ def repl(interp : LISP::Interpreter) : Nil
     rescue LISP::LispIncompleteError
       # keep buffer, request continuation
       next
+    rescue ex : LISP::LispExit
+      exit(ex.code)
     rescue ex : LISP::LispError
       buffer = ""
       puts "Error: #{ex.message}"
@@ -56,6 +58,8 @@ def main : Nil
       src = STDIN.gets_to_end
       begin
         LISP::Reader.read_all(src).each { |form| interp.eval(form, interp.global) }
+      rescue ex : LISP::LispExit
+        exit(ex.code)
       rescue ex : LISP::LispError
         STDERR.puts "Error: #{ex.message}"
         exit 1
@@ -73,6 +77,8 @@ def main : Nil
   else
     begin
       LISP.run_file(LISP::Interpreter.new, args[0])
+    rescue ex : LISP::LispExit
+      exit(ex.code)
     rescue ex : LISP::LispError
       STDERR.puts "Error: #{ex.message}"
       exit 1

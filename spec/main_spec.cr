@@ -72,4 +72,17 @@ describe "main.cr (CLI)" do
       File.delete(file.path)
     end
   end
+
+  it "(exit N) exits the real binary with code N, stopping before later forms" do
+    out, err, status = run_cli(stdin: %((display "before") (exit 3) (display "after")))
+    status.exit_code.should eq(3)
+    out.should eq("before")
+    err.should eq("")
+  end
+
+  it "(exit) with no arguments exits with code 0" do
+    out, _, status = run_cli(stdin: %((display "done") (exit)))
+    status.success?.should be_true
+    out.should eq("done")
+  end
 end

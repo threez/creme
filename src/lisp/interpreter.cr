@@ -9,23 +9,46 @@ module LISP
     getter global : Env
     getter packages : Hash(String, Env)
     property max_eval_depth : Int32
+    property max_steps : Int32?
+    property allowed_modules : Array(String)?
+    property stdout : IO
 
-    def initialize(@max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH)
+    def initialize(
+      @max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH,
+      @max_steps : Int32? = nil,
+      @allowed_modules : Array(String)? = nil,
+      @stdout : IO = STDOUT,
+    )
       @global = Env.new
       @packages = {} of String => Env
       @eval_depth = 0
+      @step_count = 0
       @gensym_counter = 0
       install_builtins(@global)
       load_prelude
     end
 
+    # Safe-by-default entry point for embedding untrusted/semi-trusted guest
+    # code: denies all `require` modules and captures stdout unless told
+    # otherwise, so a host can't accidentally embed a wide-open interpreter
+    # by forgetting to pass allowed_modules:.
+    def self.sandboxed(
+      allowed_modules : Array(String) = [] of String,
+      max_steps : Int32? = 100_000,
+      max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH,
+      stdout : IO = IO::Memory.new,
+    ) : Interpreter
+      new(max_eval_depth: max_eval_depth, max_steps: max_steps, allowed_modules: allowed_modules, stdout: stdout)
+    end
+
     # ---- Evaluation (trampolined) --------------------------------------------
 
     def eval(expr : LispValue, env : Env) : LispValue
+      @step_count = 0 if @eval_depth == 0
       @eval_depth += 1
       begin
         if @eval_depth > @max_eval_depth
-          raise LispRuntimeError.new("recursion depth exceeded")
+          raise LispExecutionLimitError.new("recursion depth exceeded")
         end
         eval_core(expr, env)
       ensure
@@ -35,6 +58,12 @@ module LISP
 
     private def eval_core(expr : LispValue, env : Env) : LispValue
       loop do
+        if budget = @max_steps
+          @step_count += 1
+          if @step_count > budget
+            raise LispExecutionLimitError.new("execution step limit exceeded (max_steps=#{budget})")
+          end
+        end
         case expr
         when LispSym
           name = expr.name
