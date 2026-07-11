@@ -25,6 +25,7 @@ require "./lisp/modules/sql"
 require "./lisp/modules/clos"
 require "./lisp/modules/tui"
 require "./lisp/modules/rfc8439"
+require "./lisp/modules/http"
 require "./lisp/runner"
 require "./lisp/convert"
 

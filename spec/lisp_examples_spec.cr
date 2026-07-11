@@ -108,4 +108,8 @@ describe "integration: examples/*.lisp" do
   it "runs 26-require-path-greeting-module.lisp end to end without raising" do
     run_example("examples/26-require-path-greeting-module.lisp")
   end
+
+  it "runs 27-http-json-fetch.lisp end to end without raising" do
+    run_example("examples/27-http-json-fetch.lisp")
+  end
 end

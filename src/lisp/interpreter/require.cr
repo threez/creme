@@ -41,6 +41,7 @@ module LISP
         "clos"       => ->install_clos(Env),
         "tui"        => ->install_tui(Env),
         "rfc8439"    => ->install_rfc8439(Env),
+        "http"       => ->install_http(Env),
       } of String => (Env -> Nil)
     end
 

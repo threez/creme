@@ -197,7 +197,7 @@ describe "#available_modules" do
     interp.available_modules.should contain("json")
     interp.available_modules.should contain("sql")
     interp.available_modules.should_not contain("sxql")
-    interp.available_modules.size.should eq(16)
+    interp.available_modules.size.should eq(17)
   end
 
   it "also lists .lisp files discoverable in module_search_path" do
