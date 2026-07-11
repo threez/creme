@@ -38,7 +38,6 @@ module LISP
         "env"        => ->install_env(Env),
         "process"    => ->install_process(Env),
         "sql"        => ->install_sql(Env),
-        "sxql"       => ->install_sxql(Env),
         "clos"       => ->install_clos(Env),
         "tui"        => ->install_tui(Env),
         "rfc8439"    => ->install_rfc8439(Env),
@@ -46,10 +45,16 @@ module LISP
     end
 
     # All module names the interpreter knows how to (require ...), regardless
-    # of `allowed_modules`. Useful for building a deny-list-style allowlist,
-    # e.g. `interp.available_modules - ["process", "file", "sql", "env"]`.
+    # of `allowed_modules`. Includes both Crystal-native modules and any
+    # "#{name}.lisp" file discoverable in module_search_path. Useful for
+    # building a deny-list-style allowlist, e.g.
+    # `interp.available_modules - ["process", "file", "sql", "env"]`.
     def available_modules : Array(String)
-      module_installers.keys.to_a
+      names = module_installers.keys.to_a
+      @module_search_path.each do |dir|
+        Dir.glob(File.join(dir, "*.lisp")).each { |file| names << File.basename(file, ".lisp") }
+      end
+      names.uniq
     end
 
     # Used by LISP.run_file so a relative (require "...") inside a top-level
@@ -68,17 +73,54 @@ module LISP
       if (allowed = @allowed_modules) && !allowed.includes?(name)
         raise LispRuntimeError.new("require: module '#{name}' is not permitted")
       end
-      installer = module_installers[name]?
-      raise LispRuntimeError.new("require: unknown module '#{name}'") unless installer
-      pkg_env = Env.new
-      installer.call(pkg_env)
-      @packages[name] = pkg_env
+      if installer = module_installers[name]?
+        pkg_env = Env.new
+        installer.call(pkg_env)
+        @packages[name] = pkg_env
+        return
+      end
+      if candidate = find_in_module_search_path(name)
+        load_lisp_module(name, File.realpath(candidate))
+        return
+      end
+      raise LispRuntimeError.new("require: unknown module '#{name}'")
+    end
+
+    # Searches module_search_path (in order) for a "#{name}.lisp" file —
+    # e.g. modules/sxql.lisp — for a bare-symbol (require 'name) that isn't
+    # a Crystal-native module.
+    private def find_in_module_search_path(name : String) : String?
+      @module_search_path.each do |dir|
+        candidate = File.join(dir, "#{name}.lisp")
+        return candidate if File.exists?(candidate)
+      end
+      nil
     end
 
     # Loads a plain .lisp file as a namespaced module — the Lisp-authored
     # counterpart to the Crystal-native modules above. Unlike those (which get
     # a parentless Env so they can't see prelude/global bindings), a Lisp
     # module's env chains to @global so its own code can use car/map/assoc/etc.
+    # Shared by require_path (explicit "(require "...")" paths) and
+    # find_in_module_search_path (bare-symbol requires resolved by name).
+    private def load_lisp_module(name : String, resolved : String) : Nil
+      if @packages.has_key?(name)
+        existing_source = @package_sources[name]?
+        return if existing_source == resolved
+        raise LispRuntimeError.new("require: module '#{name}' already bound to #{existing_source || "a built-in module"}")
+      end
+
+      pkg_env = Env.new(@global)
+      @load_dirs << File.dirname(resolved)
+      begin
+        LISP.run_source(self, File.read(resolved), nil, pkg_env, source_name: resolved)
+      ensure
+        @load_dirs.pop
+      end
+      @packages[name] = pkg_env
+      @package_sources[name] = resolved
+    end
+
     private def require_path(requested : String) : Nil
       base_dir = @load_dirs.last? || Dir.current
       expanded = File.expand_path(requested, base_dir)
@@ -99,21 +141,7 @@ module LISP
       end
 
       name = File.basename(resolved, ".lisp")
-      if @packages.has_key?(name)
-        existing_source = @package_sources[name]?
-        return if existing_source == resolved
-        raise LispRuntimeError.new("require: module '#{name}' already bound to #{existing_source || "a built-in module"}")
-      end
-
-      pkg_env = Env.new(@global)
-      @load_dirs << File.dirname(resolved)
-      begin
-        LISP.run_source(self, File.read(resolved), nil, pkg_env, source_name: resolved)
-      ensure
-        @load_dirs.pop
-      end
-      @packages[name] = pkg_env
-      @package_sources[name] = resolved
+      load_lisp_module(name, resolved)
     end
   end
 end

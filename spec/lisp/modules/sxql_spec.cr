@@ -1,12 +1,12 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = LISP::Interpreter.new
+  interp = LISP::Interpreter.new(module_search_path: ["./modules"])
   LISP.run_source(interp, "(require 'sxql) #{src}").write_string
 end
 
 private def run(src : String) : LISP::LispValue
-  interp = LISP::Interpreter.new
+  interp = LISP::Interpreter.new(module_search_path: ["./modules"])
   LISP.run_source(interp, "(require 'sxql) #{src}")
 end
 

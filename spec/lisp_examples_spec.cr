@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 private def run_example(path : String) : Nil
-  LISP.run_file(LISP::Interpreter.new, path)
+  LISP.run_file(LISP::Interpreter.new(module_search_path: ["./modules"]), path)
 end
 
 describe "integration: examples/*.lisp" do

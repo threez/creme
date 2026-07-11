@@ -12,6 +12,15 @@ module LISP
     property max_steps : Int32?
     property allowed_modules : Array(String)?
     property module_load_paths : Array(String)?
+
+    # Directories searched (in order) for a "#{name}.lisp" file when
+    # `(require 'name)` names something other than a Crystal-native module —
+    # e.g. `modules/` at the repo root ships sxql.lisp this way. Distinct
+    # from module_load_paths, which gates path-based `(require "...")`
+    # rather than resolving bare-symbol requires. Empty by default: a host
+    # embedding this library opts in explicitly (see main.cr/spec_helper.cr),
+    # rather than the interpreter silently depending on a filesystem layout.
+    property module_search_path : Array(String)
     property stdout : IO
 
     def initialize(
@@ -19,6 +28,7 @@ module LISP
       @max_steps : Int32? = nil,
       @allowed_modules : Array(String)? = nil,
       @module_load_paths : Array(String)? = nil,
+      @module_search_path : Array(String) = [] of String,
       @stdout : IO = STDOUT,
     )
       @global = Env.new

@@ -66,7 +66,7 @@ end
 def main : Nil
   args = ARGV
   if args.empty?
-    interp = LISP::Interpreter.new
+    interp = LISP::Interpreter.new(module_search_path: ["./modules"])
     if STDIN.tty?
       puts "crisp — Crystal LISP interpreter. Ctrl-D or (exit) to quit."
       repl(interp)
@@ -93,7 +93,7 @@ def main : Nil
     usage
   else
     begin
-      LISP.run_file(LISP::Interpreter.new, args[0])
+      LISP.run_file(LISP::Interpreter.new(module_search_path: ["./modules"]), args[0])
     rescue ex : LISP::LispExit
       exit(ex.code)
     rescue ex : LISP::LispError

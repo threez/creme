@@ -191,11 +191,46 @@ describe "path-based require" do
 end
 
 describe "#available_modules" do
-  it "lists every module the interpreter can require" do
+  it "lists every Crystal-native module the interpreter can require" do
     interp = LISP::Interpreter.new
     interp.available_modules.should contain("math")
     interp.available_modules.should contain("json")
     interp.available_modules.should contain("sql")
-    interp.available_modules.size.should eq(17)
+    interp.available_modules.should_not contain("sxql")
+    interp.available_modules.size.should eq(16)
+  end
+
+  it "also lists .lisp files discoverable in module_search_path" do
+    interp = LISP::Interpreter.new(module_search_path: ["./modules"])
+    interp.available_modules.should contain("sxql")
+  end
+end
+
+describe "module_search_path" do
+  it "defaults to empty — a bare-symbol require for a file-based module is unknown" do
+    interp = LISP::Interpreter.new
+    interp.module_search_path.should eq([] of String)
+    expect_raises(LISP::LispRuntimeError, /require: unknown module 'sxql'/) do
+      LISP.run_source(interp, "(require 'sxql)")
+    end
+  end
+
+  it "resolves a bare-symbol require to a matching .lisp file in a configured search directory" do
+    with_tmp_dir do |dir|
+      File.write(File.join(dir, "greeter.lisp"), %[(define (hello name) (string-append "hi " name))])
+      interp = LISP::Interpreter.new(module_search_path: [dir])
+      w = LISP.run_source(interp, %[(require 'greeter) (greeter:hello "Ada")]).write_string
+      w.should eq(%("hi Ada"))
+    end
+  end
+
+  it "still honors allowed_modules for search-path-resolved modules" do
+    with_tmp_dir do |dir|
+      File.write(File.join(dir, "greeter.lisp"), "(define x 1)")
+      interp = LISP::Interpreter.new(allowed_modules: ["math"], module_search_path: [dir])
+      expect_raises(LISP::LispRuntimeError, /require: module 'greeter' is not permitted/) do
+        LISP.run_source(interp, "(require 'greeter)")
+      end
+    end
   end
 end
