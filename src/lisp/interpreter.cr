@@ -24,6 +24,8 @@ module LISP
       @eval_depth = 0
       @step_count = 0
       @gensym_counter = 0
+      @classes = {} of String => LispClass
+      @clos_enabled = false
       install_builtins(@global)
       load_prelude
     end
@@ -67,6 +69,10 @@ module LISP
         case expr
         when LispSym
           name = expr.name
+          # Keywords (a leading `:`) are self-evaluating, like CL — this must
+          # come before the qualified-symbol split below, since a bare `:foo`
+          # would otherwise split into package "" (always unbound) and raise.
+          return expr if name.starts_with?(':')
           if idx = name.index(':')
             pkg = name[0...idx]
             local = name[(idx + 1)..]
@@ -148,6 +154,12 @@ module LISP
               return eval_define(expr, env)
             when "defmacro"
               return eval_defmacro(expr, env)
+            when "defclass"
+              return eval_defclass(expr, env)
+            when "defgeneric"
+              return eval_defgeneric(expr, env)
+            when "defmethod"
+              return eval_defmethod(expr, env)
             when "set!"
               args = LISP.list_to_a(expr.cdr)
               raise LispRuntimeError.new("set!: expects 2 arguments") unless args.size == 2
@@ -256,6 +268,26 @@ module LISP
             expr = body[body.size - 1]
             env = call_env
             next
+          elsif callee.is_a?(GenericFunction)
+            # Tail call for generic-function dispatch: mirrors the Lambda
+            # branch above so recursive CLOS methods don't blow the eval
+            # stack. call-next-method (nested, non-tail) is handled instead
+            # by the recursive apply_method_chain helper (clos.cr).
+            chain = class_chain(clos_dispatch_class(callee, args))
+            idx = find_method_index(callee, chain, 0)
+            unless idx
+              raise LispRuntimeError.new("#{callee.name}: no applicable method for #{args.first?.try(&.write_string) || "no arguments"}")
+            end
+            lam = callee.methods[chain[idx].name]
+            call_env = Env.new(lam.env)
+            bind_params(lam, args, call_env)
+            define_call_next_method(call_env, callee, chain, idx, args)
+            body = lam.body
+            return NIL if body.empty?
+            (0...body.size - 1).each { |i| eval(body[i], call_env) }
+            expr = body[body.size - 1]
+            env = call_env
+            next
           else
             return apply(callee, args)
           end
@@ -280,6 +312,13 @@ module LISP
         result
       when Macro
         raise LispRuntimeError.new("macro cannot be applied as a procedure: #{callee.name}")
+      when GenericFunction
+        chain = class_chain(clos_dispatch_class(callee, args))
+        idx = find_method_index(callee, chain, 0)
+        unless idx
+          raise LispRuntimeError.new("#{callee.name}: no applicable method for #{args.first?.try(&.write_string) || "no arguments"}")
+        end
+        apply_method_chain(callee, chain, idx, args)
       else
         raise LispRuntimeError.new("not applicable: #{callee.write_string}")
       end

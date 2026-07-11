@@ -92,4 +92,8 @@ describe "integration: examples/*.lisp" do
   it "runs 22-sxql-report-builder.lisp end to end without raising" do
     run_example("examples/22-sxql-report-builder.lisp")
   end
+
+  it "runs 23-clos-library-catalog.lisp end to end without raising" do
+    run_example("examples/23-clos-library-catalog.lisp")
+  end
 end

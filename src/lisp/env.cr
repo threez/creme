@@ -11,6 +11,14 @@ module LISP
     end
 
     def get(name : String) : LispValue
+      get?(name) || raise LispRuntimeError.new("unbound variable: #{name}")
+    end
+
+    # Same lookup as `get`, but returns nil instead of raising when unbound —
+    # for callers (e.g. defmethod's generic-function auto-vivification) that
+    # need to distinguish "unbound" from "bound to something else" without
+    # relying on exception message text.
+    def get?(name : String) : LispValue?
       e : Env? = self
       while cur = e
         if v = cur.lookup_local(name)
@@ -18,7 +26,7 @@ module LISP
         end
         e = cur.parent
       end
-      raise LispRuntimeError.new("unbound variable: #{name}")
+      nil
     end
 
     protected def lookup_local(name : String) : LispValue?

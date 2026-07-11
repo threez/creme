@@ -32,6 +32,7 @@ module LISP
         "process"    => ->install_process(Env),
         "sql"        => ->install_sql(Env),
         "sxql"       => ->install_sxql(Env),
+        "clos"       => ->install_clos(Env),
       } of String => (Env -> Nil)
     end
 
