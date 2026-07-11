@@ -1,5 +1,8 @@
 .PHONY: all clean fmt fmtcheck lint fix docs spec version tag
 
+UNAME_M != uname -m
+NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
+
 all: clean fmt lint docs spec
 
 fmt:
@@ -8,7 +11,12 @@ fmt:
 fmtcheck:
 	crystal tool format --check
 
-spec:
+# rfc8439's NEON C extension (aarch64 only) isn't built by `shards install`;
+# compile it once so `crystal spec`/`shards build` can link against it.
+lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext/chacha20_neon.h
+	$(CC) -O3 -march=armv8-a+simd -c -o $@ $<
+
+spec: $(NEON_OBJ)
 	crystal spec -v
 
 lib/ameba/bin/ameba:

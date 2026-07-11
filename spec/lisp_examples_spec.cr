@@ -100,4 +100,8 @@ describe "integration: examples/*.lisp" do
   it "runs 24-tui-try-lisp.lisp end to end without raising" do
     run_example("examples/24-tui-try-lisp.lisp")
   end
+
+  it "runs 25-rfc8439-secure-message.lisp end to end without raising" do
+    run_example("examples/25-rfc8439-secure-message.lisp")
+  end
 end

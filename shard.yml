@@ -19,6 +19,8 @@ dependencies:
   tui:
     github: threez/tui.cr
     version: ~> 0.4.0
+  rfc8439:
+    github: threez/rfc8439.cr
 
 development_dependencies:
   ameba:
