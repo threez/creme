@@ -1,4 +1,4 @@
-name: lisp
+name: scheme
 version: 0.1.0
 
 authors:
@@ -9,7 +9,7 @@ crystal: '>= 1.19.0'
 license: MIT
 
 targets:
-  crisp:
+  creme:
     main: src/main.cr
 
 dependencies:

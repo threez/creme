@@ -1,6 +1,6 @@
-require "./lisp"
+require "./scheme"
 
-def format_error(ex : LISP::LispError) : String
+def format_error(ex : Scheme::SchemeError) : String
   String.build do |io|
     if pos = ex.pos
       io << "Error: " << ex.message << " (" << pos.file << ':' << pos.line << ':' << pos.col << ')'
@@ -17,10 +17,10 @@ def format_error(ex : LISP::LispError) : String
   end
 end
 
-def repl(interp : LISP::Interpreter) : Nil
+def repl(interp : Scheme::Interpreter) : Nil
   buffer = ""
   loop do
-    prompt = buffer.empty? ? "lisp> " : "  ... "
+    prompt = buffer.empty? ? "scheme> " : "   ...  "
     print(prompt)
     line = STDIN.gets(chomp: false)
     if line.nil?
@@ -31,18 +31,18 @@ def repl(interp : LISP::Interpreter) : Nil
     next if buffer.strip.empty?
 
     begin
-      forms = LISP::Reader.read_all(buffer, "<repl>")
+      forms = Scheme::Reader.read_all(buffer, "<repl>")
       buffer = ""
       forms.each do |form|
         result = interp.eval(form, interp.global)
         puts result.write_string
       end
-    rescue LISP::LispIncompleteError
+    rescue Scheme::SchemeIncompleteError
       # keep buffer, request continuation
       next
-    rescue ex : LISP::LispExit
+    rescue ex : Scheme::SchemeExit
       exit(ex.code)
-    rescue ex : LISP::LispError
+    rescue ex : Scheme::SchemeError
       buffer = ""
       puts format_error(ex)
     rescue ex
@@ -54,30 +54,37 @@ end
 
 def usage : Nil
   puts <<-USAGE
-  crisp — a LISP interpreter (Crystal)
+  creme — a Scheme interpreter (Crystal)
 
   Usage:
-    crisp                 Start the interactive REPL
-    crisp <file.lisp>     Execute a LISP source file
-    crisp --help | -h     Show this help
+    creme                 Start the interactive REPL
+    creme <file.scm>      Execute a Scheme source file
+    creme --help | -h     Show this help
   USAGE
 end
 
 def main : Nil
   args = ARGV
   if args.empty?
-    interp = LISP::Interpreter.new(module_search_path: ["./modules"])
     if STDIN.tty?
-      puts "crisp — Crystal LISP interpreter. Ctrl-D or (exit) to quit."
+      # Interactive REPL: batteries-included, matching this project's
+      # established ergonomics — (scheme base)/(scheme write) are
+      # auto-imported so there's no friction typing expressions live.
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      puts "creme — Crystal Scheme interpreter. Ctrl-D or (exit) to quit."
       repl(interp)
     else
-      # read whole program from stdin
+      # A piped/non-interactive script is a program like any other — it
+      # must explicitly (import (scheme base)) etc., matching strict R7RS
+      # and the same contract file execution has (see the args[0] branch
+      # below).
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
       src = STDIN.gets_to_end
       begin
-        LISP::Reader.read_all(src, "<stdin>").each { |form| interp.eval(form, interp.global) }
-      rescue ex : LISP::LispExit
+        Scheme::Reader.read_all(src, "<stdin>").each { |form| interp.eval(form, interp.global) }
+      rescue ex : Scheme::SchemeExit
         exit(ex.code)
-      rescue ex : LISP::LispError
+      rescue ex : Scheme::SchemeError
         STDERR.puts format_error(ex)
         exit 1
       rescue ex
@@ -93,10 +100,12 @@ def main : Nil
     usage
   else
     begin
-      LISP.run_file(LISP::Interpreter.new(module_search_path: ["./modules"]), args[0])
-    rescue ex : LISP::LispExit
+      # A script file must explicitly import what it uses, per R7RS —
+      # see the auto_import_base doc comment on Interpreter#initialize.
+      Scheme.run_file(Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false), args[0])
+    rescue ex : Scheme::SchemeExit
       exit(ex.code)
-    rescue ex : LISP::LispError
+    rescue ex : Scheme::SchemeError
       STDERR.puts format_error(ex)
       exit 1
     rescue ex

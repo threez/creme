@@ -1,0 +1,196 @@
+# ===========================================================================
+# Numeric / list helpers
+# ===========================================================================
+
+module Scheme
+  def self.truthy?(v : SchemeValue) : Bool
+    !(v.is_a?(SchemeBool) && v.value? == false)
+  end
+
+  def self.list_to_a(v : SchemeValue) : Array(SchemeValue)
+    arr = [] of SchemeValue
+    cur = v
+    while cur.is_a?(Cons)
+      arr << cur.car
+      cur = cur.cdr
+    end
+    unless cur.is_a?(SchemeNil)
+      raise SchemeRuntimeError.new("improper list: #{v.write_string}")
+    end
+    arr
+  end
+
+  def self.a_to_list(arr : Array(SchemeValue), tail : SchemeValue = NIL) : SchemeValue
+    result = tail
+    i = arr.size - 1
+    while i >= 0
+      result = Cons.new(arr[i], result)
+      i -= 1
+    end
+    result
+  end
+
+  def self.proper_list?(v : SchemeValue) : Bool
+    cur = v
+    while cur.is_a?(Cons)
+      cur = cur.cdr
+    end
+    cur.is_a?(SchemeNil)
+  end
+
+  def self.as_f64(v : SchemeValue, who : String) : Float64
+    case v
+    when SchemeInt      then v.value.to_f64
+    when SchemeRational then v.numerator.to_f64 / v.denominator.to_f64
+    when SchemeFloat    then v.value
+    else
+      raise SchemeRuntimeError.new("#{who}: expected number, got #{v.write_string}")
+    end
+  end
+
+  def self.exact?(v : SchemeValue) : Bool
+    v.is_a?(SchemeInt) || v.is_a?(SchemeRational)
+  end
+
+  def self.inexact?(v : SchemeValue) : Bool
+    v.is_a?(SchemeFloat)
+  end
+
+  # Promotion rank across the numeric tower: exact integer < exact rational
+  # < inexact float. The higher-ranked operand's representation "wins" —
+  # this is the one place that rule is expressed; num_binop3 promotes to
+  # the max rank of its two operands rather than every call site
+  # hand-writing the same 3-way case.
+  def self.num_rank(v : SchemeValue, who : String) : Int32
+    case v
+    when SchemeInt      then 0
+    when SchemeRational then 1
+    when SchemeFloat    then 2
+    else
+      raise SchemeRuntimeError.new("#{who}: expected number, got #{v.write_string}")
+    end
+  end
+
+  # Normalizes any exact number (SchemeInt or SchemeRational) to a
+  # {numerator, denominator} pair, so rational-branch arithmetic can treat
+  # an int as "n/1" without a separate case.
+  def self.as_ratio(v : SchemeValue) : {Int64, Int64}
+    case v
+    when SchemeInt      then {v.value, 1_i64}
+    when SchemeRational then {v.numerator, v.denominator}
+    else                     raise SchemeRuntimeError.new("expected an exact number, got #{v.write_string}")
+    end
+  end
+
+  # Legacy two-way (int/float only) dispatch — still used by round_like-style
+  # callers that don't yet participate in the rational tower.
+  def self.num_binop(a : SchemeValue, b : SchemeValue, who : String, int_op : Int64, Int64 -> Int64, flt_op : Float64, Float64 -> Float64) : SchemeValue
+    if a.is_a?(SchemeInt) && b.is_a?(SchemeInt)
+      begin
+        SchemeInt.new(int_op.call(a.value, b.value))
+      rescue OverflowError
+        raise SchemeRuntimeError.new("#{who}: integer overflow")
+      end
+    else
+      SchemeFloat.new(flt_op.call(as_f64(a, who), as_f64(b, who)))
+    end
+  end
+
+  # The shared 3-way numeric tower dispatcher: promotes to the higher rank
+  # of a/b and calls the matching op. int_op handles int+int (staying
+  # exact-integer); rat_op handles anything exact+exact where at least one
+  # side is a rational (numerator/denominator pairs in, a SchemeValue out —
+  # typically routed through SchemeRational.make so results stay reduced
+  # and auto-collapse back to SchemeInt when possible); flt_op handles
+  # anything+float (inexact contagion, unchanged from today's behavior).
+  def self.num_binop3(
+    a : SchemeValue, b : SchemeValue, who : String,
+    int_op : Int64, Int64 -> SchemeValue,
+    rat_op : {Int64, Int64}, {Int64, Int64} -> SchemeValue,
+    flt_op : Float64, Float64 -> Float64,
+  ) : SchemeValue
+    rank = Math.max(num_rank(a, who), num_rank(b, who))
+    case rank
+    when 0 then int_op.call(a.as(SchemeInt).value, b.as(SchemeInt).value)
+    when 1 then rat_op.call(as_ratio(a), as_ratio(b))
+    else        SchemeFloat.new(flt_op.call(as_f64(a, who), as_f64(b, who)))
+    end
+  end
+
+  # R7RS requires equal? to terminate even on circular arguments. `seen`
+  # tracks {a.object_id, b.object_id} pairs currently being compared
+  # further up the same call — the standard cycle-tolerant equality
+  # algorithm: if we're asked to compare the same pair again while already
+  # in the middle of comparing it, the structures agree at every level
+  # reached so far, so it's safe to assume equal? and not recurse forever.
+  # Only Cons/SchemeVector can participate in a cycle (the other cases are
+  # either atomic or, for strings/bytevectors, compared by value with no
+  # further recursion), so only those two branches consult/extend `seen`.
+  def self.scheme_equal?(a : SchemeValue, b : SchemeValue, seen : Set({UInt64, UInt64})? = nil) : Bool
+    case a
+    when SchemeInt
+      b.is_a?(SchemeInt) && a.value == b.value
+    when SchemeFloat
+      b.is_a?(SchemeFloat) && a.value == b.value
+    when SchemeRational
+      b.is_a?(SchemeRational) && a.numerator == b.numerator && a.denominator == b.denominator
+    when SchemeStr
+      b.is_a?(SchemeStr) && a.value == b.value
+    when SchemeChar
+      b.is_a?(SchemeChar) && a.value == b.value
+    when SchemeBool
+      b.is_a?(SchemeBool) && a.value? == b.value?
+    when SchemeSym
+      b.is_a?(SchemeSym) && a.name == b.name
+    when SchemeNil
+      b.is_a?(SchemeNil)
+    when Cons
+      return false unless b.is_a?(Cons)
+      pair = {a.object_id, b.object_id}
+      seen ||= Set({UInt64, UInt64}).new
+      return true unless seen.add?(pair)
+      scheme_equal?(a.car, b.car, seen) && scheme_equal?(a.cdr, b.cdr, seen)
+    when SchemeVector
+      return false unless b.is_a?(SchemeVector)
+      pair = {a.object_id, b.object_id}
+      seen ||= Set({UInt64, UInt64}).new
+      return true unless seen.add?(pair)
+      vector_equal?(a, b, seen)
+    when SchemeBlob
+      b.is_a?(SchemeBlob) && a.value == b.value
+    else
+      a.same?(b)
+    end
+  end
+
+  private def self.vector_equal?(a : SchemeVector, b : SchemeVector, seen : Set({UInt64, UInt64})) : Bool
+    return false unless a.value.size == b.value.size
+    a.value.each_with_index.all? { |v, i| scheme_equal?(v, b.value[i], seen) }
+  end
+
+  # ameba:disable Metrics/CyclomaticComplexity
+  def self.scheme_eqv?(a : SchemeValue, b : SchemeValue) : Bool
+    case a
+    when SchemeInt
+      b.is_a?(SchemeInt) && a.value == b.value
+    when SchemeFloat
+      # Bit-pattern comparison, not ==, so 0.0 and -0.0 (which Float64#==
+      # treats as equal) correctly compare unequal per R7RS — eqv? must
+      # distinguish negative zero when the implementation distinguishes it
+      # at all (this one does, via IEEE 754's sign bit).
+      b.is_a?(SchemeFloat) && a.value.unsafe_as(Int64) == b.value.unsafe_as(Int64)
+    when SchemeRational
+      b.is_a?(SchemeRational) && a.numerator == b.numerator && a.denominator == b.denominator
+    when SchemeChar
+      b.is_a?(SchemeChar) && a.value == b.value
+    when SchemeBool
+      b.is_a?(SchemeBool) && a.value? == b.value?
+    when SchemeSym
+      b.is_a?(SchemeSym) && a.name == b.name
+    when SchemeNil
+      b.is_a?(SchemeNil)
+    else
+      a.same?(b)
+    end
+  end
+end

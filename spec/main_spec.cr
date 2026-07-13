@@ -1,10 +1,10 @@
 require "./spec_helper"
 
-private BIN_PATH = File.join(Dir.current, "bin", "crisp_spec")
+private BIN_PATH = File.join(Dir.current, "bin", "creme_spec")
 
 Spec.before_suite do
   build = Process.run("crystal", ["build", "src/main.cr", "-o", BIN_PATH])
-  raise "failed to build crisp for main_spec" unless build.success?
+  raise "failed to build creme for main_spec" unless build.success?
 end
 
 private def run_cli(args : Array(String) = [] of String, stdin : String = "") : {String, String, Process::Status}
@@ -16,15 +16,15 @@ end
 
 describe "main.cr (CLI)" do
   it "reads a program from stdin (non-tty) and evaluates it" do
-    out, err, status = run_cli(stdin: "(println (+ 1 2))")
+    out, err, status = run_cli(stdin: "(import (scheme base) (scheme write)) (display (+ 1 2)) (newline)")
     status.success?.should be_true
     out.should eq("3\n")
     err.should eq("")
   end
 
   it "runs a file argument and exits 0" do
-    file = File.tempfile("main_spec", ".lisp") do |io|
-      io.print(%((println "hello from file")))
+    file = File.tempfile("main_spec", ".scm") do |io|
+      io.print(%((import (scheme base) (scheme write)) (display "hello from file") (newline)))
     end
     begin
       out, err, status = run_cli([file.path])
@@ -39,7 +39,7 @@ describe "main.cr (CLI)" do
   it "prints usage for --help" do
     out, _, status = run_cli(["--help"])
     status.success?.should be_true
-    out.should contain("crisp — a LISP interpreter (Crystal)")
+    out.should contain("creme — a Scheme interpreter (Crystal)")
   end
 
   it "prints usage for -h" do
@@ -55,14 +55,14 @@ describe "main.cr (CLI)" do
   end
 
   it "exits non-zero and prints an error when the file argument doesn't exist" do
-    _, err, status = run_cli(["/nonexistent/path/does-not-exist.lisp"])
+    _, err, status = run_cli(["/nonexistent/path/does-not-exist.scm"])
     status.success?.should be_false
     err.should contain("Error:")
   end
 
   it "evaluates a runtime error from a file with a non-zero exit" do
-    file = File.tempfile("main_spec_err", ".lisp") do |io|
-      io.print("(car 1)")
+    file = File.tempfile("main_spec_err", ".scm") do |io|
+      io.print("(import (scheme base)) (car 1)")
     end
     begin
       _, err, status = run_cli([file.path])
@@ -74,14 +74,14 @@ describe "main.cr (CLI)" do
   end
 
   it "(exit N) exits the real binary with code N, stopping before later forms" do
-    out, err, status = run_cli(stdin: %((display "before") (exit 3) (display "after")))
+    out, err, status = run_cli(stdin: %((import (scheme base) (scheme write) (scheme process-context)) (display "before") (exit 3) (display "after")))
     status.exit_code.should eq(3)
     out.should eq("before")
     err.should eq("")
   end
 
   it "(exit) with no arguments exits with code 0" do
-    out, _, status = run_cli(stdin: %((display "done") (exit)))
+    out, _, status = run_cli(stdin: %((import (scheme base) (scheme write) (scheme process-context)) (display "done") (exit)))
     status.success?.should be_true
     out.should eq("done")
   end
