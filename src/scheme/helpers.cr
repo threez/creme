@@ -159,7 +159,11 @@ module Scheme
     when SchemeBlob
       b.is_a?(SchemeBlob) && a.value == b.value
     else
-      a.same?(b)
+      # Reference-identity fallback for the remaining (all class-typed) value
+      # kinds. `a` is narrowed to references here, but `b` is still the full
+      # union — guard it, since a value-type (struct) `b` can never be the
+      # same object as a reference `a`.
+      b.is_a?(Reference) && a.same?(b)
     end
   end
 
@@ -190,7 +194,9 @@ module Scheme
     when SchemeNil
       b.is_a?(SchemeNil)
     else
-      a.same?(b)
+      # See scheme_equal?'s fallback: guard `b` so a value-type struct can't
+      # reach Reference#same?.
+      b.is_a?(Reference) && a.same?(b)
     end
   end
 end

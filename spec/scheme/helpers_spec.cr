@@ -55,7 +55,7 @@ describe "Scheme.a_to_list" do
 
   it "returns the tail directly for an empty array" do
     tail = i(9_i64)
-    Scheme.a_to_list([] of Scheme::SchemeValue, tail).should be(tail)
+    Scheme.a_to_list([] of Scheme::SchemeValue, tail).should eq(tail)
   end
 end
 
@@ -171,10 +171,10 @@ describe "Scheme.scheme_equal?" do
     Scheme.scheme_equal?(a, b).should be_false
   end
 
-  it "falls back to identity for Lambda/Builtin values" do
-    lam = Scheme::Lambda.new([] of String, nil, [] of Scheme::SchemeValue, Scheme::Env.new)
-    Scheme.scheme_equal?(lam, lam).should be_true
-    Scheme.scheme_equal?(lam, Scheme::Lambda.new([] of String, nil, [] of Scheme::SchemeValue, Scheme::Env.new)).should be_false
+  it "falls back to identity for procedure values" do
+    proc = Scheme::Builtin.new("dummy", 0, 0) { Scheme::NIL.as(Scheme::SchemeValue) }
+    Scheme.scheme_equal?(proc, proc).should be_true
+    Scheme.scheme_equal?(proc, Scheme::Builtin.new("dummy", 0, 0) { Scheme::NIL.as(Scheme::SchemeValue) }).should be_false
   end
 
   it "compares blobs by content" do
@@ -254,14 +254,14 @@ describe "Scheme.scheme_eqv?" do
     Scheme.scheme_eqv?(p, p).should be_true
   end
 
-  it "is false for two distinct promises, even wrapping the same expression (identity only)" do
-    env = Scheme::Env.new
-    Scheme.scheme_eqv?(Scheme::SchemePromise.new(Scheme::NIL, env), Scheme::SchemePromise.new(Scheme::NIL, env)).should be_false
+  it "is false for two distinct promises, even wrapping the same thunk (identity only)" do
+    thunk = Scheme::Builtin.new("dummy", 0, 0) { Scheme::NIL.as(Scheme::SchemeValue) }
+    Scheme.scheme_eqv?(Scheme::SchemePromise.new(thunk), Scheme::SchemePromise.new(thunk)).should be_false
   end
 
   it "is true for the same promise object" do
-    env = Scheme::Env.new
-    p = Scheme::SchemePromise.new(Scheme::NIL, env)
+    thunk = Scheme::Builtin.new("dummy", 0, 0) { Scheme::NIL.as(Scheme::SchemeValue) }
+    p = Scheme::SchemePromise.new(thunk)
     Scheme.scheme_eqv?(p, p).should be_true
   end
 

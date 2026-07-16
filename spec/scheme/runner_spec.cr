@@ -9,7 +9,7 @@ describe "Scheme.run_source" do
 
   it "returns nil for empty source" do
     interp = Scheme::Interpreter.new
-    Scheme.run_source(interp, "").should be(Scheme::NIL)
+    Scheme.run_source(interp, "").should eq(Scheme::NIL)
   end
 
   it "propagates a parse error" do

@@ -6,12 +6,12 @@ end
 
 describe "Scheme.to_scheme" do
   it "converts nil to NIL" do
-    Scheme.to_scheme(nil).should be(Scheme::NIL)
+    Scheme.to_scheme(nil).should eq(Scheme::NIL)
   end
 
   it "converts a Bool" do
-    Scheme.to_scheme(true).should be(Scheme::TRUE)
-    Scheme.to_scheme(false).should be(Scheme::FALSE)
+    Scheme.to_scheme(true).should eq(Scheme::TRUE)
+    Scheme.to_scheme(false).should eq(Scheme::FALSE)
   end
 
   it "converts an Int" do
@@ -30,7 +30,7 @@ describe "Scheme.to_scheme" do
     vec = Scheme.to_scheme([1, "a", true]).as(Scheme::SchemeVector)
     vec.value[0].as(Scheme::SchemeInt).value.should eq(1_i64)
     vec.value[1].as(Scheme::SchemeStr).value.should eq("a")
-    vec.value[2].should be(Scheme::TRUE)
+    vec.value[2].should eq(Scheme::TRUE)
   end
 
   it "converts a Hash to an alist of (SchemeStr . value), recursively" do
@@ -53,7 +53,7 @@ describe "Scheme.to_scheme" do
 
   it "passes an already-built SchemeValue through unchanged (identity)" do
     v = Scheme::SchemeInt.new(9_i64)
-    Scheme.to_scheme(v).should be(v)
+    Scheme.to_scheme(v).should eq(v)
   end
 
   it "converts a Time to an epoch-second SchemeFloat" do
@@ -127,9 +127,9 @@ describe "Scheme.from_scheme" do
   end
 
   it "raises for an opaque, non-data value" do
-    lam = Scheme::Lambda.new([] of String, nil, [] of Scheme::SchemeValue, Scheme::Env.new)
+    proc = Scheme::Builtin.new("dummy", 0, 0) { Scheme::NIL.as(Scheme::SchemeValue) }
     expect_raises(Scheme::SchemeRuntimeError, /cannot convert/) do
-      Scheme.from_scheme(lam)
+      Scheme.from_scheme(proc)
     end
   end
 

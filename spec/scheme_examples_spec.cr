@@ -134,6 +134,6 @@ describe "integration: examples/*.scm" do
   end
 
   it "runs bench.scm end to end without raising" do
-    run_example("examples/bench.scm")
+    run_example("bench/bench.scm")
   end
 end

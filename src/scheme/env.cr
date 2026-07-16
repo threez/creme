@@ -7,13 +7,26 @@ module Scheme
   # let/letrec/do bodies, ...) typically hold only a handful of bindings, so
   # they start out backed by parallel arrays and use a linear scan — cheaper
   # than a Hash's per-insert bucket/hash overhead at this size, and this is
-  # by far the hottest allocation in eval_core's trampoline (a fresh Env per
+  # by far the hottest allocation in eval_node's trampoline (a fresh Env per
   # call). A frame that grows past ARRAY_THRESHOLD bindings (a large let, or
   # a library/global env mistakenly constructed with a parent) promotes
   # itself to a Hash once, so pathological cases stay O(1) instead of O(n)
   # forever. Root envs (no parent) — @global/@base_env and every library's
   # own env — start Hash-backed directly, since those are known up front to
   # hold hundreds of bindings where linear scan would lose.
+  #
+  # Non-root frames start out sharing a single read-only pair of EMPTY
+  # sentinel arrays rather than allocating their own: a frame that binds
+  # nothing — `(let () body)`, a no-arg thunk's body that never uses internal
+  # `define`, an empty `begin` scope — then costs just the Env object, not an
+  # object plus two throwaway arrays that only ever forward lookups to the
+  # parent. The sentinels are never mutated (lookup/has_local? only read
+  # them, and `index`/`includes?` on an empty array is a trivial no-op), so
+  # the hot read path stays byte-identical to owning a real empty array. The
+  # first `define` that actually stores a binding swaps in freshly-owned
+  # arrays (see `define`). The frame keeps its distinct lexical identity from
+  # birth, so an internal define appearing later scopes correctly to this
+  # frame rather than leaking into the parent.
   class Env
     getter parent : Env?
 
@@ -21,16 +34,51 @@ module Scheme
     # arrays to a Hash. Chosen well above typical lambda arity/let bindings.
     ARRAY_THRESHOLD = 8
 
+    # Shared read-only initial storage for a freshly-created non-root frame,
+    # swapped out by `define` on the first stored binding. Never mutated.
+    EMPTY_NAMES  = [] of String
+    EMPTY_VALUES = [] of SchemeValue
+
+    # Bumped on every define/set! into THIS frame. The AST's GlobalRefNode
+    # inline-caches a free variable's value keyed on the root env's version, so
+    # a hot loop that does no top-level (re)definition keeps its global-variable
+    # caches valid and skips the hash lookup entirely.
+    property version : Int32 = 0
+
+    # Direct indexed read of a value slot, for the AST's lexical addressing
+    # (LocalRefNode). Returns nil if this frame is Hash-backed (promoted or
+    # root) or the slot doesn't exist yet, so the caller falls back to a
+    # name-keyed lookup.
+    def local_at?(index : Int32) : SchemeValue?
+      return nil if @hash
+      vals = @values
+      return nil if vals.nil? || index >= vals.size
+      vals[index]
+    end
+
     def initialize(@parent : Env? = nil)
       if @parent.nil?
         @hash = {} of String => SchemeValue
-        @names = nil
-        @values = nil
       else
         @hash = nil
-        @names = [] of String
-        @values = [] of SchemeValue
       end
+      @names = EMPTY_NAMES
+      @values = EMPTY_VALUES
+      @names_shared = false
+    end
+
+    # Fast constructor for a lambda call frame: `names` is the callee's own
+    # (immutable, reused-every-call) parameter-name array and `values` is the
+    # freshly-built, caller-disposable argument array — so instead of
+    # allocating two fresh arrays and copying each binding in (the general
+    # `Env.new(parent)` + per-param `define` path), the frame shares `names`
+    # by reference and adopts `values` outright: zero array allocations and no
+    # per-param linear scan. `@names_shared` records that `names` is borrowed,
+    # so the first body-internal `define` that adds a *new* binding copies it
+    # before appending (copy-on-write) — the borrowed array is never mutated.
+    # `values` is always owned outright and appended to in place.
+    def initialize(@parent : Env, @names : Array(String), @values : Array(SchemeValue), @names_shared : Bool = true)
+      @hash = nil
     end
 
     def get(name : String) : SchemeValue
@@ -63,6 +111,7 @@ module Scheme
     end
 
     def define(name : String, v : SchemeValue) : SchemeValue
+      @version &+= 1
       if hash = @hash
         hash[name] = v
         return v
@@ -73,6 +122,19 @@ module Scheme
       if idx
         values[idx] = v
       else
+        if names.same?(EMPTY_NAMES)
+          # First stored binding on a fresh frame still holding the shared
+          # empty sentinels — swap in freshly-owned arrays before appending.
+          names = @names = [] of String
+          values = @values = [] of SchemeValue
+        elsif @names_shared
+          # Copy-on-write: the borrowed param-name array must never be
+          # mutated (it's shared by every call to this lambda), so dup it
+          # before this frame grows a binding of its own. `values` is always
+          # owned, so it needs no copy.
+          names = @names = names.dup
+          @names_shared = false
+        end
         promote_to_hash! if names.size >= ARRAY_THRESHOLD
         return define(name, v) if @hash
         names << name
@@ -120,6 +182,7 @@ module Scheme
     end
 
     protected def set_local(name : String, v : SchemeValue) : Nil
+      @version &+= 1
       if hash = @hash
         hash[name] = v
       else
@@ -128,6 +191,10 @@ module Scheme
         if idx
           @values.not_nil![idx] = v
         else
+          if @names_shared
+            names = @names = names.dup
+            @names_shared = false
+          end
           names << name
           @values.not_nil! << v
         end

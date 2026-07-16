@@ -1,4 +1,4 @@
-.PHONY: all clean fmt fmtcheck lint fix docs spec version tag
+.PHONY: all clean fmt fmtcheck lint fix docs spec bench version tag
 
 UNAME_M != uname -m
 NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
@@ -18,6 +18,13 @@ lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext
 
 spec: $(NEON_OBJ)
 	crystal spec -v
+
+# Run-only: assumes bin/creme is already built (shards build --release
+# --no-debug) and, for the native-Crystal comparison column, bin/bench_cr is
+# already built too (crystal build --release bench/bench.cr -o bin/bench_cr).
+# Ruby/Racket columns fall back to "n/a" if those toolchains aren't installed.
+bench:
+	./bin/creme bench/bench.scm
 
 lib/ameba/bin/ameba:
 	shards install

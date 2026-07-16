@@ -55,7 +55,7 @@ module Scheme
   # obj) — payload is ALWAYS set to the raw raised Scheme object (unlike the
   # base class's payload, which is nil unless something went through
   # `error`), since raise accepts any object, not just condition records.
-  # See interpreter/exceptions.cr.
+  # See modules/scheme/base/exceptions.cr.
   class SchemeRaise < SchemeError
     def initialize(@payload : SchemeValue)
       super(nil)

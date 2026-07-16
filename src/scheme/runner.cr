@@ -23,11 +23,11 @@ module Scheme
       env = Env.new(root)
       bindings.each { |k, v| env.define(k, v) }
     end
-    result : SchemeValue = NIL
-    Reader.read_all(src, source_name).each do |form|
-      result = interp.eval(form, env)
-    end
-    result
+    # BytecodeCompiler.run_program analyzes, compiles, and runs one form at a
+    # time against `env` (mirroring this exact per-form loop) rather than
+    # analyzing the whole program up front — required for a top-level
+    # define-syntax/import to affect a LATER form's analysis.
+    BytecodeCompiler.run_program(interp, Reader.read_all(src, source_name), env)
   end
 
   def self.run_file(interp : Interpreter, path : String, bindings : Hash(String, SchemeValue)? = nil, parent : Env? = nil) : SchemeValue

@@ -34,7 +34,7 @@ def repl(interp : Scheme::Interpreter) : Nil
       forms = Scheme::Reader.read_all(buffer, "<repl>")
       buffer = ""
       forms.each do |form|
-        result = interp.eval(form, interp.global)
+        result = Scheme::BytecodeCompiler.run_program(interp, [form], interp.global)
         puts result.write_string
       end
     rescue Scheme::SchemeIncompleteError
@@ -81,7 +81,7 @@ def main : Nil
       interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
       src = STDIN.gets_to_end
       begin
-        Scheme::Reader.read_all(src, "<stdin>").each { |form| interp.eval(form, interp.global) }
+        Scheme::BytecodeCompiler.run_program(interp, Scheme::Reader.read_all(src, "<stdin>"), interp.global)
       rescue ex : Scheme::SchemeExit
         exit(ex.code)
       rescue ex : Scheme::SchemeError

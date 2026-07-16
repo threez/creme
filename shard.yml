@@ -21,6 +21,8 @@ dependencies:
     version: ~> 0.4.0
   rfc8439:
     github: threez/rfc8439.cr
+  prof:
+    github: threez/prof.cr
 
 development_dependencies:
   ameba:
