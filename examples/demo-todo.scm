@@ -1,4 +1,4 @@
-(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme json-builder) (creme string) (creme sql) (creme dao))
+(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao))
 
 ;; Storage: SQLite, in-memory (no file to clean up). The `todo` table and its
 ;; CRUD are one declarative (creme dao) form -- no SQL/(creme sxql) call

@@ -43,4 +43,23 @@ describe "string module" do
       run("(string-upcase 5)")
     end
   end
+
+  it "translates every occurrence of each aliased char in one pass" do
+    w(%q((string-translate "a&b<c>d" (list (cons #\& "&amp;") (cons #\< "&lt;") (cons #\> "&gt;")))))
+      .should eq(%("a&amp;b&lt;c&gt;d"))
+  end
+
+  it "leaves a string with no matching characters unchanged" do
+    w(%q((string-translate "hello" (list (cons #\& "&amp;"))))).should eq(%("hello"))
+  end
+
+  it "returns the empty string for empty input" do
+    w(%q((string-translate "" (list (cons #\& "&amp;"))))).should eq(%(""))
+  end
+
+  it "raises on a malformed pairs alist" do
+    expect_raises(Scheme::SchemeRuntimeError, /string-translate: expected an alist/) do
+      run(%q((string-translate "x" (list (cons "&" "&amp;")))))
+    end
+  end
 end

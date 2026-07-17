@@ -228,4 +228,24 @@ describe "surf module" do
         SCM
     end
   end
+
+  describe "logging" do
+    it "surf-app registers surf-log-middleware, still recognized by mux-router?" do
+      w(%((mux-router? (surf-app)))).should eq("#t")
+    end
+
+    it "surf-log-middleware logs one line: method, path, status, elapsed ms" do
+      # Called directly (not through a live server): request handling for a
+      # real mux-listen! server runs on its own connection fiber, and a
+      # Scheme parameter's dynamic binding (current-output-port here) is
+      # per-fiber, so parameterize around an http-get call wouldn't reach
+      # it -- calling the middleware procedure itself, synchronously, with
+      # a stub `next`, is both simpler and fiber-safe.
+      w(<<-SCM).should match(/\A"GET \/hi -> 200 \(\d+ms\)\\n"\z/)
+        (parameterize ((current-output-port (open-output-string)))
+          (surf-log-middleware (list (cons "method" "GET") (cons "path" "/hi")) (lambda () 200))
+          (get-output-string (current-output-port)))
+        SCM
+    end
+  end
 end

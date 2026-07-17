@@ -21,6 +21,29 @@
 # once a response outgrows it, same as for a plain string body. Status/
 # headers are always set before any body byte is written, streaming or
 # not.
+#
+# `(mux-use! router middleware)` registers a middleware — an ordinary
+# two-argument Scheme procedure `(lambda (request next) ...)` — onto the
+# router; every middleware registered on a router wraps every one of that
+# router's routes once `mux-listen!` starts the server, in registration
+# order (first-registered = outermost). `next` is a zero-argument Scheme
+# procedure that runs the rest of the chain (the next middleware, or
+# finally the matched route) and returns the resulting HTTP status code as
+# an integer; a middleware can run code both before calling `next` (e.g.
+# capture a start time) and after it returns (e.g. log using the now-known
+# status) — the classic "onion" shape, same as Rack/Express middleware. If
+# a middleware calls `next`, its own return value is ignored (the response
+# was already written by whatever `next` reached). If a middleware never
+# calls `next`, it short-circuits the request — no route handler ever runs
+# — and its return value is instead treated exactly like a route handler's:
+# a response alist, written the same way. This is built entirely on
+# Crystal's own HTTP::Server handler-chaining
+# (`HTTP::Server.new(handlers : Indexable(HTTP::Handler))`, each handler
+# calling `call_next` to continue) — Mux::Router itself already
+# `include`s `HTTP::Handler`, so it's simply the last handler in that
+# chain, with one small MuxMiddlewareHandler wrapping each registered
+# Scheme middleware in front of it.
+#
 # `mux-listen!` starts the server on a spawned Fiber (non-blocking) and
 # returns an opaque server handle (tag "mux-server") — pass port 0 to
 # `mux-listen!` for an OS-assigned ephemeral port, then read the real one
@@ -31,13 +54,68 @@
 
 require "mux"
 
+# Caches the request body on the context itself: with middleware in front
+# of the router, request_to_scheme can now be called more than once per
+# request (once per middleware, once for the matched route), but
+# HTTP::Request#body is a stream, only readable once, so a naive second
+# call would see an already-drained body. Only the body is cached (not the
+# whole alist) — path-params specifically must NOT be cached, since
+# Mux::Router only populates request.path_params once its own routing
+# actually runs (inside call_next, downstream of any middleware), so a
+# request built before that point genuinely has no path-params yet; a
+# request built after routing (inside the matched route's own handler)
+# correctly sees them. Caching on the context itself (rather than some
+# separate keyed cache needing its own cleanup) means this is leak-free
+# for free: the cached value's lifetime is exactly the context's own.
+class HTTP::Server::Context
+  property mux_body : String?
+end
+
+module Scheme
+  # The "mux-router" SchemeBox's wrapped value: the real Mux::Router plus
+  # the ordered list of Scheme middleware procedures registered onto it via
+  # mux-use! (empty until mux-use! is called at least once).
+  class MuxApp
+    getter router : Mux::Router
+    getter middlewares : Array(SchemeValue)
+
+    def initialize(@router : Mux::Router)
+      @middlewares = [] of SchemeValue
+    end
+  end
+
+  # Wraps one Scheme middleware as a Crystal HTTP::Handler, so it can sit in
+  # Crystal's own handler chain in front of the router. Builds the request
+  # alist once (the same shape every route handler gets) and a `next`
+  # procedure that runs the rest of the chain and reports back the status
+  # code that ended up on the wire.
+  class MuxMiddlewareHandler
+    include HTTP::Handler
+
+    def initialize(@interp : Interpreter, @middleware : SchemeValue)
+    end
+
+    def call(context : HTTP::Server::Context) : Nil
+      request = Scheme::Builtins::MuxLibrary.request_to_scheme(context)
+      called_next = false
+      next_proc = Builtin.new("mux-middleware-next", 0, 0) do |_args|
+        called_next = true
+        call_next(context)
+        SchemeInt.new(context.response.status_code.to_i64).as(SchemeValue)
+      end
+      result = @interp.apply(@middleware, [request, next_proc.as(SchemeValue)])
+      Scheme::Builtins::MuxLibrary.write_response(@interp, context, result, "mux-use!") unless called_next
+    end
+  end
+end
+
 module Scheme::Builtins::MuxLibrary
   extend self
   include Scheme::BuiltinHelpers
 
   @[Scheme::SchemeFn("mux-router", min: 0, max: 0)]
   def mux_router(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBox.new("mux-router", Mux::Router.new, "#<mux-router>")
+    SchemeBox.new("mux-router", Scheme::MuxApp.new(Mux::Router.new), "#<mux-router>")
   end
 
   @[Scheme::SchemeFn("mux-router?", min: 1, max: 1)]
@@ -53,15 +131,24 @@ module Scheme::Builtins::MuxLibrary
     end
   {% end %}
 
+  @[Scheme::SchemeFn("mux-use!", min: 2, max: 2)]
+  def mux_use(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    app = mux_router_arg(args[0], "mux-use!")
+    app.middlewares << args[1]
+    NIL.as(SchemeValue)
+  end
+
   @[Scheme::SchemeFn("mux-listen!", min: 2, max: 3)]
   def mux_listen(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    router = mux_router_arg(args[0], "mux-listen!")
+    app = mux_router_arg(args[0], "mux-listen!")
     host, port = if args.size == 3
                    {mux_str_arg(args[1], "mux-listen!"), mux_int_arg(args[2], "mux-listen!")}
                  else
                    {"127.0.0.1", mux_int_arg(args[1], "mux-listen!")}
                  end
-    server = HTTP::Server.new(router)
+    handlers = app.middlewares.map { |mw| Scheme::MuxMiddlewareHandler.new(interp, mw).as(HTTP::Handler) }
+    handlers << app.router.as(HTTP::Handler)
+    server = HTTP::Server.new(handlers)
     address = server.bind_tcp(host, port)
     spawn { server.listen }
     Fiber.yield
@@ -95,17 +182,20 @@ module Scheme::Builtins::MuxLibrary
   end
 
   private def register_route(interp : Interpreter, args : Array(SchemeValue), method : String, who : String) : SchemeValue
-    router = mux_router_arg(args[0], who)
+    app = mux_router_arg(args[0], who)
     path = mux_str_arg(args[1], who)
     handler = args[2]
-    router.add_handler(path, method: method) do |context|
+    app.router.add_handler(path, method: method) do |context|
       response = interp.apply(handler, [request_to_scheme(context)] of SchemeValue)
       write_response(interp, context, response, who)
     end
     NIL.as(SchemeValue)
   end
 
-  private def request_to_scheme(context : HTTP::Server::Context) : SchemeValue
+  # Public (not private): also called by Scheme::MuxMiddlewareHandler, a
+  # sibling class in this same file, to build the request alist a
+  # middleware receives — the exact same shape a route handler gets.
+  def request_to_scheme(context : HTTP::Server::Context) : SchemeValue
     request = context.request
     header_pairs = [] of SchemeValue
     request.headers.each do |name, values|
@@ -114,7 +204,7 @@ module Scheme::Builtins::MuxLibrary
     param_pairs = (request.path_params || {} of String => String).map do |name, value|
       Cons.new(SchemeStr.new(name), SchemeStr.new(value)).as(SchemeValue)
     end
-    body = request.body.try(&.gets_to_end) || ""
+    body = cached_body(context)
     Scheme.a_to_list([
       Cons.new(SchemeStr.new("method"), SchemeStr.new(request.method)).as(SchemeValue),
       Cons.new(SchemeStr.new("path"), SchemeStr.new(request.path)).as(SchemeValue),
@@ -124,7 +214,22 @@ module Scheme::Builtins::MuxLibrary
     ])
   end
 
-  private def write_response(interp : Interpreter, context : HTTP::Server::Context, response : SchemeValue, who : String) : Nil
+  # See HTTP::Server::Context#mux_body's own comment: the request body is a
+  # stream, only safely readable once, but request_to_scheme may now run
+  # more than once per request (middleware, then the matched route).
+  private def cached_body(context : HTTP::Server::Context) : String
+    if cached = context.mux_body
+      return cached
+    end
+    value = context.request.body.try(&.gets_to_end) || ""
+    context.mux_body = value
+    value
+  end
+
+  # Public (not private): also called by Scheme::MuxMiddlewareHandler, a
+  # sibling class in this same file, to write a short-circuiting
+  # middleware's own returned response alist (when it never calls `next`).
+  def write_response(interp : Interpreter, context : HTTP::Server::Context, response : SchemeValue, who : String) : Nil
     body_value = alist_lookup(response, "body")
     body_proc = body_value if body_value && callable?(body_value)
     native = Scheme.from_scheme(body_proc ? alist_without(response, "body") : response)
@@ -180,9 +285,9 @@ module Scheme::Builtins::MuxLibrary
     v.value.to_i32
   end
 
-  private def mux_router_arg(v : SchemeValue, who : String) : Mux::Router
+  private def mux_router_arg(v : SchemeValue, who : String) : Scheme::MuxApp
     raise SchemeRuntimeError.new("#{who}: expected mux-router, got #{v.write_string}") unless v.is_a?(SchemeBox) && v.tag == "mux-router"
-    v.get(Mux::Router)
+    v.get(Scheme::MuxApp)
   end
 
   private def mux_server_arg(v : SchemeValue, who : String) : {HTTP::Server, Socket::IPAddress}

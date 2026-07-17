@@ -126,4 +126,66 @@ describe "mux module" do
     plain_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
     plain_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("plain string body"))
   end
+
+  describe "mux-use!" do
+    it "runs a middleware around a real request, letting it read the status from next" do
+      w(<<-SCM).should eq(%("GET /hi -> 200"))
+        (define router (mux-router))
+        (define log "")
+        (mux-use! router
+          (lambda (request next)
+            (define status (next))
+            (set! log (string-append (cdr (assoc "method" request)) " " (cdr (assoc "path" request)) " -> " (number->string status)))
+            status))
+        (mux-get! router "/hi" (lambda (request) (list (cons "status" 200) (cons "body" "hi"))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (http-get (string-append base-url "/hi"))
+        (mux-close! server)
+        log
+        SCM
+    end
+
+    it "a middleware that never calls next short-circuits the request" do
+      w(<<-SCM).should eq("403")
+        (define router (mux-router))
+        (define ran #f)
+        (mux-use! router (lambda (request next) (list (cons "status" 403) (cons "body" "nope"))))
+        (mux-get! router "/hi" (lambda (request) (set! ran #t) (list (cons "status" 200) (cons "body" "hi"))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define status (cdr (assoc "status" (http-get (string-append base-url "/hi")))))
+        (mux-close! server)
+        status
+        SCM
+
+      run(<<-SCM).write_string.should eq("#f")
+        (define router (mux-router))
+        (mux-use! router (lambda (request next) (list (cons "status" 403) (cons "body" "nope"))))
+        (define ran #f)
+        (mux-get! router "/hi" (lambda (request) (set! ran #t) (list (cons "status" 200) (cons "body" "hi"))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (http-get (string-append base-url "/hi"))
+        (mux-close! server)
+        ran
+        SCM
+    end
+
+    it "runs multiple middlewares in registration order (outermost first-in, last-out)" do
+      w(<<-SCM).should eq(%("a-in b-in b-out a-out"))
+        (define router (mux-router))
+        (define trace "")
+        (define (append! s) (set! trace (if (= (string-length trace) 0) s (string-append trace " " s))))
+        (mux-use! router (lambda (request next) (append! "a-in") (define r (next)) (append! "a-out") r))
+        (mux-use! router (lambda (request next) (append! "b-in") (define r (next)) (append! "b-out") r))
+        (mux-get! router "/hi" (lambda (request) (list (cons "status" 200) (cons "body" "hi"))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (http-get (string-append base-url "/hi"))
+        (mux-close! server)
+        trace
+        SCM
+    end
+  end
 end

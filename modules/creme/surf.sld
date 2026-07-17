@@ -47,9 +47,10 @@
 ;;                                      and no manual response-alist
 ;;                                      plumbing required at the call site.
 ;;   (surf-app)                     -> a fresh app with no routes yet (a
-;;                                      plain alias for mux-router, kept for
-;;                                      naming/discoverability) — for a
-;;                                      script that wants to build its
+;;                                      mux-router with surf-log-middleware
+;;                                      already registered on it via
+;;                                      mux-use! — see "logging" below) —
+;;                                      for a script that wants to build its
 ;;                                      routing table up incrementally
 ;;                                      rather than as one surf form.
 ;;   (surf-route! app clause)       -> registers one more clause (same
@@ -182,6 +183,24 @@
 ;; require a (creme mux) change first, out of scope for a Scheme-only
 ;; library like this one.
 ;;
+;; ---- logging --------------------------------------------------------------
+;;
+;;   (surf-log-middleware request next) -> the default logging middleware,
+;;                                      registered automatically by
+;;                                      surf-app (and so by surf too, which
+;;                                      is built out of surf-app) via
+;;                                      (creme mux)'s own mux-use! — every
+;;                                      request through a surf-built app
+;;                                      logs one line, "METHOD /path ->
+;;                                      status (Nms)", to
+;;                                      (current-output-port) once
+;;                                      handling finishes. Exported so a
+;;                                      script can also register it
+;;                                      manually on a router built via
+;;                                      bare (creme mux) (mux-router)
+;;                                      instead of surf-app, or compose it
+;;                                      alongside its own middleware.
+;;
 ;; Not auto-imported anywhere — every script that wants any of this must
 ;; (import (creme surf)) explicitly, same as any other file-based library.
 ;; ===========================================================================
@@ -191,12 +210,28 @@
           surf-response surf-text surf-html surf-redirect surf-json
           surf-method surf-path surf-body surf-header surf-path-param
           surf-url-decode surf-form surf-param
-          surf-accept surf-accepts?)
-  (import (scheme base) (scheme write) (creme mux) (creme html) (creme json-builder) (creme string))
+          surf-accept surf-accepts?
+          surf-log-middleware)
+  (import (scheme base) (scheme write) (creme mux) (creme html) (creme json-builder) (creme string) (creme time))
   (begin
     ;; ---- routing --------------------------------------------------------
 
-    (define (surf-app) (mux-router))
+    ;; (creme time)'s current-time is wall-clock float seconds -- good
+    ;; enough for a request log, no need for a true monotonic clock here.
+    (define (surf-log-middleware request next)
+      (let* ((start (current-time))
+             (status (next))
+             (elapsed-ms (exact (round (* 1000 (time-difference (current-time) start))))))
+        (write-string
+         (string-append (surf-method request) " " (surf-path request) " -> "
+                         (number->string status) " (" (number->string elapsed-ms) "ms)\n")
+         (current-output-port))
+        status))
+
+    (define (surf-app)
+      (let ((app (mux-router)))
+        (mux-use! app surf-log-middleware)
+        app))
 
     (define-syntax surf-route!
       (syntax-rules (get head post put delete patch)

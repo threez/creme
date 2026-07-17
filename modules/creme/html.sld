@@ -140,24 +140,28 @@
 (define-library (creme html)
   (export html-document->string html-document-write! html-escape html-fold html-merge-pieces
           html-pieces->body html-render html-style html->string html-tag html-text html-void-tag
-          html! html-write!)
+          html! html-write! write-dynamic-attr)
   (import (scheme base) (scheme write) (creme string) (creme css))
   (begin
+    (define html-escape-table
+      (list (cons #\& "&amp;") (cons #\< "&lt;") (cons #\> "&gt;") (cons #\" "&quot;") (cons #\' "&#39;")))
+
     ;; HTML-escaping for arbitrary text, safe to embed as either element
     ;; content (& < >) or an attribute value (" '), matching what standard
-    ;; escapers do (e.g. Ruby's CGI.escapeHTML, Python's html.escape) — & is
-    ;; replaced first, so escaping the other 4 doesn't introduce new &s that
-    ;; then get escaped again.
+    ;; escapers do (e.g. Ruby's CGI.escapeHTML, Python's html.escape).
+    ;; string-translate ((creme string), a native Crystal builtin) finds
+    ;; and substitutes all five special characters in a single native pass
+    ;; over s — replacing the previous 5-chained-string-replace
+    ;; implementation, which rescanned/reallocated the whole string 5
+    ;; times. (A hand-written Scheme char-by-char loop was tried in
+    ;; between and measured SLOWER than the 5-chain despite being
+    ;; algorithmically a single pass: each loop iteration runs through
+    ;; this interpreter's own bytecode dispatch, and that per-character
+    ;; interpretation overhead dwarfs the native string-copying cost the
+    ;; 5-chain was paying — a single *native* pass, not a single
+    ;; *interpreted* pass, is what actually wins here.)
     (define (html-escape s)
-      (string-replace
-       (string-replace
-        (string-replace
-         (string-replace
-          (string-replace s "&" "&amp;")
-          "<" "&lt;")
-         ">" "&gt;")
-        "\"" "&quot;")
-       "'" "&#39;"))
+      (string-translate s html-escape-table))
 
     ;; ---- port-based builders ----------------------------------------------
 
@@ -186,6 +190,22 @@
 
     (define (attr-value->string value)
       (if (string? value) value (number->string value)))
+
+    ;; Writes one dynamic attribute directly (no attrs list ever built): #f
+    ;; omits it, #t writes a bare boolean attribute, anything else writes
+    ;; name="escaped-value". Used by html!'s/html-write!'s expansion for a
+    ;; node's dynamic attrs entries, one call per entry — see the
+    ;; compile-time template folding section below.
+    (define (write-dynamic-attr port name value)
+      (cond
+       ((eq? value #f) #t)
+       ((eq? value #t) (write-string " " port) (write-string name port))
+       (else
+        (write-string " " port)
+        (write-string name port)
+        (write-string "=\"" port)
+        (write-string (html-escape (attr-value->string value)) port)
+        (write-string "\"" port))))
 
     (define (write-open-tag port name attrs)
       (write-string "<" port)
@@ -316,11 +336,15 @@
     (define (html-pieces->body pieces port-sym)
       (map (lambda (p) (html-piece->stmt p port-sym)) pieces))
 
-    ;; An attrs block (@ (name value) ...) is folded as one unit: if ANY
-    ;; entry's value is dynamic, the whole attrs list is built at runtime
-    ;; (mixing literal and dynamic entries) and handed to html-tag/
-    ;; html-void-tag unchanged — only that one node's own open/close tag
-    ;; markup loses precomputation; its children still fold independently.
+    ;; Attrs fold per ENTRY, not as one all-or-nothing block: a static
+    ;; entry (name and value both known at expansion time) becomes one lit
+    ;; chunk (the whole ` name="value"` fragment, pre-escaped); a dynamic
+    ;; entry becomes one write-dynamic-attr call writing just that entry,
+    ;; directly, at runtime — no attrs list is ever built (not even at
+    ;; runtime) and no body-thunk closure is needed either, since the
+    ;; open tag and children are now just more pieces in the same flat
+    ;; sequence, unconditionally, for every node — dynamic attrs, dynamic
+    ;; children, both, or neither.
     (define (html-attrs-splicing? attrs-form)
       (and attrs-form
            (let loop ((entries (cdr attrs-form)))
@@ -336,32 +360,41 @@
         (error "html!: unquote-splicing not supported as an attribute value" value))
        (else (list 'quote value))))
 
-    (define (html-fold-attrs-runtime attrs-form)
-      (cons 'list
-            (map (lambda (entry)
-                   (list 'list (list 'quote (car entry)) (html-unwrap-attr-value (cadr entry))))
-                 (cdr attrs-form))))
+    (define (html-fold-attr-entry entry port-sym)
+      (let* ((name-str (attr-name->string (car entry)))
+             (value (cadr entry)))
+        (if (html-static? value)
+            (cond
+             ((eq? value #f) '())
+             ((eq? value #t) (list (cons 'lit (string-append " " name-str))))
+             (else
+              (list (cons 'lit
+                          (string-append " " name-str "=\"" (html-escape (attr-value->string value)) "\"")))))
+            (list (cons 'code
+                        (list 'write-dynamic-attr port-sym name-str (html-unwrap-attr-value value)))))))
 
-    (define (html-fold-void-element tag-sym tag-str attrs-form attrs-static children port-sym)
+    (define (html-fold-attrs-pieces attrs-form port-sym)
+      (if attrs-form
+          (apply append (map (lambda (e) (html-fold-attr-entry e port-sym)) (cdr attrs-form)))
+          '()))
+
+    (define (html-fold-void-element tag-str attrs-form children port-sym)
       (if (pair? children)
           (error "html!: void element cannot have children" tag-str))
-      (if attrs-static
-          (list (cons 'lit (html-render-to-string (if attrs-form (list tag-sym attrs-form) (list tag-sym)))))
-          (list (cons 'code (list 'html-void-tag port-sym tag-str (html-fold-attrs-runtime attrs-form))))))
+      (html-merge-pieces
+       (append (list (cons 'lit (string-append "<" tag-str)))
+               (html-fold-attrs-pieces attrs-form port-sym)
+               (list (cons 'lit ">")))))
 
-    (define (html-fold-container-element tag-sym tag-str attrs-form attrs-static children port-sym)
-      (let* ((child-pieces (html-merge-pieces
-                             (apply append (map (lambda (c) (html-fold c port-sym)) children)))))
-        (if attrs-static
-            (let ((open-tag (let ((p (open-output-string)))
-                               (write-open-tag p tag-str (if attrs-form (cdr attrs-form) '()))
-                               (get-output-string p)))
-                  (close-tag (string-append "</" tag-str ">")))
-              (html-merge-pieces
-               (append (list (cons 'lit open-tag)) child-pieces (list (cons 'lit close-tag)))))
-            (list (cons 'code
-                        (list 'html-tag port-sym tag-str (html-fold-attrs-runtime attrs-form)
-                              (list 'lambda '() (cons 'begin (html-pieces->body child-pieces port-sym)))))))))
+    (define (html-fold-container-element tag-str attrs-form children port-sym)
+      (let ((child-pieces (html-merge-pieces
+                            (apply append (map (lambda (c) (html-fold c port-sym)) children)))))
+        (html-merge-pieces
+         (append (list (cons 'lit (string-append "<" tag-str)))
+                 (html-fold-attrs-pieces attrs-form port-sym)
+                 (list (cons 'lit ">"))
+                 child-pieces
+                 (list (cons 'lit (string-append "</" tag-str ">")))))))
 
     (define (html-fold-element form port-sym)
       (let* ((tag-sym (car form))
@@ -376,10 +409,9 @@
             ;; node, by rebuilding the original quasiquote form around it —
             ;; always correct, just without folding for this node.
             (list (cons 'code (list 'html-render port-sym (list 'quasiquote form))))
-            (let ((attrs-static (or (not has-attrs) (html-static? attrs-form))))
-              (if (void-element? tag-str)
-                  (html-fold-void-element tag-sym tag-str attrs-form attrs-static children port-sym)
-                  (html-fold-container-element tag-sym tag-str attrs-form attrs-static children port-sym))))))
+            (if (void-element? tag-str)
+                (html-fold-void-element tag-str attrs-form children port-sym)
+                (html-fold-container-element tag-str attrs-form children port-sym)))))
 
     ;; (html-fold form port-sym) -> a list of pieces (see above), folding
     ;; `form` (raw macro-argument syntax, not evaluated data) recursively.

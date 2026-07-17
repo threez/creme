@@ -53,6 +53,27 @@ module Scheme::Builtins::StringLibrary
     SchemeStr.new(s.gsub(from, to))
   end
 
+  # (string-translate s pairs) -> s with every occurrence of each pairs'
+  # char replaced by its paired string, all substitutions found in a
+  # SINGLE native pass over s (Crystal's String#gsub(Hash(Char, String))) --
+  # unlike chaining N string-replace calls (each its own full O(n) native
+  # scan/copy), this scans/copies s once regardless of how many
+  # replacements pairs holds. pairs is an alist of (char . string), e.g.
+  # '((#\& . "&amp;") (#\< . "&lt;")).
+  @[Scheme::SchemeFn("string-translate", min: 2, max: 2)]
+  def string_translate(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    s = string_ext_arg(args[0], "string-translate")
+    table = {} of Char => String
+    Scheme.list_to_a(args[1]).each do |pair|
+      raise SchemeRuntimeError.new("string-translate: expected an alist of (char . string)") unless pair.is_a?(Cons)
+      key = pair.car
+      val = pair.cdr
+      raise SchemeRuntimeError.new("string-translate: expected an alist of (char . string)") unless key.is_a?(SchemeChar) && val.is_a?(SchemeStr)
+      table[key.value] = val.value
+    end
+    SchemeStr.new(s.gsub(table))
+  end
+
   @[Scheme::SchemeFn("string-contains?", min: 2, max: 2)]
   def string_contains_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeBool.of(string_ext_arg(args[0], "string-contains?").includes?(string_ext_arg(args[1], "string-contains?")))
