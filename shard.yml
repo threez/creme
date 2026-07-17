@@ -27,6 +27,8 @@ dependencies:
     github: threez/mux.cr
   jose:
     github: threez/jose.cr
+  raft:
+    github: threez/raft.cr
 
 development_dependencies:
   ameba:

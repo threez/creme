@@ -141,6 +141,10 @@ describe "integration: examples/*.scm" do
     run_example("examples/35-mux-router.scm")
   end
 
+  it "runs 37-raft-kv-store.scm end to end without raising" do
+    run_example("examples/37-raft-kv-store.scm")
+  end
+
   it "runs bench.scm end to end without raising" do
     run_example("bench/bench.scm")
   end
