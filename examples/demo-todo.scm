@@ -1,53 +1,31 @@
-(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme sql) (creme sxql))
+(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme sql) (creme dao))
 
-;; Storage: SQLite, in-memory (no file to clean up), statements built with
-;; (creme sxql) and run through (creme sql).
+;; Storage: SQLite, in-memory (no file to clean up). The `todo` table and its
+;; CRUD are one declarative (creme dao) form -- no SQL/(creme sxql) call
+;; appears anywhere in this file.
 (define conn (sql-open ":memory:"))
 
-(define (run-stmt! stmt)
-  (let ((sql+params (sxql-yield stmt)))
-    (apply sql-execute conn (car sql+params) (cadr sql+params))))
+(define-dao todo conn
+  (id integer primary-key auto-increment)
+  (title text not-null)
+  (done integer not-null (default 0)))
 
-(define (run-query stmt)
-  (let ((sql+params (sxql-yield stmt)))
-    (apply sql-query conn (car sql+params) (cadr sql+params))))
-
-(run-stmt! (sxql-create-table 'todo
-             (list (sxql-column 'id "INTEGER" (sxql-primary-key) (sxql-autoincrement))
-                   (sxql-column 'title "TEXT" (sxql-not-null))
-                   (sxql-column 'done "INTEGER" (sxql-not-null) (sxql-default 0)))))
-
-(define (add-todo! title)
-  (run-stmt! (sxql-insert-into 'todo (sxql-set= 'title title 'done 0))))
+(define (add-todo! title) (todo-create! 'title title 'done 0))
 
 (define (toggle-todo! id)
-  (define row (vector-ref (run-query (sxql-select '(done) (sxql-from 'todo) (sxql-where (sxql-= 'id id)))) 0))
-  (define done (= (cdr (assoc "done" row)) 1))
-  (run-stmt! (sxql-update 'todo (sxql-set= 'done (if done 0 1)) (sxql-where (sxql-= 'id id)))))
-
-(define (delete-todo! id)
-  (run-stmt! (sxql-delete-from 'todo (sxql-where (sxql-= 'id id)))))
-
-(define (fetch-todos)
-  (vector->list (run-query (sxql-select '(id title done) (sxql-from 'todo) (sxql-order-by 'id)))))
-
-(define (remaining-count)
-  (define row (vector-ref (run-query (sxql-select (list (sxql-as (sxql-raw "COUNT(*)") 'count))
-                                                   (sxql-from 'todo)
-                                                   (sxql-where (sxql-= 'done 0))))
-                          0))
-  (cdr (assoc "count" row)))
+  (let ((row (todo-find id)))
+    (todo-update! id 'done (if (= (dao-ref row 'done) 1) 0 1))))
 
 ;; Built with html! instead of html->string: the <li>/<form>/<button>
 ;; skeleton here folds into precomputed string chunks at compile time: only
 ;; `id`/`done`/the title actually get rendered per row at runtime.
 (define (todo-row->string row)
-  (define id (cdr (assoc "id" row)))
-  (define done (= (cdr (assoc "done" row)) 1))
+  (define id (dao-ref row 'id))
+  (define done (= (dao-ref row 'done) 1))
   (html! `(li (@ (class ,(if done "done" "pending")))
               (form (@ (method "post") (action ,(string-append "/todos/" (number->string id) "/complete")) (class "toggle"))
                     (button (@ (type "submit")) ,(if done "Undo" "Done")))
-              (span (@ (class "title")) ,(cdr (assoc "title" row)))
+              (span (@ (class "title")) ,(dao-ref row 'title))
               (form (@ (method "post") (action ,(string-append "/todos/" (number->string id) "/delete")) (class "delete"))
                     (button (@ (type "submit")) "Delete")))))
 
@@ -95,8 +73,8 @@
              (form (@ (method "post") (action "/todos") (class "add"))
                    (input (@ (type "text") (name "title") (placeholder "New todo") (required #t)))
                    (button (@ (type "submit")) "Add"))
-             (ul (@ (class "todos")) ,@(map (lambda (row) (list 'raw (todo-row->string row))) (fetch-todos)))
-             (p (@ (class "count")) ,(string-append (number->string (remaining-count)) " remaining"))))))))
+             (ul (@ (class "todos")) ,@(map (lambda (row) (list 'raw (todo-row->string row))) (todo-all)))
+             (p (@ (class "count")) ,(string-append (number->string (todo-count (lambda (row) (= (dao-ref row 'done) 0)))) " remaining"))))))))
 
 (define (page-response) (surf-html write-page!))
 
@@ -115,7 +93,7 @@
      (surf-redirect "/"))
 
    (post "/todos/:id/delete" (request)
-     (delete-todo! (string->number (surf-param request "id")))
+     (todo-delete! (string->number (surf-param request "id")))
      (surf-redirect "/"))))
 
 (add-todo! "Write report")
