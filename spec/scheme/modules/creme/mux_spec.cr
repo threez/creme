@@ -87,4 +87,43 @@ describe "mux module" do
     w(%((mux-router? (mux-router)))).should eq("#t")
     w(%((mux-router? 5))).should eq("#f")
   end
+
+  it "streams a body written directly into the response port when body is a procedure" do
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    result = Scheme.run_source(interp, <<-SCM)
+      (import (creme mux) (creme http) (creme html))
+
+      (define router (mux-router))
+
+      (mux-get! router "/stream"
+        (lambda (request)
+          (list (cons "status" 200)
+                (cons "headers" (list (cons "content-type" "text/html")))
+                (cons "body" (lambda (port)
+                               (write-string "<p>a</p>" port)
+                               (html-write! port `(p ,(string-append "b" "!")))
+                               (write-string "<p>c</p>" port))))))
+
+      (mux-get! router "/plain"
+        (lambda (request)
+          (list (cons "status" 200) (cons "body" "plain string body"))))
+
+      (define server (mux-listen! router 0))
+      (define base-url (mux-base-url server))
+      (define stream-result (http-get (string-append base-url "/stream")))
+      (define plain-result (http-get (string-append base-url "/plain")))
+      (mux-close! server)
+      (list stream-result plain-result)
+      SCM
+
+    pair = Scheme.list_to_a(result)
+    stream_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
+    plain_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+
+    stream_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+    stream_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("<p>a</p><p>b!</p><p>c</p>"))
+
+    plain_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+    plain_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("plain string body"))
+  end
 end

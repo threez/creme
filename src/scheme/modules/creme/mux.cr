@@ -8,6 +8,19 @@
 #    (headers . (("content-type" . "text/plain"))) (body . "..."))
 # and must return a response alist, mirroring the (creme http) convention:
 #   ((status . 200) (headers . (("content-type" . "text/plain"))) (body . "..."))
+# `body` is either a plain string (written as-is) or a procedure of one
+# argument, a port — called directly against the real HTTP response IO
+# (via a SchemePort wrapping context.response) instead of being stringified
+# first, so a handler can stream a large/dynamic body (e.g. built with
+# (creme html)'s html-write!/html-document-write!) without ever
+# materializing the whole thing as one Crystal String first — the win is
+# skipping the Scheme-side string-building/generic-conversion work for the
+# body, not necessarily the wire format: Crystal's HTTP::Server::Response
+# still buffers internally and computes a real Content-Length for anything
+# that fits in its buffer, falling back to chunked transfer encoding only
+# once a response outgrows it, same as for a plain string body. Status/
+# headers are always set before any body byte is written, streaming or
+# not.
 # `mux-listen!` starts the server on a spawned Fiber (non-blocking) and
 # returns an opaque server handle (tag "mux-server") — pass port 0 to
 # `mux-listen!` for an OS-assigned ephemeral port, then read the real one
@@ -87,7 +100,7 @@ module Scheme::Builtins::MuxLibrary
     handler = args[2]
     router.add_handler(path, method: method) do |context|
       response = interp.apply(handler, [request_to_scheme(context)] of SchemeValue)
-      write_response(context, response, who)
+      write_response(interp, context, response, who)
     end
     NIL.as(SchemeValue)
   end
@@ -111,19 +124,50 @@ module Scheme::Builtins::MuxLibrary
     ])
   end
 
-  private def write_response(context : HTTP::Server::Context, response : SchemeValue, who : String) : Nil
-    native = Scheme.from_scheme(response).as(Hash(String, Scheme::Convertible))
+  private def write_response(interp : Interpreter, context : HTTP::Server::Context, response : SchemeValue, who : String) : Nil
+    body_value = alist_lookup(response, "body")
+    body_proc = body_value if body_value && callable?(body_value)
+    native = Scheme.from_scheme(body_proc ? alist_without(response, "body") : response)
+      .as(Hash(String, Scheme::Convertible))
     context.response.status_code = (native["status"]? || 200_i64).as(Int64).to_i32
     if headers = native["headers"]?
       headers.as(Hash(String, Scheme::Convertible)).each do |name, value|
         context.response.headers[name] = value.as(String)
       end
     end
-    context.response.print(native["body"]?.as?(String) || "")
+    if body_proc
+      interp.apply(body_proc, [SchemePort.new(context.response, false, true)] of SchemeValue)
+    else
+      context.response.print(native["body"]?.as?(String) || "")
+    end
   rescue ex : Exception
-    context.response.status_code = 500
-    context.response.content_type = "text/plain"
-    context.response.print("#{who}: #{ex.message}")
+    begin
+      context.response.status_code = 500
+      context.response.content_type = "text/plain"
+      context.response.print("#{who}: #{ex.message}")
+    rescue
+      # The streaming body proc raised after already writing some bytes —
+      # status/headers are already committed, so there's nothing more we
+      # can cleanly do here; swallow rather than crash the request fiber.
+    end
+  end
+
+  private def alist_lookup(alist : SchemeValue, key : String) : SchemeValue?
+    Scheme.list_to_a(alist).each do |pair|
+      return pair.as(Cons).cdr if pair.is_a?(Cons) && (k = pair.car).is_a?(SchemeStr) && k.value == key
+    end
+    nil
+  end
+
+  private def alist_without(alist : SchemeValue, key : String) : SchemeValue
+    pairs = Scheme.list_to_a(alist).reject do |pair|
+      pair.is_a?(Cons) && (k = pair.car).is_a?(SchemeStr) && k.value == key
+    end
+    Scheme.a_to_list(pairs)
+  end
+
+  private def callable?(v : SchemeValue) : Bool
+    v.is_a?(Builtin) || v.is_a?(BytecodeClosure) || v.is_a?(BytecodeCaseClosure)
   end
 
   private def mux_str_arg(v : SchemeValue, who : String) : String
