@@ -1,4 +1,4 @@
-(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao))
+(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao) (creme memoize))
 
 ;; Storage: SQLite, in-memory (no file to clean up). The `todo` table and its
 ;; CRUD are one declarative (creme dao) form -- no SQL/(creme sxql) call
@@ -12,25 +12,41 @@
 
 (define (add-todo! title) (todo-create! 'title title 'done 0))
 
+;; memoize-forget! drops the row's cache entry under its OLD done value
+;; (the new one is simply a fresh cache miss on next render) -- otherwise
+;; cached-todo-row->string would keep answering with the pre-toggle markup
+;; forever, since (id old-done title) never stops being a valid cache key,
+;; it's just never looked up again.
 (define (toggle-todo! id)
-  (let ((row (todo-find id)))
-    (todo-update! id 'done (if (= (dao-ref row 'done) 1) 0 1))))
+  (let* ((row (todo-find id))
+         (old-done (= (dao-ref row 'done) 1))
+         (title (dao-ref row 'title)))
+    (todo-update! id 'done (if old-done 0 1))
+    (memoize-forget! cached-todo-row->string id old-done title)))
 
 ;; Built with html! instead of html->string: the <li>/<form>/<button>
 ;; skeleton here folds into precomputed string chunks at compile time: only
-;; `id`/`done`/the title actually get rendered per row at runtime. Action
+;; `id`/`done`/`title` actually get rendered per row at runtime. Action
 ;; URLs are built with (creme path)'s path macro instead of hand-written
 ;; string-append -- (path 'todos id 'complete) folds the same way, down to
 ;; the same (string-append "/todos/" (number->string id) "/complete").
-(define (todo-row->string row)
-  (define id (dao-ref row 'id))
-  (define done (= (dao-ref row 'done) 1))
+;;
+;; Takes id/done/title as three plain arguments (rather than a row alist)
+;; specifically so (creme memoize)'s memoize -- which caches on its whole
+;; argument list -- caches on exactly those three values: calling it twice
+;; with the same id/done/title (the common case, since most rows don't
+;; change between one render and the next) skips re-running html! entirely
+;; and returns the same string; a changed done/title is simply a different
+;; argument list, i.e. a cache miss, never a stale hit.
+(define (todo-row->string id done title)
   (html! `(li (@ (class ,(if done "done" "pending")))
               (form (@ (method "post") (action ,(path 'todos id 'complete)) (class "toggle"))
                     (button (@ (type "submit")) ,(if done "Undo" "Done")))
-              (span (@ (class "title")) ,(dao-ref row 'title))
+              (span (@ (class "title")) ,title)
               (form (@ (method "post") (action ,(path 'todos id 'delete)) (class "delete"))
                     (button (@ (type "submit")) "Delete")))))
+
+(define cached-todo-row->string (memoize todo-row->string))
 
 ;; Built with (creme css)'s css! instead of a hand-written string: nesting
 ;; builds the repeated ".todos li ..." selector prefixes automatically, and
@@ -76,7 +92,10 @@
              (form (@ (method "post") (action "/todos") (class "add"))
                    (input (@ (type "text") (name "title") (placeholder "New todo") (required #t)))
                    (button (@ (type "submit")) "Add"))
-             (ul (@ (class "todos")) ,@(map (lambda (row) (list 'raw (todo-row->string row))) (todo-all)))
+             (ul (@ (class "todos"))
+                 ,@(map (lambda (row)
+                          (list 'raw (cached-todo-row->string (dao-ref row 'id) (= (dao-ref row 'done) 1) (dao-ref row 'title))))
+                        (todo-all)))
              (p (@ (class "count")) ,(string-append (number->string (todo-count (lambda (row) (= (dao-ref row 'done) 0)))) " remaining"))))))))
 
 (define (page-response) (surf-html write-page!))
