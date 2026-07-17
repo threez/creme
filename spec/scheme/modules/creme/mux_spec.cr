@@ -1,0 +1,90 @@
+require "../../../spec_helper"
+
+private def w(src : String) : String
+  interp = Scheme::Interpreter.new
+  Scheme.run_source(interp, "(import (creme mux) (creme http)) #{src}").write_string
+end
+
+private def run(src : String) : Scheme::SchemeValue
+  interp = Scheme::Interpreter.new
+  Scheme.run_source(interp, "(import (creme mux) (creme http)) #{src}")
+end
+
+describe "mux module" do
+  it "routes GET/POST requests, path params, and headers through Scheme handlers" do
+    result = run(<<-SCM)
+      (define router (mux-router))
+
+      (mux-get! router "/hello/:id"
+        (lambda (request)
+          (list (cons "status" 200)
+                (cons "headers" (list (cons "content-type" "text/plain")))
+                (cons "body" (string-append "hello " (cdr (assoc "id" (cdr (assoc "path-params" request))))))))
+      )
+
+      (mux-post! router "/echo"
+        (lambda (request)
+          (list (cons "status" 201)
+                (cons "body" (cdr (assoc "body" request))))))
+
+      (define server (mux-listen! router 0))
+      (define base-url (mux-base-url server))
+      (define get-result (http-get (string-append base-url "/hello/42")))
+      (define post-result (http-post (string-append base-url "/echo") "payload"))
+      (mux-close! server)
+      (list get-result post-result)
+    SCM
+
+    pair = Scheme.list_to_a(result)
+    get_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
+    post_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+
+    get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+    get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hello 42"))
+    headers = Scheme.list_to_a(get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "headers" }.cdr)
+      .map { |cons| cons.as(Scheme::Cons) }
+    headers.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "content-type" }.cdr.write_string.should eq(%("text/plain"))
+
+    post_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("201")
+    post_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("payload"))
+  end
+
+  it "returns 404 for unmatched routes and 500 with the error message for a handler that raises" do
+    w(<<-SCM).should eq("404")
+      (define router (mux-router))
+      (define server (mux-listen! router 0))
+      (define base-url (mux-base-url server))
+      (define result (cdr (assoc "status" (http-get (string-append base-url "/nope")))))
+      (mux-close! server)
+      result
+    SCM
+
+    result = run(<<-SCM)
+      (define router (mux-router))
+      (mux-get! router "/boom" (lambda (request) (car '())))
+      (define server (mux-listen! router 0))
+      (define base-url (mux-base-url server))
+      (define response (http-get (string-append base-url "/boom")))
+      (mux-close! server)
+      response
+    SCM
+    alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
+    alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("500")
+  end
+
+  it "reports the bound host/port via mux-address" do
+    w(<<-SCM).should eq("#t")
+      (define router (mux-router))
+      (define server (mux-listen! router 0))
+      (define addr (mux-address server))
+      (define port (cdr (assoc "port" addr)))
+      (mux-close! server)
+      (and (string? (cdr (assoc "host" addr))) (integer? port) (> port 0))
+    SCM
+  end
+
+  it "recognizes mux-router?" do
+    w(%((mux-router? (mux-router)))).should eq("#t")
+    w(%((mux-router? 5))).should eq("#f")
+  end
+end

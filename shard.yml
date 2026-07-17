@@ -23,6 +23,8 @@ dependencies:
     github: threez/rfc8439.cr
   prof:
     github: threez/prof.cr
+  mux:
+    github: threez/mux.cr
 
 development_dependencies:
   ameba:
