@@ -161,7 +161,7 @@ Libraries are loaded with `(import ...)`, following R7RS's `define-library`/`imp
 
 ### `(creme ...)`: this project's own extensions
 
-Modules with no SRFI precedent (`sql`, `tui`, `http`, `digest`, `bigdecimal`, `rfc8439`, the `sxql` DSL) use a `module-name-` prefix to stay collision-free; modules that do follow a SRFI keep that SRFI's naming.
+Modules with no SRFI precedent (`sql`, `tui`, `http`, `digest`, `bigdecimal`, `rfc8439`, `jose`, the `sxql` DSL) use a `module-name-` prefix to stay collision-free; modules that do follow a SRFI keep that SRFI's naming.
 
 - **`(creme bigdecimal)`** — arbitrary-precision decimal arithmetic: `string->bigdecimal`, `integer->bigdecimal`, `bigdecimal-add`/`sub`/`mul`/`div`/`neg`, `bigdecimal-compare`, `bigdecimal=?`/`<?`/`>?`, `bigdecimal->string`, `bigdecimal?`
 - **`(creme digest)`** — `digest-md5`, `digest-sha1`, `digest-sha256`, `base64-encode`, `base64-decode`
@@ -171,6 +171,7 @@ Modules with no SRFI precedent (`sql`, `tui`, `http`, `digest`, `bigdecimal`, `r
 - **`(creme file)`** — whole-file convenience helpers (`file-read`/`file-write`/`file-append`/`file-lines`/`file-size`, plus R7RS-exact `file-exists?`/`delete-file`) and R7RS port-based file I/O (`open-input-file`, `open-output-file`, `call-with-input-file`, `call-with-output-file`, `with-input-from-file`, `with-output-to-file`) — the latter compose with `(scheme base)`'s own `read-char`/`peek-char`/`read-line`/`read-string`/`write-char`/`write-string`/port procedures
 - **`(creme hash-table)`** — `make-hash-table`, `hash-table?`, `hash-table-set!`, `hash-table-ref` (optional default value or thunk), `hash-table-delete!`, `hash-table-contains?`, `hash-table-keys`, `hash-table-values`, `hash-table->alist` — keys compared by `equal?`, not R7RS-small but a common practical need
 - **`(creme json)`** — `json-read`/`json-write` (JSON arrays decode to vectors, objects to alists)
+- **`(creme jose)`** — JOSE (JSON Object Signing and Encryption), backed by the [jose.cr](https://github.com/threez/jose.cr) shard (OpenSSL underneath): JWK generation/import/export (`jose-jwk-generate-oct`/`-ec`/`-rsa`/`-okp`, `jose-jwk-from-oct`/`-pem`/`-json`, `jose-jwk-to-pem`/`-json`/`-public`, `jose-jwk-with-kid`, `jose-jwk-kty`, `jose-jwk-public?`/`-private?`/`?`), JWS signing (`jose-jws-sign`/`-verify`, `-sign-detached`/`-verify-detached`, `-sign-json`/`-verify-json`), JWT issuing/verification with RFC 8725 checks (`jose-jwt-sign`, `jose-jwt-verify`), JWE encryption (`jose-jwe-encrypt`/`-decrypt`, `-password-encrypt`/`-decrypt`, `-json-encrypt`/`-json-decrypt`), and JWKS key sets (`jose-jwks-new`, `-to-public`, `-ref`, `-size`, `?`) — claims/headers round-trip as alists, matching the `(creme json)` convention; compact tokens are plain strings
 - **`(creme math)`** — a superset of `(scheme inexact)`'s trig/log functions plus non-standard extras: `log2`, `log10`, `atan2`, `pow`, `hypot`, `pi`, `e`
 - **`(creme pipe)`** — Elixir-style `|>` pipeline threading, spelled `pipe` since this project's reader treats a leading `|` as the start of a `|...|` piped identifier so a literal `|>` token isn't lexable: `(pipe x step ...)` threads `x` through each step left to right, a bare identifier step `f` called as `(f acc)` and a list step `(f arg ...)` called as `(f acc arg ...)` — e.g. `(pipe 5 (+ 1) (* 2) -)` → `-12`; a file-based `.sld` library (`modules/creme/pipe.sld`), not compiled into the interpreter binary
 - **`(creme process)`** — `process-run` to run external commands (`command-line` is in `(scheme process-context)`)
@@ -305,7 +306,7 @@ crystal tool format --check    # check formatting
 lib/ameba/bin/ameba            # lint
 ```
 
-`make` wraps these as `fmt`/`fmtcheck`/`spec`/`lint`/`fix`. Building requires the system SQLite3 library (already present on macOS; `apt install libsqlite3-dev` on Debian/Ubuntu), since the `sql` module links against it.
+`make` wraps these as `fmt`/`fmtcheck`/`spec`/`lint`/`fix`. Building requires the system SQLite3 library (already present on macOS; `apt install libsqlite3-dev` on Debian/Ubuntu), since the `sql` module links against it. The `jose` module links against system OpenSSL (via the `jose`/`ed25519` shards) — already present on macOS with no extra setup; `apt install libssl-dev` on Debian/Ubuntu if missing.
 
 ## License
 

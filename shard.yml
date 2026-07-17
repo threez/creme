@@ -25,6 +25,8 @@ dependencies:
     github: threez/prof.cr
   mux:
     github: threez/mux.cr
+  jose:
+    github: threez/jose.cr
 
 development_dependencies:
   ameba:
