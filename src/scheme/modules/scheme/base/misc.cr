@@ -1,54 +1,15 @@
 # ===========================================================================
-# (scheme base): promises, parameters, error conditions, misc
+# (scheme base): parameters, error conditions, misc
 # ===========================================================================
+#
+# force/make-promise/promise? live in (scheme lazy); exit in (scheme
+# process-context); gensym in (creme introspection) — each defined in that
+# library's own module file. `interp.gensym` (below) stays here since the
+# analyzer's own macro expansion uses it directly.
 
 module Scheme::Builtins::Misc
   extend self
   include Scheme::BuiltinHelpers
-
-  @[Scheme::SchemeFn("promise?", min: 1, max: 1)]
-  def promise_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(args[0].is_a?(SchemePromise))
-  end
-
-  @[Scheme::SchemeFn("make-promise", min: 1, max: 1)]
-  def make_promise(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    v = args[0]
-    if v.is_a?(SchemePromise)
-      v.as(SchemeValue)
-    else
-      SchemePromise.new(forced_value: v).as(SchemeValue)
-    end
-  end
-
-  # Forcing a non-promise just returns it unchanged (R7RS: `force`
-  # accepts ordinary values for programs written before promises
-  # existed). Forcing an already-forced promise returns the memoized
-  # value without re-evaluating the thunk.
-  # Loops rather than single-stepping so a delay-force chain (where a
-  # forced thunk's own result is itself another promise, R7RS's
-  # "iterative lazy evaluation" idiom) resolves without growing the
-  # Crystal stack one eval() frame per link — each promise in the chain
-  # gets forced and its result fed into the next iteration in the same
-  # loop, not via recursive force-of-force calls.
-  @[Scheme::SchemeFn("force", min: 1, max: 1)]
-  def force(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    v = args[0]
-    while v.is_a?(SchemePromise)
-      unless v.forced?
-        thunk_closure = v.thunk_closure
-        raise SchemeRuntimeError.new("force: promise has no thunk") unless thunk_closure
-        result = interp.apply(thunk_closure, [] of SchemeValue)
-        unless v.forced?
-          v.value = result
-          v.forced = true
-          v.thunk_closure = nil
-        end
-      end
-      v = v.value
-    end
-    v
-  end
 
   # The initial value is converted too (R7RS): a parameter's value is
   # always the converter's output, never the raw input, so reads never
@@ -122,23 +83,6 @@ module Scheme::Builtins::Misc
     condition_field(args[0], 1, "error-object-irritants")
   end
 
-  @[Scheme::SchemeFn("exit", min: 0, max: 1)]
-  def exit(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    code = args.empty? ? 0 : int_arg(args[0], "exit").clamp(0_i64, 255_i64).to_i
-    raise SchemeExit.new(code)
-  end
-
-  @[Scheme::SchemeFn("gensym", min: 0, max: 1)]
-  def gensym(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    prefix = case a = args[0]?
-             when SchemeStr then a.value
-             when SchemeSym then a.name
-             when Nil       then "g"
-             else                raise SchemeRuntimeError.new("gensym: expected a string or symbol prefix")
-             end
-    interp.gensym(prefix)
-  end
-
   # simplest-rational-in-interval (Stern-Brocot style): the simplest
   # (least-denominator) rational within [lo, hi]. Assumes lo <= hi; if 0
   # is in range, 0/1 is trivially simplest. Used by `rationalize`.
@@ -173,7 +117,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_misc(env : Env) : Nil
+    private def install_misc(env : Env) : Array(String)
       register_module(Scheme::Builtins::Misc, env)
     end
 

@@ -133,6 +133,10 @@ describe "integration: examples/*.scm" do
     run_example("examples/33-complex-number-mandelbrot.scm")
   end
 
+  it "runs 34-actor-ping-pong.scm end to end without raising" do
+    run_example("examples/34-actor-ping-pong.scm")
+  end
+
   it "runs bench.scm end to end without raising" do
     run_example("bench/bench.scm")
   end

@@ -15,9 +15,9 @@ describe "(scheme base)" do
     w("(car '(1 2 3))").should eq("1")
   end
 
-  it "every SCHEME_BASE_EXPORTS name is bound in @global and callable/referenceable" do
+  it "every (scheme base) export is bound in @global and callable/referenceable" do
     interp = Scheme::Interpreter.new
-    Scheme::Interpreter::SCHEME_BASE_EXPORTS.each do |name|
+    interp.library_export_names(["scheme", "base"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
   end
@@ -50,9 +50,9 @@ describe "(scheme write)" do
     out.to_s.should eq(%(hi"hi"))
   end
 
-  it "every SCHEME_WRITE_EXPORTS name is bound in @global" do
+  it "every (scheme write) export is bound in @global" do
     interp = Scheme::Interpreter.new
-    Scheme::Interpreter::SCHEME_WRITE_EXPORTS.each do |name|
+    interp.library_export_names(["scheme", "write"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
   end

@@ -23,10 +23,10 @@
 # bindings if Interpreter.new(auto_import_base: true) (the default) copies
 # them in at construction, or the program itself imports them.
 #
-# `include`/`include-ci`/`cond-expand` inside a library body are stubbed here
-# to raise "not yet implemented" until later stages (cond-expand: stage 3,
-# include/include-ci: stage 11) add real support — this keeps the grammar
-# parser honest about what it recognizes without silently misparsing.
+# `include`/`include-ci`/`cond-expand` inside a library body are handled in
+# process_library_declarations below: cond-expand splices its matched clause's
+# declarations back through the same method, and include/include-ci read and
+# evaluate the named files' forms against the library's own Env.
 
 module Scheme
   class Interpreter

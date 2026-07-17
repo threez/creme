@@ -1,8 +1,28 @@
 # ===========================================================================
 # process module: running external commands, program arguments
 # ===========================================================================
+#
+# ProcessLibrary holds command-line — the one procedure R7RS's
+# (scheme process-context) shares with this module — so (scheme
+# process-context) (modules/scheme/process_context.cr) registers it directly
+# and derives its exports. ProcessExtra holds the creme-only process-run;
+# (creme process) registers BOTH.
 
 module Scheme::Builtins::ProcessLibrary
+  extend self
+  include Scheme::BuiltinHelpers
+
+  # R7RS-exact name/contract: (command-line) -> list of strings, whose
+  # first element is the program name. This module's Crystal-native ARGV
+  # doesn't include the program name, so it's prepended here.
+  @[Scheme::SchemeFn("command-line", min: 0, max: 0)]
+  def command_line(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    Scheme.a_to_list(([PROGRAM_NAME] + ARGV).map { |arg| SchemeStr.new(arg).as(SchemeValue) })
+  end
+end
+
+# creme-only process control, beyond R7RS's (scheme process-context) contract.
+module Scheme::Builtins::ProcessExtra
   extend self
   include Scheme::BuiltinHelpers
 
@@ -31,18 +51,13 @@ module Scheme::Builtins::ProcessLibrary
       SchemeBool.of(status.success?).as(SchemeValue),
     ])
   end
-
-  # R7RS-exact name/contract: (command-line) -> list of strings, whose
-  # first element is the program name. This module's Crystal-native ARGV
-  # doesn't include the program name, so it's prepended here.
-  @[Scheme::SchemeFn("command-line", min: 0, max: 0)]
-  def command_line(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    Scheme.a_to_list(([PROGRAM_NAME] + ARGV).map { |arg| SchemeStr.new(arg).as(SchemeValue) })
-  end
 end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "process"], Scheme::Builtins::ProcessLibrary
+    register_library ["creme", "process"] do |env|
+      register_module(Scheme::Builtins::ProcessLibrary, env) +
+        register_module(Scheme::Builtins::ProcessExtra, env)
+    end
   end
 end

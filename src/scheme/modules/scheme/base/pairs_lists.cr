@@ -25,6 +25,48 @@ module Scheme::Builtins::PairsLists
     v.cdr
   end
 
+  # The four 2-level compositions R7RS scopes to (scheme base) (the 3-/4-level
+  # ones live in (scheme cxr)/cxr.cr). Real builtins rather than prelude
+  # closures so a direct `(cadr x)` fuses into Op::Cxr (the analyzer fuses any
+  # call whose head resolves to a cxr-named builtin — see analyzer's cxr_name?
+  # / bytecode_compiler's cxr_code); each raises the same "<name>: expected
+  # pair" error the fused op's deopt path reproduces.
+  @[Scheme::SchemeFn("caar", min: 1, max: 1)]
+  def caar(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    v = args[0]
+    raise SchemeRuntimeError.new("caar: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v = v.car
+    raise SchemeRuntimeError.new("caar: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v.car
+  end
+
+  @[Scheme::SchemeFn("cadr", min: 1, max: 1)]
+  def cadr(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    v = args[0]
+    raise SchemeRuntimeError.new("cadr: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v = v.cdr
+    raise SchemeRuntimeError.new("cadr: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v.car
+  end
+
+  @[Scheme::SchemeFn("cdar", min: 1, max: 1)]
+  def cdar(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    v = args[0]
+    raise SchemeRuntimeError.new("cdar: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v = v.car
+    raise SchemeRuntimeError.new("cdar: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v.cdr
+  end
+
+  @[Scheme::SchemeFn("cddr", min: 1, max: 1)]
+  def cddr(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    v = args[0]
+    raise SchemeRuntimeError.new("cddr: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v = v.cdr
+    raise SchemeRuntimeError.new("cddr: expected pair, got #{v.write_string}") unless v.is_a?(Cons)
+    v.cdr
+  end
+
   @[Scheme::SchemeFn("set-car!", min: 2, max: 2)]
   def set_car(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     v = args[0]
@@ -211,7 +253,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_pairs_and_lists(env : Env) : Nil
+    private def install_pairs_and_lists(env : Env) : Array(String)
       register_module(Scheme::Builtins::PairsLists, env)
     end
   end

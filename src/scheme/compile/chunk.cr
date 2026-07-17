@@ -22,9 +22,9 @@ module Scheme
     # allocates exactly this many registers per call.
     property num_registers : Int32 = 0
     property name : String = "lambda"
-    # Per-GetGlobal-instruction inline cache, mirroring the tree-walker's
-    # GlobalRefNode#cache_value/#cache_version — skips the Env hash lookup
-    # entirely while nothing has (re)defined the name at the global level.
+    # Per-GetGlobal-instruction inline cache, keyed on the global env's
+    # version — skips the Env hash lookup entirely while nothing has
+    # (re)defined the name at the global level.
     # Array-indexed by instruction index (kept 1:1 with `instructions` by
     # `emit`, below) rather than a Hash — a plain array index is cheaper
     # than hashing an Int32 key on every single GetGlobal dispatch, and the
@@ -82,8 +82,8 @@ module Scheme
     # immutable value types (Int/Float/Sym/Char) compared via scheme_eqv?'s
     # bit-pattern equality (distinguishes 0.0 from -0.0, unlike a
     # write_string comparison — SchemeFloat#to_display renders both as
-    # "0.0", so an earlier write_string-based dedup silently returned the
-    # WRONG constant for a later -0.0 literal). Never dedups mutable
+    # "0.0", so a write_string-based dedup would return the WRONG constant
+    # for a -0.0 literal). Never dedups mutable
     # aggregate literals (strings/pairs/vectors/bytevectors) — two textually
     # identical quoted literals sharing one object would be a real
     # correctness hazard the instant either gets mutated (string-set!,

@@ -4,6 +4,12 @@
 # that SRFI treats environment variables as read-only, so they follow its
 # lexeme style pragmatically instead)
 # ===========================================================================
+#
+# EnvVars holds the two read-only accessors R7RS's (scheme process-context)
+# specifies (get-environment-variable / get-environment-variables) — so
+# (scheme process-context) (modules/scheme/process_context.cr) registers it
+# directly and derives its exports. EnvExtra holds the creme-only mutators;
+# (creme env) registers BOTH.
 
 module Scheme::Builtins::EnvVars
   extend self
@@ -15,6 +21,24 @@ module Scheme::Builtins::EnvVars
     v = ENV[key]?
     v ? SchemeStr.new(v).as(SchemeValue) : FALSE.as(SchemeValue)
   end
+
+  @[Scheme::SchemeFn("get-environment-variables", min: 0, max: 0)]
+  def get_environment_variables(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    pairs = [] of SchemeValue
+    ENV.each { |k, v| pairs << Cons.new(SchemeStr.new(k), SchemeStr.new(v)) }
+    Scheme.a_to_list(pairs)
+  end
+
+  private def env_str_arg(v : SchemeValue, who : String) : String
+    raise SchemeRuntimeError.new("#{who}: expected string, got #{v.write_string}") unless v.is_a?(SchemeStr)
+    v.value
+  end
+end
+
+# creme-only environment mutators, beyond R7RS's read-only contract.
+module Scheme::Builtins::EnvExtra
+  extend self
+  include Scheme::BuiltinHelpers
 
   @[Scheme::SchemeFn("set-environment-variable!", min: 2, max: 2)]
   def set_environment_variable(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
@@ -35,13 +59,6 @@ module Scheme::Builtins::EnvVars
     SchemeBool.of(ENV.has_key?(env_str_arg(args[0], "environment-variable-set?")))
   end
 
-  @[Scheme::SchemeFn("get-environment-variables", min: 0, max: 0)]
-  def get_environment_variables(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    pairs = [] of SchemeValue
-    ENV.each { |k, v| pairs << Cons.new(SchemeStr.new(k), SchemeStr.new(v)) }
-    Scheme.a_to_list(pairs)
-  end
-
   private def env_str_arg(v : SchemeValue, who : String) : String
     raise SchemeRuntimeError.new("#{who}: expected string, got #{v.write_string}") unless v.is_a?(SchemeStr)
     v.value
@@ -50,6 +67,9 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "env"], Scheme::Builtins::EnvVars
+    register_library ["creme", "env"] do |env|
+      register_module(Scheme::Builtins::EnvVars, env) +
+        register_module(Scheme::Builtins::EnvExtra, env)
+    end
   end
 end

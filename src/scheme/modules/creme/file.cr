@@ -1,56 +1,22 @@
 # ===========================================================================
-# file module: whole-file convenience helpers plus R7RS port-based file I/O
+# file module: R7RS port-based file I/O (FileLibrary) plus creme-only
+# whole-file convenience helpers (FileExtra)
 # ===========================================================================
+#
+# FileLibrary holds exactly the procedures R7RS's (scheme file) specifies —
+# so (scheme file) (modules/scheme/file.cr) registers it directly and its
+# export list is derived, no hand-maintained subset constant. FileExtra
+# holds this project's non-standard whole-file conveniences
+# (file-read/file-write/file-append/file-lines/file-size/current-directory);
+# (creme file) registers BOTH, so it stays the richer superset.
 
 module Scheme::Builtins::FileLibrary
   extend self
   include Scheme::BuiltinHelpers
 
-  @[Scheme::SchemeFn("file-read", min: 1, max: 1)]
-  def file_read(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    path = file_str_arg(args[0], "file-read")
-    raise SchemeFileError.new("file-read: file not found: #{path}") unless File.exists?(path)
-    SchemeStr.new(File.read(path))
-  rescue ex : Exception
-    raise SchemeFileError.new("file-read: #{ex.message}")
-  end
-
-  @[Scheme::SchemeFn("file-write", min: 2, max: 2)]
-  def file_write(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    path = file_str_arg(args[0], "file-write")
-    content = file_str_arg(args[1], "file-write")
-    begin
-      File.write(path, content)
-    rescue ex : Exception
-      raise SchemeFileError.new("file-write: #{ex.message}")
-    end
-    NIL.as(SchemeValue)
-  end
-
-  @[Scheme::SchemeFn("file-append", min: 2, max: 2)]
-  def file_append(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    path = file_str_arg(args[0], "file-append")
-    content = file_str_arg(args[1], "file-append")
-    begin
-      File.open(path, "a", &.print(content))
-    rescue ex : Exception
-      raise SchemeFileError.new("file-append: #{ex.message}")
-    end
-    NIL.as(SchemeValue)
-  end
-
   @[Scheme::SchemeFn("file-exists?", min: 1, max: 1)]
   def file_exists_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeBool.of(File.exists?(file_str_arg(args[0], "file-exists?")))
-  end
-
-  # (current-directory) -> the process's current working directory
-  # (absolute) — e.g. so a script can turn an absolute path it was handed
-  # (a SourcePos.file, a profiler entry, ...) back into one relative to
-  # where it was invoked from for display purposes.
-  @[Scheme::SchemeFn("current-directory", min: 0, max: 0)]
-  def current_directory(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeStr.new(Dir.current).as(SchemeValue)
   end
 
   @[Scheme::SchemeFn("delete-file", min: 1, max: 1)]
@@ -64,22 +30,6 @@ module Scheme::Builtins::FileLibrary
     end
     NIL.as(SchemeValue)
   end
-
-  @[Scheme::SchemeFn("file-lines", min: 1, max: 1)]
-  def file_lines(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    path = file_str_arg(args[0], "file-lines")
-    raise SchemeFileError.new("file-lines: file not found: #{path}") unless File.exists?(path)
-    Scheme.a_to_list(File.read_lines(path).map { |line| SchemeStr.new(line).as(SchemeValue) })
-  end
-
-  @[Scheme::SchemeFn("file-size", min: 1, max: 1)]
-  def file_size(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    path = file_str_arg(args[0], "file-size")
-    raise SchemeFileError.new("file-size: file not found: #{path}") unless File.exists?(path)
-    SchemeInt.new(File.size(path).to_i64)
-  end
-
-  # ---- R7RS port-based file I/O ----
 
   @[Scheme::SchemeFn("open-input-file", min: 1, max: 1)]
   def open_input_file(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
@@ -169,8 +119,78 @@ module Scheme::Builtins::FileLibrary
   end
 end
 
+# creme-only whole-file conveniences, beyond R7RS's (scheme file) contract.
+module Scheme::Builtins::FileExtra
+  extend self
+  include Scheme::BuiltinHelpers
+
+  @[Scheme::SchemeFn("file-read", min: 1, max: 1)]
+  def file_read(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    path = file_str_arg(args[0], "file-read")
+    raise SchemeFileError.new("file-read: file not found: #{path}") unless File.exists?(path)
+    SchemeStr.new(File.read(path))
+  rescue ex : Exception
+    raise SchemeFileError.new("file-read: #{ex.message}")
+  end
+
+  @[Scheme::SchemeFn("file-write", min: 2, max: 2)]
+  def file_write(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    path = file_str_arg(args[0], "file-write")
+    content = file_str_arg(args[1], "file-write")
+    begin
+      File.write(path, content)
+    rescue ex : Exception
+      raise SchemeFileError.new("file-write: #{ex.message}")
+    end
+    NIL.as(SchemeValue)
+  end
+
+  @[Scheme::SchemeFn("file-append", min: 2, max: 2)]
+  def file_append(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    path = file_str_arg(args[0], "file-append")
+    content = file_str_arg(args[1], "file-append")
+    begin
+      File.open(path, "a", &.print(content))
+    rescue ex : Exception
+      raise SchemeFileError.new("file-append: #{ex.message}")
+    end
+    NIL.as(SchemeValue)
+  end
+
+  # (current-directory) -> the process's current working directory
+  # (absolute) — e.g. so a script can turn an absolute path it was handed
+  # (a SourcePos.file, a profiler entry, ...) back into one relative to
+  # where it was invoked from for display purposes.
+  @[Scheme::SchemeFn("current-directory", min: 0, max: 0)]
+  def current_directory(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    SchemeStr.new(Dir.current).as(SchemeValue)
+  end
+
+  @[Scheme::SchemeFn("file-lines", min: 1, max: 1)]
+  def file_lines(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    path = file_str_arg(args[0], "file-lines")
+    raise SchemeFileError.new("file-lines: file not found: #{path}") unless File.exists?(path)
+    Scheme.a_to_list(File.read_lines(path).map { |line| SchemeStr.new(line).as(SchemeValue) })
+  end
+
+  @[Scheme::SchemeFn("file-size", min: 1, max: 1)]
+  def file_size(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    path = file_str_arg(args[0], "file-size")
+    raise SchemeFileError.new("file-size: file not found: #{path}") unless File.exists?(path)
+    SchemeInt.new(File.size(path).to_i64)
+  end
+
+  private def file_str_arg(v : SchemeValue, who : String) : String
+    raise SchemeRuntimeError.new("#{who}: expected string, got #{v.write_string}") unless v.is_a?(SchemeStr)
+    v.value
+  end
+end
+
 module Scheme
   class Interpreter
-    register_library ["creme", "file"], Scheme::Builtins::FileLibrary
+    register_library ["creme", "file"] do |env|
+      register_module(Scheme::Builtins::FileLibrary, env) +
+        register_module(Scheme::Builtins::FileExtra, env)
+    end
   end
 end

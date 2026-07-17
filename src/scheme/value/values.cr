@@ -8,11 +8,11 @@ module Scheme
   # carry per-occurrence position).
   record SourcePos, file : String, line : Int32, col : Int32
 
-  # The shared behavior every Scheme value provides. Formerly the abstract base
-  # `class SchemeValue`; now a module so both `class` and `struct` value types
-  # can mix under the `SchemeValue` union alias (see scheme/value/alias.cr) —
-  # Crystal forbids a `struct` inheriting from a class, so the common surface
-  # lives in a mixin instead. Every concrete value type `include`s this.
+  # The shared behavior every Scheme value provides. A module, not a base
+  # class, so both `class` and `struct` value types can mix under the
+  # `SchemeValue` union alias (see scheme/value/alias.cr) — Crystal forbids a
+  # `struct` inheriting from a class, so the common surface lives in a mixin
+  # instead. Every concrete value type `include`s this.
   module SchemeBaseValue
     # Human-readable form (strings unquoted).
     abstract def to_display(io : IO) : Nil
@@ -33,8 +33,8 @@ module Scheme
 
   # A value-type struct (not a class): an integer lives inline in its
   # container (Array(SchemeValue) slot, Cons.car, env value store) instead of
-  # as a separately heap-allocated object, so integer arithmetic no longer
-  # boxes per result. Safe as a value type because SchemeInt is immutable and
+  # as a separately heap-allocated object, so integer arithmetic doesn't box
+  # per result. Safe as a value type because SchemeInt is immutable and
   # eq?/eqv?/equal? compare it by value (helpers.cr), never by identity.
   struct SchemeInt
     include SchemeBaseValue

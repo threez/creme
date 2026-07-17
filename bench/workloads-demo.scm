@@ -24,5 +24,7 @@
 (timed-run "build-list(200000) length+reverse" (lambda () (length (reverse (build-list 200000)))))
 (timed-run "vector-sum-test(500000)" (lambda () (vector-sum-test 500000)))
 (timed-run "string-build-test(4000) length" (lambda () (string-build-test 4000)))
+(timed-run "tak(18,12,6)" (lambda () (tak 18 12 6)))
+(timed-run "nqueens(9)" (lambda () (nqueens 9)))
 
 (display "total = ") (display (- (current-second) total-start)) (display "s") (newline)

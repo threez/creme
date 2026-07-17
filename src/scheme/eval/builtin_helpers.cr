@@ -176,10 +176,8 @@ module Scheme::BuiltinHelpers
 
   # Exact/exact division produces an exact SchemeRational (auto-collapsing
   # to SchemeInt when it divides evenly) instead of falling back to an
-  # inexact float — e.g. (/ 1 3) now yields exact 1/3, not 0.333...
-  # Division by exact zero is still an error; division by inexact
-  # (float) zero also still raises for now (kept as today's behavior,
-  # not revisited by this change).
+  # inexact float — e.g. (/ 1 3) yields exact 1/3, not 0.333...
+  # Division by zero raises whether the zero is exact or inexact (float).
   def divide(a : SchemeValue, b : SchemeValue) : SchemeValue
     return complex_div(to_complex(a, "/"), to_complex(b, "/")) if a.is_a?(SchemeComplex) || b.is_a?(SchemeComplex)
     rank = Math.max(Scheme.num_rank(a, "/"), Scheme.num_rank(b, "/"))

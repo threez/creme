@@ -158,6 +158,10 @@ module Scheme
       vector_equal?(a, b, seen)
     when SchemeBlob
       b.is_a?(SchemeBlob) && a.value == b.value
+    when SchemeTreelist
+      b.is_a?(SchemeTreelist) && treelist_equal?(a.tree, b.tree, seen)
+    when SchemeMutableTreelist
+      b.is_a?(SchemeMutableTreelist) && treelist_equal?(a.tree, b.tree, seen)
     else
       # Reference-identity fallback for the remaining (all class-typed) value
       # kinds. `a` is narrowed to references here, but `b` is still the full
@@ -170,6 +174,12 @@ module Scheme
   private def self.vector_equal?(a : SchemeVector, b : SchemeVector, seen : Set({UInt64, UInt64})) : Bool
     return false unless a.value.size == b.value.size
     a.value.each_with_index.all? { |v, i| scheme_equal?(v, b.value[i], seen) }
+  end
+
+  private def self.treelist_equal?(a : RRB::Tree, b : RRB::Tree, seen : Set({UInt64, UInt64})?) : Bool
+    return false unless a.size == b.size
+    ba = b.to_a
+    a.to_a.each_with_index.all? { |v, i| scheme_equal?(v, ba[i], seen) }
   end
 
   # ameba:disable Metrics/CyclomaticComplexity

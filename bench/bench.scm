@@ -1,12 +1,13 @@
-; Shells out to all 4 comparison variants the same way and prints a combined
+; Shells out to all 5 comparison variants the same way and prints a combined
 ; cross-language table:
 ;
 ;   - bin/creme, this same interpreter, running bench/creme.scm
 ;     (build once: shards build --release --no-debug)
 ;   - bench/bench.cr, a native, unmodified-code Crystal reference floor
 ;     (build once: crystal build --release bench/bench.cr -o bin/bench_cr)
-;   - bench/bench.rb, the same 5 workloads under Ruby (MRI)
-;   - bench/racket.scm, the same 5 workloads under Racket's #lang r7rs
+;   - bench/bench.rb, the same 7 workloads under Ruby (MRI)
+;   - bench/racket.scm, the same 7 workloads under Racket's #lang r7rs
+;   - bench/guile.scm, the same 7 workloads under GNU Guile (run with --r7rs)
 ;
 ; Each variant is optional: if its command isn't found (or exits non-zero),
 ; that column falls back to "n/a" instead of raising, so this script — and
@@ -34,7 +35,7 @@
   (cli "Cross-language benchmark comparison"
        (list (flag "html" "--html" "Also write bench/bench.html"))))
 
-; ---- run the 4 comparison variants -----------------------------------------
+; ---- run the 5 comparison variants -----------------------------------------
 
 (define (run-variant cmd args)
   (guard (e (#t #f))
@@ -47,6 +48,7 @@
 (define crystal-output (run-variant "bin/bench_cr" '()))
 (define ruby-output (run-variant "ruby" (list "bench/bench.rb")))
 (define racket-output (run-variant "racket" (list "bench/racket.scm")))
+(define guile-output (run-variant "guile" (list "--r7rs" "bench/guile.scm")))
 
 ; ---- parse "<label> = <result>  (<elapsed>s)" / "total = <elapsed>s" -------
 
@@ -68,6 +70,7 @@
 (define crystal-times (parse-elapsed-alist crystal-output))
 (define racket-times (parse-elapsed-alist racket-output))
 (define ruby-times (parse-elapsed-alist ruby-output))
+(define guile-times (parse-elapsed-alist guile-output))
 (define creme-times (parse-elapsed-alist creme-output))
 
 ; ---- print the table --------------------------------------------------------
@@ -78,25 +81,28 @@
 
 (define workloads
   (list "fib(27)" "sum-to(2000000)" "build-list(200000) length+reverse"
-        "vector-sum-test(500000)" "string-build-test(4000) length" "total"))
+        "vector-sum-test(500000)" "string-build-test(4000) length"
+        "tak(18,12,6)" "nqueens(9)" "total"))
 
 (define headers
-  (list "workload" "crystal" "racket" "ruby" "creme"
-        "creme/crystal" "creme/racket" "creme/ruby"))
+  (list "workload" "crystal" "racket" "ruby" "guile" "creme"
+        "creme/crystal" "creme/racket" "creme/ruby" "creme/guile"))
 
 (define aligns
-  (list 'left 'right 'right 'right 'right 'right 'right 'right))
+  (list 'left 'right 'right 'right 'right 'right 'right 'right 'right 'right))
 
 (define data-rows
   (map (lambda (label)
          (let ((c (lookup label crystal-times))
                (r (lookup label racket-times))
                (rb (lookup label ruby-times))
+               (g (lookup label guile-times))
                (cr (lookup label creme-times)))
            (list label
                  (numfmt-fixed c 5) (numfmt-fixed r 5)
-                 (numfmt-fixed rb 5) (numfmt-fixed cr 5)
-                 (numfmt-ratio cr c) (numfmt-ratio cr r) (numfmt-ratio cr rb))))
+                 (numfmt-fixed rb 5) (numfmt-fixed g 5) (numfmt-fixed cr 5)
+                 (numfmt-ratio cr c) (numfmt-ratio cr r)
+                 (numfmt-ratio cr rb) (numfmt-ratio cr g))))
        workloads))
 
 (display (bench-table->string headers data-rows aligns 1))

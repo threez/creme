@@ -1,6 +1,11 @@
 # ===========================================================================
 # (scheme base): strings, chars, and numeric<->string conversion
 # ===========================================================================
+#
+# The character classification/case procedures, the case-insensitive
+# char-ci*/string-ci* comparisons, and string-foldcase live in (scheme char)
+# (modules/scheme/char.cr). (scheme base) keeps the case-sensitive char=?/
+# char<?/... comparisons and char->integer/integer->char.
 
 module Scheme::Builtins::Strings
   extend self
@@ -130,38 +135,6 @@ module Scheme::Builtins::Strings
   @[Scheme::SchemeFn("string>=?", min: 2, max: -1)]
   def string_ge(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     string_chain_cmp(args, "string>=?") { |lhs, rhs| lhs >= rhs }
-  end
-
-  @[Scheme::SchemeFn("string-foldcase", min: 1, max: 1)]
-  def string_foldcase(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    s = args[0]
-    raise SchemeRuntimeError.new("string-foldcase: expected string, got #{s.write_string}") unless s.is_a?(SchemeStr)
-    SchemeStr.new(s.value.downcase)
-  end
-
-  @[Scheme::SchemeFn("string-ci=?", min: 2, max: -1)]
-  def string_ci_eq(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    string_chain_cmp(args, "string-ci=?") { |lhs, rhs| lhs.downcase == rhs.downcase }
-  end
-
-  @[Scheme::SchemeFn("string-ci<?", min: 2, max: -1)]
-  def string_ci_lt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    string_chain_cmp(args, "string-ci<?") { |lhs, rhs| lhs.downcase < rhs.downcase }
-  end
-
-  @[Scheme::SchemeFn("string-ci>?", min: 2, max: -1)]
-  def string_ci_gt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    string_chain_cmp(args, "string-ci>?") { |lhs, rhs| lhs.downcase > rhs.downcase }
-  end
-
-  @[Scheme::SchemeFn("string-ci<=?", min: 2, max: -1)]
-  def string_ci_le(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    string_chain_cmp(args, "string-ci<=?") { |lhs, rhs| lhs.downcase <= rhs.downcase }
-  end
-
-  @[Scheme::SchemeFn("string-ci>=?", min: 2, max: -1)]
-  def string_ci_ge(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    string_chain_cmp(args, "string-ci>=?") { |lhs, rhs| lhs.downcase >= rhs.downcase }
   end
 
   @[Scheme::SchemeFn("string-ref", min: 2, max: 2)]
@@ -328,57 +301,6 @@ module Scheme::Builtins::Strings
     SchemeChar.new(n.to_i32.chr)
   end
 
-  @[Scheme::SchemeFn("char-upcase", min: 1, max: 1)]
-  def char_upcase(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeChar.new(char_arg(args[0], "char-upcase").upcase)
-  end
-
-  @[Scheme::SchemeFn("char-downcase", min: 1, max: 1)]
-  def char_downcase(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeChar.new(char_arg(args[0], "char-downcase").downcase)
-  end
-
-  # foldcase is what case-insensitive comparisons use internally in a
-  # full Unicode-aware implementation; here it's the same as downcase,
-  # which is correct for the ASCII/simple-Unicode range this interpreter
-  # otherwise handles.
-  @[Scheme::SchemeFn("char-foldcase", min: 1, max: 1)]
-  def char_foldcase(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeChar.new(char_arg(args[0], "char-foldcase").downcase)
-  end
-
-  @[Scheme::SchemeFn("digit-value", min: 1, max: 1)]
-  def digit_value(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    c = char_arg(args[0], "digit-value")
-    n = c.to_i?
-    n ? SchemeInt.new(n.to_i64).as(SchemeValue) : FALSE.as(SchemeValue)
-  end
-
-  @[Scheme::SchemeFn("char-alphabetic?", min: 1, max: 1)]
-  def char_alphabetic_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(char_arg(args[0], "char-alphabetic?").letter?)
-  end
-
-  @[Scheme::SchemeFn("char-numeric?", min: 1, max: 1)]
-  def char_numeric_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(char_arg(args[0], "char-numeric?").number?)
-  end
-
-  @[Scheme::SchemeFn("char-whitespace?", min: 1, max: 1)]
-  def char_whitespace_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(char_arg(args[0], "char-whitespace?").whitespace?)
-  end
-
-  @[Scheme::SchemeFn("char-upper-case?", min: 1, max: 1)]
-  def char_upper_case_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(char_arg(args[0], "char-upper-case?").uppercase?)
-  end
-
-  @[Scheme::SchemeFn("char-lower-case?", min: 1, max: 1)]
-  def char_lower_case_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(char_arg(args[0], "char-lower-case?").lowercase?)
-  end
-
   @[Scheme::SchemeFn("char=?", min: 2, max: -1)]
   def char_eq(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     char_chain(args, "char=?", false) { |lhs, rhs| lhs == rhs }
@@ -402,31 +324,6 @@ module Scheme::Builtins::Strings
   @[Scheme::SchemeFn("char>=?", min: 2, max: -1)]
   def char_ge(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     char_chain(args, "char>=?", false) { |lhs, rhs| lhs >= rhs }
-  end
-
-  @[Scheme::SchemeFn("char-ci=?", min: 2, max: -1)]
-  def char_ci_eq(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    char_chain(args, "char-ci=?", true) { |lhs, rhs| lhs == rhs }
-  end
-
-  @[Scheme::SchemeFn("char-ci<?", min: 2, max: -1)]
-  def char_ci_lt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    char_chain(args, "char-ci<?", true) { |lhs, rhs| lhs < rhs }
-  end
-
-  @[Scheme::SchemeFn("char-ci>?", min: 2, max: -1)]
-  def char_ci_gt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    char_chain(args, "char-ci>?", true) { |lhs, rhs| lhs > rhs }
-  end
-
-  @[Scheme::SchemeFn("char-ci<=?", min: 2, max: -1)]
-  def char_ci_le(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    char_chain(args, "char-ci<=?", true) { |lhs, rhs| lhs <= rhs }
-  end
-
-  @[Scheme::SchemeFn("char-ci>=?", min: 2, max: -1)]
-  def char_ci_ge(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    char_chain(args, "char-ci>=?", true) { |lhs, rhs| lhs >= rhs }
   end
 
   private def string_chain_cmp(args : Array(SchemeValue), who : String, &block : String, String -> Bool) : SchemeValue
@@ -474,7 +371,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_strings(env : Env) : Nil
+    private def install_strings(env : Env) : Array(String)
       register_module(Scheme::Builtins::Strings, env)
     end
   end

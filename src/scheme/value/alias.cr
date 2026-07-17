@@ -2,16 +2,15 @@
 # SchemeValue — the union of every concrete value type
 # ===========================================================================
 #
-# Formerly `abstract class SchemeValue`; now a union alias so that immutable
-# scalar types can be value-type `struct`s (living inline in their container
-# instead of heap-boxed) while identity/mutable types stay `class`es — Crystal
-# cannot mix `struct` and `class` in one inheritance hierarchy, so the shared
-# behavior lives in the `SchemeBaseValue` module (see values.cr) and the common
-# type is this union.
+# `SchemeValue` is a union alias, not a base class, so that immutable scalar
+# types can be value-type `struct`s (living inline in their container instead
+# of heap-boxed) while identity/mutable types stay `class`es — Crystal cannot
+# mix `struct` and `class` in one inheritance hierarchy, so the shared behavior
+# lives in the `SchemeBaseValue` module (see values.cr) and the common type is
+# this union.
 #
-# Keeping the name `SchemeValue` means every existing `: SchemeValue` /
-# `Array(SchemeValue)` / `.as(SchemeValue)` annotation is unchanged. To add a
-# new value type: define it, `include SchemeBaseValue`, and append it here.
+# To add a new value type: define it, `include SchemeBaseValue`, and append it
+# here.
 #
 # The alias is resolved in Crystal's late semantic phase, so the recursive
 # references (e.g. `Cons#car : SchemeValue`, where the union includes `Cons`)
@@ -49,6 +48,8 @@ module Scheme
                       SchemeSyntaxRules |
                       SchemeLibrary |
                       SchemeHashTable |
+                      SchemeTreelist |
+                      SchemeMutableTreelist |
                       SchemeBigDecimal |
                       SchemeBox |
                       BytecodeClosure |

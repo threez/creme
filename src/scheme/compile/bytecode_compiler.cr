@@ -6,9 +6,9 @@
 # based Chunk for the VM (eval/vm.cr) to run. Re-derives lexical scoping
 # itself (own name->register scope chain, Lua-compiler-style) rather than
 # reusing LocalRefNode/GlobalRefNode's depth/index or inline-cache fields,
-# which were tuned for the tree-walker's Env-chain model, not a flat
-# per-function register window — walking the same Node tree in the same
-# nesting order the analyzer did reproduces correct shadowing on its own.
+# which describe an Env-chain model, not a flat per-function register window
+# — walking the same Node tree in the same nesting order the analyzer did
+# reproduces correct shadowing on its own.
 #
 # Register allocation strategy: `alloc_reg` only ever bumps a per-function
 # watermark; most temps are reclaimed once their containing expression/
@@ -361,9 +361,8 @@ module Scheme
         emit_load_literal(fc, dst, SchemeSym.of(node.name))
         fc.emit(Op::Return, dst) if tail
       when SetBangNode
-        # env.set! returns the new value (see env.cr) — eval_node.cr's
-        # SetBangNode arm evaluates to that same value, not an unspecified/
-        # NIL result, so match it exactly.
+        # A set! expression evaluates to the value assigned, not an
+        # unspecified/NIL result.
         compile_expr(fc, node.value, dst, false)
         compile_name_write(fc, node.name, dst, false)
         fc.emit(Op::Return, dst) if tail
@@ -372,8 +371,8 @@ module Scheme
         # surface only if actually REACHED at runtime (e.g. inside an
         # untaken if-branch, or a cond/case clause after an earlier match)
         # — must NOT raise here at compile time, since compiling a Chunk
-        # ahead of time (like the tree-walker's own eager `analyze` pass)
-        # visits every branch regardless of whether it'll ever run.
+        # ahead of time visits every branch regardless of whether it'll
+        # ever run.
         fc.emit(Op::Throw, fc.chunk.add_const(SchemeStr.new(node.message)))
       when IfNode
         compile_if(fc, node, dst, tail)
@@ -537,29 +536,50 @@ module Scheme
       jmp
     end
 
+    # Strip leading `not` wrappers from a truthiness-only test, returning the
+    # unwrapped inner test and whether the sense is inverted (each `not` flips
+    # it). `(if (not X) a b)` ≡ `(if X b a)` exactly — both only consult the
+    # test's truthiness — so folding the `not` away lets the inner test (often a
+    # comparison) fuse into a single compare-and-branch instead of paying a
+    # separate `not` (and boolean materialization). Only genuine PrimOp::Not
+    # nodes peel, so a shadowed/redefined `not` is untouched.
+    private def peel_not(test : Node) : {Node, Bool}
+      inverted = false
+      while test.is_a?(PrimCallNode) && test.op == PrimOp::Not
+        test = test.args[0]
+        inverted = !inverted
+      end
+      {test, inverted}
+    end
+
+    # Compile an if/when branch that may be absent (evaluates to unspecified).
+    private def compile_branch(fc : FunctionCompiler, branch : Node?, dst : Int32, tail : Bool) : Nil
+      if branch
+        compile_expr(fc, branch, dst, tail)
+      else
+        emit_nil(fc, dst)
+        fc.emit(Op::Return, dst) if tail
+      end
+    end
+
     private def compile_if(fc : FunctionCompiler, node : IfNode, dst : Int32, tail : Bool) : Nil
-      jmp_false = compile_fused_test(fc, node.test, "if") || begin
+      test, inverted = peel_not(node.test)
+      then_branch = inverted ? node.alt : node.conseq
+      else_branch = inverted ? node.conseq : node.alt
+      jmp_false = compile_fused_test(fc, test, "if") || begin
         mark = fc.next_reg
         test_reg = fc.alloc_reg
-        compile_expr(fc, node.test, test_reg, false)
+        compile_expr(fc, test, test_reg, false)
         fc.reclaim_to(mark)
         jmp = fc.emit(Op::TestFalse, test_reg, 0)
         fc.chunk.tag_sample(jmp, "if")
         jmp
       end
-      compile_expr(fc, node.conseq, dst, tail)
-      if alt = node.alt
-        jmp_end = fc.emit(Op::Jmp, 0, 0) unless tail
-        fc.chunk.patch_jump_to_here(jmp_false)
-        compile_expr(fc, alt, dst, tail)
-        fc.chunk.patch_jump_to_here(jmp_end) if jmp_end
-      else
-        jmp_end = fc.emit(Op::Jmp, 0, 0) unless tail
-        fc.chunk.patch_jump_to_here(jmp_false)
-        emit_nil(fc, dst)
-        fc.emit(Op::Return, dst) if tail
-        fc.chunk.patch_jump_to_here(jmp_end) if jmp_end
-      end
+      compile_branch(fc, then_branch, dst, tail)
+      jmp_end = fc.emit(Op::Jmp, 0, 0) unless tail
+      fc.chunk.patch_jump_to_here(jmp_false)
+      compile_branch(fc, else_branch, dst, tail)
+      fc.chunk.patch_jump_to_here(jmp_end) if jmp_end
     end
 
     private def compile_seq_tail(fc : FunctionCompiler, body : Array(Node), dst : Int32, tail : Bool) : Nil
@@ -619,17 +639,21 @@ module Scheme
     # (unless ...) is the mirror image — modeled directly on compile_if with
     # body/nil swapped by `negate?`, rather than a separate ad-hoc encoding.
     private def compile_when(fc : FunctionCompiler, node : WhenNode, dst : Int32, tail : Bool) : Nil
-      tag = node.negate? ? "unless" : "when"
-      jmp_false = compile_fused_test(fc, node.test, tag) || begin
+      # A `not` in the test just flips when<->unless (each one toggles the
+      # negate sense), dropping the `not` instruction — see peel_not.
+      test, inverted = peel_not(node.test)
+      negate = node.negate? ^ inverted
+      tag = negate ? "unless" : "when"
+      jmp_false = compile_fused_test(fc, test, tag) || begin
         mark = fc.next_reg
         test_reg = fc.alloc_reg
-        compile_expr(fc, node.test, test_reg, false)
+        compile_expr(fc, test, test_reg, false)
         fc.reclaim_to(mark)
         jmp = fc.emit(Op::TestFalse, test_reg, 0)
         fc.chunk.tag_sample(jmp, tag)
         jmp
       end
-      if node.negate?
+      if negate
         emit_nil(fc, dst)
         fc.emit(Op::Return, dst) if tail
         jmp_end = fc.emit(Op::Jmp, 0, 0) unless tail
@@ -733,7 +757,7 @@ module Scheme
     # decide (see compile_cond_result). No match evaluates to NIL. A
     # clause's own throw_msg (a malformed clause the analyzer deferred to
     # eval time) unconditionally raises the instant it's REACHED — it must
-    # not even evaluate a test, matching the tree-walker's cond handling.
+    # not even evaluate a test.
     private def compile_cond_clauses(fc : FunctionCompiler, clauses : Array(CondClause), index : Int32, dst : Int32, tail : Bool) : Nil
       if index >= clauses.size
         emit_nil(fc, dst)
@@ -746,7 +770,7 @@ module Scheme
         return
       end
       test = clause.test
-      if test.nil? # else — always matches, tv is NIL (matches eval_node.cr)
+      if test.nil? # else — always matches, tv is NIL
         compile_cond_result(fc, clause, nil, dst, tail)
         return
       end
@@ -769,9 +793,9 @@ module Scheme
     end
 
     # `test_reg` holds the already-computed test value (tv) — nil only for
-    # an `else` clause, where tv is NIL (matching eval_node.cr exactly, so
-    # a bodyless else falls through to the same "bare value" path below and
-    # correctly yields NIL rather than needing a separate case).
+    # an `else` clause, where tv is NIL, so a bodyless else falls through to
+    # the same "bare value" path below and correctly yields NIL rather than
+    # needing a separate case.
     private def compile_cond_result(fc : FunctionCompiler, clause : CondClause, test_reg : Int32?, dst : Int32, tail : Bool) : Nil
       if arrow = clause.arrow
         mark = fc.next_reg
@@ -803,8 +827,8 @@ module Scheme
 
     # (case key clause...) — the key is evaluated ONCE, then matched against
     # each clause's datums via eqv? (Op::CaseMatch). Unlike cond, a bodyless
-    # clause evaluates to NIL, not the key (matching eval_node.cr), and
-    # `=>` applies the arrow procedure to the KEY, not a match boolean.
+    # clause evaluates to NIL, not the key, and `=>` applies the arrow
+    # procedure to the KEY, not a match boolean.
     private def compile_case(fc : FunctionCompiler, node : CaseNode, dst : Int32, tail : Bool) : Nil
       mark = fc.next_reg
       key_reg = fc.alloc_reg
@@ -977,8 +1001,7 @@ module Scheme
     end
 
     # (parameterize ((param val)...) body...). Never tail (the dynamic
-    # extent's restore must run right after body — matches the tree-walker's
-    # own "not tail" comment on ParameterizeNode), so body is always compiled
+    # extent's restore must run right after body), so body is always compiled
     # non-tail into its own temp register regardless of the caller's `tail`.
     # Params/newvals are evaluated into two contiguous register blocks so
     # Op::ParamPush can address them as (first_param_reg, first_newval_reg,
@@ -998,11 +1021,10 @@ module Scheme
       fc.emit(Op::Return, dst) if tail
     end
 
-    # (guard (var clause...) body...). body is ALWAYS compiled non-tail
-    # (matching the tree-walker's own "not tail" — the installed handler
-    # must not be invalidated by a TailCall repointing THIS frame's chunk/ip
-    # to somewhere else while it's still in scope; see PushHandler's doc
-    # comment). PushHandler's offset lands on the clause-checking code,
+    # (guard (var clause...) body...). body is ALWAYS compiled non-tail: the
+    # installed handler must not be invalidated by a TailCall repointing THIS
+    # frame's chunk/ip to somewhere else while it's still in scope; see
+    # PushHandler's doc comment. PushHandler's offset lands on the clause-checking code,
     # compiled by compile_guard_clauses — reached only if the VM's
     # handle_guarded_error jumps there; the normal (no error) path runs
     # PopHandler and jumps PAST the clause code entirely.
@@ -1021,7 +1043,7 @@ module Scheme
       # already been popped (handle_guarded_error pops it before jumping
       # here) — guard's own protection is over by this point, so a matched
       # clause CAN genuinely tail-call out if the enclosing guard form
-      # itself is in tail position, same as the tree-walker's cold_body.
+      # itself is in tail position.
       compile_guard_clauses(fc, node.clauses, 0, dst, tail)
       fc.pop_scope
       fc.chunk.patch_jump_to_here(jmp_over_clauses)
@@ -1118,9 +1140,8 @@ module Scheme
     # supported at the top level (where `env` is unambiguously
     # @interp.global, exactly like DefineNode's global path). The raw form
     # is preserved as a const (a Cons is already a SchemeValue) and handed
-    # to the same eval_* helper the tree-walker uses, for identical
-    # semantics — these forms are never hot enough to be worth
-    # reimplementing against registers.
+    # to the Interpreter's eval_* helper for that form — these forms are
+    # never hot enough to be worth reimplementing against registers.
     private def compile_helper_form(fc : FunctionCompiler, node : HelperFormNode, dst : Int32) : Nil
       at_toplevel = fc.scope.nil? && fc.is_toplevel?
       unless at_toplevel
@@ -1264,8 +1285,8 @@ module Scheme
 
     # The Return-fused counterpart of a base 2-arg arithmetic/comparison Op
     # — see opcode.cr's AddReturn doc. nil for anything else (the Imm/Up/
-    # vector-family shapes still emit a plain trailing Return in tail
-    # position; only the general 2-arg path fuses this way for now).
+    # vector-family shapes emit a plain trailing Return in tail position;
+    # only the general 2-arg path fuses this way).
     private def return_op_for(op : Op) : Op?
       case op
       when Op::Add   then Op::AddReturn
@@ -1308,6 +1329,11 @@ module Scheme
            in PrimOp::Not             then Op::Not
            in PrimOp::IsNull          then Op::IsNull
            in PrimOp::IsPair          then Op::IsPair
+           in PrimOp::Cxr             then Op::Cxr
+           in PrimOp::Abs             then Op::Abs
+           in PrimOp::IsZero          then Op::CmpZero
+           in PrimOp::IsPositive      then Op::CmpZero
+           in PrimOp::IsNegative      then Op::CmpZero
            end
       # (< n 2)/(- n 1)-shaped calls: a 2-arg arithmetic/comparison op whose
       # 2nd argument is a small-enough integer literal skips staging that
@@ -1390,11 +1416,10 @@ module Scheme
         return false
       end
       # `d` carries the const-pool index of the original Builtin (node.prim)
-      # so the VM dispatches to the exact same implementation the
-      # tree-walker's PrimCallNode inlines from — same semantics/errors,
-      # without re-implementing arithmetic/bounds-checking here. A later
-      # perf pass can fuse these into direct Crystal calls the way
-      # eval_node.cr's PrimCallNode already does.
+      # so the VM dispatches to that exact implementation — same semantics/
+      # errors, without re-implementing arithmetic/bounds-checking here. The
+      # hottest shapes (integer arithmetic, cxr) are further fused into direct
+      # Crystal calls in the VM dispatch loop; the rest go through exec_prim.
       builtin_idx = fc.chunk.add_const(node.prim)
       mark = fc.next_reg
       # When every argument is a side-effect-free leaf (no call/set!/begin
@@ -1420,8 +1445,27 @@ module Scheme
       fused = false
       case arg_regs.size
       when 1
-        ip = fc.emit(op, dst, arg_regs[0], 0, builtin_idx)
-        fc.chunk.tag_sample(ip, node.name, prim_src)
+        # Operand c is op-specific: Op::Cxr packs the car/cdr chain (cxr_code),
+        # Op::CmpZero selects the test (0 zero? / 1 positive? / 2 negative?),
+        # others leave it 0. Thread the call-site pos: the deopting unary prims
+        # (Cxr/Abs/CmpZero) read frame.chunk.positions[ip] to give the deopted
+        # builtin's frame the right source location. Harmless (no fast-path
+        # effect) for the prims that never read it.
+        unary_c = case node.op
+                  when PrimOp::Cxr        then cxr_code(node.name)
+                  when PrimOp::IsPositive then 1
+                  when PrimOp::IsNegative then 2
+                  else                         0
+                  end
+        ip = fc.emit(op, dst, arg_regs[0], unary_c, builtin_idx, node.pos)
+        if op == Op::Cxr
+          # Profiler: show the fused op ("cxr") in the instruction column and
+          # the specific accessor ("car"/"cdr"/"caar"/…) in the expression
+          # column, so all uses of one accessor aggregate under it.
+          fc.chunk.tag_sample(ip, "cxr", node.name)
+        else
+          fc.chunk.tag_sample(ip, node.name, prim_src)
+        end
       when 2
         # A tail-position call to one of the base arithmetic/comparison
         # ops fuses straight into its own Return-flavored op (see
@@ -1442,6 +1486,21 @@ module Scheme
         fc.emit(Op::Move, dst, arg_regs[0]) unless dst == arg_regs[0]
       end
       fused
+    end
+
+    # Encode a cxr accessor name's car/cdr chain into the Op::Cxr `c` operand:
+    # each `a`/`d` letter between the leading `c` and trailing `r` becomes one
+    # bit (a=1/car, d=0/cdr), with a sentinel top bit marking the chain length.
+    # The VM applies bits LSB-first, which is innermost-first (the letter
+    # nearest `r`), so `(caddr x)` = car(cdr(cdr x)) decodes to cdr,cdr,car.
+    # E.g. car→0b11, cdr→0b10, caddr→0b1100.
+    private def cxr_code(name : String) : Int32
+      code = 1
+      name.each_char_with_index do |letter, i|
+        next if i == 0 || i == name.size - 1
+        code = (code << 1) | (letter == 'a' ? 1 : 0)
+      end
+      code
     end
 
     # If `node` is a bare variable-reference callee, its {resolution kind,

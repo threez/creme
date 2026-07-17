@@ -3,17 +3,17 @@
 # ===========================================================================
 
 module Scheme
-  # Variable bindings for one lexical frame. Call-frame envs (lambda calls,
-  # let/letrec/do bodies, ...) typically hold only a handful of bindings, so
-  # they start out backed by parallel arrays and use a linear scan — cheaper
-  # than a Hash's per-insert bucket/hash overhead at this size, and this is
-  # by far the hottest allocation in eval_node's trampoline (a fresh Env per
-  # call). A frame that grows past ARRAY_THRESHOLD bindings (a large let, or
-  # a library/global env mistakenly constructed with a parent) promotes
-  # itself to a Hash once, so pathological cases stay O(1) instead of O(n)
-  # forever. Root envs (no parent) — @global/@base_env and every library's
-  # own env — start Hash-backed directly, since those are known up front to
-  # hold hundreds of bindings where linear scan would lose.
+  # Variable bindings for one lexical frame. A running closure's own locals
+  # do NOT live here — those are register slots on the VM's shared stack (see
+  # vm.cr); Env is used for the global/library/first-class-SchemeEnvironment
+  # case. A non-root frame typically holds only a handful of bindings, so it
+  # starts out backed by parallel arrays and uses a linear scan — cheaper than
+  # a Hash's per-insert bucket/hash overhead at this size. A frame that grows
+  # past ARRAY_THRESHOLD bindings promotes itself to a Hash once, so
+  # pathological cases stay O(1) instead of O(n) forever. Root envs (no
+  # parent) — @global/@base_env and every library's own env — start Hash-backed
+  # directly, since those are known up front to hold hundreds of bindings where
+  # linear scan would lose.
   #
   # Non-root frames start out sharing a single read-only pair of EMPTY
   # sentinel arrays rather than allocating their own: a frame that binds

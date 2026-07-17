@@ -45,8 +45,8 @@ module Scheme
 
   # A closure produced by the register VM's Closure instruction: a compiled
   # Chunk plus the upvalue cells it captured at creation time (per
-  # chunk.upvalues' UpvalDesc list). Analogous to the tree-walker's Lambda,
-  # but env-chain capture is replaced by this explicit upvalue array.
+  # chunk.upvalues' UpvalDesc list). Free variables are captured through this
+  # explicit upvalue array rather than an enclosing env chain.
   class BytecodeClosure
     include SchemeBaseValue
     getter chunk : Chunk
@@ -69,8 +69,7 @@ module Scheme
 
   # (case-lambda (formals body...) ...) — one BytecodeClosure per clause
   # (each independently capturing its own upvalues via a normal Closure
-  # instruction), selected by argument count at call time. Mirrors the
-  # tree-walker's CaseLambda/Lambda pairing.
+  # instruction), selected by argument count at call time.
   class BytecodeCaseClosure
     include SchemeBaseValue
     getter clauses : Array(BytecodeClosure)

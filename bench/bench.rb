@@ -1,4 +1,4 @@
-# Ruby translation of examples/bench.scm — same five workloads, timed the
+# Ruby translation of examples/bench.scm — same seven workloads, timed the
 # same way, for a same-machine cross-language comparison alongside the
 # creme/Racket numbers in baseline.md.
 #
@@ -96,6 +96,34 @@ def string_build_test(n)
   s.length
 end
 
+def tak(x, y, z)
+  y < x ? tak(tak(x - 1, y, z), tak(y - 1, z, x), tak(z - 1, x, y)) : z
+end
+
+# Positions reuse the same Cons list build_list uses, so nqueens conses a
+# position per placement exactly as the Scheme version does.
+def queens_safe?(col, positions)
+  node = positions
+  dist = 1
+  while node
+    return false if node.car == col || (node.car - col).abs == dist
+    node = node.cdr
+    dist += 1
+  end
+  true
+end
+
+def nqueens(board_size, row = 0, positions = nil)
+  return 1 if row == board_size
+  count = 0
+  col = 0
+  while col < board_size
+    count += nqueens(board_size, row + 1, Cons.new(col, positions)) if queens_safe?(col, positions)
+    col += 1
+  end
+  count
+end
+
 def timed_run(name)
   start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   result = yield
@@ -111,5 +139,7 @@ timed_run("sum-to(2000000)") { sum_to(2_000_000, 0) }
 timed_run("build-list(200000) length+reverse") { list_length(list_reverse(build_list(200_000))) }
 timed_run("vector-sum-test(500000)") { vector_sum_test(500_000) }
 timed_run("string-build-test(4000) length") { string_build_test(4_000) }
+timed_run("tak(18,12,6)") { tak(18, 12, 6) }
+timed_run("nqueens(9)") { nqueens(9) }
 
 puts "total = #{Process.clock_gettime(Process::CLOCK_MONOTONIC) - total_start}s"

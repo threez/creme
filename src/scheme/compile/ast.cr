@@ -4,10 +4,10 @@
 #
 # The Reader emits s-expressions (SchemeValue trees). The Analyzer
 # (analyzer.cr) translates those, once, into this typed Node AST, which
-# `eval_node` (eval/eval_node.cr) evaluates — instead of re-parsing the
-# raw s-expression on every visit. This is the seam where s-expression
-# optimizations (constant folding, dead-branch removal, …) are applied before
-# a form is ever evaluated. `eval_node` is the sole evaluator: every form the
+# BytecodeCompiler (bytecode_compiler.cr) then compiles into a Chunk for the
+# VM to run — instead of re-parsing the raw s-expression on every visit. This
+# is the seam where s-expression optimizations (constant folding, dead-branch
+# removal, …) are applied before a form is ever compiled. Every form the
 # Analyzer sees becomes a typed Node (a malformed form becomes a ThrowNode).
 
 module Scheme
@@ -21,9 +21,9 @@ module Scheme
   end
 
   # A malformed form the analyzer detected at analyze time but whose error must
-  # surface at EVAL time (preserving the timing a tree-walker would have — a
-  # malformed form in an untaken branch or an unreached lambda body only errors
-  # when reached). `eval_node` raises `SchemeRuntimeError.new(message)`.
+  # surface only when actually reached at runtime — a malformed form in an
+  # untaken branch or an unreached lambda body must not error until reached.
+  # Compiles to Op::Throw, which raises `SchemeRuntimeError.new(message)`.
   class ThrowNode < Node
     getter message : String
 
@@ -54,7 +54,7 @@ module Scheme
   end
 
   # A lexically-addressed local: the binding lives `depth` env frames up, at
-  # value slot `index`. Read directly (no name compare / hash) — see eval_node.
+  # value slot `index`. Read directly (no name compare / hash).
   # `name` is kept as a fallback for the rare case the target frame has promoted
   # to a Hash. Only emitted for param/rest slots (fixed, always-valid indices).
   class LocalRefNode < Node
@@ -237,9 +237,9 @@ module Scheme
     getter arrow : Node?
     getter? els : Bool
     # A malformed clause detected at analyze time: when cond/guard evaluation
-    # REACHES this clause it raises this message. Deferring the error to when the
-    # clause is actually reached matches a tree-walker — a malformed clause after
-    # an earlier matching clause is never seen.
+    # REACHES this clause it raises this message. The error is deferred to when
+    # the clause is actually reached so a malformed clause after an earlier
+    # matching clause is never seen.
     getter throw_msg : String?
 
     def initialize(@test : Node?, @body : Array(Node), @arrow : Node?, @els : Bool, @throw_msg : String? = nil)
@@ -281,17 +281,22 @@ module Scheme
   end
 
   # A fixed-arity primitive whose head statically resolves to a known builtin.
-  # eval_node inlines the operation — evaluating the arg nodes and performing
+  # Compiles to a fused prim op — evaluating the arg nodes and performing
   # the op directly — skipping the generic apply path (args-array alloc,
   # arity check, backtrace-frame push, closure indirection). Guarded at runtime:
   # if the name has been redefined/shadowed away from `prim`, it deopts to
   # resolving the new binding and applying it to the evaluated args.
   #
-  # Deliberately excludes any builtin whose failure mode is tested/expected
-  # to show up as its OWN backtrace frame (e.g. `car`/`cdr`'s "expected
-  # pair" error — see spec/scheme/eval/backtrace_spec.cr) — fusion means no
-  # Frame is ever pushed for it, so only side-effect-free-on-error builtins
-  # (never raise regardless of argument shape) belong here.
+  # Historically excluded any builtin whose failure mode is tested/expected
+  # to show up as its OWN backtrace frame — fusion pushes no Frame, so a
+  # naive fusion would lose it. The whole (scheme cxr) accessor family
+  # (`car`/`cdr`/`caar`/…/`cddddr`, whose "expected pair" error must appear as
+  # its own frame — see spec/scheme/eval/backtrace_spec.cr) is the exception
+  # that proves the rule: it fuses into PrimOp::Cxr, but the VM handler fast-
+  # paths only the all-pairs case and *deopts to the real builtin* (via
+  # @interp.apply, which pushes the frame) on the first non-pair, so the error
+  # message/frame/position stay byte-identical. Any other error-framed builtin
+  # added here must do the same, or it does not belong.
   enum PrimOp
     Add
     Sub
@@ -312,6 +317,18 @@ module Scheme
     Not
     IsNull
     IsPair
+    # The whole (scheme cxr) accessor family (car/cdr/caar/.../cddddr) fuses
+    # into this single op; the specific car/cdr chain rides in the emitted
+    # instruction's operand (see bytecode_compiler.cr's cxr_code). Recognized
+    # in the analyzer by name pattern (cxr_name?), not via PRIM_OPS.
+    Cxr
+    # Unary numeric prims: abs, and the compare-against-zero predicates
+    # zero?/positive?/negative? (all three emit Op::CmpZero, distinguished by
+    # operand c). Each fast-paths int/float inline and deopts to its builtin.
+    Abs
+    IsZero
+    IsPositive
+    IsNegative
   end
 
   # Builtin names the analyzer specializes into a PrimCallNode, the op each
@@ -338,6 +355,12 @@ module Scheme
     "not"                => {PrimOp::Not, 1},
     "null?"              => {PrimOp::IsNull, 1},
     "pair?"              => {PrimOp::IsPair, 1},
+    "abs"                => {PrimOp::Abs, 1},
+    "zero?"              => {PrimOp::IsZero, 1},
+    "positive?"          => {PrimOp::IsPositive, 1},
+    "negative?"          => {PrimOp::IsNegative, 1},
+    # car/cdr/caar/.../cddddr are recognized by name pattern in the analyzer
+    # (cxr_name?) → PrimOp::Cxr, not listed here.
   }
 
   class PrimCallNode < Node

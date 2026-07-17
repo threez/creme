@@ -178,25 +178,6 @@ module Scheme::Builtins::Arithmetic
     end
   end
 
-  # Exact perfect-square fast path ahead of the float fallback: (sqrt 4)
-  # is now exact 2, not inexact 2.0. (sqrt 2) stays inexact (irrational,
-  # no exact representation). Shares its integer-sqrt logic with the
-  # exact-integer-sqrt builtin below rather than duplicating it.
-  @[Scheme::SchemeFn("sqrt", min: 1, max: 1)]
-  def sqrt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    v = args[0]
-    if v.is_a?(SchemeInt) && v.value >= 0
-      root, rem = exact_integer_sqrt_pair(v.value)
-      rem == 0 ? SchemeInt.new(root).as(SchemeValue) : SchemeFloat.new(Math.sqrt(Scheme.as_f64(v, "sqrt"))).as(SchemeValue)
-    elsif number?(v) && !v.is_a?(SchemeComplex) && Scheme.as_f64(v, "sqrt") < 0
-      # sqrt of a negative real is complex, per R7RS — the magnitude's
-      # square root goes on the imaginary axis.
-      SchemeComplex.make(SchemeFloat.new(0.0), SchemeFloat.new(Math.sqrt(-Scheme.as_f64(v, "sqrt")))).as(SchemeValue)
-    else
-      SchemeFloat.new(Math.sqrt(Scheme.as_f64(v, "sqrt")))
-    end
-  end
-
   @[Scheme::SchemeFn("exact-integer-sqrt", min: 1, max: 1)]
   def exact_integer_sqrt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     n = int_arg(args[0], "exact-integer-sqrt")
@@ -314,7 +295,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_arithmetic(env : Env) : Nil
+    private def install_arithmetic(env : Env) : Array(String)
       register_module(Scheme::Builtins::Arithmetic, env)
     end
   end

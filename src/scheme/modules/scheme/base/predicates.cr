@@ -1,6 +1,9 @@
 # ===========================================================================
 # (scheme base): type predicates
 # ===========================================================================
+#
+# nan?/infinite?/finite? live in (scheme inexact) and macro? in
+# (creme introspection) — each defined in that library's own module file.
 
 module Scheme::Builtins::Predicates
   extend self
@@ -48,6 +51,56 @@ module Scheme::Builtins::Predicates
     SchemeBool.of(args[0].is_a?(SchemeInt))
   end
 
+  # zero?/positive?/negative? — the sign predicates, real builtins (rather than
+  # prelude closures like `(= n 0)`) so a direct `(zero? n)` fuses into
+  # Op::CmpZero, and so redefinition-guarded fusion has a Builtin to key on.
+  # Implemented via the same `num_chain` the =/>/< builtins use, so the
+  # numeric-tower semantics stay identical (only the error's `who` differs).
+  # The VM fast-paths int/float and deopts here for rational/complex/errors.
+  @[Scheme::SchemeFn("zero?", min: 1, max: 1)]
+  def zero_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    num_chain([args[0], SchemeInt.new(0_i64)], "zero?") { |cmp| cmp == 0 }
+  end
+
+  @[Scheme::SchemeFn("positive?", min: 1, max: 1)]
+  def positive_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    num_chain([args[0], SchemeInt.new(0_i64)], "positive?") { |cmp| cmp > 0 }
+  end
+
+  @[Scheme::SchemeFn("negative?", min: 1, max: 1)]
+  def negative_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    num_chain([args[0], SchemeInt.new(0_i64)], "negative?") { |cmp| cmp < 0 }
+  end
+
+  # even?/odd?: R7RS integer parity predicates, real builtins (rather than
+  # prelude closures going through exact-integer-part + modulo + =). Accept
+  # exact integers and integer-valued floats (e.g. 4.0); anything else is an
+  # error.
+  @[Scheme::SchemeFn("even?", min: 1, max: 1)]
+  def even_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    SchemeBool.of(integer_value_for(args[0], "even?").even?)
+  end
+
+  @[Scheme::SchemeFn("odd?", min: 1, max: 1)]
+  def odd_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    SchemeBool.of(integer_value_for(args[0], "odd?").odd?)
+  end
+
+  private def integer_value_for(v : SchemeValue, who : String) : Int64
+    case v
+    when SchemeInt
+      v.value
+    when SchemeFloat
+      f = v.value
+      unless f.finite? && f == f.trunc && Int64::MIN.to_f64 <= f <= Int64::MAX.to_f64
+        raise SchemeRuntimeError.new("#{who}: expected integer, got #{v.write_string}")
+      end
+      f.to_i64
+    else
+      raise SchemeRuntimeError.new("#{who}: expected integer, got #{v.write_string}")
+    end
+  end
+
   @[Scheme::SchemeFn("exact?", min: 1, max: 1)]
   def exact_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeBool.of(Scheme.exact?(args[0]))
@@ -56,24 +109,6 @@ module Scheme::Builtins::Predicates
   @[Scheme::SchemeFn("inexact?", min: 1, max: 1)]
   def inexact_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeBool.of(Scheme.inexact?(args[0]))
-  end
-
-  @[Scheme::SchemeFn("nan?", min: 1, max: 1)]
-  def nan_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    v = args[0]
-    SchemeBool.of(v.is_a?(SchemeFloat) && v.value.nan?)
-  end
-
-  @[Scheme::SchemeFn("infinite?", min: 1, max: 1)]
-  def infinite_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    v = args[0]
-    SchemeBool.of(v.is_a?(SchemeFloat) && v.value.infinite? != nil)
-  end
-
-  @[Scheme::SchemeFn("finite?", min: 1, max: 1)]
-  def finite_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    v = args[0]
-    SchemeBool.of(!v.is_a?(SchemeFloat) || v.value.finite?)
   end
 
   @[Scheme::SchemeFn("square", min: 1, max: 1)]
@@ -106,16 +141,11 @@ module Scheme::Builtins::Predicates
     v = args[0]
     SchemeBool.of(v.is_a?(Builtin) || v.is_a?(BytecodeClosure) || v.is_a?(BytecodeCaseClosure))
   end
-
-  @[Scheme::SchemeFn("macro?", min: 1, max: 1)]
-  def macro_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(args[0].is_a?(Macro))
-  end
 end
 
 module Scheme
   class Interpreter
-    private def install_predicates(env : Env) : Nil
+    private def install_predicates(env : Env) : Array(String)
       register_module(Scheme::Builtins::Predicates, env)
     end
   end

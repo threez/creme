@@ -121,7 +121,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_vectors(env : Env) : Nil
+    private def install_vectors(env : Env) : Array(String)
       register_module(Scheme::Builtins::Vectors, env)
     end
   end

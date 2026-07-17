@@ -4,9 +4,9 @@
 #
 # Executes a Chunk (see compile/chunk.cr) produced by BytecodeCompiler.
 # Deliberately iterative (an explicit call-frame stack), not recursive
-# Crystal calls — this is the foundation Phase 4 (call/cc, dynamic-wind,
-# guard) needs: those features unwind to an arbitrary saved depth of this
-# same stack rather than relying on Crystal's own call stack/exceptions.
+# Crystal calls — this is what lets call/cc, dynamic-wind, and guard unwind
+# to an arbitrary saved depth of this same stack rather than relying on
+# Crystal's own call stack/exceptions.
 #
 # Registers live in ONE shared, growable `@stack` array — each CallFrame is
 # just a `base` offset into it (Lua-style), not its own freshly allocated
@@ -21,9 +21,9 @@
 # returned) call REUSES that same CallFrame object, just overwriting its
 # fields — recursion depth bounds how many CallFrame objects a whole run
 # ever needs (e.g. ~27 for fib(27), not one per each of its ~630,000 calls).
-# An earlier version allocated both a fresh register Array AND a fresh
-# CallFrame per call and was measurably slower than the tree-walker on fib/
-# sum-to; this pooled-stack design is the fix for both.
+# Allocating both a fresh register Array AND a fresh CallFrame per call would
+# be measurably slower on fib/sum-to workloads; this pooled-stack design
+# avoids both allocations on the hot path.
 #
 # Because register slots (and now CallFrame objects) are genuinely reused
 # across calls, any Upvalue capturing "an open register in a still-live
@@ -54,8 +54,8 @@ module Scheme
     # VM instance/caller happens to be running it. A closure that escapes
     # its defining scope (e.g. a library export called from unrelated user
     # code) must still resolve its own free variables against the env it
-    # was compiled under — exactly like the tree-walker's Lambda#env
-    # lexical-chain capture — not wherever it's being called FROM.
+    # was compiled under — standard lexical-scope capture — not wherever
+    # it's being called FROM.
     property root_env : Env
     # Whether an Interpreter::Frame currently exists on @call_stack for THIS
     # activation — used by exec_call's tail-call path to tell "collapse
@@ -93,14 +93,13 @@ module Scheme
   end
 
   # A pending cleanup action to run when execution unwinds past the point it
-  # was pushed — the VM's explicit stand-in for what the tree-walker gets for
-  # free from Crystal's own `ensure`/exception unwinding. `parameterize`
-  # pushes one to restore its saved parameter values; `dynamic-wind` will
-  # push one to run its `after` thunk. Popped/run in LIFO order by ParamPop
-  # (normal exit) — guard's error-catching path (not yet implemented) will
-  # need to run every UnwindAction between the raise site and the handler's
-  # depth when it unwinds abnormally, not just whatever a normal ParamPop
-  # would reach.
+  # was pushed — the VM's explicit stand-in for the `ensure`/exception
+  # unwinding a recursive Crystal evaluator would get for free. `parameterize`
+  # pushes one to restore its saved parameter values; `dynamic-wind` pushes one
+  # to run its `after` thunk. Popped/run in LIFO order by ParamPop on normal
+  # exit; on an abnormal unwind (see handle_guarded_error) every UnwindAction
+  # between the raise site and the handler's depth is run, not just whatever a
+  # normal ParamPop would reach.
   abstract class UnwindAction
     abstract def run : Nil
   end
@@ -160,8 +159,7 @@ module Scheme
 
     # Interpreter.push_current/pop_current lets SchemeError#initialize find
     # the active interpreter (to snapshot call_stack_snapshot/current_pos)
-    # without needing an explicit reference threaded to every raise site —
-    # mirrors the tree-walker's own "top_level" push/pop in eval_node.cr.
+    # without needing an explicit reference threaded to every raise site.
     def run(chunk : Chunk) : SchemeValue
       Interpreter.push_current(@interp)
       begin
@@ -176,9 +174,9 @@ module Scheme
     # Invoked from Interpreter#apply whenever a builtin (map, for-each, sort,
     # apply, call-with-values, ...) calls back into a BytecodeClosure value —
     # runs the closure to completion in a fresh frame stack and returns its
-    # result, bridging the tree-walker-era `apply` convention to the VM.
+    # result, bridging Interpreter#apply's convention to the VM.
     # apply already pushed an Interpreter::Frame for this exact activation
-    # (matching its Lambda arm) — mark it so a later self-tail-call from
+    # (it does so for every closure it runs) — mark it so a later self-tail-call from
     # THIS closure correctly overwrites that frame instead of pushing a
     # second one on top of it.
     def call(closure : BytecodeClosure, args : Array(SchemeValue)) : SchemeValue
@@ -604,10 +602,57 @@ module Scheme
             exec_prim(frame, base, instr)
             result = deliver_return(@stack.unsafe_fetch(base + instr.a))
             return result unless result.nil?
+          when Op::Cxr
+            # The whole (scheme cxr) accessor family (car/cdr/caar/.../cddddr)
+            # fused into one op: operand c encodes the car/cdr chain as bits
+            # (1=car, 0=cdr) applied LSB-first, terminated by a sentinel top bit
+            # (see bytecode_compiler.cr's cxr_code). Fast-path while every step
+            # lands on a pair; on the first non-pair, deopt to the real builtin
+            # so its "<name>: expected pair" error keeps its own backtrace frame
+            # + position (see cxr_deopt). Own arm at the END of the chain —
+            # appending, never inserting mid-chain (see the AddReturn arm above /
+            # doc/optimization.md).
+            v = @stack.unsafe_fetch(base + instr.b)
+            code = instr.c
+            while code != 1
+              unless v.is_a?(Cons)
+                v = unary_prim_deopt(frame, instr)
+                break
+              end
+              v = (code & 1) == 1 ? v.car : v.cdr
+              code >>= 1
+            end
+            @stack.unsafe_put(base + instr.a, v)
+          when Op::Abs
+            # Fast-path a non-INT64_MIN integer inline; everything else (float,
+            # rational, INT64_MIN overflow, non-number error) deopts to the abs
+            # builtin. Own arm at the END of the chain (append-only).
+            v = @stack.unsafe_fetch(base + instr.b)
+            res = if v.is_a?(SchemeInt) && v.value != Int64::MIN
+                    v.value < 0 ? SchemeInt.new(-v.value) : v
+                  else
+                    unary_prim_deopt(frame, instr)
+                  end
+            @stack.unsafe_put(base + instr.a, res)
+          when Op::CmpZero
+            # zero?/positive?/negative? — operand c selects the test. Fast-path
+            # int and float inline; rational/complex/non-number deopt to the
+            # builtin (which matches = / > / < against 0, including its errors).
+            v = @stack.unsafe_fetch(base + instr.b)
+            res = if v.is_a?(SchemeInt)
+                    n = v.value
+                    SchemeBool.of(instr.c == 0 ? n == 0 : (instr.c == 1 ? n > 0 : n < 0))
+                  elsif v.is_a?(SchemeFloat)
+                    f = v.value
+                    SchemeBool.of(instr.c == 0 ? f == 0.0 : (instr.c == 1 ? f > 0.0 : f < 0.0))
+                  else
+                    unary_prim_deopt(frame, instr)
+                  end
+            @stack.unsafe_put(base + instr.a, res)
           end
         rescue ex : SchemeExecutionLimitError
           # Sandboxing budgets must never be interceptable by guard — always
-          # propagate, exactly like the tree-walker's own guard handling.
+          # propagate.
           raise ex
         rescue ex : SchemeError
           result = handle_guarded_error(ex)
@@ -643,12 +688,10 @@ module Scheme
     # Looks up the innermost installed guard, if any, and jumps execution
     # back to its clause-checking code — or re-raises for an outer
     # catcher/the VM's own caller if no guard is currently installed.
-    # Mirrors the tree-walker's GuardNode handling (same condition
-    # synthesis, same clause semantics — see compile_guard/
-    # compile_guard_clauses) but via an explicit handler stack instead of
+    # Implements guard's clause semantics (see compile_guard/
+    # compile_guard_clauses) via an explicit handler stack rather than
     # Crystal's own begin/rescue, since ordinary Scheme calls in this VM
-    # don't create new Crystal stack frames the way tree-walker recursion
-    # does.
+    # don't create new Crystal stack frames to hang a rescue off of.
     private def handle_guarded_error(ex : SchemeError) : SchemeValue?
       handler = @handlers.pop?
       unless handler
@@ -682,18 +725,14 @@ module Scheme
       val.is_a?(SchemeBool) && !val.value?
     end
 
-    # Mirrors eval_node.cr's PrimCallNode arm exactly (same helper calls,
-    # same bounds-check/error-message conventions) rather than routing
-    # through the generic Builtin/apply path (arity check, args-array
-    # alloc, call-stack frame push/pop) — that indirection is exactly what
-    # PrimCallNode fusion exists to skip in the tree-walker, and skipping
-    # it here matters just as much: an early side-channel benchmark of this
-    # VM (fib/sum-to/vector-sum-test, all arithmetic/comparison-heavy hot
-    # loops) came back SLOWER than the tree-walker specifically because
-    # this dispatch still went through `apply` — going through the same
-    # direct helpers the tree-walker uses closes most of that gap. `d`
-    # (the const-pool index of the original Builtin) is unused here now,
-    # kept only for a possible future error-message/introspection need.
+    # Calls the primitive's underlying helper directly (same bounds-check/
+    # error-message conventions the real builtin uses) rather than routing
+    # through the generic Builtin/apply path (arity check, args-array alloc,
+    # call-stack frame push/pop). That indirection is a real, measurable cost
+    # in arithmetic/comparison-heavy hot loops (fib/sum-to/vector-sum) — going
+    # straight to the direct helpers avoids it. `d` (the const-pool index of
+    # the original Builtin) is unused here now, kept only for a possible future
+    # error-message/introspection need.
     #
     # Add/Sub/Mul/comparisons additionally fast-path the SchemeInt/SchemeInt
     # case directly (computing on the raw Int64s, no proc/closure allocation
@@ -1045,9 +1084,25 @@ module Scheme
       frame.chunk.consts[idx].as(SchemeSym).name
     end
 
+    # Slow path shared by the fused unary prims (Op::Cxr/Op::Abs/Op::CmpZero):
+    # fall back to the original Builtin (const-pool index in operand `d`)
+    # applied to the source value (register `b`) via the generic apply path,
+    # which pushes a properly-named/positioned backtrace Frame and computes the
+    # exact result/error the builtin would — so fusing never changes behavior on
+    # the cases the fast path punts (non-pair for cxr; float/rational/overflow/
+    # non-number for abs/cmp-zero). Returns the builtin's value (which for the
+    # cxr non-pair case is always an error raise).
+    private def unary_prim_deopt(frame : CallFrame, instr : Instruction) : SchemeValue
+      builtin = frame.chunk.consts[instr.d]
+      src = @stack.unsafe_fetch(frame.base + instr.b)
+      pos = frame.chunk.positions[frame.ip - 1]?
+      @interp.current_pos = pos if pos
+      @interp.apply(builtin, [src] of SchemeValue, pos)
+    end
+
     # Inline-caches a GetGlobal site's resolved value keyed on the global
-    # env's version (mirrors GlobalRefNode's cache in the tree-walker) — a
-    # hot recursive call like `(fib (- n 1))` references the global `fib`
+    # env's version — a hot recursive call like `(fib (- n 1))` references
+    # the global `fib`
     # on every single invocation, so skipping the Env hash lookup while
     # nothing has (re)defined it at top level matters a lot in practice.
     private def get_global_cached(frame : CallFrame, instr_idx : Int32, const_idx : Int32) : SchemeValue
@@ -1133,11 +1188,10 @@ module Scheme
       @stack.unsafe_put(dst_base + fixed, rest_list)
     end
 
-    # Reconstructs a quasiquoted datum, mirroring eval_qq exactly (same
-    # QQConst/QQHole/QQList/QQVector/QQSpliceItem handling) except holes
-    # pull their pre-evaluated value from `@stack.unsafe_fetch(hole_base + idx)` (idx
-    # threaded through and returned alongside the built value) instead of
-    # calling eval_node against a live env — see compile_quasiquote/
+    # Reconstructs a quasiquoted datum from its QQTemplate (QQConst/QQHole/
+    # QQList/QQVector/QQSpliceItem), with each hole pulling its pre-evaluated
+    # value from `@stack.unsafe_fetch(hole_base + idx)` (idx threaded through
+    # and returned alongside the built value) — see compile_quasiquote/
     # compile_qq_holes for why the traversal order here must match exactly
     # how those compiled each hole into its own contiguous register.
     private def build_qq(t : QQTemplate, hole_base : Int32, idx : Int32) : {SchemeValue, Int32}
@@ -1208,9 +1262,9 @@ module Scheme
 
     # (parameterize ((param val)...) body...): for each pair, apply the
     # parameter's converter (if any) to val, save the CURRENT value, then
-    # set the new one — matching the tree-walker's two-pass order exactly
-    # (compute every converted newval first, THEN save, THEN assign) so a
-    # converter can't observe a partially-updated set of parameters.
+    # set the new one — a strict two-pass order (compute every converted
+    # newval first, THEN save, THEN assign) so a converter can't observe a
+    # partially-updated set of parameters.
     private def exec_param_push(base : Int32, instr : Instruction) : Nil
       count = instr.c
       param_base = base + instr.a
@@ -1300,15 +1354,13 @@ module Scheme
       # execute's loop, so index back one to find its recorded call-site
       # position (see compile_app — Op::Call/TailCall are the only ops that
       # currently thread a real one through; most instructions have nil
-      # here, which just leaves current_pos at whatever it was last set to,
-      # same as the tree-walker's own per-node current_pos updates).
+      # here, which just leaves current_pos at whatever it was last set to).
       pos = frame.chunk.positions[frame.ip - 1]?
       @interp.current_pos = pos if pos
       callee = callee.select_clause(nargs) if callee.is_a?(BytecodeCaseClosure)
       if callee.is_a?(BytecodeClosure)
-        # Tail calls reuse the current frame (@depth doesn't grow, matching
-        # the tree-walker's own trampoline never growing @eval_depth for a
-        # tail loop) — only a non-tail push can run away, so only THIS path
+        # Tail calls reuse the current frame (@depth doesn't grow for a tail
+        # loop) — only a non-tail push can run away, so only THIS path
         # needs the check. Without it, unbounded non-tail recursion just
         # grows @stack/@frames forever instead of raising a clean,
         # sandboxable error, exactly what max_eval_depth exists to prevent.
@@ -1327,8 +1379,8 @@ module Scheme
         bind_args(callee.chunk, nargs, new_base, @stack) { |i| @stack.unsafe_fetch(arg_base + i) }
         if tail
           # Collapse into the SAME interpreter frame if one's already
-          # installed for this activation (the common case — matches the
-          # tree-walker's tail-call frame collapsing); the two exceptions
+          # installed for this activation (the common case, so a tail loop
+          # shows one backtrace frame, not one per iteration); the two exceptions
           # with nothing yet to overwrite are VM#run's still-nameless
           # outermost activation, and VM#call's outermost activation (whose
           # frame belongs to Interpreter#apply, not us — pushing our OWN

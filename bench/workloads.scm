@@ -8,6 +8,10 @@
 ;   - list building + reverse + length (allocation, list traversal)
 ;   - vector fill + sum (mutable array access)
 ;   - string building via a string output port (growable-buffer writes)
+;   - tak: the Gabriel Takeuchi benchmark, triply-nested non-tail recursion
+;     over small integers (call dispatch + integer arithmetic, no allocation)
+;   - nqueens: backtracking search that conses a growing position list and
+;     walks it per candidate (recursion + allocation + list traversal together)
 ;
 ; This file has no (import ...) line of its own and is never run directly —
 ; it's just the workload definitions, spliced in via (include "workloads.scm")
@@ -43,3 +47,32 @@
       (if (= i n)
           (string-length (get-output-string port))
           (begin (write-string "x" port) (loop (+ i 1)))))))
+
+(define (tak x y z)
+  (if (not (< y x))
+      z
+      (tak (tak (- x 1) y z)
+           (tak (- y 1) z x)
+           (tak (- z 1) x y))))
+
+; Counts all solutions to the n-queens problem. `positions` is the list of
+; already-placed queens' columns, most recent (nearest row) first; `dist` is
+; the row distance from `col`'s row to the head of `positions`, so a diagonal
+; conflict is (= (abs (- placed-col col)) dist).
+(define (nqueens board-size)
+  (define (safe? col positions dist)
+    (cond ((null? positions) #t)
+          ((= (car positions) col) #f)
+          ((= (abs (- (car positions) col)) dist) #f)
+          (else (safe? col (cdr positions) (+ dist 1)))))
+  (define (place row positions)
+    (if (= row board-size)
+        1
+        (let loop ((col 0) (count 0))
+          (if (= col board-size)
+              count
+              (loop (+ col 1)
+                    (if (safe? col positions 1)
+                        (+ count (place (+ row 1) (cons col positions)))
+                        count))))))
+  (place 0 '()))

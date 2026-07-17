@@ -38,7 +38,9 @@
         (cons "sum-to" (lambda () (sum-to 2000000 0)))
         (cons "build-list" (lambda () (length (reverse (build-list 200000)))))
         (cons "vector-sum-test" (lambda () (vector-sum-test 500000)))
-        (cons "string-build-test" (lambda () (string-build-test 4000)))))
+        (cons "string-build-test" (lambda () (string-build-test 4000)))
+        (cons "tak" (lambda () (tak 18 12 6)))
+        (cons "nqueens" (lambda () (nqueens 9)))))
 
 (define target-seconds 1.5)
 (define step-interval 200)

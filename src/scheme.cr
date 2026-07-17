@@ -33,6 +33,7 @@ require "./scheme/modules/scheme/base/io"
 require "./scheme/modules/scheme/base/misc"
 require "./scheme/modules/scheme/base/bytevectors"
 require "./scheme/modules/scheme/base/exceptions"
+require "./scheme/modules/scheme/base/write"
 require "./scheme/modules/scheme/char"
 require "./scheme/modules/scheme/inexact"
 require "./scheme/modules/scheme/cxr"
@@ -64,6 +65,9 @@ require "./scheme/modules/creme/tui"
 require "./scheme/modules/creme/rfc8439"
 require "./scheme/modules/creme/http"
 require "./scheme/modules/creme/hash_table"
+require "./scheme/modules/creme/treelist"
+require "./scheme/modules/creme/introspection"
+require "./scheme/modules/creme/actor"
 # prof_vm.cr (the (creme prof-vm) cooperative sampler) has no native/
 # backtrace(3) dependency, so it's required unconditionally. prof_native.cr
 # (the (creme prof-native) SIGPROF sampler) has no backtrace(3) on musl

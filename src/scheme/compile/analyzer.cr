@@ -3,16 +3,14 @@
 # ===========================================================================
 #
 # `analyze` translates a parsed s-expression into the typed Node AST (ast.cr)
-# once, so `eval_node` need not re-parse it on every evaluation. It runs per
-# top-level form, against the live environment, because this interpreter's
-# special-form / macro / procedure disambiguation is dynamic (special forms are
-# shadowable bindings; macros are defined and used across forms).
+# once, so it need not be re-parsed on every evaluation. It runs per top-level
+# form, against the live environment, because this interpreter's special-form /
+# macro / procedure disambiguation is dynamic (special forms are shadowable
+# bindings; macros are defined and used across forms).
 #
 # Every form becomes a typed Node: a macro call is expanded here at analyze time
-# and re-analyzed in place; a malformed form becomes a ThrowNode that raises at
-# eval time. The only residual dynamism is a head that resolves to a macro only
-# at runtime (a computed head, or a macro defined after an enclosing lambda was
-# analyzed): that stays an AppNode and expands when reached (see eval_node.cr).
+# and re-analyzed in place (so the BytecodeCompiler and VM never see a macro);
+# a malformed form becomes a ThrowNode that raises only when reached at runtime.
 
 module Scheme
   # Compile-time macro environment: names bound to a Macro / SchemeSyntaxRules
@@ -780,11 +778,39 @@ module Scheme
       # global currently bound to a known builtin, at the exact arity that
       # builtin expects, inlines the op (see PrimCallNode). Guarded at runtime
       # against redefinition.
-      if head.is_a?(SchemeSym) && !scope.bound?(head.name) && (spec = PRIM_OPS[head.name]?) && args.size == spec[1]
-        b = env.get?(head.name)
-        return PrimCallNode.new(spec[0], head.name, args, b, form, form.pos) if b.is_a?(Builtin)
+      if head.is_a?(SchemeSym) && !scope.bound?(head.name)
+        if (spec = PRIM_OPS[head.name]?) && args.size == spec[1]
+          b = env.get?(head.name)
+          return PrimCallNode.new(spec[0], head.name, args, b, form, form.pos) if b.is_a?(Builtin)
+        elsif args.size == 1
+          # car/cdr/caar/.../cddddr — the whole (scheme cxr) accessor family
+          # fuses into one PrimOp::Cxr (the car/cdr chain rides in the emitted
+          # operand). Keyed on the RESOLVED builtin's name, not the call's head
+          # symbol, so a plain value alias fuses too: `(define first car)` binds
+          # `first` to the car builtin (name "car"), and `(first x)` then fuses
+          # exactly like `(car x)` — no separate alias table needed. The
+          # is-it-a-cxr-named-Builtin gate is both the redefinition guard (a
+          # user redefinition to a non-builtin won't fuse) and what limits this
+          # to real accessors (only cxr builtins have cxr-shaped names). The
+          # chain and profiler label come from the builtin's own name.
+          b = env.get?(head.name)
+          return PrimCallNode.new(PrimOp::Cxr, b.name, args, b, form, form.pos) if b.is_a?(Builtin) && cxr_name?(b.name)
+        end
       end
       AppNode.new(analyze(head, env, scope, form.pos), args, form, form.pos)
+    end
+
+    # A car/cdr composition name: `c`, one or more `a`/`d` letters, then `r`
+    # (car, cdr, caar, cadr, …, cddddr). Length isn't capped here — the
+    # is-it-a-bound-Builtin gate at the call site restricts fusion to accessors
+    # that actually exist.
+    private def cxr_name?(name : String) : Bool
+      return false unless name.size >= 3 && name.starts_with?('c') && name.ends_with?('r')
+      name.each_char_with_index do |letter, i|
+        next if i == 0 || i == name.size - 1
+        return false unless letter == 'a' || letter == 'd'
+      end
+      true
     end
 
     # Analyze a lambda/define body with `scope` extended by the params, rest,

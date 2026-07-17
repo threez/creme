@@ -80,7 +80,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_exceptions(env : Env) : Nil
+    private def install_exceptions(env : Env) : Array(String)
       register_module(Scheme::Builtins::Exceptions, env)
     end
   end

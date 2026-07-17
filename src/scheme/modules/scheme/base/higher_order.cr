@@ -1,5 +1,9 @@
 # ===========================================================================
-# (scheme base): higher-order procedures, environments, values, call/cc
+# (scheme base): higher-order procedures, values, call/cc
+#
+# eval/environment live in (scheme eval), null-environment/
+# scheme-report-environment in (scheme r5rs), and interaction-environment
+# in (scheme repl) — each defined in that library's own module file.
 # ===========================================================================
 
 module Scheme::Builtins::HigherOrder
@@ -38,53 +42,6 @@ module Scheme::Builtins::HigherOrder
     last = args[args.size - 1]
     call_args = middle + Scheme.list_to_a(last)
     interp.apply(f, call_args)
-  end
-
-  @[Scheme::SchemeFn("eval", min: 1, max: 2)]
-  def eval(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    target_env = args.size == 2 ? environment_specifier_arg(args[1], "eval") : interp.global
-    # Eval'd data has no enclosing lexical frame -> analyze with an empty scope.
-    BytecodeCompiler.run_program(interp, [args[0]], target_env)
-  end
-
-  # (environment list...) — a fresh, otherwise-empty Env populated by
-  # importing each list as an import set (the same grammar/mechanism
-  # eval_import uses for a program's own top-level import declarations).
-  # The resulting environment specifier's bindings are immutable in the
-  # sense that R7RS describes (this implementation doesn't separately
-  # enforce that; nothing here differs from any other Env in practice).
-  @[Scheme::SchemeFn("environment", min: 0, max: -1)]
-  def environment(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    target_env = Env.new
-    args.each { |import_set| interp.import_into(target_env, import_set) }
-    SchemeEnvironment.new(target_env)
-  end
-
-  # (null-environment version) — an environment with only the syntactic
-  # keywords bound, no procedures. `version` (5, matching R5RS) is
-  # accepted but otherwise unused, per R7RS's own description of this
-  # procedure existing for R5RS-compatibility purposes.
-  @[Scheme::SchemeFn("null-environment", min: 0, max: 1)]
-  def null_environment(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    target_env = Env.new
-    interp.install_special_forms(target_env)
-    SchemeEnvironment.new(target_env)
-  end
-
-  # (scheme-report-environment version) — an environment containing the
-  # R5RS-report bindings. This implementation doesn't maintain a
-  # separate R5RS-vs-R7RS binding set, so, like null-environment, this
-  # wraps @base_env (the same bindings (scheme base) itself wraps).
-  @[Scheme::SchemeFn("scheme-report-environment", min: 0, max: 1)]
-  def scheme_report_environment(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeEnvironment.new(interp.base_env)
-  end
-
-  # (interaction-environment) — a specifier for the environment a REPL
-  # would evaluate typed-in expressions against, i.e. @global itself.
-  @[Scheme::SchemeFn("interaction-environment", min: 0, max: 0)]
-  def interaction_environment(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeEnvironment.new(interp.global)
   end
 
   # (values x) is x itself, not a wrapped single-element SchemeValues —
@@ -142,7 +99,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_higher_order(env : Env) : Nil
+    private def install_higher_order(env : Env) : Array(String)
       register_module(Scheme::Builtins::HigherOrder, env)
     end
 

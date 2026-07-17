@@ -48,6 +48,19 @@ module Scheme
     Not
     IsNull
     IsPair
+    # a=dst, b=src register, c=a car/cdr chain encoded as a bitmap with a
+    # sentinel top bit (see bytecode_compiler.cr's cxr_code / vm.cr's Op::Cxr
+    # arm), d=const index of the underlying cxr builtin for the deopt-on-non-
+    # pair error path. Fuses the whole (scheme cxr) family — car/cdr/caar/
+    # cadr/.../cddddr — into this one instruction.
+    Cxr
+    # a=dst, b=src register, d=const index of the underlying builtin for the
+    # deopt path. Unary numeric prims that fast-path the common representation
+    # inline and deopt to their builtin for the rest (tower/overflow/error):
+    # Abs; CmpZero (operand c selects the test: 0 => zero?, 1 => positive?,
+    # 2 => negative?).
+    Abs
+    CmpZero
     # a=dst, b=src1 register, c=a raw Int32 immediate value (NOT a const-pool
     # index — b OP c directly) — the small-integer-literal-as-2nd-operand
     # specialization of the arithmetic/comparison ops just above (e.g. `(< n
@@ -207,10 +220,10 @@ module Scheme
     # dispatch — so the base op's hot dispatch arm is completely untouched
     # (this codebase already measured that even an always-false runtime
     # check added to that arm regresses it; see the execute/execute_sampled
-    # split's own comment above). Only the plain 2-arg path fuses this way
-    # for now; the Imm/Up/vector-family prim shapes still emit a separate
-    # trailing Return in tail position (deferred — this pass only targets
-    # the shape fib's own tail call needs).
+    # split's own comment above). Only the plain 2-arg path fuses this way;
+    # the Imm/Up/vector-family prim shapes still emit a separate trailing
+    # Return in tail position, since this fusion targets only the shape fib's
+    # own tail call needs.
     AddReturn
     SubReturn
     MulReturn
@@ -286,11 +299,11 @@ module Scheme
 
   # A single decoded bytecode instruction. `d`, when used (currently only by
   # the fused prim ops), is a const-pool index for the underlying Builtin to
-  # dispatch to — reusing the same builtin the tree-walker's PrimCallNode
-  # inlines from (ast.cr's PRIM_OPS), so arithmetic/vector/string/bytevector
-  # semantics and error messages stay identical without re-implementing them
-  # here. A later perf pass can fuse these into direct Crystal calls, the way
-  # eval_node.cr's PrimCallNode already does, bypassing Builtin#fn entirely.
+  # dispatch to (from ast.cr's PRIM_OPS), so arithmetic/vector/string/
+  # bytevector semantics and error messages stay identical without
+  # re-implementing them here. The hottest prim shapes (integer arithmetic,
+  # cxr) are further fused into direct Crystal calls in the VM dispatch loop,
+  # bypassing Builtin#fn entirely; the rest still go through exec_prim.
   struct Instruction
     getter op : Op
     getter a : Int32

@@ -5,8 +5,8 @@
 #
 # `profile`/`profile-top`/... wrap prof.cr's SIGPROF-based sampler, which
 # unwinds the raw native C stack on a signal. Since every Scheme call funnels
-# through the same handful of Crystal methods (Interpreter#eval_node_core,
-# #apply, ...), its frame names are Crystal internals, not Scheme function
+# through the same handful of Crystal methods (VM#execute, Interpreter#apply,
+# ...), its frame names are Crystal internals, not Scheme function
 # names — useful for finding hot spots in the *interpreter itself*, not in
 # the guest program. See prof_vm.cr for the other half of this pair — a
 # cooperative sampler that instead shows which SCHEME-level operation is hot.

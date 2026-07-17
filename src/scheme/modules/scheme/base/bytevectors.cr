@@ -230,7 +230,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_bytevectors(env : Env) : Nil
+    private def install_bytevectors(env : Env) : Array(String)
       register_module(Scheme::Builtins::Bytevectors, env)
     end
   end

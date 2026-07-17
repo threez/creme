@@ -13,4 +13,4 @@
 # under src/scheme/modules/scheme/, via a `register_library [...]` (or
 # block-form) call directly in that file's own class body — this file is
 # just the header comment for the group; there is no wiring method here
-# anymore (see builtin_registration.cr's `LIB_DECLS`/`macro finished`).
+# (see builtin_registration.cr's `LIB_DECLS`/`macro finished`).

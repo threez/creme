@@ -44,9 +44,18 @@
     any append-map cons* count delete delete!
     every exact->inexact filter filter-map float? foldl foldr
     inexact->exact iota last-pair partition print println
-    reduce)
+    reduce times)
   (import (scheme base) (scheme write))
   (begin
+    ;; (times n body ...) — run body n times, purely for its side effects
+    ;; (a fresh loop variable isn't bound the way `do` normally provides
+    ;; one, since callers using this just want repetition, not an index).
+    (define-syntax times
+      (syntax-rules ()
+        ((_ n body ...)
+         (do ((%times-i 0 (+ %times-i 1))) ((= %times-i n))
+           body ...))))
+
     (define (filter pred lst)
       (cond ((null? lst) '())
             ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))

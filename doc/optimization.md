@@ -37,13 +37,16 @@ the wins below are the story of closing that gap and then pulling clearly ahead.
 Every change in this document was accepted or rejected on measurement, not
 intuition. The methodology matters as much as the results:
 
-- **The workloads.** `bench/workloads.scm` defines five micro-benchmarks, each
+- **The workloads.** `bench/workloads.scm` defines seven micro-benchmarks, each
   chosen to stress a different hot path, run via `bench/creme.scm`:
   - `fib` — deep non-tail recursion + integer arithmetic
   - `sum-to` — tail-recursive accumulation (trampoline / TCO)
   - `build-list` — allocation + list traversal
   - `vector-sum` — mutable array access
   - `string-build` — growable-buffer writes
+  - `tak` — the Gabriel Takeuchi benchmark: triply-nested non-tail recursion
+  - `nqueens` — backtracking search: recursion + list allocation + `car`/`cdr`
+    traversal together
 - **Back-to-back A/B.** The only reliable comparison is: stash the change,
   rebuild, measure the baseline, restore the change, rebuild, measure — both
   within the same short window. Comparing a measurement taken now against one
@@ -179,6 +182,71 @@ doc comment there.
   `(+ (fib …) (fib …))` in tail position used to `Add` into a register, then
   `Return` it. These ops deliver the return value directly. `fib`'s "return"
   bucket was ~20% of dispatched instructions before this.
+
+- **The `cxr` accessor family as one prim** — `Op::Cxr`. `null?`/`pair?`/`cons`
+  were already prims, but `car`/`cdr` (and `caar`/`cadr`/…/`cddddr`) compiled to a
+  generic `CallGlobal`, so every `(car xs)` first staged `xs` into an argument
+  register with a `Move` and then paid full call dispatch. `nqueens`' `safe?`
+  inner loop is almost entirely `(car positions)`/`(cdr positions)`, and its
+  profile showed those `call` rows plus their `local-ref positions` (Move) rows
+  dominating. Rather than one opcode per accessor, a **single `Op::Cxr` encodes
+  the whole car/cdr chain as a bitmap** in its operand (1=car, 0=cdr, applied
+  LSB-first under a sentinel top bit — see `cxr_code`/`cxr_label`). Recognition
+  keys on the **resolved builtin's name**, not the call's head symbol: any call
+  whose head resolves to a cxr-named `Builtin` fuses, and the chain comes from
+  that builtin's name. This covers the whole family — `car`/`cdr`, the 2-level
+  `caar`/`cadr`/`cdar`/`cddr` (promoted from prelude closures to real
+  `(scheme base)` builtins), and the 3-/4-level `caaar`…`cddddr` — **and it makes
+  aliasing free**: because a plain `(define first car)` binds `first` to the `car`
+  builtin, `(first x)` fuses exactly like `(car x)` with no dedicated alias table
+  (this is how `first`/`second`/`third`/`rest` are now defined, replacing their
+  old wrapper closures). The VM walks the chain reading each pair straight from a
+  register (and, because a fused prim with a leaf local argument elides its
+  staging `Move` via `local_register_of?`, drops that Move too). The family was
+  historically excluded from prims because a non-pair must raise `car: expected
+  pair` *with its own backtrace frame* (a fused op pushes none) — resolved by
+  fast-pathing only the all-pairs case inline and **deopting to the real builtin
+  on the first non-pair** (via `@interp.apply`, which pushes the frame and
+  re-walks to raise at the same step), so the error message/frame/position stay
+  byte-identical (guarded by `spec/scheme/eval/backtrace_spec.cr`). Measured:
+  **`nqueens` ~0.050s → ~0.030s (about −40%)** back-to-back, with every other
+  workload flat; and a fused `cadr` now edges out an explicit `(car (cdr x))`
+  (one 2-step `Cxr` vs two ops), where the old prelude-closure `cadr` paid a full
+  call per access. Same append-only-arm and redefinition-safety rules as the
+  other prims (a shadowed/redefined accessor deopts at analyze time to a normal
+  call).
+
+- **`abs` and the sign predicates as unary numeric prims** — `Op::Abs` and
+  `Op::CmpZero`. `nqueens`' `safe?` still showed `(abs …)` as the one remaining
+  generic `call` in its loop; and `zero?`/`positive?`/`negative?` were prelude
+  closures (literally `(= n 0)` etc.), paying a closure call each. `Op::Abs`
+  fast-paths a non-`INT64_MIN` integer inline; `Op::CmpZero` (operand `c` selects
+  `zero?`/`positive?`/`negative?`) fast-paths int and float. Both deopt to the
+  real builtin for the rest (float/rational/overflow/error), same
+  frame-preserving pattern as `Cxr` (they share `unary_prim_deopt`). The sign
+  predicates were also promoted from prelude closures to real builtins (via the
+  same `num_chain` the `=`/`>`/`<` builtins use, so tower semantics are identical)
+  so the fusion has a `Builtin` to key on and to back first-class/deopt use.
+  Measured: **`nqueens` ~0.030s → ~0.024s** (a further ~20%; ~53% under the
+  original tree-through-`CallGlobal` baseline), and `zero?`/`positive?`/`abs`
+  loops each **~2× faster** (~1.5s → ~0.8s on 20M iterations), every other
+  workload flat.
+
+- **Folding `not` in test position** — not a new op, a codegen rewrite in
+  `compile_if`/`compile_when`. `(if (not X) a b)` ≡ `(if X b a)` exactly (both
+  only consult the test's truthiness), so `peel_not` strips leading `not`
+  wrappers from an if/when test and inverts the branch sense (each `not` toggles
+  it; for `when`/`unless` it flips the negate flag). This drops the `not`
+  instruction entirely, and — crucially — lets the now-unwrapped inner
+  comparison fuse into a single compare-and-branch. `tak`'s inner test is
+  `(not (< y x))`, which the profile showed as three separate hot instructions
+  (`<` materializing a boolean, `not` inverting it, `if` testing it — together
+  ~43% of samples); it now compiles to one `TestLt` with swapped targets.
+  Only genuine `PrimOp::Not` nodes peel, so a shadowed/redefined `not` is
+  untouched, and double negation cancels (`(not (not X))` → `X`). Measured
+  back-to-back (same session): **`tak` 0.00355s → 0.00278s (~22%)**, other
+  workloads unaffected (codegen is byte-identical for a test with no leading
+  `not`).
 
 **An invariant this exposed.** Crystal compiles a `case`/`when` over an enum to a
 *sequential comparison chain*, not a jump table. So inserting a new dispatch arm

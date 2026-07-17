@@ -1,37 +1,14 @@
 # ===========================================================================
-# (scheme base) / (scheme write): I/O, ports, string ports
+# (scheme base): I/O, ports, string ports
 # ===========================================================================
+#
+# (scheme write)'s display/write/write-simple/write-shared live in
+# Scheme::Builtins::WriteLibrary (base/write.cr); `read` lives in
+# Scheme::Builtins::ReadLibrary ((scheme read), modules/scheme/read.cr).
 
 module Scheme::Builtins::Io
   extend self
   include Scheme::BuiltinHelpers
-
-  @[Scheme::SchemeFn("display", min: 1, max: 2)]
-  def display(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    interp.emit(args[0].display_string, args[1]?, "display")
-    NIL.as(SchemeValue)
-  end
-
-  @[Scheme::SchemeFn("write", min: 1, max: 2)]
-  def write(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    interp.emit(args[0].write_string, args[1]?, "write")
-    NIL.as(SchemeValue)
-  end
-
-  # write-simple never emits datum labels for shared/circular structure —
-  # since plain write here doesn't emit them either, this is currently a
-  # faithful alias.
-  @[Scheme::SchemeFn("write-simple", min: 1, max: 2)]
-  def write_simple(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    interp.emit(args[0].write_string, args[1]?, "write-simple")
-    NIL.as(SchemeValue)
-  end
-
-  @[Scheme::SchemeFn("write-shared", min: 1, max: 2)]
-  def write_shared(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    interp.emit(write_shared_string(args[0]), args[1]?, "write-shared")
-    NIL.as(SchemeValue)
-  end
 
   @[Scheme::SchemeFn("newline", min: 0, max: 1)]
   def newline(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
@@ -64,20 +41,6 @@ module Scheme::Builtins::Io
     io = p.io
     raise SchemeRuntimeError.new("get-output-string: expected a string output port") unless io.is_a?(IO::Memory)
     SchemeStr.new(io.to_s).as(SchemeValue)
-  end
-
-  # Reads and parses exactly one datum from a port, advancing the
-  # port's position past it — subsequent `read` calls on the same port
-  # continue from where this one left off. Ports don't natively support
-  # incremental (partial) Scheme-level reading, so this buffers the
-  # port's remaining unread bytes, tokenizes/parses just the first
-  # form, then rewrites the port's backing IO::Memory to contain only
-  # what's left over after that form — a full re-tokenize per call, but
-  # correct and simple, and read is not a hot-path procedure.
-  @[Scheme::SchemeFn("read", min: 0, max: 1)]
-  def read(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    p = interp.input_port_arg(args[0]?, "read")
-    read_one_form(p)
   end
 
   @[Scheme::SchemeFn("port?", min: 1, max: 1)]
@@ -179,7 +142,7 @@ end
 
 module Scheme
   class Interpreter
-    private def install_io(env : Env) : Nil
+    private def install_io(env : Env) : Array(String)
       # current-*-port are real R7RS parameter objects (not zero-arg
       # builtins) — bound directly so both `(current-output-port)` (apply
       # on a SchemeParameter returns .value, see apply) and

@@ -11,9 +11,9 @@ private def w(src : String) : String
 end
 
 describe "Appendix A Standard Libraries" do
-  it "(scheme base) imports and every SCHEME_BASE_EXPORTS name is bound in @global" do
+  it "(scheme base) imports and every (scheme base) export is bound in @global" do
     interp = Scheme::Interpreter.new
-    Scheme::Interpreter::SCHEME_BASE_EXPORTS.each do |name|
+    interp.library_export_names(["scheme", "base"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
   end
@@ -21,7 +21,7 @@ describe "Appendix A Standard Libraries" do
   it "(scheme write) imports and exports display/write" do
     w("(import (scheme write)) (+ 1 1)").should eq("2")
     interp = Scheme::Interpreter.new
-    Scheme::Interpreter::SCHEME_WRITE_EXPORTS.each do |name|
+    interp.library_export_names(["scheme", "write"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
   end

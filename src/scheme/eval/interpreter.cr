@@ -43,9 +43,8 @@ module Scheme
 
     # Restricts which libraries (import ...) may resolve, by space-joined
     # name (e.g. "creme sql" for (creme sql), "scheme base" for (scheme
-    # base)) — nil (the default) means unrestricted. Renamed from the
-    # require-era allowed_modules (a bare module-name allowlist) now that
-    # import/library names are the unit of access control.
+    # base)) — nil (the default) means unrestricted. Library names are the
+    # unit of access control.
     property allowed_libraries : Array(String)?
 
     # Directories searched (in order) for a "#{a}/#{b}/#{c}.sld" file when
@@ -158,13 +157,15 @@ module Scheme
       @current_output_port = SchemeParameter.new(SchemePort.new(@stdout, false, true))
       @current_input_port = SchemeParameter.new(SchemePort.new(@stdin, true, false))
       @current_error_port = SchemeParameter.new(SchemePort.new(@stderr, false, true))
-      install_builtins(@base_env)
-      install_bytevectors(@base_env)
-      install_exceptions(@base_env)
+      base_names = install_builtins(@base_env)
+      base_names.concat(install_bytevectors(@base_env))
+      base_names.concat(install_exceptions(@base_env))
+      write_names = install_write(@base_env)
       install_special_forms(@base_env)
       load_prelude
-      install_base_and_write_libraries
+      install_base_and_write_libraries(base_names, write_names)
       install_all_libraries
+      install_cxr_conveniences
       # Special forms (if/define/import/...) must always be visible so a
       # program can even parse far enough to reach its own `import`
       # statement — these are syntactic keywords, not (scheme base)
@@ -176,6 +177,90 @@ module Scheme
           library = @libraries[name]
           SchemeLibrary.import_bindings(@global, library.exports.map { |external, internal| {external, library, internal} })
         end
+      end
+    end
+
+    # Read-only view of the registered libraries, keyed by their dotted name
+    # (e.g. ["creme", "sql"]) — needed so a spawned actor's own Interpreter
+    # (see `initialize(inherit_from:)` below) can start from the same set of
+    # already-loaded libraries as its parent instead of re-registering
+    # everything.
+    getter libraries : Hash(Array(String), SchemeLibrary)
+
+    # Lightweight constructor for a spawned actor's own Fiber (see (creme
+    # actor)'s `spawn`): gets its own independent per-fiber execution state —
+    # required since eval-depth/step-count/call-stack bookkeeping (and
+    # Interpreter.current's Fiber-keyed stack) assumes exactly one Fiber ever
+    # touches a given Interpreter instance. Skips the normal constructor's
+    # install_builtins/load_prelude/install_all_libraries work entirely,
+    # since @base_env/@global/@libraries are inherited rather than rebuilt.
+    #
+    # @base_env is shared with the parent by literal reference — safe since
+    # nothing mutates it once the root Interpreter's constructor finishes
+    # (every `define` into it happens during `install_builtins`/etc., before
+    # any actor can exist to spawn concurrently against it), so concurrent
+    # reads from multiple actor Fibers need no lock.
+    #
+    # @global and @libraries are NOT shared by reference — each actor gets
+    # its own private overlay so its own top-level `define`/`set!`/`import`
+    # can never race with a sibling actor's (or the parent's) writes into the
+    # same underlying Hash. @global is a fresh child Env whose parent is the
+    # spawning interpreter's own @global: `Env#get`/`get?` fall through the
+    # chain, so every binding visible at spawn time (helper functions, record
+    # types, ...) is still visible to the actor, but a `define` the actor
+    # makes lands only in its own frame, never the shared one. @libraries is
+    # a shallow `dup` of the parent's table for the same reason — the
+    # loaded SchemeLibrary values themselves stay shared (a library's own Env
+    # is fixed once its body has finished loading), only the "which names are
+    # loaded" table needs to be a private copy so a first-time `(import ...)`
+    # in one actor doesn't mutate every other actor's view of it.
+    def initialize(inherit_from parent : Interpreter)
+      @max_eval_depth = parent.max_eval_depth
+      @max_steps = parent.max_steps
+      @allowed_libraries = parent.allowed_libraries
+      @library_search_path = parent.library_search_path
+      @stdout = parent.stdout
+      @stdin = parent.stdin
+      @stderr = parent.stderr
+      @base_env = parent.base_env
+      @global = Env.new(parent.global)
+      @libraries = parent.libraries.dup
+      @load_dirs = parent.load_dirs.dup
+      @libraries_loading = Set(Array(String)).new
+      @eval_depth = 0
+      @step_count = 0
+      @gensym_counter = 0
+      @cc_tag_counter = 0_i64
+      @live_continuation_tags = Set(Int64).new
+      @call_stack = [] of Frame
+      @current_pos = nil.as(SourcePos?)
+      @sample_interval = nil.as(Int32?)
+      @sample_countdown = 0
+      @sample_counts = {} of SampleKey => Int32
+      @start_instant = Time.instant
+      @exception_handlers = [] of SchemeValue
+      @analyzing_macros = MacroEnv.new
+      @macro_expand_depth = 0
+      @current_output_port = SchemeParameter.new(SchemePort.new(@stdout, false, true))
+      @current_input_port = SchemeParameter.new(SchemePort.new(@stdin, true, false))
+      @current_error_port = SchemeParameter.new(SchemePort.new(@stderr, false, true))
+    end
+
+    # @base_env conveniences that aren't (scheme base) exports but have always
+    # been available unprefixed (REPL / auto_import_base). Kept here rather than
+    # as prelude closures so they resolve to real builtins and therefore fuse
+    # into Op::Cxr (the analyzer fuses a call whose head resolves to a cxr-named
+    # builtin — see analyzer.cr):
+    #   - caddr/cdddr/cadddr: the real (scheme cxr) builtins, copied from that
+    #     library (single source of truth — not reimplemented in base).
+    #   - first/second/third/rest: plain value aliases; because fusion keys on
+    #     the resolved builtin's name, `(define first car)` makes `(first x)`
+    #     fuse exactly like `(car x)` with no dedicated alias machinery.
+    private def install_cxr_conveniences : Nil
+      cxr_env = @libraries[["scheme", "cxr"]].env
+      %w[caddr cdddr cadddr].each { |name| @base_env.define(name, cxr_env.get(name)) }
+      {"first" => "car", "second" => "cadr", "third" => "caddr", "rest" => "cdr"}.each do |alias_name, target|
+        @base_env.define(alias_name, @base_env.get(target))
       end
     end
 
@@ -198,6 +283,14 @@ module Scheme
       SPECIAL_FORM_NAMES.each { |name| env.define(name, SchemeSpecialForm.new(name)) }
     end
 
+    # The external export names of a registered library — for tests/tools
+    # that want to enumerate what a library provides now that these lists are
+    # derived (from each library's own annotated modules) rather than held in
+    # a hand-maintained SCHEME_*_EXPORTS constant.
+    def library_export_names(name : Array(String)) : Array(String)
+      @libraries[name].exports.keys
+    end
+
     # Safe-by-default entry point for embedding untrusted/semi-trusted guest
     # code: denies all library imports and captures stdout/stdin unless told
     # otherwise, so a host can't accidentally embed a wide-open interpreter
@@ -205,11 +298,11 @@ module Scheme
     # (read-line) can't block on the host's real terminal input.
     # auto_import_base defaults to false here (unlike Interpreter.new) so
     # "denies all library imports" is actually true: auto-import binds
-    # (scheme base)/(scheme write)/(creme extra) into @global at
-    # construction, bypassing allowed_libraries entirely (see
-    # AUTO_IMPORTED_LIBRARIES in modules/scheme/base.cr) — leaving it
-    # true here would silently hand guest code a working base environment
-    # no matter what allowed_libraries said.
+    # (scheme base)/(scheme write) into @global at construction, bypassing
+    # allowed_libraries entirely (see AUTO_IMPORTED_LIBRARIES in
+    # modules/scheme/base.cr) — leaving it true here would silently hand
+    # guest code a working base environment no matter what allowed_libraries
+    # said.
     def self.sandboxed(
       allowed_libraries : Array(String) = [] of String,
       max_steps : Int32? = 100_000,
@@ -226,26 +319,44 @@ module Scheme
 
     # ---- Backtrace support ----------------------------------------------------
 
-    @@current_stack = [] of Interpreter
+    # Keyed by Fiber so concurrent actor fibers (each running their own
+    # Interpreter/VM) don't corrupt each other's push/pop history — only one
+    # Fiber ever touches a given key's array, but many fibers may be pushing
+    # to their own arrays at once.
+    @@current_stacks = {} of Fiber => Array(Interpreter)
 
     # The interpreter instance whose eval() call chain is currently active on
     # this fiber, if any — used so a SchemeError can eagerly capture a
     # backtrace at construction time without every raise site needing a
     # reference to the interpreter.
     def self.current : Interpreter?
-      @@current_stack.last?
+      @@current_stacks[Fiber.current]?.try(&.last?)
     end
 
     def self.push_current(interp : Interpreter) : Nil
-      @@current_stack << interp
+      (@@current_stacks[Fiber.current] ||= [] of Interpreter) << interp
     end
 
     def self.pop_current : Nil
-      @@current_stack.pop?
+      stack = @@current_stacks[Fiber.current]?
+      return unless stack
+      stack.pop?
+      @@current_stacks.delete(Fiber.current) if stack.empty?
     end
 
     def call_stack_snapshot : Array(Frame)
       @call_stack.dup
+    end
+
+    # Lets Interpreter#apply push/pop a Frame onto whichever Interpreter is
+    # actually active on this fiber (see apply's own doc comment), which
+    # isn't necessarily `self` from that method's own point of view.
+    def push_frame(f : Frame) : Nil
+      @call_stack << f
+    end
+
+    def pop_frame : Nil
+      @call_stack.pop
     end
 
     def current_pos : SourcePos?
@@ -256,11 +367,9 @@ module Scheme
       @current_pos = pos
     end
 
-    # The register VM's own equivalent of eval_node's Frame push/pop around
-    # each call (see eval/vm.cr's exec_call/deliver_return) — exposed
-    # publicly since the VM is a separate class from Interpreter, unlike
-    # the tree-walker's own apply/eval_node which push/pop @call_stack
-    # directly as instance methods of this same class.
+    # Pushes/pops an Interpreter::Frame around each call for backtraces (see
+    # eval/vm.cr's exec_call/deliver_return) — exposed publicly since the VM
+    # is a separate class from Interpreter and drives @call_stack from there.
     def push_frame(name : String, pos : SourcePos?) : Nil
       @call_stack << Frame.new(name, pos)
     end
@@ -270,9 +379,7 @@ module Scheme
     end
 
     # Overwrites the top frame in place — backs tail-call collapsing (a
-    # self-tail-recursive loop of N iterations shows up as ONE frame, not
-    # N), matching eval_node_core's own `@call_stack[-1] = Frame.new(...)`
-    # for a tail call.
+    # self-tail-recursive loop of N iterations shows up as ONE frame, not N).
     def set_top_frame(name : String, pos : SourcePos?) : Nil
       @call_stack[-1] = Frame.new(name, pos) unless @call_stack.empty?
     end
@@ -310,10 +417,10 @@ module Scheme
     # mean == interval), not fixed — a recursive function's body dispatches
     # the same sequence of instructions in the same order on every call, so a
     # fixed step interval can alias with that period and always land on the
-    # same phase (confirmed on the tree-walker's equivalent sampler: a fixed
-    # interval of 50 reported 100% of samples on the one node type that
-    # happened to line up with the stride, while an interval of 1, or a
-    # jittered interval, both reproduce the expected proportional breakdown).
+    # same phase (a fixed interval of 50 can report 100% of samples on the one
+    # instruction that happens to line up with the stride, while an interval of
+    # 1, or a jittered interval, both reproduce the expected proportional
+    # breakdown).
     # This is the same aliasing hazard any fixed-rate sampler faces against a
     # periodic signal; jittering the phase is the standard fix.
 
@@ -381,8 +488,16 @@ module Scheme
       name, instruction = if tag = chunk.sample_tags[ip]?
                             {tag[1], tag[0]}
                           else
-                            label = Interpreter.op_label(chunk.instructions[ip].op)
-                            {label, label}
+                            instr = chunk.instructions[ip]
+                            if instr.op == Op::Cxr
+                              # Untagged Op::Cxr: decode its bitmap operand back
+                              # into the accessor name so the expression column
+                              # still shows car/cdr/caar/… under the "cxr" op.
+                              {Interpreter.cxr_label(instr.c), "cxr"}
+                            else
+                              label = Interpreter.op_label(instr.op)
+                              {label, label}
+                            end
                           end
       {name, instruction, pos.try(&.file), pos.try(&.line)}
     end
@@ -392,28 +507,45 @@ module Scheme
     # Crystal enum member name — used as both the name and instruction
     # columns for any instruction BytecodeCompiler didn't tag more
     # specifically (see Chunk#sample_tags).
+    # Decode an Op::Cxr bitmap operand back into its accessor name, the inverse
+    # of bytecode_compiler.cr's cxr_code: bits are innermost-first (1=car/a,
+    # 0=cdr/d) below a sentinel top bit, so reading LSB→MSB yields the letters
+    # right-to-left; reverse them for the c…r spelling (e.g. 0b1100 → "caddr").
+    def self.cxr_label(code : Int32) : String
+      letters = [] of Char
+      c = code
+      while c > 1
+        letters << ((c & 1) == 1 ? 'a' : 'd')
+        c >>= 1
+      end
+      "c#{letters.reverse.join}r"
+    end
+
     # ameba:disable Metrics/CyclomaticComplexity
     def self.op_label(op : Op) : String
       case op
-      when Op::Add    then "+"
-      when Op::Sub    then "-"
-      when Op::Mul    then "*"
-      when Op::NumLt  then "<"
-      when Op::NumLe  then "<="
-      when Op::NumGt  then ">"
-      when Op::NumGe  then ">="
-      when Op::NumEq  then "="
-      when Op::VecRef then "vector-ref"
-      when Op::VecSet then "vector-set!"
-      when Op::VecLen then "vector-length"
-      when Op::StrRef then "string-ref"
-      when Op::StrSet then "string-set!"
-      when Op::BvRef  then "bytevector-u8-ref"
-      when Op::BvSet  then "bytevector-u8-set!"
-      when Op::Cons   then "cons"
-      when Op::Not    then "not"
-      when Op::IsNull then "null?"
-      when Op::IsPair then "pair?"
+      when Op::Add     then "+"
+      when Op::Sub     then "-"
+      when Op::Mul     then "*"
+      when Op::NumLt   then "<"
+      when Op::NumLe   then "<="
+      when Op::NumGt   then ">"
+      when Op::NumGe   then ">="
+      when Op::NumEq   then "="
+      when Op::VecRef  then "vector-ref"
+      when Op::VecSet  then "vector-set!"
+      when Op::VecLen  then "vector-length"
+      when Op::StrRef  then "string-ref"
+      when Op::StrSet  then "string-set!"
+      when Op::BvRef   then "bytevector-u8-ref"
+      when Op::BvSet   then "bytevector-u8-set!"
+      when Op::Cons    then "cons"
+      when Op::Not     then "not"
+      when Op::IsNull  then "null?"
+      when Op::IsPair  then "pair?"
+      when Op::Cxr     then "cxr"
+      when Op::Abs     then "abs"
+      when Op::CmpZero then "cmp-zero"
       when Op::Call, Op::TailCall
         "call"
       when Op::Closure, Op::MakeCaseClosure
@@ -434,15 +566,31 @@ module Scheme
 
     # ---- Application ----------------------------------------------------------
 
+    # `active` is whichever Interpreter's VM call is actually running on
+    # THIS fiber right now — NOT necessarily `self`. A builtin's own
+    # `interp` parameter is captured once, when the Builtin closure was
+    # registered into @global (see builtin_registration.cr's
+    # register_module) — normally that's harmless since there's only ever
+    # one Interpreter instance in play, so `self` and Interpreter.current
+    # always agree. But (creme actor) actors are separate Interpreter
+    # instances that deliberately SHARE @global by reference (see
+    # Interpreter#initialize(inherit_from:)), so a builtin like map/
+    # for-each/apply calling `interp.apply(f, ...)` with its stale captured
+    # `interp` would otherwise push the WRONG Interpreter's VM onto this
+    # fiber's Interpreter.current stack — corrupting actor-context
+    # resolution (self/receive!/monitor/...) for any code nested inside
+    # that call. Falls back to `self` if nothing is active yet (e.g. apply
+    # called directly from Crystal, outside any VM call).
     def apply(callee : SchemeValue, args : Array(SchemeValue), pos : SourcePos? = nil) : SchemeValue
+      active = Interpreter.current || self
       case callee
       when Builtin
         check_arity(callee, args)
-        @call_stack << Frame.new(callee.name, pos)
+        active.push_frame(Frame.new(callee.name, pos))
         begin
           callee.fn.call(args)
         ensure
-          @call_stack.pop
+          active.pop_frame
         end
       when BytecodeClosure
         # Bridges a builtin (map, for-each, sort, apply, ...) calling back
@@ -454,19 +602,19 @@ module Scheme
         # already covered by this frame (see CallFrame#has_interp_frame),
         # so a later self-tail-call from THIS closure correctly overwrites
         # it instead of leaving it doubled up.
-        @call_stack << Frame.new(callee.chunk.name, pos)
+        active.push_frame(Frame.new(callee.chunk.name, pos))
         begin
-          VM.new(self, callee.root_env).call(callee, args)
+          VM.new(active, callee.root_env).call(callee, args)
         ensure
-          @call_stack.pop
+          active.pop_frame
         end
       when BytecodeCaseClosure
         clause = callee.select_clause(args.size)
-        @call_stack << Frame.new(clause.chunk.name, pos)
+        active.push_frame(Frame.new(clause.chunk.name, pos))
         begin
-          VM.new(self, clause.root_env).call(clause, args)
+          VM.new(active, clause.root_env).call(clause, args)
         ensure
-          @call_stack.pop
+          active.pop_frame
         end
       when Macro
         raise SchemeRuntimeError.new("macro cannot be applied as a procedure: #{callee.name}")
@@ -524,7 +672,7 @@ module Scheme
     end
 
     # Expand a defmacro call: bind the unevaluated arg forms to the macro's
-    # params and run its body (analyze + eval_node each form), returning the
+    # params and run its body (compile + run each form), returning the
     # expansion.
     def expand_defmacro(macro_def : Macro, form : Cons) : SchemeValue
       arg_forms = [] of SchemeValue
@@ -556,11 +704,10 @@ module Scheme
       {name.name, Macro.new(params, rparam, body, env, name.name)}
     end
 
-    # Picks the first clause whose arity accepts `argc` — an exact match for
-    # a fixed-arity clause (no rest param), or argc >= params.size for a
-    # clause with one. Shared by apply's non-tail CaseLambda arm and
-    # eval_node's AppNode tail-call arm, so both dispatch identically.
-    # Returns {params, rest}
+    # Parses a lambda formals spec into {fixed params, rest param (or nil)}:
+    # a bare symbol is full-variadic (all args in rest), a proper list is
+    # fixed-arity, an improper/dotted list is fixed params plus a rest.
+    # Shared by the analyzer (lambda/let/named-let) and build_macro.
     def parse_formals(spec : SchemeValue) : {Array(String), String?}
       params = [] of String
       rest : String? = nil
