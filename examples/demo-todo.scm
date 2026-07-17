@@ -1,4 +1,4 @@
-(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme sql) (creme dao))
+(import (scheme base) (scheme write) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme json-builder) (creme string) (creme sql) (creme dao))
 
 ;; Storage: SQLite, in-memory (no file to clean up). The `todo` table and its
 ;; CRUD are one declarative (creme dao) form -- no SQL/(creme sxql) call
@@ -18,15 +18,18 @@
 
 ;; Built with html! instead of html->string: the <li>/<form>/<button>
 ;; skeleton here folds into precomputed string chunks at compile time: only
-;; `id`/`done`/the title actually get rendered per row at runtime.
+;; `id`/`done`/the title actually get rendered per row at runtime. Action
+;; URLs are built with (creme path)'s path macro instead of hand-written
+;; string-append -- (path 'todos id 'complete) folds the same way, down to
+;; the same (string-append "/todos/" (number->string id) "/complete").
 (define (todo-row->string row)
   (define id (dao-ref row 'id))
   (define done (= (dao-ref row 'done) 1))
   (html! `(li (@ (class ,(if done "done" "pending")))
-              (form (@ (method "post") (action ,(string-append "/todos/" (number->string id) "/complete")) (class "toggle"))
+              (form (@ (method "post") (action ,(path 'todos id 'complete)) (class "toggle"))
                     (button (@ (type "submit")) ,(if done "Undo" "Done")))
               (span (@ (class "title")) ,(dao-ref row 'title))
-              (form (@ (method "post") (action ,(string-append "/todos/" (number->string id) "/delete")) (class "delete"))
+              (form (@ (method "post") (action ,(path 'todos id 'delete)) (class "delete"))
                     (button (@ (type "submit")) "Delete")))))
 
 ;; Built with (creme css)'s css! instead of a hand-written string: nesting
@@ -78,11 +81,33 @@
 
 (define (page-response) (surf-html write-page!))
 
+;; One row's JSON shape; (todos-json) joins every row's rendered JSON with
+;; "," and wraps the joined blob as a single array item -- the same
+;; per-row-string-then-splice pattern write-page! already uses for HTML,
+;; so no ,@-splicing machinery is needed in (creme json-builder) itself.
+(define (todo->json-node row)
+  `(object (id ,(dao-ref row 'id)) (title ,(dao-ref row 'title))
+           (done ,(if (= (dao-ref row 'done) 1) #t #f))))
+
+(define (todos-json)
+  (json! `(array (raw ,(string-join (map (lambda (row) (json->string (todo->json-node row))) (todo-all)) ",")))))
+
 ;; Whole app's routing table as one declarative form: each clause is
-;; (method path (request) body ...), registered onto a fresh router.
+;; (method path (request) body ...), registered onto a fresh router. "/"
+;; is content-negotiated via surf-accept: text/html is checked FIRST, so a
+;; browser whose Accept header contains both "text/html" and a "*/*"
+;; fallback (or a browser extension that broadens Accept to include
+;; application/json) still gets the HTML page rather than JSON -- surf-
+;; accepts? treats "*/*" as matching any clause, so whichever clause is
+;; listed first wins a "*/*" request; a real content-type mismatch (an
+;; Accept header naming neither) is a 406, not a silent HTML fallback.
 (define router
   (surf
-   (get "/" (request) (page-response))
+   (get "/" (request)
+     (surf-accept request
+       ("text/html" (page-response))
+       ("application/json" (surf-json (todos-json)))
+       (else (surf-text "Not Acceptable: this route serves text/html or application/json" 406))))
 
    (post "/todos" (request)
      (add-todo! (cdr (assoc "title" (surf-form request))))

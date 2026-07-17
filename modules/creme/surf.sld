@@ -95,6 +95,14 @@
 ;;                                      redirect-after-POST), a Location
 ;;                                      header, empty body.
 ;;   (surf-redirect location status) -> same, explicit status.
+;;   (surf-json body)                -> 200, application/json. `body` is
+;;                                      either a string/procedure (used
+;;                                      as-is, e.g. the result of
+;;                                      json->string/json!/json-write!) or
+;;                                      a live (creme json-builder) node,
+;;                                      auto-rendered via json->string if
+;;                                      so.
+;;   (surf-json body status)         -> same, explicit status.
 ;;   (surf-normalize-response value) -> `value` unchanged if it's already a
 ;;                                      response alist (has a "status"
 ;;                                      entry); (surf-html value) if it's a
@@ -133,6 +141,40 @@
 ;;                                      submitted form field by the same
 ;;                                      name.
 ;;
+;; ---- content negotiation --------------------------------------------------
+;;
+;;   (surf-accept request clause ...) -> a match-inspired syntax-rules
+;;                                      macro (see (creme match)'s own
+;;                                      literal-else convention) for
+;;                                      choosing a response by the
+;;                                      request's Accept header:
+;;
+;;     (surf-accept request
+;;       ("application/json" (surf-json (todos-json)))
+;;       (else (page-response)))
+;;
+;;                                      Each clause's media-type is an
+;;                                      ordinary string expression (not
+;;                                      pattern-matched structurally —
+;;                                      `else` is the only real literal),
+;;                                      checked in order via
+;;                                      surf-accepts? (below); the first
+;;                                      matching clause's body runs. With
+;;                                      no clause matching and no `else`,
+;;                                      responds 406 (Not Acceptable) via
+;;                                      surf-text — a real HTTP fallback,
+;;                                      not an error.
+;;   (surf-accepts? request media-type) -> #t if the request has no Accept
+;;                                      header, the header contains
+;;                                      "*/*", or the header contains
+;;                                      media-type as a substring —
+;;                                      deliberately simple substring
+;;                                      matching, not full RFC 7231
+;;                                      quality-value parsing (a known
+;;                                      simplification, same spirit as
+;;                                      surf-form's own documented
+;;                                      omissions).
+;;
 ;; Not covered: query-string parsing. (creme mux)'s request alist never
 ;; receives the request's raw query string from Crystal's HTTP::Request in
 ;; the first place (see mux.cr/request_to_scheme) — there's nothing in pure
@@ -146,10 +188,11 @@
 
 (define-library (creme surf)
   (export surf surf-app surf-route! surf-normalize-response
-          surf-response surf-text surf-html surf-redirect
+          surf-response surf-text surf-html surf-redirect surf-json
           surf-method surf-path surf-body surf-header surf-path-param
-          surf-url-decode surf-form surf-param)
-  (import (scheme base) (scheme write) (creme mux) (creme html) (creme string))
+          surf-url-decode surf-form surf-param
+          surf-accept surf-accepts?)
+  (import (scheme base) (scheme write) (creme mux) (creme html) (creme json-builder) (creme string))
   (begin
     ;; ---- routing --------------------------------------------------------
 
@@ -196,6 +239,11 @@
       (surf-response (if (pair? opt) (car opt) 303)
                      (list (cons "Location" location))
                      ""))
+
+    (define (surf-json body . opt)
+      (surf-response (if (pair? opt) (car opt) 200)
+                     (list (cons "content-type" "application/json"))
+                     (if (or (string? body) (procedure? body)) body (json->string body))))
 
     ;; #f the moment `v` isn't shaped like a response alist: a (name . value)
     ;; pair list with a "status" entry somewhere in it.
@@ -255,4 +303,19 @@
       (let ((path-value (surf-path-param request name)))
         (if path-value
             path-value
-            (surf-alist-ref (surf-form request) name))))))
+            (surf-alist-ref (surf-form request) name))))
+
+    ;; ---- content negotiation ------------------------------------------------
+
+    (define (surf-accepts? request media-type)
+      (let ((accept (surf-header request "Accept")))
+        (or (not accept) (string-contains? accept "*/*") (string-contains? accept media-type))))
+
+    (define-syntax surf-accept
+      (syntax-rules (else)
+        ((_ req (else body ...)) (begin body ...))
+        ((_ req (media-type body ...) rest ...)
+         (if (surf-accepts? req media-type)
+             (begin body ...)
+             (surf-accept req rest ...)))
+        ((_ req) (surf-text "Not Acceptable" 406))))))

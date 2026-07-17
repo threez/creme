@@ -2,12 +2,12 @@ require "../../spec_helper"
 
 private def w(src : String) : String
   interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme http)) #{src}").write_string
+  Scheme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme json-builder) (creme http)) #{src}").write_string
 end
 
 private def run(src : String) : Scheme::SchemeValue
   interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme http)) #{src}")
+  Scheme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme json-builder) (creme http)) #{src}")
 end
 
 describe "surf module" do
@@ -142,6 +142,89 @@ describe "surf module" do
         (define result (cdr (assoc "body" (http-get (string-append base-url "/only")))))
         (mux-close! server)
         result
+        SCM
+    end
+  end
+
+  describe "surf-json" do
+    it "surf-json defaults to 200 application/json" do
+      w(%((cdr (assoc "status" (surf-json "{}"))))).should eq("200")
+      w(%((cdr (assoc "content-type" (cdr (assoc "headers" (surf-json "{}"))))))).should eq(%("application/json"))
+      w(%((cdr (assoc "body" (surf-json "{}"))))).should eq(%("{}"))
+    end
+
+    it "surf-json accepts an explicit status" do
+      w(%((cdr (assoc "status" (surf-json "{}" 201))))).should eq("201")
+    end
+
+    it "surf-json renders a live (creme json-builder) node" do
+      w(%((cdr (assoc "body" (surf-json '(object (a 1))))))).should eq("\"{\\\"a\\\":1}\"")
+    end
+
+    it "surf-json passes a string body through unchanged" do
+      w(%((cdr (assoc "body" (surf-json "[1,2,3]"))))).should eq(%("[1,2,3]"))
+    end
+  end
+
+  describe "surf-accept" do
+    it "picks the matching clause by Accept header substring" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get "/" (request)
+             (surf-accept request
+               ("application/json" (surf-json (list 'object (list 'kind "json"))))
+               (else (surf-text "html-ish"))))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define json-result
+          (http-get (string-append base-url "/") (list (cons "Accept" "application/json"))))
+        (define html-result
+          (http-get (string-append base-url "/") (list (cons "Accept" "text/html"))))
+        (mux-close! server)
+        (list json-result html-result)
+        SCM
+
+      pair = Scheme.list_to_a(result)
+      json_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
+      html_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+
+      json_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq("\"{\\\"kind\\\":\\\"json\\\"}\"")
+      html_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("html-ish"))
+    end
+
+    it "a missing Accept header and */* both match any clause" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get "/" (request)
+             (surf-accept request
+               ("application/json" "json-branch")
+               (else "else-branch")))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define no-header (cdr (assoc "body" (http-get (string-append base-url "/")))))
+        (define star (cdr (assoc "body" (http-get (string-append base-url "/") (list (cons "Accept" "*/*"))))))
+        (mux-close! server)
+        (list no-header star)
+        SCM
+      pair = Scheme.list_to_a(result)
+      pair[0].write_string.should eq(%("json-branch"))
+      pair[1].write_string.should eq(%("json-branch"))
+    end
+
+    it "falls back to 406 when nothing matches and there is no else" do
+      w(<<-SCM).should eq("406")
+        (define router
+          (surf
+           (get "/" (request)
+             (surf-accept request
+               ("application/json" "json-branch")))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define status (cdr (assoc "status" (http-get (string-append base-url "/") (list (cons "Accept" "text/html"))))))
+        (mux-close! server)
+        status
         SCM
     end
   end
