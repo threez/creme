@@ -5,7 +5,8 @@
 # A router is an opaque SchemeBox (tag "mux-router"); route handlers are
 # ordinary Scheme procedures of one argument, a request alist:
 #   ((method . "GET") (path . "/foo/1") (path-params . (("id" . "1")))
-#    (headers . (("content-type" . "text/plain"))) (body . "..."))
+#    (headers . (("content-type" . "text/plain"))) (remote-addr . "1.2.3.4:5678")
+#    (body . "..."))
 # and must return a response alist, mirroring the (creme http) convention:
 #   ((status . 200) (headers . (("content-type" . "text/plain"))) (body . "..."))
 # `body` is either a plain string (written as-is) or a procedure of one
@@ -205,11 +206,13 @@ module Scheme::Builtins::MuxLibrary
       Cons.new(SchemeStr.new(name), SchemeStr.new(value)).as(SchemeValue)
     end
     body = cached_body(context)
+    remote_addr = request.remote_address.try(&.to_s) || ""
     Scheme.a_to_list([
       Cons.new(SchemeStr.new("method"), SchemeStr.new(request.method)).as(SchemeValue),
       Cons.new(SchemeStr.new("path"), SchemeStr.new(request.path)).as(SchemeValue),
       Cons.new(SchemeStr.new("path-params"), Scheme.a_to_list(param_pairs)).as(SchemeValue),
       Cons.new(SchemeStr.new("headers"), Scheme.a_to_list(header_pairs)).as(SchemeValue),
+      Cons.new(SchemeStr.new("remote-addr"), SchemeStr.new(remote_addr)).as(SchemeValue),
       Cons.new(SchemeStr.new("body"), SchemeStr.new(body)).as(SchemeValue),
     ])
   end

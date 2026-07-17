@@ -121,6 +121,10 @@
 ;;   (surf-method request)           -> the HTTP method string, e.g. "GET".
 ;;   (surf-path request)             -> the request path string.
 ;;   (surf-body request)             -> the raw request body string.
+;;   (surf-remote-addr request)      -> the client's address, e.g.
+;;                                      "1.2.3.4:5678" ("host:port", exactly
+;;                                      Crystal's Socket::Address#to_s — no
+;;                                      further parsing here).
 ;;   (surf-header request name)      -> the named header's value, or #f if
 ;;                                      absent (vs. plain assoc, which
 ;;                                      errors on cdr of #f).
@@ -191,8 +195,8 @@
 ;;                                      is built out of surf-app) via
 ;;                                      (creme mux)'s own mux-use! — every
 ;;                                      request through a surf-built app
-;;                                      logs one line, "METHOD /path ->
-;;                                      status (Nms)", to
+;;                                      logs one line, "client-addr METHOD
+;;                                      /path -> status (Nms)", to
 ;;                                      (current-output-port) once
 ;;                                      handling finishes. Exported so a
 ;;                                      script can also register it
@@ -208,7 +212,7 @@
 (define-library (creme surf)
   (export surf surf-app surf-route! surf-normalize-response
           surf-response surf-text surf-html surf-redirect surf-json
-          surf-method surf-path surf-body surf-header surf-path-param
+          surf-method surf-path surf-body surf-remote-addr surf-header surf-path-param
           surf-url-decode surf-form surf-param
           surf-accept surf-accepts?
           surf-log-middleware)
@@ -223,7 +227,7 @@
              (status (next))
              (elapsed-ms (exact (round (* 1000 (time-difference (current-time) start))))))
         (write-string
-         (string-append (surf-method request) " " (surf-path request) " -> "
+         (string-append (surf-remote-addr request) " " (surf-method request) " " (surf-path request) " -> "
                          (number->string status) " (" (number->string elapsed-ms) "ms)\n")
          (current-output-port))
         status))
@@ -305,6 +309,7 @@
     (define (surf-method request) (cdr (assoc "method" request)))
     (define (surf-path request) (cdr (assoc "path" request)))
     (define (surf-body request) (cdr (assoc "body" request)))
+    (define (surf-remote-addr request) (cdr (assoc "remote-addr" request)))
 
     (define (surf-header request name)
       (surf-alist-ref (cdr (assoc "headers" request)) name))

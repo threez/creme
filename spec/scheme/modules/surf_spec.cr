@@ -241,9 +241,10 @@ describe "surf module" do
       # per-fiber, so parameterize around an http-get call wouldn't reach
       # it -- calling the middleware procedure itself, synchronously, with
       # a stub `next`, is both simpler and fiber-safe.
-      w(<<-SCM).should match(/\A"GET \/hi -> 200 \(\d+ms\)\\n"\z/)
+      w(<<-SCM).should match(/\A"1\.2\.3\.4:5678 GET \/hi -> 200 \(\d+ms\)\\n"\z/)
         (parameterize ((current-output-port (open-output-string)))
-          (surf-log-middleware (list (cons "method" "GET") (cons "path" "/hi")) (lambda () 200))
+          (surf-log-middleware (list (cons "method" "GET") (cons "path" "/hi") (cons "remote-addr" "1.2.3.4:5678"))
+                                (lambda () 200))
           (get-output-string (current-output-port)))
         SCM
     end

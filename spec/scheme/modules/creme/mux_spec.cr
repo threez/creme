@@ -88,6 +88,20 @@ describe "mux module" do
     w(%((mux-router? 5))).should eq("#f")
   end
 
+  it "reports the client's address via remote-addr" do
+    w(<<-SCM).should eq("#t")
+      (define router (mux-router))
+      (mux-get! router "/hi"
+        (lambda (request)
+          (list (cons "status" 200) (cons "body" (cdr (assoc "remote-addr" request))))))
+      (define server (mux-listen! router 0))
+      (define base-url (mux-base-url server))
+      (define addr (cdr (assoc "body" (http-get (string-append base-url "/hi")))))
+      (mux-close! server)
+      (> (string-length addr) 0)
+      SCM
+  end
+
   it "streams a body written directly into the response port when body is a procedure" do
     interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     result = Scheme.run_source(interp, <<-SCM)
