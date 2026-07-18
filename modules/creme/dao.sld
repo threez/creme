@@ -40,19 +40,19 @@
 ;;
 ;; Each `column-spec` is plain data (not evaluated, not `sxql-*` calls):
 ;;   (name type constraint ...)
-;; `type` is one of: integer, text, real, blob. `constraint` is one of:
+;; `type` is one of: integer, text, real, blob, bool. `constraint` is one of:
 ;; primary-key, auto-increment, not-null, unique, or (default value). E.g.:
 ;;
 ;;   (define-dao todo conn
 ;;     (id integer primary-key auto-increment)
 ;;     (title text not-null)
-;;     (done integer not-null (default 0)))
+;;     (done bool not-null (default #f)))
 ;;
 ;; generates:
 ;;   (todo-create! . kvs)   -> INSERT; kvs alternating column/value symbols
 ;;                             and values (same shape (creme sxql)'s own
 ;;                             sxql-set= takes), e.g.
-;;                             (todo-create! 'title "Buy milk" 'done 0);
+;;                             (todo-create! 'title "Buy milk" 'done #f);
 ;;                             returns the new row's id.
 ;;   (todo-all)             -> every row, ordered by id, as a list of rows
 ;;                             (read with dao-ref below). No separate
@@ -68,11 +68,23 @@
 ;;                             (pred row) is true, `pred` an ordinary
 ;;                             one-argument Scheme procedure (typically
 ;;                             built around dao-ref), e.g.
-;;                             (todo-count (lambda (row) (= (dao-ref row 'done) 0))).
+;;                             (todo-count (lambda (row) (not (todo-done? row)))).
 ;;                             This is what replaces a SQL WHERE clause for
 ;;                             filtered counts/aggregates: plain Scheme
 ;;                             filtering over already-fetched rows, not a
 ;;                             query-builder DSL exposed to the caller.
+;;   (todo-<col>? row)      -> generated ONLY for columns declared `bool`
+;;                             (e.g. `done` above generates `todo-done?`) —
+;;                             SQLite has no native boolean storage class, so
+;;                             a `bool` column is still stored/read back as
+;;                             an INTEGER 0/1 under the hood (dao-ref on it
+;;                             still returns 0/1, not #t/#f); this predicate
+;;                             is the one place that 0/1 -> #t/#f translation
+;;                             happens, e.g. (todo-done? row). Writing a
+;;                             `bool` column's value (via todo-create!/
+;;                             todo-update!'s kvs, or its own `(default ...)`
+;;                             constraint) still takes a plain #t/#f directly
+;;                             — only reading it back needs this accessor.
 ;;
 ;; ---- reading a row ------------------------------------------------------
 ;;
@@ -81,7 +93,11 @@
 ;;                        underlying shape is (creme sxql)'s own
 ;;                        `:col`-keyword-alist convention (see sxql.sld's
 ;;                        sxql-row->kw-alist) — callers never need to know
-;;                        that detail, only `dao-ref`.
+;;                        that detail, only `dao-ref`. For a `bool` column,
+;;                        prefer the generated `<table>-<col>?` predicate
+;;                        (above) over calling dao-ref directly, since
+;;                        dao-ref itself has no per-column type information
+;;                        to translate the stored 0/1 with.
 ;;
 ;; ---- escape hatch ---------------------------------------------------------
 ;;
@@ -129,6 +145,7 @@
        ((eq? type 'text) "TEXT")
        ((eq? type 'real) "REAL")
        ((eq? type 'blob) "BLOB")
+       ((eq? type 'bool) "BOOLEAN")
        (else (error "define-dao: unknown column type" type))))
 
     (define (dao-constraint->sxql c)
@@ -173,14 +190,35 @@
 
     (defmacro define-dao (name conn . columns)
       (let* ((name-str (symbol->string name))
-             (mk (lambda (suffix) (string->symbol (string-append name-str suffix)))))
-        (list 'begin
-              (list 'dao-create-table! conn (list 'quote name) (list 'quote columns))
-              (list 'define (cons (mk "-create!") 'kvs) (list 'dao-insert! conn (list 'quote name) 'kvs))
-              (list 'define (list (mk "-all")) (list 'dao-select-all conn (list 'quote name)))
-              (list 'define (list (mk "-find") 'id) (list 'dao-select-one conn (list 'quote name) 'id))
-              (list 'define (cons (mk "-update!") (cons 'id 'kvs))
-                    (list 'dao-update! conn (list 'quote name) 'id 'kvs) 'id)
-              (list 'define (list (mk "-delete!") 'id) (list 'dao-delete! conn (list 'quote name) 'id))
-              (list 'define (cons (mk "-count") 'opt-pred)
-                    (list 'apply 'dao-count conn (list 'quote name) 'opt-pred)))))))
+             (mk (lambda (suffix) (string->symbol (string-append name-str suffix))))
+             ;; One (name-<col>? row) predicate per `bool` column, translating
+             ;; its stored 0/1 to #t/#f -- see this file's header comment.
+             ;; Filtered with a named `let` rather than this file's own
+             ;; private dao-filter: a defmacro transformer body runs against
+             ;; the single shared @global env, not this library's own env
+             ;; (see this file's own header comment), so dao-filter -- an
+             ;; ordinary, unexported binding in THIS library's env -- isn't
+             ;; visible here even though it's visible to dao-count's body.
+             (bool-cols
+              (let loop ((specs columns) (acc '()))
+                (cond ((null? specs) (reverse acc))
+                      ((eq? (cadr (car specs)) 'bool) (loop (cdr specs) (cons (car specs) acc)))
+                      (else (loop (cdr specs) acc)))))
+             (bool-accessors
+              (map (lambda (spec)
+                     (list 'define (list (mk (string-append "-" (symbol->string (car spec)) "?")) 'row)
+                           (list '= (list 'dao-ref 'row (list 'quote (car spec))) 1)))
+                   bool-cols)))
+        (cons 'begin
+              (append
+               (list
+                (list 'dao-create-table! conn (list 'quote name) (list 'quote columns))
+                (list 'define (cons (mk "-create!") 'kvs) (list 'dao-insert! conn (list 'quote name) 'kvs))
+                (list 'define (list (mk "-all")) (list 'dao-select-all conn (list 'quote name)))
+                (list 'define (list (mk "-find") 'id) (list 'dao-select-one conn (list 'quote name) 'id))
+                (list 'define (cons (mk "-update!") (cons 'id 'kvs))
+                      (list 'dao-update! conn (list 'quote name) 'id 'kvs) 'id)
+                (list 'define (list (mk "-delete!") 'id) (list 'dao-delete! conn (list 'quote name) 'id))
+                (list 'define (cons (mk "-count") 'opt-pred)
+                      (list 'apply 'dao-count conn (list 'quote name) 'opt-pred)))
+               bool-accessors))))))

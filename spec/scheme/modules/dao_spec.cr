@@ -16,7 +16,8 @@ private def fresh_widget_dao : String
   (define-dao widget conn
     (id integer primary-key auto-increment)
     (name text not-null)
-    (qty integer not-null (default 0)))
+    (qty integer not-null (default 0))
+    (active bool not-null (default #f)))
   SCM
 end
 
@@ -118,6 +119,31 @@ describe "dao module" do
         (dao-insert! conn 'widget (list 'qty 1))
         SCM
     end
+  end
+
+  it "applies a bool column's DEFAULT when a create! call omits that column, readable via the generated predicate" do
+    w(<<-SCM).should eq("#f")
+      #{fresh_widget_dao}
+      (define id (widget-create! 'name "bolt" 'qty 5))
+      (widget-active? (widget-find id))
+      SCM
+  end
+
+  it "the generated bool predicate reads back a value passed directly as #t/#f on create!" do
+    w(<<-SCM).should eq("#t")
+      #{fresh_widget_dao}
+      (define id (widget-create! 'name "bolt" 'qty 5 'active #t))
+      (widget-active? (widget-find id))
+      SCM
+  end
+
+  it "the generated bool predicate reflects a flip via update!" do
+    w(<<-SCM).should eq("#t")
+      #{fresh_widget_dao}
+      (define id (widget-create! 'name "bolt" 'qty 5))
+      (widget-update! id 'active #t)
+      (widget-active? (widget-find id))
+      SCM
   end
 
   it "define-dao is idempotent (CREATE TABLE IF NOT EXISTS)" do
