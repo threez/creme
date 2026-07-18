@@ -7,7 +7,7 @@ threw away.
 
 It covers only the performance thread. The parallel architectural work (the
 R7RS library system, the annotation-driven builtin registration, the
-one-file-per-library layout) is out of scope here — see `CLAUDE.md` for that.
+one-file-per-library layout) is out of scope here.
 
 ---
 
@@ -286,8 +286,7 @@ off each dispatched instruction.
 
   **Invariant:** the integer arithmetic fast path now lives in *two* places — the
   inlined dispatch-loop arms and `exec_prim` — that must be kept in sync. An edit
-  to arithmetic semantics has to touch both. This is documented in `CLAUDE.md` and
-  in the code.
+  to arithmetic semantics has to touch both.
 
 These two, together with the earlier work, are why `fib` and `vector-sum` are
 among the fastest paths.

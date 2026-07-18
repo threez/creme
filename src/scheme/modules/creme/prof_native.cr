@@ -71,8 +71,8 @@ module Scheme::Builtins::ProfNative
 
   # (profile-top report n) -> a list of up to n alists, one per hottest
   # frame, each shaped (("name" . str) ("count" . int) ("percent" . flo)
-  # ("file" . str-or-#f) ("line" . int-or-#f)) — see CLAUDE.md's alist
-  # convention for object-shaped data (matches (creme sql)'s row shape).
+  # ("file" . str-or-#f) ("line" . int-or-#f)) — alist convention for
+  # object-shaped data (matches (creme sql)'s row shape).
   @[Scheme::SchemeFn("profile-top", min: 2, max: 2)]
   def profile_top(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     report = prof_report_arg(args[0], "profile-top")

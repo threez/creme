@@ -86,7 +86,7 @@ module Scheme::Builtins::ProfVM
   # (profile-scheme-top report n) -> a list of up to n alists, one per
   # hottest sample key, shaped (("name" . str) ("instruction" . str)
   # ("count" . int) ("percent" . flo) ("file" . str-or-#f)
-  # ("line" . int-or-#f)) — see CLAUDE.md's alist convention for
+  # ("line" . int-or-#f)) — alist convention for
   # object-shaped data. `name` resembles the actual source at that call
   # site (e.g. "(fib (- n 1))"), not a generic frame name; `instruction`
   # is the KIND of thing it is, in the language's own syntax (e.g. "if",

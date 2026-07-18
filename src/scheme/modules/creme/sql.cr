@@ -102,7 +102,7 @@ module Scheme::Builtins::SqlLibrary
       case key.name
       when "reader" then reader = n
       when "writer" then writer = n
-      else                raise SchemeRuntimeError.new("#{who}: unknown keyword '#{key.name} (expected 'reader or 'writer)")
+      else               raise SchemeRuntimeError.new("#{who}: unknown keyword '#{key.name} (expected 'reader or 'writer)")
       end
     end
     {reader, writer}

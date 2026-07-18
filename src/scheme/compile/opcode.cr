@@ -145,7 +145,7 @@ module Scheme
     # truthiness (unlike cond/guard's clause tests, which can be the
     # clause's own result via a bodyless clause or a `=>` arrow — those
     # keep compiling through the unfused Num*+TestFalse path). Mirrors
-    # Lua's own bytecode design (this VM's stated model, per CLAUDE.md):
+    # Lua's own bytecode design (this VM's stated model):
     # Lua's OP_LT/OP_LE/OP_EQ are themselves conditional-skip instructions,
     # not boolean-producing ops paired with a separate test.
     TestLt
