@@ -325,23 +325,36 @@ module Scheme
     # to their own arrays at once.
     @@current_stacks = {} of Fiber => Array(Interpreter)
 
+    # Guards @@current_stacks itself (insert/delete of a Fiber's own key, and
+    # the resulting internal bucket-array resize/rehash), not each fiber's
+    # private Array. Different fibers only ever touch different keys, but
+    # under -Dpreview_mt with more than one OS thread, two fibers' inserts
+    # into the SAME Hash can land at literally the same instant — Crystal's
+    # Hash isn't safe for concurrent mutation even across distinct keys, and
+    # this raced in practice (segfaults during GC under real multi-core
+    # parallelism; harmless under single-OS-thread cooperative fiber
+    # scheduling, where mutations never truly overlap).
+    @@stacks_mutex = Mutex.new
+
     # The interpreter instance whose eval() call chain is currently active on
     # this fiber, if any — used so a SchemeError can eagerly capture a
     # backtrace at construction time without every raise site needing a
     # reference to the interpreter.
     def self.current : Interpreter?
-      @@current_stacks[Fiber.current]?.try(&.last?)
+      @@stacks_mutex.synchronize { @@current_stacks[Fiber.current]? }.try(&.last?)
     end
 
     def self.push_current(interp : Interpreter) : Nil
-      (@@current_stacks[Fiber.current] ||= [] of Interpreter) << interp
+      @@stacks_mutex.synchronize { (@@current_stacks[Fiber.current] ||= [] of Interpreter) << interp }
     end
 
     def self.pop_current : Nil
-      stack = @@current_stacks[Fiber.current]?
-      return unless stack
-      stack.pop?
-      @@current_stacks.delete(Fiber.current) if stack.empty?
+      @@stacks_mutex.synchronize do
+        stack = @@current_stacks[Fiber.current]?
+        next unless stack
+        stack.pop?
+        @@current_stacks.delete(Fiber.current) if stack.empty?
+      end
     end
 
     def call_stack_snapshot : Array(Frame)

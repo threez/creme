@@ -287,16 +287,19 @@ describe Scheme::SchemeHashTable do
     h.display_string.should eq("#<hash-table 1 entries>")
   end
 
-  it "index_of finds a key by equal?, not identity" do
+  it "finds a key by equal?, not identity" do
     key1 = Scheme.a_to_list([Scheme::SchemeInt.new(1_i64)] of Scheme::SchemeValue)
     key2 = Scheme.a_to_list([Scheme::SchemeInt.new(1_i64)] of Scheme::SchemeValue)
     entries = [{key1.as(Scheme::SchemeValue), Scheme::SchemeInt.new(99_i64).as(Scheme::SchemeValue)}]
     h = Scheme::SchemeHashTable.new(entries)
-    h.index_of(key2).should eq(0)
+    h.contains?(key2).should be_true
+    h.get?(key2).should eq(Scheme::SchemeInt.new(99_i64))
   end
 
-  it "index_of returns nil when the key is absent" do
-    Scheme::SchemeHashTable.new.index_of(Scheme::SchemeSym.of("z")).should be_nil
+  it "reports absent keys as not found" do
+    h = Scheme::SchemeHashTable.new
+    h.contains?(Scheme::SchemeSym.of("z")).should be_false
+    h.get?(Scheme::SchemeSym.of("z")).should be_nil
   end
 end
 

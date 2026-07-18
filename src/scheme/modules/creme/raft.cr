@@ -133,15 +133,20 @@ module Scheme::Builtins::RaftLibrary
 
   # A fresh id-prefix, unique for the life of the OS process — see this
   # file's header comment for why that's a process-wide Crystal class
-  # variable rather than an Interpreter-scoped `gensym`. Single-threaded
-  # cooperative fibers make the plain increment safe with no Mutex.
-  @@namespace_counter = 0_u64
+  # variable rather than an Interpreter-scoped `gensym`. An `Atomic` (rather
+  # than a plain increment guarded by nothing) is required as soon as more
+  # than one OS thread can run Scheme fibers concurrently (-Dpreview_mt with
+  # CRYSTAL_WORKERS > 1) — a bare `+= 1` is a non-atomic read-modify-write
+  # that can drop increments or hand out a duplicate id under real
+  # parallelism, even though it's safe under single-OS-thread cooperative
+  # fiber scheduling.
+  @@namespace_counter = Atomic(UInt64).new(0_u64)
 
   @[Scheme::SchemeFn("raft-fresh-namespace", min: 0, max: 1)]
   def raft_fresh_namespace(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     prefix = args.size == 1 ? string_arg(args[0], "raft-fresh-namespace") : "raft"
-    @@namespace_counter += 1
-    SchemeStr.new("#{prefix}-#{@@namespace_counter}")
+    n = @@namespace_counter.add(1_u64) + 1_u64
+    SchemeStr.new("#{prefix}-#{n}")
   end
 
   @[Scheme::SchemeFn("raft-transport-partition!", min: 2, max: 2)]

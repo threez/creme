@@ -70,6 +70,11 @@ require "mux"
 # for free: the cached value's lifetime is exactly the context's own.
 class HTTP::Server::Context
   property mux_body : String?
+
+  # This request's own Interpreter — see request_interpreter below for why
+  # every middleware/route handler in this one request's chain shares
+  # exactly one (not the router-registration-time Interpreter directly).
+  property mux_interp : Scheme::Interpreter?
 end
 
 module Scheme
@@ -98,14 +103,15 @@ module Scheme
 
     def call(context : HTTP::Server::Context) : Nil
       request = Scheme::Builtins::MuxLibrary.request_to_scheme(context)
+      request_interp = Scheme::Builtins::MuxLibrary.request_interpreter(context, @interp)
       called_next = false
       next_proc = Builtin.new("mux-middleware-next", 0, 0) do |_args|
         called_next = true
         call_next(context)
         SchemeInt.new(context.response.status_code.to_i64).as(SchemeValue)
       end
-      result = @interp.apply(@middleware, [request, next_proc.as(SchemeValue)])
-      Scheme::Builtins::MuxLibrary.write_response(@interp, context, result, "mux-use!") unless called_next
+      result = request_interp.apply(@middleware, [request, next_proc.as(SchemeValue)])
+      Scheme::Builtins::MuxLibrary.write_response(request_interp, context, result, "mux-use!") unless called_next
     end
   end
 end
@@ -187,10 +193,35 @@ module Scheme::Builtins::MuxLibrary
     path = mux_str_arg(args[1], who)
     handler = args[2]
     app.router.add_handler(path, method: method) do |context|
-      response = interp.apply(handler, [request_to_scheme(context)] of SchemeValue)
-      write_response(interp, context, response, who)
+      request_interp = request_interpreter(context, interp)
+      response = request_interp.apply(handler, [request_to_scheme(context)] of SchemeValue)
+      write_response(request_interp, context, response, who)
     end
     NIL.as(SchemeValue)
+  end
+
+  # Every request handled by mux-listen! runs against its OWN Interpreter —
+  # a lightweight child of whichever Interpreter registered the route/
+  # middleware (Interpreter.new(inherit_from:), the exact same mechanism
+  # (creme actor)'s `spawn` uses to give each actor its own isolated
+  # execution state). This is required, not just tidy: an Interpreter's
+  # own @call_stack (backtrace tracking, mutated on every function call)
+  # and other per-instance bookkeeping (gensym counter, eval-depth,
+  # exception-handler stack, ...) are NOT safe for two Fibers to touch at
+  # the same instant — reusing the single router-registration-time
+  # Interpreter directly across every concurrently-handled request
+  # corrupted @call_stack under real multi-core parallelism
+  # (-Dpreview_mt with more than one OS thread; see competition/results.md
+  # in the repo root for how this was found). One Interpreter per HTTP
+  # request (shared across that request's own middleware chain + route
+  # handler via HTTP::Server::Context#mux_interp, set once by whichever
+  # handler runs first) mirrors actor isolation at HTTP-request
+  # granularity, at the cost of one cheap Interpreter allocation per
+  # request (@base_env is shared by reference; @global/@libraries are
+  # small per-request overlays) — far cheaper than the SQL query or
+  # template render most handlers do anyway.
+  def request_interpreter(context : HTTP::Server::Context, interp : Interpreter) : Interpreter
+    context.mux_interp ||= Interpreter.new(inherit_from: interp)
   end
 
   # Public (not private): also called by Scheme::MuxMiddlewareHandler, a

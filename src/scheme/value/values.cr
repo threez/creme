@@ -108,9 +108,17 @@ module Scheme
     getter name : String
 
     @@table = {} of String => SchemeSym
+    @@table_mutex = Mutex.new
 
+    # Interning is process-wide and reached from every Fiber (any code path
+    # that calls string->symbol/gensym/read, not just compile-time literals),
+    # so under -Dpreview_mt with more than one OS thread two Fibers can call
+    # this at literally the same instant — an unsynchronized Hash write here
+    # corrupts the table (segfaults observed in practice under real
+    # multi-core parallelism, harmless under single-OS-thread cooperative
+    # fiber scheduling since writes never truly overlap there).
     def self.of(name : String) : SchemeSym
-      @@table[name] ||= SchemeSym.new(name)
+      @@table_mutex.synchronize { @@table[name] ||= SchemeSym.new(name) }
     end
 
     # Only SchemeSym.of should be used externally; kept public for interning table.
