@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Todo List</title>
+    <style><%= css %></style>
+  </head>
+  <body>
+    <div class="todo-app">
+      <h1>Todo List</h1>
+      <form method="post" action="/todos" class="add">
+        <input type="text" name="title" placeholder="New todo" required>
+        <button type="submit">Add</button>
+      </form>
+      <ul class="todos">
+        <%= rows_html %>
+      </ul>
+      <p class="count"><%= remaining %> remaining</p>
+    </div>
+  </body>
+</html>

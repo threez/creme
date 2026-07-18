@@ -1,9 +1,13 @@
-# Competition: scheme.cr vs. Ruby/Sinatra/ERB/Sequel/SQLite
+# Competition: scheme.cr vs. Ruby/Sinatra/ERB/Sequel/SQLite vs. Crystal/Kemal/Granite
 
-A head-to-head benchmark of a small todo-list app built two ways: scheme.cr
-with `(creme surf)`/`(creme mux)`/`(creme dao)`/etc., and idiomatic Ruby --
+A head-to-head benchmark of a small todo-list app built three ways: scheme.cr
+with `(creme surf)`/`(creme mux)`/`(creme dao)`/etc., idiomatic Ruby --
 Sinatra for routing, ERB for templates, Sequel as the ORM (mirroring
-`(creme dao)`), SQLite (in-memory) for storage, served by Puma.
+`(creme dao)`), SQLite (in-memory) for storage, served by Puma -- and
+idiomatic Crystal -- Kemal for routing (Sinatra's closest Crystal analog),
+Granite as the ORM (Sequel's closest Crystal analog, same declarative
+column-only model), ECR (Crystal's stdlib templating, ERB's closest
+analog) for templates, SQLite (in-memory) for storage.
 
 ## Layout
 
@@ -17,6 +21,11 @@ Sinatra for routing, ERB for templates, Sequel as the ORM (mirroring
   `[id, done, title]`, mirroring `(creme memoize)`), same JSON
   content-negotiation behavior. Includes `puma.rb`/`config.ru` for
   clustered (`WEB_CONCURRENCY=N`) runs. `bundle install` first.
+- `crystal/demo-todo/` -- the Crystal twin: same routes/schema/JSON
+  content-negotiation, same row-level memoization strategy (a `Hash` keyed
+  on the `{id, done, title}` tuple). `shards install` first, then either
+  `shards build --release` (or let `bench.sh` build it lazily) before
+  running `PORT=4572 ./bin/app`.
 - `bench.sh` -- starts each app in turn and runs `wrk` against `GET /`
   (`text/html` and `application/json`).
 - `results.md` -- recorded results and analysis from runs on this machine

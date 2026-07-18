@@ -7,6 +7,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEME_PORT=4571
 RUBY_PORT=4570
+CRYSTAL_PORT=4572
 DURATION=${DURATION:-8s}
 THREADS=${THREADS:-4}
 CONNS=${CONNS:-32}
@@ -15,6 +16,7 @@ cleanup() {
   pkill -f "bin/creme .*demo-todo/app.scm" 2>/dev/null || true
   pkill -f "tail -f /dev/null" 2>/dev/null || true
   pkill -f "ruby app.rb" 2>/dev/null || true
+  pkill -f "crystal/demo-todo/bin/app" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -60,5 +62,23 @@ echo
 echo "############ Ruby / Sinatra+ERB+Sequel+SQLite ############"
 run_wrk "GET / (text/html)" "http://127.0.0.1:${RUBY_PORT}/" "text/html"
 run_wrk "GET / (application/json)" "http://127.0.0.1:${RUBY_PORT}/" "application/json"
+
+cleanup
+sleep 1
+
+echo "== Building and starting Crystal (Kemal+Granite+ECR+SQLite) app on :${CRYSTAL_PORT} =="
+cd "$REPO_ROOT/competition/crystal/demo-todo"
+mkdir -p bin
+if [ ! -x bin/app ] || [ src/app.cr -nt bin/app ]; then
+  shards build --release
+fi
+PORT=$CRYSTAL_PORT ./bin/app > /tmp/bench-crystal.log 2>&1 &
+disown
+wait_for_port "$CRYSTAL_PORT"
+
+echo
+echo "############ Crystal / Kemal+Granite+ECR+SQLite ############"
+run_wrk "GET / (text/html)" "http://127.0.0.1:${CRYSTAL_PORT}/" "text/html"
+run_wrk "GET / (application/json)" "http://127.0.0.1:${CRYSTAL_PORT}/" "application/json"
 
 cleanup
