@@ -86,6 +86,19 @@
 ;;                               via (creme mux)); returns unspecified, not
 ;;                               a string. Same @global-visibility
 ;;                               requirement as json!
+;;   (json-array-map proc lst) -> (array (proc elt) ...), an ordinary node
+;;                               (see json-render above), NOT a macro — `lst`
+;;                               is genuinely dynamic (e.g. every row a
+;;                               (creme dao) query returns), so there is no
+;;                               fixed set of array items for json!'s
+;;                               compile-time fold to see. `proc` maps one
+;;                               element to its own node (typically
+;;                               (object ...)); pass the result straight to
+;;                               json->string/json-render/json-write! —
+;;                               replaces the previous idiom of rendering
+;;                               each element to its own JSON string with
+;;                               json->string and string-joining the
+;;                               results with "," under a (raw ...) node.
 ;;
 ;; Example:
 ;;
@@ -99,7 +112,7 @@
 
 (define-library (creme json-builder)
   (export json-escape json-render json->string json-fold json-merge-pieces
-          json-pieces->body json! json-write!)
+          json-pieces->body json! json-write! json-array-map)
   (import (scheme base) (scheme write))
   (begin
     ;; A generic \u00XX fallback covers every control character; the four
@@ -176,6 +189,14 @@
       (let ((port (open-output-string)))
         (json-render port node)
         (get-output-string port)))
+
+    ;; (json-array-map proc lst) -> (array (proc elt) ...) -- an ordinary
+    ;; node, not a macro, for mapping a genuinely dynamic list (e.g. every
+    ;; row a (creme dao) query returns) to a JSON array of per-element
+    ;; nodes. Pass the result straight to json->string/json-render/
+    ;; json-write!.
+    (define (json-array-map proc lst)
+      (cons 'array (map proc lst)))
 
     ;; ---- compile-time template folding (json!) -----------------------------
 
