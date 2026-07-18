@@ -27,17 +27,34 @@
 ;;        (get "/" (request) (page-response))
 ;;        (post "/todos" (request)
 ;;          (add-todo! (cdr (assoc "title" (surf-form request))))
+;;          (surf-redirect "/"))
+;;        (post "/todos/:id/complete" (request id)
+;;          (toggle-todo! (string->number id))
 ;;          (surf-redirect "/"))))
 ;;
-;;                                      Each clause is (method path (req)
-;;                                      body ...): `method` one of get/head/
-;;                                      post/put/delete/patch (a bare,
-;;                                      unquoted literal — not evaluated),
-;;                                      `path` a (creme mux) radix path
-;;                                      (":name" path params), `req` the
-;;                                      name the request alist is bound to
-;;                                      inside body. The clause's last body
-;;                                      form's value is passed through
+;;                                      Each clause is (method path (req
+;;                                      name ...) body ...): `method` one of
+;;                                      get/head/post/put/delete/patch (a
+;;                                      bare, unquoted literal — not
+;;                                      evaluated), `path` a (creme mux)
+;;                                      radix path (":name" path params),
+;;                                      `req` the name the request alist is
+;;                                      bound to inside body. Any further
+;;                                      names (0 or more) are auto-bound to
+;;                                      (surf-param req "name") before body
+;;                                      runs — the common case being a
+;;                                      route's own ":name" path param, so
+;;                                      a handler for "/todos/:id/complete"
+;;                                      can write (request id) instead of
+;;                                      (request) plus its own
+;;                                      (surf-param request "id") — but
+;;                                      surf-param also checks a submitted
+;;                                      form field by the same name, so
+;;                                      this works for that too. A name
+;;                                      with no matching path param or form
+;;                                      field is simply bound to #f. The
+;;                                      clause's last body form's value is
+;;                                      passed through
 ;;                                      surf-normalize-response (see below),
 ;;                                      so a handler can just return a
 ;;                                      string, or call surf-html/surf-
@@ -54,10 +71,11 @@
 ;;                                      routing table up incrementally
 ;;                                      rather than as one surf form.
 ;;   (surf-route! app clause)       -> registers one more clause (same
-;;                                      (method path (req) body ...) shape
-;;                                      as above) onto an already-existing
-;;                                      app value; `surf` itself is built
-;;                                      out of repeated calls to this.
+;;                                      (method path (req name ...) body
+;;                                      ...) shape as above) onto an
+;;                                      already-existing app value; `surf`
+;;                                      itself is built out of repeated
+;;                                      calls to this.
 ;;
 ;; `surf`/`surf-route!` are syntax-rules macros, not procedures — `method`
 ;; is matched as a literal identifier at the call site, never evaluated, so
@@ -237,20 +255,31 @@
         (mux-use! app surf-log-middleware)
         app))
 
+    ;; A clause's binding form is (req name ...) -- req is the request alist
+    ;; as always, and each extra name (typically a route's own ":name" path
+    ;; param, e.g. "/todos/:id/complete"'s id) is bound to (surf-param req
+    ;; "name") before the body runs, so a handler never has to write out
+    ;; (surf-param request "id") itself. `(symbol->string 'name)` rather
+    ;; than a string literal since this project's syntax-rules can't
+    ;; stringify an identifier at expansion time -- 'name after substitution
+    ;; is a quoted symbol spelled exactly like the bound name, so this is
+    ;; ordinary runtime code the macro emits, not a macro-time computation.
+    ;; A name that isn't actually present (not a path param, no matching
+    ;; form field) is simply bound to #f, same as calling surf-param by hand.
     (define-syntax surf-route!
       (syntax-rules (get head post put delete patch)
-        ((_ app (get path (req) body ...))
-         (mux-get! app path (lambda (req) (surf-normalize-response (begin body ...)))))
-        ((_ app (head path (req) body ...))
-         (mux-head! app path (lambda (req) (surf-normalize-response (begin body ...)))))
-        ((_ app (post path (req) body ...))
-         (mux-post! app path (lambda (req) (surf-normalize-response (begin body ...)))))
-        ((_ app (put path (req) body ...))
-         (mux-put! app path (lambda (req) (surf-normalize-response (begin body ...)))))
-        ((_ app (delete path (req) body ...))
-         (mux-delete! app path (lambda (req) (surf-normalize-response (begin body ...)))))
-        ((_ app (patch path (req) body ...))
-         (mux-patch! app path (lambda (req) (surf-normalize-response (begin body ...)))))))
+        ((_ app (get path (req name ...) body ...))
+         (mux-get! app path (lambda (req) (let ((name (surf-param req (symbol->string 'name))) ...) (surf-normalize-response (begin body ...))))))
+        ((_ app (head path (req name ...) body ...))
+         (mux-head! app path (lambda (req) (let ((name (surf-param req (symbol->string 'name))) ...) (surf-normalize-response (begin body ...))))))
+        ((_ app (post path (req name ...) body ...))
+         (mux-post! app path (lambda (req) (let ((name (surf-param req (symbol->string 'name))) ...) (surf-normalize-response (begin body ...))))))
+        ((_ app (put path (req name ...) body ...))
+         (mux-put! app path (lambda (req) (let ((name (surf-param req (symbol->string 'name))) ...) (surf-normalize-response (begin body ...))))))
+        ((_ app (delete path (req name ...) body ...))
+         (mux-delete! app path (lambda (req) (let ((name (surf-param req (symbol->string 'name))) ...) (surf-normalize-response (begin body ...))))))
+        ((_ app (patch path (req name ...) body ...))
+         (mux-patch! app path (lambda (req) (let ((name (surf-param req (symbol->string 'name))) ...) (surf-normalize-response (begin body ...))))))))
 
     (define-syntax surf
       (syntax-rules ()

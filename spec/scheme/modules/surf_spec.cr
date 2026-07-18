@@ -133,6 +133,36 @@ describe "surf module" do
       post_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hi there"))
     end
 
+    it "auto-binds extra clause names to their surf-param value" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get "/todos/:id/complete" (request id)
+             (surf-text (string-append "id=" id)))
+           (post "/echo2" (request title)
+             (surf-text (string-append "title=" title)))
+           (get "/missing" (request nope)
+             (surf-text (if nope "present" "absent")))))
+
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define path-param-result (http-get (string-append base-url "/todos/42/complete")))
+        (define form-field-result (http-post (string-append base-url "/echo2") "title=hi+there"))
+        (define missing-result (http-get (string-append base-url "/missing")))
+        (mux-close! server)
+        (list path-param-result form-field-result missing-result)
+        SCM
+
+      triple = Scheme.list_to_a(result)
+      path_param_alist = Scheme.list_to_a(triple[0]).map { |cons| cons.as(Scheme::Cons) }
+      form_field_alist = Scheme.list_to_a(triple[1]).map { |cons| cons.as(Scheme::Cons) }
+      missing_alist = Scheme.list_to_a(triple[2]).map { |cons| cons.as(Scheme::Cons) }
+
+      path_param_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("id=42"))
+      form_field_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("title=hi there"))
+      missing_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("absent"))
+    end
+
     it "surf-route! adds a route to an already-existing app one at a time" do
       w(<<-SCM).should eq(%("added"))
         (define router (surf-app))
