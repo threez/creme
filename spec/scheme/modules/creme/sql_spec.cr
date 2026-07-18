@@ -97,4 +97,54 @@ describe "sql module" do
         SCHEME
     end
   end
+
+  it "opens a file-backed connection with explicit 'reader/'writer pool sizes and round-trips a write through a read" do
+    path = File.tempname("sql_spec", ".sqlite3")
+    begin
+      w(<<-SCHEME).should eq("2")
+        (define conn (sql-open #{path.inspect} 'reader 4 'writer 1))
+        (sql-execute conn "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)")
+        (sql-execute conn "INSERT INTO person (name) VALUES (?)" "Alice")
+        (sql-execute conn "INSERT INTO person (name) VALUES (?)" "Bob")
+        (sql-scalar conn "SELECT COUNT(*) FROM person")
+        SCHEME
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "accepts a single 'reader or 'writer keyword alone" do
+    path = File.tempname("sql_spec", ".sqlite3")
+    begin
+      w(%((sql-connection? (sql-open #{path.inspect} 'reader 2)))).should eq("#t")
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "ignores 'reader/'writer keywords for \":memory:\" without error" do
+    w(%((sql-connection? (sql-open ":memory:" 'reader 4 'writer 1)))).should eq("#t")
+  end
+
+  it "raises a SchemeRuntimeError on an odd number of trailing keyword arguments" do
+    expect_raises(Scheme::SchemeRuntimeError, /keyword arguments must come in/) do
+      run(%((sql-open ":memory:" 'reader)))
+    end
+  end
+
+  it "raises a SchemeRuntimeError on an unknown keyword" do
+    expect_raises(Scheme::SchemeRuntimeError, /unknown keyword/) do
+      run(%((sql-open ":memory:" 'bogus 4)))
+    end
+  end
+
+  it "raises a SchemeRuntimeError when a keyword position isn't a symbol" do
+    expect_raises(Scheme::SchemeRuntimeError, /expected a keyword symbol/) do
+      run(%((sql-open ":memory:" "reader" 4)))
+    end
+  end
 end
