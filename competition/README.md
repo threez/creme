@@ -1,13 +1,19 @@
-# Competition: scheme.cr vs. Ruby/Sinatra/ERB/Sequel/SQLite vs. Crystal/Kemal/Granite
+# Competition: scheme.cr vs. Ruby/Sinatra/ERB/Sequel/SQLite vs. Crystal/Kemal/Granite vs. Racket
 
-A head-to-head benchmark of a small todo-list app built three ways: scheme.cr
+A head-to-head benchmark of a small todo-list app built four ways: scheme.cr
 with `(creme surf)`/`(creme mux)`/`(creme dao)`/etc., idiomatic Ruby --
 Sinatra for routing, ERB for templates, Sequel as the ORM (mirroring
-`(creme dao)`), SQLite (in-memory) for storage, served by Puma -- and
-idiomatic Crystal -- Kemal for routing (Sinatra's closest Crystal analog),
-Granite as the ORM (Sequel's closest Crystal analog, same declarative
-column-only model), ECR (Crystal's stdlib templating, ERB's closest
-analog) for templates, SQLite (in-memory) for storage.
+`(creme dao)`), SQLite (in-memory) for storage, served by Puma -- idiomatic
+Crystal -- Kemal for routing (Sinatra's closest Crystal analog), Granite as
+the ORM (Sequel's closest Crystal analog, same declarative column-only
+model), ECR (Crystal's stdlib templating, ERB's closest analog) for
+templates, SQLite (in-memory) for storage -- and idiomatic Racket --
+`web-server/dispatch` for routing (Racket's own stdlib router, no external
+framework needed), plain `db` library queries for storage (Racket has no
+dominant Sequel/Granite-style ORM, so this mirrors the Scheme twin's own
+hand-written CRUD functions), x-expressions rendered via `response/xexpr`
+for HTML (Racket's own idiom, closest structural analog to the Scheme
+twin's own `(creme html)` s-expression templates).
 
 ## Layout
 
@@ -26,6 +32,11 @@ analog) for templates, SQLite (in-memory) for storage.
   on the `{id, done, title}` tuple). `shards install` first, then either
   `shards build --release` (or let `bench.sh` build it lazily) before
   running `PORT=4572 ./bin/app`.
+- `racket/demo-todo/` -- the Racket twin: same routes/schema/JSON
+  content-negotiation, same row-level memoization strategy (a hash table
+  keyed on the `(id done title)` list). `raco pkg install --auto db-lib
+  web-server-lib` first (a `minimal-racket` install doesn't ship these by
+  default); no build step, just `PORT=4573 racket app.rkt`.
 - `bench.sh` -- starts each app in turn and runs `wrk` against `GET /`
   (`text/html` and `application/json`).
 - `results.md` -- recorded results and analysis from runs on this machine

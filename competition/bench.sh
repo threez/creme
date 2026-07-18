@@ -8,6 +8,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCHEME_PORT=4571
 RUBY_PORT=4570
 CRYSTAL_PORT=4572
+RACKET_PORT=4573
 DURATION=${DURATION:-8s}
 THREADS=${THREADS:-4}
 CONNS=${CONNS:-32}
@@ -17,6 +18,7 @@ cleanup() {
   pkill -f "tail -f /dev/null" 2>/dev/null || true
   pkill -f "ruby app.rb" 2>/dev/null || true
   pkill -f "crystal/demo-todo/bin/app" 2>/dev/null || true
+  pkill -f "racket .*demo-todo/app.rkt" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -80,5 +82,19 @@ echo
 echo "############ Crystal / Kemal+Granite+ECR+SQLite ############"
 run_wrk "GET / (text/html)" "http://127.0.0.1:${CRYSTAL_PORT}/" "text/html"
 run_wrk "GET / (application/json)" "http://127.0.0.1:${CRYSTAL_PORT}/" "application/json"
+
+cleanup
+sleep 1
+
+echo "== Starting Racket (web-server/dispatch+db+SQLite) app on :${RACKET_PORT} =="
+cd "$REPO_ROOT/competition/racket/demo-todo"
+PORT=$RACKET_PORT racket app.rkt > /tmp/bench-racket.log 2>&1 &
+disown
+wait_for_port "$RACKET_PORT"
+
+echo
+echo "############ Racket / web-server+db+SQLite ############"
+run_wrk "GET / (text/html)" "http://127.0.0.1:${RACKET_PORT}/" "text/html"
+run_wrk "GET / (application/json)" "http://127.0.0.1:${RACKET_PORT}/" "application/json"
 
 cleanup
