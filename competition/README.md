@@ -1,0 +1,45 @@
+# Competition: scheme.cr vs. Ruby/Sinatra/ERB/Sequel/SQLite
+
+A head-to-head benchmark of a small todo-list app built two ways: scheme.cr
+with `(creme surf)`/`(creme mux)`/`(creme dao)`/etc., and idiomatic Ruby --
+Sinatra for routing, ERB for templates, Sequel as the ORM (mirroring
+`(creme dao)`), SQLite (in-memory) for storage, served by Puma.
+
+## Layout
+
+- `scheme/demo-todo/app.scm` -- the scheme.cr app. Listens on an OS-assigned
+  ephemeral port by default (so running it directly is as easy as any other
+  example); set the `PORT` env var to pin it to a known port for a benchmark
+  script to target.
+- `ruby/demo-todo/` -- the Ruby twin: same routes, same in-memory SQLite
+  schema (or a shared on-disk file under `puma -w N`, via `TODO_DB_PATH`),
+  same row-level memoization strategy (a `Hash` keyed on
+  `[id, done, title]`, mirroring `(creme memoize)`), same JSON
+  content-negotiation behavior. Includes `puma.rb`/`config.ru` for
+  clustered (`WEB_CONCURRENCY=N`) runs. `bundle install` first.
+- `bench.sh` -- starts each app in turn and runs `wrk` against `GET /`
+  (`text/html` and `application/json`).
+- `results.md` -- recorded results and analysis from runs on this machine
+  (Apple Silicon, macOS), including several interpreter-level
+  thread-safety bugs found and fixed along the way while investigating
+  `-Dpreview_mt` multi-core scheme.cr: symbol interning, the backtrace
+  fiber-stack, `(creme hash-table)`'s backing store, and (the big one)
+  `mux-listen!` reusing one shared `Interpreter` across every concurrent
+  request instead of giving each request its own — fixed by reusing
+  `(creme actor)`'s own `Interpreter.new(inherit_from:)` isolation
+  mechanism, which took a trivial route from crashing in seconds to 750K
+  clean requests. Two SQL-layer bugs were found and fixed too (`:memory:`
+  + connection pooling, and a `busy_timeout` gap that made a reader/writer
+  pool split slower than one serialized connection under contention). A
+  residual, rarer crash still shows up in the full app under sustained
+  load, not yet isolated — `-Dpreview_mt` is closer than when this started
+  but not yet a certified path to multi-core scheme.cr.
+
+## Running it yourself
+
+```sh
+make lib/rfc8439/ext/chacha20_neon.o   # aarch64 only, if bin/creme isn't built yet
+shards build --release                  # or: make all
+cd competition/ruby/demo-todo && bundle install && cd -
+./competition/bench.sh
+```

@@ -1,0 +1,61 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    base64 (0.3.0)
+    bigdecimal (4.1.2)
+    logger (1.7.0)
+    mustermann (3.1.1)
+    nio4r (2.7.5)
+    puma (8.0.2)
+      nio4r (~> 2.0)
+    rack (3.2.6)
+    rack-protection (4.2.1)
+      base64 (>= 0.1.0)
+      logger (>= 1.6.0)
+      rack (>= 3.0.0, < 4)
+    rack-session (2.1.2)
+      base64 (>= 0.1.0)
+      rack (>= 3.0.0)
+    rackup (2.3.1)
+      rack (>= 3)
+    sequel (5.100.0)
+      bigdecimal
+    sinatra (4.2.1)
+      logger (>= 1.6.0)
+      mustermann (~> 3.0)
+      rack (>= 3.0.0, < 4)
+      rack-protection (= 4.2.1)
+      rack-session (>= 2.0.0, < 3)
+      tilt (~> 2.0)
+    sqlite3 (2.9.0-arm64-darwin)
+    tilt (2.8.0)
+
+PLATFORMS
+  arm64-darwin
+
+DEPENDENCIES
+  puma
+  rackup
+  sequel
+  sinatra
+  sqlite3
+
+CHECKSUMS
+  base64 (0.3.0)
+  bigdecimal (4.1.2)
+  bundler (4.0.15) sha256=a4ceb882fe94a0e0ac63cd0813932bbfd631a14e5ac0b7975189b19a4d28d9e7
+  logger (1.7.0)
+  mustermann (3.1.1)
+  nio4r (2.7.5)
+  puma (8.0.2)
+  rack (3.2.6)
+  rack-protection (4.2.1)
+  rack-session (2.1.2)
+  rackup (2.3.1)
+  sequel (5.100.0)
+  sinatra (4.2.1)
+  sqlite3 (2.9.0-arm64-darwin)
+  tilt (2.8.0)
+
+BUNDLED WITH
+  4.0.15
