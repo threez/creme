@@ -24,7 +24,8 @@
          (old-done (todo-done? row))
          (title (dao-ref row 'title)))
     (todo-update! id 'done (if old-done #f #t))
-    (memoize-forget! cached-todo-row->string id old-done title)))
+    (memoize-forget! cached-todo-row->string id old-done title)
+    (memoize-forget! cached-todo-row->json id old-done title)))
 
 (define (todo-row->string id done title)
   (html! `(li (@ (class ,(if done "done" "pending")))
@@ -74,32 +75,41 @@
 
 (define (page-response) (surf-html write-page!))
 
-(define (todo->json-node row)
-  `(object (id ,(dao-ref row 'id)) (title ,(dao-ref row 'title))
-           (done ,(todo-done? row))))
+(define (todo-row->json id done title)
+  (json->string `(object (id ,id) (title ,title) (done ,done))))
 
-(define (todos-json)
-  (json->string (json-array-map todo->json-node (todo-all))))
+(define cached-todo-row->json (memoize todo-row->json))
+
+(define (write-todos-json! port)
+  (write-string "[" port)
+  (let loop ((rows (todo-all)) (first #t))
+    (if (pair? rows)
+        (let ((row (car rows)))
+          (if (not first) (write-string "," port))
+          (write-string (cached-todo-row->json (dao-ref row 'id) (todo-done? row) (dao-ref row 'title)) port)
+          (loop (cdr rows) #f))))
+  (write-string "]" port))
 
 (define router
   (surf
-   (get "/" (request)
+   (get ("") (request)
      (surf-accept request
        ("text/html" (page-response))
-       ("application/json" (surf-json (todos-json)))
+       ("application/json" (surf-json write-todos-json!))
        (else (surf-text "Not Acceptable: this route serves text/html or application/json" 406))))
 
-   (post "/todos" (request)
-     (add-todo! (cdr (assoc "title" (surf-form request))))
+   (post ("todos") (request title)
+     (add-todo! title)
      (surf-redirect "/"))
 
-   (post "/todos/:id/complete" (request id)
-     (toggle-todo! (string->number id))
-     (surf-redirect "/"))
+   (at ("todos" (id integer))
+     (post ("complete") (request)
+       (toggle-todo! id)
+       (surf-redirect "/"))
 
-   (post "/todos/:id/delete" (request id)
-     (todo-delete! (string->number id))
-     (surf-redirect "/"))))
+     (post ("delete") (request)
+       (todo-delete! id)
+       (surf-redirect "/")))))
 
 (add-todo! "Write report")
 (add-todo! "Review PR")

@@ -109,9 +109,9 @@ describe "surf module" do
       result = run(<<-SCM)
         (define router
           (surf
-           (get "/hello/:id" (request)
+           (get ("hello" (id text)) (request)
              (string-append "hello " (surf-path-param request "id")))
-           (post "/echo" (request)
+           (post ("echo") (request)
              (surf-text (cdr (assoc "title" (surf-form request)))))))
 
         (define server (mux-listen! router 0))
@@ -137,11 +137,11 @@ describe "surf module" do
       result = run(<<-SCM)
         (define router
           (surf
-           (get "/todos/:id/complete" (request id)
+           (get ("todos" (id text) "complete") (request id)
              (surf-text (string-append "id=" id)))
-           (post "/echo2" (request title)
+           (post ("echo2") (request title)
              (surf-text (string-append "title=" title)))
-           (get "/missing" (request nope)
+           (get ("missing") (request nope)
              (surf-text (if nope "present" "absent")))))
 
         (define server (mux-listen! router 0))
@@ -163,10 +163,134 @@ describe "surf module" do
       missing_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("absent"))
     end
 
+    it "an (name integer) binding parses a numeric path param" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get ("todos" (id text) "complete") (request (id integer))
+             (surf-text (string-append "id=" (number->string id))))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define result (http-get (string-append base-url "/todos/42/complete")))
+        (mux-close! server)
+        result
+        SCM
+      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
+      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("id=42"))
+    end
+
+    it "an (name integer) binding responds 404 instead of running body when the segment isn't numeric" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get ("todos" (id text) "complete") (request (id integer))
+             (surf-text (string-append "id=" (number->string id))))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define result (http-get (string-append base-url "/todos/abc/complete")))
+        (mux-close! server)
+        result
+        SCM
+      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
+      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
+    end
+
+    it "an (name integer) binding responds 404 for a fractional segment -- integer means integer, not just numeric" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get ("todos" (id text) "complete") (request (id integer))
+             (surf-text (string-append "id=" (number->string id))))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define result (http-get (string-append base-url "/todos/3.14/complete")))
+        (mux-close! server)
+        result
+        SCM
+      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
+      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
+    end
+
+    it "an (name float) binding parses both whole and fractional segments" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get ("price" (amount text)) (request (amount float))
+             (surf-text (string-append "amount=" (number->string amount))))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define whole (http-get (string-append base-url "/price/42")))
+        (define fractional (http-get (string-append base-url "/price/3.14")))
+        (mux-close! server)
+        (list whole fractional)
+        SCM
+      pair = Scheme.list_to_a(result)
+      whole_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
+      fractional_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+
+      whole_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("amount=42"))
+      fractional_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("amount=3.14"))
+    end
+
+    it "an (name float) binding responds 404 instead of running body when the segment isn't numeric" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get ("price" (amount text)) (request (amount float))
+             (surf-text (string-append "amount=" (number->string amount))))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define result (http-get (string-append base-url "/price/abc")))
+        (mux-close! server)
+        result
+        SCM
+      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
+      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
+    end
+
+    it "an unrecognized type in a (name kind) binding raises instead of miscompiling (surfaces as 500, not a crash)" do
+      # The specific "surf: unknown path-param type ..." message is only
+      # visible server-side (a handler-level raise, unlike a response-
+      # writing-stage error, isn't caught by mux.cr's own write_response
+      # rescue, so the client only sees a generic 500) -- what matters
+      # here is that it's a clean 500 via the ordinary error path, not the
+      # old miscompiled-let crash.
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (get ("todos" (id text) "complete") (request (id string))
+             (surf-text "unreachable"))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define result (http-get (string-append base-url "/todos/1/complete")))
+        (mux-close! server)
+        result
+        SCM
+      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
+      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("500")
+    end
+
+    it "mixes a typed (name integer) binding with a plain name binding in the same clause" do
+      result = run(<<-SCM)
+        (define router
+          (surf
+           (post ("todos" (id text) "rename") (request (id integer) title)
+             (surf-text (string-append (number->string id) ":" title)))))
+        (define server (mux-listen! router 0))
+        (define base-url (mux-base-url server))
+        (define result (http-post (string-append base-url "/todos/7/rename") "title=hi+there"))
+        (mux-close! server)
+        result
+        SCM
+      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
+      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("7:hi there"))
+    end
+
     it "surf-route! adds a route to an already-existing app one at a time" do
       w(<<-SCM).should eq(%("added"))
         (define router (surf-app))
-        (surf-route! router (get "/only" (request) "added"))
+        (surf-route! router (get ("only") (request) "added"))
         (define server (mux-listen! router 0))
         (define base-url (mux-base-url server))
         (define result (cdr (assoc "body" (http-get (string-append base-url "/only")))))
@@ -201,7 +325,7 @@ describe "surf module" do
       result = run(<<-SCM)
         (define router
           (surf
-           (get "/" (request)
+           (get ("") (request)
              (surf-accept request
                ("application/json" (surf-json (list 'object (list 'kind "json"))))
                (else (surf-text "html-ish"))))))
@@ -227,7 +351,7 @@ describe "surf module" do
       result = run(<<-SCM)
         (define router
           (surf
-           (get "/" (request)
+           (get ("") (request)
              (surf-accept request
                ("application/json" "json-branch")
                (else "else-branch")))))
@@ -247,7 +371,7 @@ describe "surf module" do
       w(<<-SCM).should eq("406")
         (define router
           (surf
-           (get "/" (request)
+           (get ("") (request)
              (surf-accept request
                ("application/json" "json-branch")))))
         (define server (mux-listen! router 0))
