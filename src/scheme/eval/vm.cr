@@ -292,7 +292,12 @@ module Scheme
             # Bounds-check-free: `instr.b` is always a const-pool index
             # BytecodeCompiler obtained from THIS chunk's own `add_const`
             # call, so it's provably < chunk.consts.size (same reasoning as
-            # `top_frame`'s @frames.unsafe_fetch above).
+            # `top_frame`'s @frames.unsafe_fetch above) — every other
+            # `chunk.consts`/`chunk.protos`/`chunk.qq_templates`/
+            # `chunk.case_dispatch_tables` access in this file (all indexed by
+            # an operand BytecodeCompiler obtained from that same chunk's own
+            # add_const/add_proto/add_qq_template/add_case_dispatch_table
+            # call) shares this same argument without repeating the comment.
             @stack.unsafe_put(base + instr.a, frame.chunk.consts.unsafe_fetch(instr.b))
           when Op::LoadNil
             @stack.unsafe_put(base + instr.a, NIL)
@@ -303,9 +308,9 @@ module Scheme
           when Op::Move
             @stack.unsafe_put(base + instr.a, @stack.unsafe_fetch(base + instr.b))
           when Op::GetUpval
-            @stack.unsafe_put(base + instr.a, closure_of(frame).upvalues[instr.b].get)
+            @stack.unsafe_put(base + instr.a, upvalue(frame, instr.b).get)
           when Op::SetUpval
-            closure_of(frame).upvalues[instr.a].set(@stack.unsafe_fetch(base + instr.b))
+            upvalue(frame, instr.a).set(@stack.unsafe_fetch(base + instr.b))
           when Op::GetGlobal
             @stack.unsafe_put(base + instr.a, get_global_cached(frame, frame.ip - 1, instr.b))
           when Op::DefGlobal
@@ -397,11 +402,11 @@ module Scheme
             exec_prim(frame, base, instr)
           when Op::CaseMatch
             key = @stack.unsafe_fetch(base + instr.b)
-            datums = frame.chunk.consts[instr.c].as(SchemeVector).value
+            datums = frame.chunk.consts.unsafe_fetch(instr.c).as(SchemeVector).value
             @stack.unsafe_put(base + instr.a, SchemeBool.of(datums.any? { |datum| Scheme.scheme_eqv?(key, datum) }))
           when Op::CaseDispatch
             key = @stack.unsafe_fetch(base + instr.a)
-            table = frame.chunk.case_dispatch_tables[instr.b]
+            table = frame.chunk.case_dispatch_tables.unsafe_fetch(instr.b)
             dispatch_key = case key
                            when SchemeInt  then CaseDispatchKey.for_int(key.value)
                            when SchemeChar then CaseDispatchKey.for_char(key.value)
@@ -412,7 +417,7 @@ module Scheme
                            end
             frame.ip = (dispatch_key && table.targets[dispatch_key]?) || table.default
           when Op::Throw
-            raise SchemeRuntimeError.new(frame.chunk.consts[instr.a].as(SchemeStr).value)
+            raise SchemeRuntimeError.new(frame.chunk.consts.unsafe_fetch(instr.a).as(SchemeStr).value)
           when Op::Jmp
             frame.ip += instr.b
           when Op::TestFalse
@@ -488,42 +493,42 @@ module Scheme
             end
             frame.ip += instr.b unless truthy
           when Op::TestLtUp
-            x = @stack.unsafe_fetch(base + instr.a); y = closure_of(frame).upvalues[instr.c].get
+            x = @stack.unsafe_fetch(base + instr.a); y = upvalue(frame, instr.c).get
             truthy = x.is_a?(SchemeInt) && y.is_a?(SchemeInt) ? x.value < y.value : begin
               cmp = @interp.num_compare2(x, y, "<")
               !cmp.nil? && cmp < 0
             end
             frame.ip += instr.b unless truthy
           when Op::TestLeUp
-            x = @stack.unsafe_fetch(base + instr.a); y = closure_of(frame).upvalues[instr.c].get
+            x = @stack.unsafe_fetch(base + instr.a); y = upvalue(frame, instr.c).get
             truthy = x.is_a?(SchemeInt) && y.is_a?(SchemeInt) ? x.value <= y.value : begin
               cmp = @interp.num_compare2(x, y, "<=")
               !cmp.nil? && cmp <= 0
             end
             frame.ip += instr.b unless truthy
           when Op::TestGtUp
-            x = @stack.unsafe_fetch(base + instr.a); y = closure_of(frame).upvalues[instr.c].get
+            x = @stack.unsafe_fetch(base + instr.a); y = upvalue(frame, instr.c).get
             truthy = x.is_a?(SchemeInt) && y.is_a?(SchemeInt) ? x.value > y.value : begin
               cmp = @interp.num_compare2(x, y, ">")
               !cmp.nil? && cmp > 0
             end
             frame.ip += instr.b unless truthy
           when Op::TestGeUp
-            x = @stack.unsafe_fetch(base + instr.a); y = closure_of(frame).upvalues[instr.c].get
+            x = @stack.unsafe_fetch(base + instr.a); y = upvalue(frame, instr.c).get
             truthy = x.is_a?(SchemeInt) && y.is_a?(SchemeInt) ? x.value >= y.value : begin
               cmp = @interp.num_compare2(x, y, ">=")
               !cmp.nil? && cmp >= 0
             end
             frame.ip += instr.b unless truthy
           when Op::TestEqUp
-            x = @stack.unsafe_fetch(base + instr.a); y = closure_of(frame).upvalues[instr.c].get
+            x = @stack.unsafe_fetch(base + instr.a); y = upvalue(frame, instr.c).get
             truthy = x.is_a?(SchemeInt) && y.is_a?(SchemeInt) ? x.value == y.value : begin
               cmp = @interp.num_compare2(x, y, "=")
               !cmp.nil? && cmp == 0
             end
             frame.ip += instr.b unless truthy
           when Op::Closure
-            @stack.unsafe_put(base + instr.a, make_closure(frame, frame.chunk.protos[instr.b]))
+            @stack.unsafe_put(base + instr.a, make_closure(frame, frame.chunk.protos.unsafe_fetch(instr.b)))
           when Op::MakeCaseClosure
             clauses = Array(BytecodeClosure).new(instr.c) { |i| @stack.unsafe_fetch(base + instr.b + i).as(BytecodeClosure) }
             @stack.unsafe_put(base + instr.a, BytecodeCaseClosure.new(clauses, frame.root_env))
@@ -541,12 +546,12 @@ module Scheme
           when Op::GuardReraise
             raise @pending_reraise || raise SchemeRuntimeError.new("internal: no pending exception to re-raise")
           when Op::Quasiquote
-            value, _ = build_qq(frame.chunk.qq_templates[instr.b], base + instr.c, 0)
+            value, _ = build_qq(frame.chunk.qq_templates.unsafe_fetch(instr.b), base + instr.c, 0)
             @stack.unsafe_put(base + instr.a, value)
           when Op::MakePromise
             @stack.unsafe_put(base + instr.a, SchemePromise.new(@stack.unsafe_fetch(base + instr.b)))
           when Op::HelperForm
-            form = frame.chunk.consts[instr.b].as(Cons)
+            form = frame.chunk.consts.unsafe_fetch(instr.b).as(Cons)
             @stack.unsafe_put(base + instr.a, exec_helper_form(instr.c, form, frame.root_env))
           when Op::HelperFormLocal
             exec_helper_form_local(frame, base, instr)
@@ -577,7 +582,7 @@ module Scheme
             result = deliver_return(get_global_cached(frame, frame.ip - 1, instr.a))
             return result unless result.nil?
           when Op::ReturnUpval
-            result = deliver_return(closure_of(frame).upvalues[instr.a].get)
+            result = deliver_return(upvalue(frame, instr.a).get)
             return result unless result.nil?
           when Op::AddReturn, Op::SubReturn, Op::MulReturn
             # The Return-fused arithmetic trio (e.g. fib's inner
@@ -688,7 +693,7 @@ module Scheme
             x = @stack.unsafe_fetch(base + instr.a)
             frame.ip += instr.b unless x.is_a?(SchemeInt) && x.value == instr.c.to_i64
           when Op::TestIsEqUp
-            x = @stack.unsafe_fetch(base + instr.a); y = closure_of(frame).upvalues[instr.c].get
+            x = @stack.unsafe_fetch(base + instr.a); y = upvalue(frame, instr.c).get
             frame.ip += instr.b unless Scheme.scheme_eqv?(x, y)
           end
         rescue ex : SchemeExecutionLimitError
@@ -946,7 +951,7 @@ module Scheme
                                end
       when Op::AddUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  begin
                                    SchemeInt.new(x.value + y.value)
@@ -958,7 +963,7 @@ module Scheme
                                end
       when Op::SubUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  begin
                                    SchemeInt.new(x.value - y.value)
@@ -970,7 +975,7 @@ module Scheme
                                end
       when Op::MulUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  begin
                                    SchemeInt.new(x.value * y.value)
@@ -982,7 +987,7 @@ module Scheme
                                end
       when Op::NumLtUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  SchemeBool.of(x.value < y.value)
                                else
@@ -991,7 +996,7 @@ module Scheme
                                end
       when Op::NumLeUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  SchemeBool.of(x.value <= y.value)
                                else
@@ -1000,7 +1005,7 @@ module Scheme
                                end
       when Op::NumGtUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  SchemeBool.of(x.value > y.value)
                                else
@@ -1009,7 +1014,7 @@ module Scheme
                                end
       when Op::NumGeUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  SchemeBool.of(x.value >= y.value)
                                else
@@ -1018,7 +1023,7 @@ module Scheme
                                end
       when Op::NumEqUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
                                  SchemeBool.of(x.value == y.value)
                                else
@@ -1066,28 +1071,28 @@ module Scheme
         raise SchemeRuntimeError.new("bytevector-u8-set!: index out of range") if idx < 0 || idx >= bytes.size
         bytes[idx] = b
       when Op::VecLenUp
-        arr = @interp.vector_arg(closure_of(frame).upvalues[instr.b].get, "vector-length")
+        arr = @interp.vector_arg(upvalue(frame, instr.b).get, "vector-length")
         regs[base + instr.a] = SchemeInt.new(arr.size.to_i64)
       when Op::VecRefUp
-        arr = @interp.vector_arg(closure_of(frame).upvalues[instr.b].get, "vector-ref")
+        arr = @interp.vector_arg(upvalue(frame, instr.b).get, "vector-ref")
         i = @interp.vector_index_arg(regs[base + instr.c], "vector-ref")
         raise SchemeRuntimeError.new("vector-ref: index #{i} out of range") if i < 0 || i >= arr.size
         regs[base + instr.a] = arr[i]
       when Op::VecSetUp
-        obj = closure_of(frame).upvalues[instr.a].get
+        obj = upvalue(frame, instr.a).get
         arr = @interp.vector_arg(obj, "vector-set!")
         i = @interp.vector_index_arg(regs[base + instr.b], "vector-set!")
         raise SchemeRuntimeError.new("vector-set!: index #{i} out of range") if i < 0 || i >= arr.size
         arr[i] = regs[base + instr.c]
         regs[base + instr.d] = obj
       when Op::StrRefUp
-        sv = closure_of(frame).upvalues[instr.b].get
+        sv = upvalue(frame, instr.b).get
         raise SchemeRuntimeError.new("string-ref: expected string, got #{sv.write_string}") unless sv.is_a?(SchemeStr)
         idx = @interp.int_arg(regs[base + instr.c], "string-ref")
         raise SchemeRuntimeError.new("string-ref: index out of range") if idx < 0 || idx >= sv.value.size
         regs[base + instr.a] = SchemeChar.new(sv.value[idx.to_i])
       when Op::StrSetUp
-        sv = closure_of(frame).upvalues[instr.a].get
+        sv = upvalue(frame, instr.a).get
         raise SchemeRuntimeError.new("string-set!: expected string, got #{sv.write_string}") unless sv.is_a?(SchemeStr)
         idx = @interp.int_arg(regs[base + instr.b], "string-set!").to_i32
         chv = regs[base + instr.c]
@@ -1098,12 +1103,12 @@ module Scheme
         sv.value = chars.join
         regs[base + instr.d] = sv
       when Op::BvRefUp
-        bytes = @interp.blob_arg(closure_of(frame).upvalues[instr.b].get, "bytevector-u8-ref")
+        bytes = @interp.blob_arg(upvalue(frame, instr.b).get, "bytevector-u8-ref")
         idx = @interp.int_arg(regs[base + instr.c], "bytevector-u8-ref")
         raise SchemeRuntimeError.new("bytevector-u8-ref: index out of range") if idx < 0 || idx >= bytes.size
         regs[base + instr.a] = SchemeInt.new(bytes[idx].to_i64)
       when Op::BvSetUp
-        obj = closure_of(frame).upvalues[instr.a].get
+        obj = upvalue(frame, instr.a).get
         bytes = @interp.blob_arg(obj, "bytevector-u8-set!")
         idx = @interp.int_arg(regs[base + instr.b], "bytevector-u8-set!")
         b = @interp.byte_arg(regs[base + instr.c], "bytevector-u8-set!")
@@ -1127,13 +1132,13 @@ module Scheme
         regs[base + instr.a] = SchemeBool.of(x.is_a?(SchemeInt) && x.value == instr.c.to_i64)
       when Op::IsEqUp
         x = regs[base + instr.b]
-        y = closure_of(frame).upvalues[instr.c].get
+        y = upvalue(frame, instr.c).get
         regs[base + instr.a] = SchemeBool.of(Scheme.scheme_eqv?(x, y))
       end
     end
 
     private def const_name(frame : CallFrame, idx : Int32) : String
-      frame.chunk.consts[idx].as(SchemeSym).name
+      frame.chunk.consts.unsafe_fetch(idx).as(SchemeSym).name
     end
 
     # Slow path shared by the fused unary prims (Op::Cxr/Op::Abs/Op::CmpZero):
@@ -1145,7 +1150,7 @@ module Scheme
     # non-number for abs/cmp-zero). Returns the builtin's value (which for the
     # cxr non-pair case is always an error raise).
     private def unary_prim_deopt(frame : CallFrame, instr : Instruction) : SchemeValue
-      builtin = frame.chunk.consts[instr.d]
+      builtin = frame.chunk.consts.unsafe_fetch(instr.d)
       src = @stack.unsafe_fetch(frame.base + instr.b)
       pos = frame.chunk.positions[frame.ip - 1]?
       @interp.current_pos = pos if pos
@@ -1177,6 +1182,16 @@ module Scheme
 
     private def closure_of(frame : CallFrame) : BytecodeClosure
       frame.closure || raise SchemeRuntimeError.new("internal: upvalue op in a frame with no closure")
+    end
+
+    # `frame`'s own closure's `idx`th upvalue. Bounds-check-free: `idx` is
+    # always an upvalue index BytecodeCompiler resolved against THIS
+    # closure's own upvalue list (a GetUpval/SetUpval/Closure-capture/*Up-
+    # family operand, or a call-family op's own callee upvalue index), so
+    # it's provably < upvalues.size — same reasoning as `top_frame`'s
+    # @frames.unsafe_fetch.
+    private def upvalue(frame : CallFrame, idx : Int32) : Upvalue
+      closure_of(frame).upvalues.unsafe_fetch(idx)
     end
 
     # Closes every Upvalue opened against `frame`'s own registers — must run
@@ -1312,7 +1327,7 @@ module Scheme
     # Scheme.record_type_names' order, out into the registers the
     # compiler pre-declared for them.
     private def exec_helper_form_local(frame : CallFrame, base : Int32, instr : Instruction) : Nil
-      form = frame.chunk.consts[instr.b].as(Cons)
+      form = frame.chunk.consts.unsafe_fetch(instr.b).as(Cons)
       scratch_env = Env.new
       @interp.eval_define_record_type(form, scratch_env)
       names = Scheme.record_type_names(form).not_nil!
@@ -1396,7 +1411,7 @@ module Scheme
     # Op::CallUpval / Op::TailCallUpval — the callee is a closed-over
     # variable, at upvalue index `d`.
     private def exec_call_upval(frame : CallFrame, instr : Instruction, tail : Bool) : SchemeValue?
-      dispatch_call(frame, instr, closure_of(frame).upvalues[instr.d].get, tail)
+      dispatch_call(frame, instr, upvalue(frame, instr.d).get, tail)
     end
 
     # Returns a non-nil value only when this call unwound the VM's OUTERMOST

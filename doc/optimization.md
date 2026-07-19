@@ -280,6 +280,63 @@ doc comment there.
   workloads unaffected (codegen is byte-identical for a test with no leading
   `not`).
 
+- **Relaxing the prim Move-elision gate to a per-argument suffix.** A bare local
+  argument to a fused prim (`(+ acc (vector-ref v i))`, `(= (car positions)
+  col)`) could alias its own register directly, instead of being staged through
+  a `Move`, only when *every* argument to that call was a side-effect-free leaf
+  (`all_leaves`) — so the common `(op (compound…) local)` shape (nqueens'
+  `safe?` does `(= (car positions) col)`) still forced a redundant `Move` of the
+  trailing bare local. The actual correctness requirement is narrower: an
+  operand can alias its register as long as no argument evaluated *after* it
+  can mutate that local before the op runs — i.e. its own index is past the
+  last non-leaf argument, not that the whole call is leaves-only. `safe?` drops
+  from 23 to 20 instructions (9 to 8 registers); **`nqueens` ~5% faster**, no
+  change to workloads without this mixed leaf/non-leaf argument shape.
+
+- **Treating pure prim-call subtrees as side-effect-free in `leaf_node?`.**
+  `leaf_node?` (used by the Move-elision gate above, and by the `*Up` fusions'
+  own leaf-argument gates) only recognized bare locals/literals as safe to
+  alias — a `PrimCallNode` argument like `(* i 2)` in `(vector-set! v i (* i
+  2))`, or `(vector-ref v i)` in `(+ acc (vector-ref v i))`, was always treated
+  as potentially unsafe, blocking both the `*Up` fusion (the vector, closed
+  over by a named-let loop, couldn't fuse into `VecSetUp`/read straight from
+  its upvalue) and the aliasing above. A prim call is genuinely side-effect-free
+  exactly when every one of its own arguments is (it only ever writes its own
+  destination register, plus — for `vector-set!` etc. — a heap object, never a
+  caller-visible local's register), so `leaf_node?` now recurses into
+  `PrimCallNode` args. `vector-sum-test`'s fill loop drops from 10 to 7
+  instructions (6 to 4 registers), its sum loop from 7 to 6. A nested
+  `set!`/call inside a prim argument still keeps the whole prim non-leaf,
+  preserving the required left-to-right evaluation snapshot.
+
+- **`case` hash dispatch — `Op::CaseDispatch`.** Modeled directly on YARV's
+  `opt_case_dispatch` (Ruby's own bytecode compiles `case` to a hash-table
+  jump instead of a clause chain): the previous lowering emitted one
+  `Op::CaseMatch` + `Op::TestFalse` pair per clause (`compile_case_clauses`),
+  so a `case` with N clauses cost up to O(N) clause probes, each itself
+  scanning that clause's own datum vector by `eqv?`. When every clause's
+  datums are a cheaply/safely hashable literal type — `SchemeInt`, `SchemeChar`,
+  `SchemeSym`, `SchemeBool`, `SchemeNil` (excluding `SchemeFloat`'s bit-pattern
+  `eqv?`, `SchemeRational`, and anything falling to the generic
+  `Reference#same?` identity fallback — all legal but vanishingly rare as case
+  datums), any `else` is absent or last (an `else` earlier in the list would
+  short-circuit later clauses under the old clause-order semantics, which a
+  hash table can't reproduce), and there are at least
+  `CASE_DISPATCH_MIN_DATUMS` (8) datums total (below that a linear scan is
+  already fast enough that building a `Hash` isn't worth it), `compile_case`
+  instead emits one `Op::CaseDispatch` against a `CaseDispatchTable` built at
+  compile time — an allocation-free `CaseDispatchKey` record normalizes the
+  runtime key, and the table maps it straight to the matching clause's
+  absolute instruction offset (or a default, for `else`/no-match), so
+  `frame.ip` is set directly rather than walking a chain of relative jumps.
+  Any `case` outside that shape (small clause count, a non-hashable datum, a
+  misplaced `else`, a malformed clause) falls back to the exact original
+  linear codegen, unchanged. Measured on a standalone worst-case microbenchmark
+  (24 single-datum clauses, 3,000,000 iterations always matching the *last*
+  clause — the case a linear scan pays most for): **~1.03s → ~0.24s (about
+  4.3×)**; ordinary small `case` forms (below the datum threshold) are
+  byte-for-byte the same codegen as before, so unaffected.
+
 **An invariant this exposed.** Crystal compiles a `case`/`when` over an enum to a
 *sequential comparison chain*, not a jump table. So inserting a new dispatch arm
 in the middle of the loop's `case` pushes every later arm's comparisons back and
@@ -304,6 +361,63 @@ off each dispatched instruction.
   raw buffer pointer (`@stack.to_unsafe`), whose `[]`/`[]=` are unchecked —
   a one-line change that made every arithmetic register access in that method
   bounds-check-free, safe because nothing `exec_prim` calls ever grows `@stack`.
+
+- **Bounds-check-free instruction fetch, then dropping the guard that made it
+  provable.** The fetch/decode step (`instructions.unsafe_fetch(frame.ip)`) and
+  `top_frame`'s `@frames.unsafe_fetch(@depth - 1)`, run once per dispatched
+  instruction, were converted the same way as register access above — each is
+  provably in range (the fetch is dominated by a `frame.ip >=
+  instructions.size` guard with nothing mutating `frame.ip` in between; `@depth`
+  is always ≥ 1 for an executing VM), but LLVM can't prove either across the
+  intervening heap loads on its own. Measured (min-of-8, release): **`fib(30)`
+  ~7%, `tak(24,16,8)` ~8.5%, `build-list` ~4.5% faster**. This established that
+  Crystal lowers a dense enum `case` to a real jump table at `--release`
+  (confirmed via an isolated micro-benchmark), so — unlike the interpreter's
+  own dispatch loop, which is hand-written as a sequential chain (see this
+  section's invariant above) — dispatch-*arm order* inside a single `case` is
+  not itself a lever once compiled.
+
+  That still left a genuine per-instruction guard: `frame.ip >=
+  instructions.size`, checked every iteration purely to catch a chunk running
+  off its end without an explicit `Return`. Rather than paying that branch
+  forever, the compiler now guarantees the condition can never hold:
+  `BytecodeCompiler#append_return_sentinel` appends a `LoadNil`+`Return` to
+  every compiled chunk, so (a) the last instruction is always a `Return` — no
+  sequential fall-off is reachable — and (b) the instruction array has a valid
+  index one past every possible `patch_jump_to_here` target, so no jump can
+  land out of range either. With both fetch and guard removed, dispatch just
+  starts at the fetch. Measured (min-of-8, release): **`sum-to` ~10%, `fib`
+  ~6% faster; `nqueens` ~1% slower** (a code-layout artifact of the extra
+  sentinel instructions). Full suite (including every `examples/*.scm`) stayed
+  green, which is itself evidence the no-jump-past-end invariant holds across
+  every tested program shape — a malformed chunk lacking the sentinel would
+  now read out of bounds instead of raising, so keeping that invariant is the
+  compiler's responsibility, not something the VM checks anymore.
+
+- **Extending bounds-check-free access to every other compiler-controlled
+  index.** Once the pattern above was established, the same argument applies
+  to any array read indexed by an operand the compiler itself produced for
+  that exact chunk/closure — not just registers and the instruction stream.
+  Converted: `chunk.consts[instr.b]` in `LoadK` (a literal load, on the same
+  hot path as register access) and `chunk.global_cache_values`/
+  `global_cache_versions[instr_idx]` in `get_global_cached` (read on every
+  `GetGlobal`/`CallGlobal`/`TailCallGlobal`/`ReturnGlobal` dispatch — i.e.
+  every recursive call to a global function). Both are provably in range for
+  the same reason `top_frame` is: the index either came from that chunk's own
+  `add_const`, or (for the cache arrays) `Chunk#emit` keeps them 1:1-sized with
+  `instructions`. Also converted, for consistency rather than measured gain:
+  every `closure_of(frame).upvalues[idx]` read (folded into one `upvalue(frame,
+  idx)` helper, replacing ~26 call sites — `GetUpval`/`SetUpval`, the `*Up`
+  fusions, vector/string/bytevector-`Up` ops, call-family callee reads), plus
+  the remaining `chunk.protos`/`chunk.qq_templates`/`chunk.case_dispatch_tables`
+  accesses (`Closure`, `Quasiquote`, `CaseDispatch`) and the prim-op deopt
+  path's builtin lookup. **Only the `LoadK`/`get_global_cached` conversions
+  showed up in back-to-back measurement** (bundled with the two fetch/guard
+  changes above: ~11% combined on `bench/creme.scm`'s full suite); the upvalue/
+  proto/qq-template/case-table sites are colder paths (they fire once per
+  construct, not once per hot-loop register op) and produced **no measurable
+  change** — kept anyway since they're the same provably-safe pattern and
+  remove real (if cold) bounds checks, not a reverted experiment.
 
 - **Inlining the hottest prims into the dispatch loop.** The base + immediate
   integer arithmetic ops (`Add`/`Sub`/`Mul` and their `Imm` variants) and the
@@ -429,10 +543,24 @@ implemented or prototyped and then dropped on measurement.
   dispatch `case` slows every later arm — append new ops at the end.
 - **The integer arithmetic fast path lives in two places** (the inlined
   dispatch-loop arms and `exec_prim`) that must stay in sync.
-- **Unsafe register access relies on the allocator's in-range guarantee.** The
-  `unsafe_fetch`/`unsafe_put`/raw-pointer accesses are correct only because the
-  register allocator plus `ensure_stack_size` guarantee indices are in range;
-  don't introduce a register access whose index isn't compiler-controlled.
+- **Every `unsafe_fetch`/`unsafe_put` in the VM relies on the index being
+  compiler-controlled.** Register access is correct because the register
+  allocator plus `ensure_stack_size` guarantee `base + reg` is in range;
+  `chunk.consts`/`protos`/`qq_templates`/`case_dispatch_tables` and
+  `closure.upvalues` reads are correct because the index came from that exact
+  chunk's/closure's own `add_const`/`add_proto`/.../upvalue-resolution call;
+  the instruction fetch and cache-array reads are correct because
+  `Chunk#append_return_sentinel` guarantees every chunk ends in a `Return` and
+  `Chunk#emit` keeps the cache arrays 1:1 with `instructions`. Don't introduce
+  an access via any of these `unsafe_*` calls whose index isn't provably tied
+  to one of these invariants — a chunk assembled by hand (not through
+  `BytecodeCompiler`) rather than by the compiler would need to reestablish
+  all of them itself.
+- **No jump/patch may target past the end of a chunk's own instruction
+  array.** `patch_jump_to_here` relies on this, and the end-of-chunk `Return`
+  sentinel relies on it too (see Section 6) — a hand-assembled or corrupted
+  chunk that broke this would read out of bounds rather than raising, now that
+  the VM no longer checks per instruction.
 - **Upvalues must be closed on frame reuse.** Because register slots and frame
   objects are reused across calls, any upvalue capturing a still-live register
   must be closed (copied out) the instant its frame exits, or a later call
