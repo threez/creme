@@ -5,6 +5,8 @@
 ;     (build once: shards build --release --no-debug)
 ;   - bench/bench.cr, a native, unmodified-code Crystal reference floor
 ;     (build once: crystal build --release bench/bench.cr -o bin/bench_cr)
+;   - bench/bench.go, the same 7 workloads under native Go, a second
+;     compiled-code floor (build once: go build -o bin/bench_go bench/bench.go)
 ;   - bench/bench.rb, the same 7 workloads under Ruby (MRI)
 ;   - bench/racket.scm, the same 7 workloads under Racket's #lang r7rs
 ;   - bench/guile.scm, the same 7 workloads under GNU Guile (run with --r7rs)
@@ -46,6 +48,7 @@
 
 (define creme-output (run-variant "bin/creme" (list "bench/creme.scm")))
 (define crystal-output (run-variant "bin/bench_cr" '()))
+(define go-output (run-variant "bin/bench_go" '()))
 (define ruby-output (run-variant "ruby" (list "bench/bench.rb")))
 (define racket-output (run-variant "racket" (list "bench/racket.scm")))
 (define guile-output (run-variant "guile" (list "--r7rs" "bench/guile.scm")))
@@ -68,6 +71,7 @@
         (append per-line total))))
 
 (define crystal-times (parse-elapsed-alist crystal-output))
+(define go-times (parse-elapsed-alist go-output))
 (define racket-times (parse-elapsed-alist racket-output))
 (define ruby-times (parse-elapsed-alist ruby-output))
 (define guile-times (parse-elapsed-alist guile-output))
@@ -85,23 +89,24 @@
         "tak(18,12,6)" "nqueens(9)" "total"))
 
 (define headers
-  (list "workload" "crystal" "racket" "ruby" "guile" "creme"
-        "creme/crystal" "creme/racket" "creme/ruby" "creme/guile"))
+  (list "workload" "crystal" "go" "racket" "ruby" "guile" "creme"
+        "creme/crystal" "creme/go" "creme/racket" "creme/ruby" "creme/guile"))
 
 (define aligns
-  (list 'left 'right 'right 'right 'right 'right 'right 'right 'right 'right))
+  (list 'left 'right 'right 'right 'right 'right 'right 'right 'right 'right 'right 'right))
 
 (define data-rows
   (map (lambda (label)
          (let ((c (lookup label crystal-times))
+               (go (lookup label go-times))
                (r (lookup label racket-times))
                (rb (lookup label ruby-times))
                (g (lookup label guile-times))
                (cr (lookup label creme-times)))
            (list label
-                 (numfmt-fixed c 5) (numfmt-fixed r 5)
+                 (numfmt-fixed c 5) (numfmt-fixed go 5) (numfmt-fixed r 5)
                  (numfmt-fixed rb 5) (numfmt-fixed g 5) (numfmt-fixed cr 5)
-                 (numfmt-ratio cr c) (numfmt-ratio cr r)
+                 (numfmt-ratio cr c) (numfmt-ratio cr go) (numfmt-ratio cr r)
                  (numfmt-ratio cr rb) (numfmt-ratio cr g))))
        workloads))
 

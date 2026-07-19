@@ -1,6 +1,6 @@
 ;; Benchmarks the scheme.cr demo-todo app (competition/scheme/demo-todo/app.scm)
-;; against its Sinatra+ERB+Sequel+SQLite, Kemal+Granite+ECR, and Racket
-;; web-server twins using wrk. A scheme.cr port of bench.sh -- same
+;; against its Sinatra+ERB+Sequel+SQLite, Kemal+Granite+ECR, Racket web-server,
+;; and Go Fiber+GORM+html-template twins using wrk. A scheme.cr port of bench.sh -- same
 ;; sequence, same wrk invocations, same cleanup patterns, just orchestrated
 ;; from creme instead of bash. Prints one line per step as it runs, then a
 ;; results table at the end (see print-results-table! below) instead of
@@ -13,11 +13,12 @@
         (creme shell) (creme table) (creme numfmt) (creme sort) (creme string))
 
 (define opts
-  (cli "Benchmarks the scheme.cr/Ruby/Crystal/Racket demo-todo twins with wrk"
+  (cli "Benchmarks the scheme.cr/Ruby/Crystal/Racket/Go demo-todo twins with wrk"
        (list (flag "scheme-port" "--scheme-port" "scheme.cr server port" 'integer 4571)
              (flag "ruby-port" "--ruby-port" "Ruby server port" 'integer 4570)
              (flag "crystal-port" "--crystal-port" "Crystal server port" 'integer 4572)
              (flag "racket-port" "--racket-port" "Racket server port" 'integer 4573)
+             (flag "go-port" "--go-port" "Go server port" 'integer 4574)
              (flag "duration" "--duration" "wrk run duration" 'string "8s")
              (flag "threads" "--threads" "wrk thread count" 'integer 4)
              (flag "conns" "--conns" "wrk connection count" 'integer 32)
@@ -28,6 +29,7 @@
 (define ruby-port (number->string (cli-get opts "ruby-port")))
 (define crystal-port (number->string (cli-get opts "crystal-port")))
 (define racket-port (number->string (cli-get opts "racket-port")))
+(define go-port (number->string (cli-get opts "go-port")))
 (define duration (cli-get opts "duration"))
 (define threads (cli-get opts "threads"))
 (define profile? (cli-flag? opts "profile"))
@@ -267,6 +269,27 @@
                        'stdout "/tmp/bench-racket.log" 'stderr "/tmp/bench-racket.log"))
 (wait-for-port! racket-port)
 (bench-app! "Racket / web-server+db+SQLite" racket-port)
+(cleanup!)
+(sleep! 1)
+
+;; ---- Go / Fiber+GORM+html-template+SQLite -----------------------------------
+
+(step! (string-append "Go / Fiber+GORM+html-template+SQLite -- starting on port " go-port))
+;; Same freshness check as the Crystal section above, one shell test since
+;; (creme file) has no mtime accessor of its own: rebuild only if bin/app is
+;; missing or older than main.go.
+(if (not (cdr (assoc "success" (shell-run "sh"
+                            (list "-c" (string-append
+                                        "[ -x competition/go/demo-todo/bin/app ] && "
+                                        "[ ! competition/go/demo-todo/main.go -nt "
+                                        "competition/go/demo-todo/bin/app ]"))))))
+    (shell-checked! "sh" (list "-c" "cd competition/go/demo-todo && go build -o bin/app .") "go build"))
+(track! (process-spawn "./bin/app" '()
+                       'chdir "competition/go/demo-todo"
+                       'env (list (cons "PORT" go-port))
+                       'stdout "/tmp/bench-go.log" 'stderr "/tmp/bench-go.log"))
+(wait-for-port! go-port)
+(bench-app! "Go / Fiber+GORM+html-template+SQLite" go-port)
 (cleanup!)
 
 (print-results-table!)
