@@ -57,10 +57,35 @@ def usage : Nil
   creme — a Scheme interpreter (Crystal)
 
   Usage:
-    creme                 Start the interactive REPL
-    creme <file.scm>      Execute a Scheme source file
-    creme --help | -h     Show this help
+    creme                        Start the interactive REPL
+    creme <file.scm>             Execute a Scheme source file
+    creme -S | --dump-bytecode <file.scm>
+                                 Compile a script and print its bytecode
+                                 disassembly (one dump per top-level form,
+                                 including nested closures) instead of
+                                 running it
+    creme --help | -h            Show this help
   USAGE
+end
+
+# Compiles and runs each top-level form of `path`, printing its bytecode
+# disassembly before running it — for `creme --dump-bytecode`. Runs (rather
+# than just compiling) since a later form's analyze pass needs any earlier
+# define-syntax/import to have actually executed first, matching
+# Scheme.run_file's own incremental per-form driver; mirrors its contract
+# otherwise (strict R7RS, no auto-imported (scheme base)) since the point is
+# to see exactly what a real script compiles to.
+def dump_bytecode(path : String) : Nil
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+  src = File.read(path)
+  forms = Scheme::Reader.read_all(src, path)
+  forms.each_with_index do |form, i|
+    node = interp.analyze(form, interp.global)
+    chunk = Scheme::BytecodeCompiler.compile_program([node])
+    puts "; ---- top-level form #{i} ----" if forms.size > 1
+    Scheme::Disassembler.disassemble(chunk, "form #{i}")
+    Scheme::VM.new(interp, interp.global).run(chunk)
+  end
 end
 
 def main : Nil
@@ -98,6 +123,29 @@ def main : Nil
   case args[0]
   when "--help", "-h"
     usage
+  when "--dump-bytecode", "-S"
+    if args[1]?
+      begin
+        # Drop the dump-bytecode flag itself from ARGV before compiling —
+        # (command-line)/(creme cli) (see modules/creme/cli.sld) assume
+        # ARGV[0] is always the script's own path, matching plain "creme
+        # SCRIPT [args...]"; leaving "-S"/"--dump-bytecode" in ARGV would
+        # shift that and make the script's own flag parsing see its path as
+        # a stray unrecognized flag. `args` IS `ARGV` (see below), so this
+        # shift is visible to both.
+        path = args[1]
+        ARGV.shift
+        dump_bytecode(path)
+      rescue ex : Scheme::SchemeExit
+        exit(ex.code)
+      rescue ex : Scheme::SchemeError
+        STDERR.puts format_error(ex)
+        exit 1
+      end
+    else
+      STDERR.puts "Usage: creme --dump-bytecode <file.scm>"
+      exit 1
+    end
   else
     begin
       # A script file must explicitly import what it uses, per R7RS —
