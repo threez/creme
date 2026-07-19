@@ -218,7 +218,10 @@ module Scheme
     end
 
     private def top_frame : CallFrame
-      @frames[@depth - 1]
+      # @depth is >= 1 for the whole lifetime of an executing VM (the
+      # outermost frame is pushed before execute runs and popped only as the
+      # VM returns), so @depth - 1 is always a valid @frames index.
+      @frames.unsafe_fetch(@depth - 1)
     end
 
     # Wrapped in a begin/rescue INSIDE the loop (not around the whole
@@ -270,7 +273,11 @@ module Scheme
           {% if sampled %}
             sampled_ip = frame.ip
           {% end %}
-          instr = instructions[frame.ip]
+          # Bounds-check-free: the `frame.ip >= instructions.size` guard above
+          # dominates this fetch with nothing in between mutating frame.ip, so
+          # frame.ip is provably in range here (LLVM can't prove it across the
+          # intervening heap loads on its own).
+          instr = instructions.unsafe_fetch(frame.ip)
           frame.ip += 1
           {% if sampled %}
             if interval = @interp.sample_interval
