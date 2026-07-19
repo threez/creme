@@ -137,6 +137,22 @@ module Scheme
     # a=dst (bool), b=key register, c=const index of a SchemeVector holding
     # a case clause's datums — true iff any datum is `eqv?` the key.
     CaseMatch
+    # a=key register, b=index into chunk.case_dispatch_tables. O(1)
+    # counterpart of CaseMatch/TestFalse's per-clause linear scan — emitted
+    # instead of that chain when BytecodeCompiler#hashable_case? finds every
+    # clause's datums are all a hashable type (int/char/symbol/bool/nil) and
+    # there are enough of them to be worth a table (see
+    # BytecodeCompiler#compile_case_hash_dispatch). Unlike CaseMatch this
+    # never materializes a boolean — it looks the key up in the table
+    # directly and jumps to the matching clause's body (or the table's
+    # `default`, an else clause or a shared "produce NIL" block, on a miss),
+    # by setting `frame.ip` to an ABSOLUTE instruction index rather than
+    # adding a relative offset like every other jump op — safe because the
+    # fetch step already advances `frame.ip` past this instruction before
+    # dispatch runs, so a plain assignment here lands the next fetch exactly
+    # on the target instruction, same as it would after `frame.ip +=
+    # relative_offset` for any other jump.
+    CaseDispatch
     # a=const index of a message SchemeStr. Raises a SchemeRuntimeError when
     # REACHED at runtime (mirrors ThrowNode — a malformed form detected at
     # compile time whose error must surface only if actually executed, e.g.

@@ -14,14 +14,13 @@ module Scheme
       Op::PushHandler,
     }
 
-    # Ops whose b operand is a const-pool index.
-    CONST_B_OPS = {Op::LoadK, Op::GetGlobal, Op::HelperForm, Op::HelperFormLocal}
-    # Ops whose a operand is a const-pool index.
-    CONST_A_OPS = {Op::DefGlobal, Op::SetGlobal, Op::ReturnGlobal, Op::Throw}
-    # Ops whose c operand is a const-pool index.
-    CONST_C_OPS = {Op::CaseMatch}
-    # Ops whose d operand is a const-pool index (the callee's global name).
-    CONST_D_OPS = {Op::CallGlobal, Op::TailCallGlobal}
+    # Which operand field (:a/:b/:c/:d) is a const-pool index, per op.
+    CONST_OPS = {
+      Op::LoadK => :b, Op::GetGlobal => :b, Op::HelperForm => :b, Op::HelperFormLocal => :b,
+      Op::DefGlobal => :a, Op::SetGlobal => :a, Op::ReturnGlobal => :a, Op::Throw => :a,
+      Op::CaseMatch => :c,
+      Op::CallGlobal => :d, Op::TailCallGlobal => :d,
+    }
 
     def self.disassemble(chunk : Chunk, name : String = chunk.name, io : IO = STDOUT) : Nil
       io << "== " << name << " (regs=" << chunk.num_registers << ", params=" << chunk.param_count
@@ -36,23 +35,38 @@ module Scheme
         end
         io << " c=" << instr.c if instr.c != 0 || instr.op.in?({Op::Call, Op::TailCall, Op::MakeCaseClosure, Op::Destructure, Op::ParamPush})
         io << " d=" << instr.d if instr.d != 0
-
-        if CONST_B_OPS.includes?(instr.op) && instr.b < chunk.consts.size
-          io << "   ; " << chunk.consts[instr.b].write_string
-        elsif CONST_A_OPS.includes?(instr.op) && instr.a < chunk.consts.size
-          io << "   ; " << chunk.consts[instr.a].write_string
-        elsif CONST_C_OPS.includes?(instr.op) && instr.c < chunk.consts.size
-          io << "   ; " << chunk.consts[instr.c].write_string
-        elsif CONST_D_OPS.includes?(instr.op) && instr.d < chunk.consts.size
-          io << "   ; " << chunk.consts[instr.d].write_string
-        elsif instr.op == Op::Closure && instr.b < chunk.protos.size
-          io << "   ; proto " << instr.b << " (" << chunk.protos[instr.b].name << ")"
-        end
+        annotate(io, chunk, instr)
         io << '\n'
       end
       chunk.protos.each_with_index do |proto, i|
         io << '\n'
         disassemble(proto, "#{name} > proto #{i} (#{proto.name})", io)
+      end
+    end
+
+    # Trailing "; ..." comment for an instruction whose operand references
+    # something worth resolving and printing (a const-pool entry, a nested
+    # proto, or a case-dispatch table) — split out from `disassemble` itself
+    # to keep that method's own branching (jump-offset vs. plain operand
+    # printing) simple.
+    private def self.annotate(io : IO, chunk : Chunk, instr : Instruction) : Nil
+      if field = CONST_OPS[instr.op]?
+        idx = operand(instr, field)
+        io << "   ; " << chunk.consts[idx].write_string if idx < chunk.consts.size
+      elsif instr.op == Op::Closure && instr.b < chunk.protos.size
+        io << "   ; proto " << instr.b << " (" << chunk.protos[instr.b].name << ")"
+      elsif instr.op == Op::CaseDispatch && instr.b < chunk.case_dispatch_tables.size
+        table = chunk.case_dispatch_tables[instr.b]
+        io << "   ; table " << instr.b << ", " << table.targets.size << " keys, default -> " << table.default
+      end
+    end
+
+    private def self.operand(instr : Instruction, field : Symbol) : Int32
+      case field
+      when :a then instr.a
+      when :b then instr.b
+      when :c then instr.c
+      else         instr.d
       end
     end
   end

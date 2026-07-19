@@ -838,8 +838,111 @@ module Scheme
       mark = fc.next_reg
       key_reg = fc.alloc_reg
       compile_expr(fc, node.key, key_reg, false)
-      compile_case_clauses(fc, node.clauses, 0, key_reg, dst, tail)
+      if hashable_case?(node.clauses)
+        compile_case_hash_dispatch(fc, node.clauses, key_reg, dst, tail)
+      else
+        compile_case_clauses(fc, node.clauses, 0, key_reg, dst, tail)
+      end
       fc.reclaim_to(mark)
+    end
+
+    # Below what total-datum-count a case form's linear CaseMatch scan is
+    # already fast enough that building a Hash isn't worth it.
+    CASE_DISPATCH_MIN_DATUMS = 8
+
+    # `datum`'s normalized Op::CaseDispatch key, or nil if its type can't
+    # safely hash-dispatch — restricted to the eqv?-comparable types whose
+    # equality is a cheap, allocation-free structural comparison (mirrors
+    # Scheme.scheme_eqv?'s own type dispatch in helpers.cr): SchemeInt,
+    # SchemeChar, SchemeSym, SchemeBool, SchemeNil. Deliberately excluded:
+    # SchemeFloat (eqv? distinguishes 0.0/-0.0 by bit pattern — hashable in
+    # principle, but not worth the complexity for a datum type that's nearly
+    # never used in case clauses), SchemeRational, and everything falling to
+    # scheme_eqv?'s generic Reference#same? identity fallback (strings/
+    # pairs/vectors as datums — legal but vanishingly rare). Any of those
+    # appearing anywhere makes the whole case form fall back to the linear
+    # CaseMatch path via hashable_case? below.
+    private def hashable_case_key(datum : SchemeValue) : CaseDispatchKey?
+      case datum
+      when SchemeInt  then CaseDispatchKey.for_int(datum.value)
+      when SchemeChar then CaseDispatchKey.for_char(datum.value)
+      when SchemeSym  then CaseDispatchKey.for_sym(datum.name)
+      when SchemeBool then CaseDispatchKey.for_bool(datum.value?)
+      when SchemeNil  then CaseDispatchKey::NIL
+      else                 nil
+      end
+    end
+
+    # Whether `clauses` is eligible for the O(1) Op::CaseDispatch path
+    # instead of the O(clause count) CaseMatch/TestFalse chain. See
+    # hashable_case_key's doc comment for which datum types qualify; beyond
+    # that, this also requires: no malformed clause (a throw_msg clause is
+    # rare enough it isn't worth modeling in the fast path — bail to linear,
+    # which already handles it via Op::Throw), and at most one `else`, which
+    # if present must be LAST — compile_case_clauses processes clauses in
+    # list order with no requirement else be last, so an else appearing
+    # earlier short-circuits later clauses; hash dispatch can't reproduce
+    # arbitrary clause-order short-circuiting, so any other placement bails
+    # to the linear path too.
+    private def hashable_case?(clauses : Array(CaseClause)) : Bool
+      total_datums = 0
+      clauses.each_with_index do |clause, index|
+        return false if clause.throw_msg
+        if clause.els?
+          return false if index != clauses.size - 1
+          next
+        end
+        datums = clause.datums
+        return false if datums.nil? || datums.empty?
+        return false unless datums.all? { |datum| hashable_case_key(datum) }
+        total_datums += datums.size
+      end
+      total_datums >= CASE_DISPATCH_MIN_DATUMS
+    end
+
+    # Builds one Op::CaseDispatch + its CaseDispatchTable instead of the
+    # CaseMatch/TestFalse chain compile_case_clauses emits — same clause
+    # bodies (via the unchanged compile_case_result), just entered by a
+    # direct O(1) jump instead of a linear match-then-branch per clause.
+    private def compile_case_hash_dispatch(fc : FunctionCompiler, clauses : Array(CaseClause), key_reg : Int32, dst : Int32, tail : Bool) : Nil
+      key_to_clause = {} of CaseDispatchKey => Int32
+      els_index = nil
+      clauses.each_with_index do |clause, index|
+        if clause.els?
+          els_index = index
+          next
+        end
+        (clause.datums || [] of SchemeValue).each do |datum|
+          next unless key = hashable_case_key(datum)
+          key_to_clause[key] = index unless key_to_clause.has_key?(key)
+        end
+      end
+
+      table_id = fc.chunk.add_case_dispatch_table
+      fc.emit(Op::CaseDispatch, key_reg, table_id)
+      fc.chunk.tag_sample(fc.chunk.instructions.size - 1, "case")
+
+      clause_starts = {} of Int32 => Int32
+      jmp_ends = [] of Int32
+      clauses.each_with_index do |clause, index|
+        clause_starts[index] = fc.chunk.instructions.size
+        compile_case_result(fc, clause, key_reg, dst, tail)
+        jmp_ends << fc.emit(Op::Jmp, 0, 0) unless tail
+      end
+
+      default_target = if els = els_index
+                         clause_starts[els]
+                       else
+                         nil_start = fc.chunk.instructions.size
+                         emit_nil(fc, dst)
+                         fc.emit(Op::Return, dst) if tail
+                         nil_start
+                       end
+      jmp_ends.each { |j| fc.chunk.patch_jump_to_here(j) }
+
+      table = fc.chunk.case_dispatch_tables[table_id]
+      key_to_clause.each { |key, index| table.targets[key] = clause_starts[index] }
+      table.default = default_target
     end
 
     private def compile_case_clauses(fc : FunctionCompiler, clauses : Array(CaseClause), index : Int32, key_reg : Int32, dst : Int32, tail : Bool) : Nil

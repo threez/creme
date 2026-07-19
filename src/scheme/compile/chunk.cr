@@ -8,10 +8,55 @@
 # closures (Closure's `b` operand).
 
 module Scheme
+  # A normalized, allocation-free dispatch key for Op::CaseDispatch — one
+  # shape per hashable case-datum type (see BytecodeCompiler#hashable_case_key
+  # for which types qualify). `tag` disambiguates types that could otherwise
+  # collide on their raw payload (e.g. the int 0 vs #f vs char #\nul all
+  # have a zero `ival`) — a plain `record` gets `==`/`hash` for free, and
+  # being a struct means building one to probe a Hash never allocates.
+  record CaseDispatchKey, tag : Int8, ival : Int64 = 0_i64, sval : String = "" do
+    TAG_INT  = 0_i8
+    TAG_CHAR = 1_i8
+    TAG_SYM  = 2_i8
+    TAG_BOOL = 3_i8
+    TAG_NIL  = 4_i8
+
+    def self.for_int(v : Int64) : CaseDispatchKey
+      new(TAG_INT, ival: v)
+    end
+
+    def self.for_char(v : Char) : CaseDispatchKey
+      new(TAG_CHAR, ival: v.ord.to_i64)
+    end
+
+    def self.for_sym(name : String) : CaseDispatchKey
+      new(TAG_SYM, sval: name)
+    end
+
+    def self.for_bool(v : Bool) : CaseDispatchKey
+      new(TAG_BOOL, ival: v ? 1_i64 : 0_i64)
+    end
+
+    NIL = new(TAG_NIL)
+  end
+
+  # Op::CaseDispatch's jump table — built once at compile time (see
+  # BytecodeCompiler#compile_case_hash_dispatch), then read (never mutated)
+  # by the VM. A class, not a struct: it's appended to Chunk#case_dispatch_tables
+  # before its final contents are known (clause body start offsets aren't
+  # recorded until those bodies are compiled), so it needs reference
+  # semantics to be filled in in place — the same timing problem
+  # Chunk#patch_jump_to_here solves for ordinary relative jumps.
+  class CaseDispatchTable
+    getter targets = {} of CaseDispatchKey => Int32
+    property default : Int32 = -1
+  end
+
   class Chunk
     getter instructions = [] of Instruction
     getter consts = [] of SchemeValue
     getter protos = [] of Chunk
+    getter case_dispatch_tables = [] of CaseDispatchTable
     getter positions = [] of SourcePos?
     getter upvalues = [] of UpvalDesc
     # Number of fixed parameter registers (0..params.size-1), used by the VM
@@ -101,6 +146,11 @@ module Scheme
     def add_proto(proto : Chunk) : Int32
       @protos << proto
       @protos.size - 1
+    end
+
+    def add_case_dispatch_table : Int32
+      @case_dispatch_tables << CaseDispatchTable.new
+      @case_dispatch_tables.size - 1
     end
   end
 end

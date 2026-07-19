@@ -391,6 +391,18 @@ module Scheme
             key = @stack.unsafe_fetch(base + instr.b)
             datums = frame.chunk.consts[instr.c].as(SchemeVector).value
             @stack.unsafe_put(base + instr.a, SchemeBool.of(datums.any? { |datum| Scheme.scheme_eqv?(key, datum) }))
+          when Op::CaseDispatch
+            key = @stack.unsafe_fetch(base + instr.a)
+            table = frame.chunk.case_dispatch_tables[instr.b]
+            dispatch_key = case key
+                           when SchemeInt  then CaseDispatchKey.for_int(key.value)
+                           when SchemeChar then CaseDispatchKey.for_char(key.value)
+                           when SchemeSym  then CaseDispatchKey.for_sym(key.name)
+                           when SchemeBool then CaseDispatchKey.for_bool(key.value?)
+                           when SchemeNil  then CaseDispatchKey::NIL
+                           else                 nil
+                           end
+            frame.ip = (dispatch_key && table.targets[dispatch_key]?) || table.default
           when Op::Throw
             raise SchemeRuntimeError.new(frame.chunk.consts[instr.a].as(SchemeStr).value)
           when Op::Jmp

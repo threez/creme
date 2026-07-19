@@ -128,6 +128,84 @@ describe "BytecodeCompiler + VM" do
       w("(case 99 ((1 2) 'a))").should eq("()") # no match, no else -> NIL
       w("(case 1 ((1) ))").should eq("()")      # bare-datum match, empty body -> NIL (not the key)
     end
+
+    # 8+ total datums, all hashable (ints here) -- exercises
+    # BytecodeCompiler#compile_case_hash_dispatch/Op::CaseDispatch instead of
+    # the linear CaseMatch/TestFalse chain (see hashable_case?'s threshold).
+    it "hash-dispatches large all-literal case forms (Op::CaseDispatch)" do
+      big = <<-SCM
+        (case n
+          ((0 1) 'zero-or-one)
+          ((2 3) 'two-or-three)
+          ((4 5) 'four-or-five)
+          ((6 7) 'six-or-seven)
+          (else 'other))
+      SCM
+      w("(define n 0) #{big}").should eq("zero-or-one")  # match on first clause
+      w("(define n 7) #{big}").should eq("six-or-seven") # match on last clause
+      w("(define n 42) #{big}").should eq("other")       # no match, has else
+
+      no_else = <<-SCM
+        (case n
+          ((0 1) 'a) ((2 3) 'b) ((4 5) 'c) ((6 7) 'd))
+      SCM
+      w("(define n 42) #{no_else}").should eq("()") # no match, no else -> NIL
+    end
+
+    it "hash-dispatch: first clause wins on a duplicate datum across clauses" do
+      w(<<-SCM
+        (case 1
+          ((1 2) 'first) ((1 3) 'second) ((4 5) 'x) ((6 7) 'y) (else 'z))
+        SCM
+      ).should eq("first")
+    end
+
+    it "hash-dispatch: distinguishes datum types that could otherwise collide" do
+      w(<<-SCM
+        (case #\\a
+          ((0 1) 'int-zero-or-one)
+          ((#\\a #\\b) 'char-a-or-b)
+          ((foo bar) 'sym)
+          ((#t #f) 'bool)
+          (else 'none))
+        SCM
+      ).should eq("char-a-or-b")
+      w(<<-SCM
+        (case #f
+          ((0 1) 'int-zero-or-one)
+          ((#\\a #\\b) 'char-a-or-b)
+          ((foo bar) 'sym)
+          ((#t #f) 'bool)
+          (else 'none))
+        SCM
+      ).should eq("bool")
+    end
+
+    it "falls back to the linear path when else isn't last" do
+      w(<<-SCM
+        (case 9
+          ((0 1) 'a) (else 'else-first) ((2 3) 'b) ((4 5) 'c) ((6 7) 'd))
+        SCM
+      ).should eq("else-first")
+    end
+
+    it "falls back to the linear path for non-hashable datum types" do
+      w(<<-SCM
+        (case 1.5
+          ((0 1) 'a) ((2 3) 'b) ((1.5 2.5) 'floats) ((4 5) 'c) (else 'z))
+        SCM
+      ).should eq("floats")
+    end
+
+    it "falls back to the linear path for a malformed clause" do
+      expect_raises(Scheme::SchemeRuntimeError, /empty clause/) do
+        vm_run(<<-SCM
+          (case 99
+            ((0 1) 'a) ((2 3) 'b) ((4 5) 'c) ((6 7) 'd) ())
+          SCM
+        )
+      end
+    end
   end
 
   describe "case-lambda" do
