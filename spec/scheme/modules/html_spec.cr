@@ -115,6 +115,36 @@ describe "html module" do
       w(%((html! (raw "<b>bold</b>")))).should eq(%("<b>bold</b>"))
     end
 
+    # Dynamic raw content -- (raw ,expr) -- folds to a direct verbatim
+    # write (see html-fold's raw branch / html-raw-foldable?), NOT through a
+    # runtime quasiquote + html-render. These pin that the fold stays
+    # verbatim (no escaping) and preserves argument order.
+    it "folds dynamic raw content into a verbatim write (no escaping)" do
+      w(<<-SCHEME).should eq(%("<b>bold</b>"))
+        (define s "<b>bold</b>")
+        (html! `(raw ,s))
+        SCHEME
+      # the (style (raw ,css)) hot-path shape
+      w(<<-SCHEME).should eq(%("<style>.x{color:red}</style>"))
+        (define css ".x{color:red}")
+        (html! `(style (raw ,css)))
+        SCHEME
+    end
+
+    it "folds raw with mixed literal and dynamic args, verbatim and in order" do
+      w(<<-SCHEME).should eq(%("<i>A</i>"))
+        (define mid "A")
+        (html! `(raw "<i>" ,mid "</i>"))
+        SCHEME
+    end
+
+    it "falls back to html-render for unquote-splicing raw args" do
+      w(<<-SCHEME).should eq(%("ab"))
+        (define parts (list "a" "b"))
+        (html! `(raw ,@parts))
+        SCHEME
+    end
+
     it "matches html->string for #f/'() no-op nodes" do
       w(%((html! (div #f () "x")))).should eq(%("<div>x</div>"))
     end

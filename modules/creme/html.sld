@@ -301,6 +301,22 @@
     (define (html-unquote-splicing? form)
       (and (pair? form) (eq? (car form) 'unquote-splicing)))
 
+    ;; #t iff a (raw ...) node's arguments are all directly foldable into
+    ;; verbatim writes — each either a string literal or a plain (unquote
+    ;; expr). Those are the shapes for which html-fold's raw branch below
+    ;; can emit direct write-string calls instead of rebuilding the node and
+    ;; dispatching through html-render at runtime. Anything else (a bare
+    ;; symbol, a nested list, unquote-splicing) takes the safe html-render
+    ;; fallback, so the fast path never changes behaviour for an odd shape.
+    (define (html-raw-foldable? args)
+      (and (pair? args)
+           (let loop ((a args))
+             (cond
+              ((null? a) #t)
+              ((html-unquote? (car a)) (loop (cdr a)))
+              ((string? (car a)) (loop (cdr a)))
+              (else #f)))))
+
     ;; #f the moment an (unquote ...)/(unquote-splicing ...) form is found
     ;; anywhere inside, recursively — #t otherwise (no nested-quasiquote
     ;; support: a documented limitation, consistent with this project's
@@ -421,8 +437,23 @@
        ((html-unquote? form) (list (cons 'code (list 'html-render port-sym (cadr form)))))
        ((html-unquote-splicing? form) (list (cons 'code (list 'html-render port-sym (cadr form)))))
        ((and (pair? form) (eq? (car form) 'raw))
-        ;; Dynamic raw content (rare) -- same safe fallback as above.
-        (list (cons 'code (list 'html-render port-sym (list 'quasiquote form)))))
+        ;; Dynamic raw content: fold each argument straight into a verbatim
+        ;; write rather than rebuilding the node and dispatching through
+        ;; html-render at runtime. `raw` writes its args verbatim (no
+        ;; escaping), so a string-literal arg is a lit piece and an
+        ;; ,expr arg is a direct (write-string expr port). This removes the
+        ;; per-call quasiquote cons and html-render's own string-append copy
+        ;; -- which matters when raw content is a large constant on a hot
+        ;; path, e.g. an inline stylesheet spliced into every page as
+        ;; (style (raw ,css)). Unusual shapes fall back to html-render.
+        (if (html-raw-foldable? (cdr form))
+            (html-merge-pieces
+             (map (lambda (arg)
+                    (if (html-unquote? arg)
+                        (cons 'code (list 'write-string (cadr arg) port-sym))
+                        (cons 'lit arg)))
+                  (cdr form)))
+            (list (cons 'code (list 'html-render port-sym (list 'quasiquote form))))))
        ((and (pair? form) (symbol? (car form)))
         (html-fold-element form port-sym))
        ((pair? form)
