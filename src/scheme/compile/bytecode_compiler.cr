@@ -1289,12 +1289,28 @@ module Scheme
       fc.emit(Op::HelperForm, dst, form_idx, kind)
     end
 
-    # A side-effect-free leaf: reading it can never itself run arbitrary
-    # Scheme code (no computed-property/getter globals in this language), so
-    # a whole prim-call argument list made of only these is safe to
-    # reorder/elide reads for — see local_register_of?.
+    # A side-effect-free node: evaluating it can never run arbitrary Scheme
+    # code nor mutate any local, so its position in evaluation order relative
+    # to a sibling doesn't matter — which is exactly what lets a sibling bare
+    # local alias its own register instead of being staged through a Move
+    # (see local_register_of? and its callers' suffix/all-leaves gates).
+    #
+    # The base cases are the pure reads: literals and variable references
+    # (no computed-property/getter globals in this language). A PrimCallNode
+    # is included recursively when all its arguments are themselves
+    # side-effect-free: executing a fused prim op writes only its own dst
+    # register (a fresh temp) and, for the mutating ops (vector-set! etc.),
+    # a heap object — never a caller local's register — so the *only* way a
+    # prim call could mutate a local L before a sibling reads it is via a
+    # set!/call buried in one of its own arguments, which the recursion
+    # rules out. (Cxr/Abs/arithmetic deopts merely raise or fall to the
+    # numeric tower; they run no user code and mutate no register either.)
     private def leaf_node?(node : Node) : Bool
-      node.is_a?(LiteralNode) || node.is_a?(VarRefNode) || node.is_a?(LocalRefNode) || node.is_a?(GlobalRefNode)
+      case node
+      when LiteralNode, VarRefNode, LocalRefNode, GlobalRefNode then true
+      when PrimCallNode                                         then node.args.all? { |arg| leaf_node?(arg) }
+      else                                                           false
+      end
     end
 
     # If `node` is a bare local-variable read, its own register — reusable

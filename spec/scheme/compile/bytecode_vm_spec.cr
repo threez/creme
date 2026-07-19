@@ -110,6 +110,30 @@ describe "BytecodeCompiler + VM" do
     end
   end
 
+  # A bare local prim operand can alias its own register (skipping a Move)
+  # only when nothing evaluated after it mutates that local — see
+  # BytecodeCompiler#leaf_node?/local_register_of?. These pin the evaluation
+  # order the elision must preserve, in both the safe (alias) and unsafe
+  # (must-snapshot) directions.
+  describe "prim operand Move-elision preserves left-to-right evaluation" do
+    it "aliases a bare local when its suffix is side-effect-free" do
+      # `col` is the last operand of `(= (car x) col)` — nothing runs after
+      # it, so it aliases r0 directly; result is still correct.
+      w("(let ((x '(9 9)) (col 3)) (= (car x) col))").should eq("#f")
+      w("(let ((x '(3 9)) (col 3)) (= (car x) col))").should eq("#t")
+      # A pure prim sibling (`(* c 2)`) can't mutate `n`, so `n` aliases too.
+      w("(let ((n 10) (c 2)) (- n (* c 2)))").should eq("6")
+    end
+
+    it "snapshots a bare local when a later sibling can mutate it" do
+      # `(begin (set! b 100) 2)` buried in a prim arg makes that whole prim
+      # non-leaf, so `b` (the 1st operand) must be read BEFORE it: 7 - 2 = 5.
+      w("(let ((b 7)) (- b (* (begin (set! b 100) 2) 1)))").should eq("5")
+      # A call sibling likewise forces a snapshot: 5 - 2 = 3, not 99 - 2.
+      w("(let ((d 5)) (define (bump!) (set! d 99) 1) (- d (* (bump!) 2)))").should eq("3")
+    end
+  end
+
   describe "cond" do
     it "picks the first matching clause, supports else/=>/empty-body" do
       w("(cond ((= 1 2) 'a) ((= 1 1) 'b) (else 'c))").should eq("b")
