@@ -118,7 +118,9 @@
 
 (define-library (creme dao)
   (export define-dao dao-ref dao-run-stmt!
-          dao-create-table! dao-insert! dao-select-all dao-select-one dao-update! dao-delete! dao-count)
+          dao-create-table! dao-insert! dao-select-all dao-select-one dao-update! dao-delete! dao-count
+          dao-prepare-all dao-prepare-by-id dao-prepare-delete
+          dao-all-prepared dao-one-prepared dao-delete-prepared! dao-count-prepared)
   (import (scheme base) (scheme write) (creme sxql) (creme sql))
   (begin
     ;; SRFI-1's filter isn't an R7RS base export; kept as a small private
@@ -186,6 +188,48 @@
       (let ((rows (dao-select-all conn table)))
         (length (if (pair? opt-pred) (dao-filter (car opt-pred) rows) rows))))
 
+    ;; ---- prepared static queries -------------------------------------------
+    ;;
+    ;; A DAO's read/delete-by-id queries have a fixed shape -- (todo-all)
+    ;; always renders "SELECT * FROM todo ORDER BY id", (todo-find id) always
+    ;; "SELECT * FROM todo WHERE id = ?", etc. -- so the SQL string can be
+    ;; rendered ONCE (define-dao binds it to a per-table constant via the
+    ;; dao-prepare-* helpers below) and run directly through (creme sql),
+    ;; instead of rebuilding and re-walking the (creme sxql) alist on every
+    ;; call. sxql parameterises every value as a `?` placeholder (see
+    ;; sxql-render-expr), so the string is independent of the id value; the
+    ;; id is bound positionally at run time by the dao-*-prepared runners.
+    ;; Row shape (sxql-row->kw-alist) and results are identical to the
+    ;; non-prepared dao-select-*/dao-delete! paths above -- only the redundant
+    ;; per-call query construction is gone. INSERT/UPDATE stay on the sxql
+    ;; path: their column set (and thus SQL shape) varies with the kvs passed.
+
+    (define (dao-prepare-all table)
+      (car (sxql-yield (sxql-select (list '*) (sxql-from table) (sxql-order-by 'id)))))
+
+    (define (dao-prepare-by-id table)
+      (car (sxql-yield (sxql-select (list '*) (sxql-from table) (sxql-where (sxql-= 'id 0))))))
+
+    (define (dao-prepare-delete table)
+      (car (sxql-yield (sxql-delete-from table (sxql-where (sxql-= 'id 0))))))
+
+    (define (dao-run-select conn sql params)
+      (map sxql-row->kw-alist (vector->list (apply sql-query conn sql params))))
+
+    (define (dao-all-prepared conn sql)
+      (dao-run-select conn sql '()))
+
+    (define (dao-one-prepared conn sql id)
+      (let ((rows (dao-run-select conn sql (list id))))
+        (if (pair? rows) (car rows) #f)))
+
+    (define (dao-delete-prepared! conn sql id)
+      (apply sql-execute conn sql (list id)))
+
+    (define (dao-count-prepared conn sql opt-pred)
+      (let ((rows (dao-run-select conn sql '())))
+        (length (if (pair? opt-pred) (dao-filter (car opt-pred) rows) rows))))
+
     ;; ---- define-dao ---------------------------------------------------------
 
     (defmacro define-dao (name conn . columns)
@@ -209,16 +253,26 @@
                      (list 'define (list (mk (string-append "-" (symbol->string (car spec)) "?")) 'row)
                            (list '= (list 'dao-ref 'row (list 'quote (car spec))) 1)))
                    bool-cols)))
-        (cons 'begin
-              (append
-               (list
-                (list 'dao-create-table! conn (list 'quote name) (list 'quote columns))
-                (list 'define (cons (mk "-create!") 'kvs) (list 'dao-insert! conn (list 'quote name) 'kvs))
-                (list 'define (list (mk "-all")) (list 'dao-select-all conn (list 'quote name)))
-                (list 'define (list (mk "-find") 'id) (list 'dao-select-one conn (list 'quote name) 'id))
-                (list 'define (cons (mk "-update!") (cons 'id 'kvs))
-                      (list 'dao-update! conn (list 'quote name) 'id 'kvs) 'id)
-                (list 'define (list (mk "-delete!") 'id) (list 'dao-delete! conn (list 'quote name) 'id))
-                (list 'define (cons (mk "-count") 'opt-pred)
-                      (list 'apply 'dao-count conn (list 'quote name) 'opt-pred)))
-               bool-accessors))))))
+        ;; Per-table prepared-SQL constants, rendered once here (see the
+        ;; dao-prepare-* helpers). Hidden `--dao-q-*` names (double dash,
+        ;; unlikely to collide with user bindings) hold the strings the
+        ;; static read/delete methods below run directly.
+        (let ((q-all (mk "--dao-q-all"))
+              (q-by-id (mk "--dao-q-by-id"))
+              (q-del (mk "--dao-q-del")))
+          (cons 'begin
+                (append
+                 (list
+                  (list 'dao-create-table! conn (list 'quote name) (list 'quote columns))
+                  (list 'define q-all (list 'dao-prepare-all (list 'quote name)))
+                  (list 'define q-by-id (list 'dao-prepare-by-id (list 'quote name)))
+                  (list 'define q-del (list 'dao-prepare-delete (list 'quote name)))
+                  (list 'define (cons (mk "-create!") 'kvs) (list 'dao-insert! conn (list 'quote name) 'kvs))
+                  (list 'define (list (mk "-all")) (list 'dao-all-prepared conn q-all))
+                  (list 'define (list (mk "-find") 'id) (list 'dao-one-prepared conn q-by-id 'id))
+                  (list 'define (cons (mk "-update!") (cons 'id 'kvs))
+                        (list 'dao-update! conn (list 'quote name) 'id 'kvs) 'id)
+                  (list 'define (list (mk "-delete!") 'id) (list 'dao-delete-prepared! conn q-del 'id))
+                  (list 'define (cons (mk "-count") 'opt-pred)
+                        (list 'dao-count-prepared conn q-all 'opt-pred)))
+                 bool-accessors)))))))
