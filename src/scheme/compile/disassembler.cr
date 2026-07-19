@@ -8,9 +8,9 @@ module Scheme
     # Ops whose b operand is a signed relative jump offset (see opcode.cr) —
     # printed as an absolute target index instead of the raw offset.
     JUMP_OPS = {
-      Op::Jmp, Op::TestFalse, Op::TestLt, Op::TestLe, Op::TestGt, Op::TestGe, Op::TestEq,
-      Op::TestLtImm, Op::TestLeImm, Op::TestGtImm, Op::TestGeImm, Op::TestEqImm,
-      Op::TestLtUp, Op::TestLeUp, Op::TestGtUp, Op::TestGeUp, Op::TestEqUp,
+      Op::Jmp, Op::TestFalse, Op::TestLt, Op::TestLe, Op::TestGt, Op::TestGe, Op::TestEq, Op::TestIsEq,
+      Op::TestLtImm, Op::TestLeImm, Op::TestGtImm, Op::TestGeImm, Op::TestEqImm, Op::TestIsEqImm,
+      Op::TestLtUp, Op::TestLeUp, Op::TestGtUp, Op::TestGeUp, Op::TestEqUp, Op::TestIsEqUp,
       Op::PushHandler,
     }
 

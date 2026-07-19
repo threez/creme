@@ -48,6 +48,12 @@ module Scheme
     Not
     IsNull
     IsPair
+    # eq? — unlike IsNull/IsPair just above, a 2-arg predicate (a=dst,
+    # b=src1, c=src2, same shape as NumEq/Cons), so it's appended here
+    # rather than grouped with the unary predicates. Reuses
+    # Scheme.scheme_eqv? directly (see ast.cr's PrimOp::IsEq doc comment)
+    # — no deopt path, since eq?/eqv? never raise.
+    IsEq
     # a=dst, b=src register, c=a car/cdr chain encoded as a bitmap with a
     # sentinel top bit (see bytecode_compiler.cr's cxr_code / vm.cr's Op::Cxr
     # arm), d=const index of the underlying cxr builtin for the deopt-on-non-
@@ -80,6 +86,11 @@ module Scheme
     NumGtImm
     NumGeImm
     NumEqImm
+    # eq?'s *Imm counterpart — c is always logically a SchemeInt (that's
+    # all imm_operand? ever bakes), and scheme_eqv? says a non-SchemeInt
+    # can never be eqv? an int, so the check is just `x.is_a?(SchemeInt)
+    # && x.value == c` — no SchemeInt allocation, no fallback needed.
+    IsEqImm
     # a=dst, b=src1 register, c=upvalue index of the 2nd operand (read via
     # Upvalue#get, NOT a register) — the closed-over-variable-as-2nd-operand
     # specialization of the arithmetic/comparison ops, skipping the
@@ -99,6 +110,10 @@ module Scheme
     NumGtUp
     NumGeUp
     NumEqUp
+    # eq?'s *Up counterpart — c's upvalue read can be any runtime value
+    # (unlike Imm, this isn't restricted to integers), so this always
+    # calls Scheme.scheme_eqv?(x, y) in full, same as the base IsEq op.
+    IsEqUp
     # a=dst, b=upvalue index of the vector, c=index register — the closed-
     # over-vector-as-object specialization of VecRef, same rationale as
     # AddUp above (e.g. `(vector-ref v i)` where `v` is captured by a
@@ -153,6 +168,12 @@ module Scheme
     TestGt
     TestGe
     TestEq
+    # eq?'s fused compare+branch counterpart (same TestEq shape: a=src1,
+    # b=offset, c=src2) — TestEq itself is `=`'s (NOT eq?'s), hence the
+    # distinct "TestIsEq" name; see PrimOp::IsEq's doc comment. Emitted by
+    # compile_fused_test exactly where a bare `(eq? x y)` is if/when's own
+    # test expression.
+    TestIsEq
     # a=src register, b=offset, c=raw Int32 immediate — the TestLt-family
     # counterpart of *Imm: the comparison's 2nd operand is a compile-time
     # literal instead of a register, baked directly into the instruction.
@@ -161,6 +182,7 @@ module Scheme
     TestGtImm
     TestGeImm
     TestEqImm
+    TestIsEqImm
     # a=src register, b=offset, c=upvalue index — the TestLt-family
     # counterpart of *Up: the comparison's 2nd operand is a closed-over
     # variable read via Upvalue#get instead of a register.
@@ -169,6 +191,7 @@ module Scheme
     TestGtUp
     TestGeUp
     TestEqUp
+    TestIsEqUp
     # a=func register (args occupy a+1..a+b), b=nargs, c=dst register (where
     # the return value is written). c is independent of a/the arg window —
     # exec_call writes the result there directly, no separate Move needed.
@@ -232,6 +255,9 @@ module Scheme
     NumGtReturn
     NumGeReturn
     NumEqReturn
+    # eq?'s Return-fused counterpart — same shape/rationale as NumEqReturn
+    # just above (only the plain 2-arg path fuses this way).
+    IsEqReturn
     # a=dst register, b=proto index (into chunk.protos). Builds a closure,
     # capturing upvalues per chunk.protos[b].upvalues.
     Closure

@@ -317,6 +317,15 @@ module Scheme
     Not
     IsNull
     IsPair
+    # eq? — a 2-arg predicate, unlike the unary IsNull/IsPair just above.
+    # Named "IsEq" (not "Eq") to keep clear of NumEq, `=`'s own PrimOp — eq?
+    # and `=` are unrelated predicates that happen to share an English name.
+    # In this codebase eq? and eqv? are literally the same implementation
+    # (Scheme.scheme_eqv? — see src/scheme/modules/scheme/base/
+    # arithmetic.cr's eq_p/eqv_p), so the fused op reuses that helper
+    # directly: unlike arithmetic/comparison prims, it never raises and
+    # never needs a numeric-tower/overflow deopt path.
+    IsEq
     # The whole (scheme cxr) accessor family (car/cdr/caar/.../cddddr) fuses
     # into this single op; the specific car/cdr chain rides in the emitted
     # instruction's operand (see bytecode_compiler.cr's cxr_code). Recognized
@@ -355,6 +364,7 @@ module Scheme
     "not"                => {PrimOp::Not, 1},
     "null?"              => {PrimOp::IsNull, 1},
     "pair?"              => {PrimOp::IsPair, 1},
+    "eq?"                => {PrimOp::IsEq, 2},
     "abs"                => {PrimOp::Abs, 1},
     "zero?"              => {PrimOp::IsZero, 1},
     "positive?"          => {PrimOp::IsPositive, 1},

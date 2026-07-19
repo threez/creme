@@ -429,4 +429,79 @@ describe "primitive call specialization" do
       w("(define (+ a b) (list 'shadowed a b)) (define (f a b) (+ a b)) (f 1 2)").should eq("(shadowed 1 2)")
     end
   end
+
+  # eq? gets the same full op family as the numeric comparisons (base
+  # Op::IsEq, IsEqImm, IsEqUp, TestIsEq/TestIsEqImm/TestIsEqUp, IsEqReturn)
+  # instead of compiling to a generic dynamic call — see ast.cr's
+  # PrimOp::IsEq doc comment. Unlike NumEq, it never raises and never needs
+  # a numeric-tower fallback (it's literally Scheme.scheme_eqv? — eq? and
+  # eqv? share one implementation, see arithmetic.cr's eq_p/eqv_p), so
+  # these specs lean on that simplicity rather than mirroring every
+  # NumEq-family edge case (there's no "falls back to the numeric tower"
+  # shape for eq? to test).
+  describe "eq? fusion (IsEq family)" do
+    it "computes correctly for the base 2-register op, across value types" do
+      w("(let ((a 'x) (b 'x)) (eq? a b))").should eq("#t")
+      w("(let ((a 'x) (b 'y)) (eq? a b))").should eq("#f")
+      w("(let ((a 5) (b 5)) (eq? a b))").should eq("#t")
+      w("(let ((a 5) (b 5.0)) (eq? a b))").should eq("#f")
+      w("(let ((a #\\a) (b #\\a)) (eq? a b))").should eq("#t")
+      w("(let ((a #t) (b #t)) (eq? a b))").should eq("#t")
+      w("(let ((a '()) (b '())) (eq? a b))").should eq("#t")
+      w("(let ((p (cons 1 2))) (eq? p p))").should eq("#t")
+      w("(eq? (cons 1 2) (cons 1 2))").should eq("#f")
+      w("(eq? 0.0 -0.0)").should eq("#f")
+    end
+
+    it "computes correctly with a small-integer-literal 2nd operand (Imm)" do
+      w("(let ((n 5)) (eq? n 5))").should eq("#t")
+      w("(let ((n 5)) (eq? n 6))").should eq("#f")
+      w("(let ((n 'sym)) (eq? n 5))").should eq("#f")
+    end
+
+    it "falls back to the general path for a literal too large for Int32" do
+      w("(let ((n 5)) (eq? n 5000000000))").should eq("#f")
+    end
+
+    it "computes correctly with a closed-over 2nd operand (Up)" do
+      w("(let ((n 5)) (let ((f (lambda (x) (eq? x n)))) (f 5)))").should eq("#t")
+      w("(let ((n 5)) (let ((f (lambda (x) (eq? x n)))) (f 6)))").should eq("#f")
+      w("(let ((n 'sym)) (let ((f (lambda (x) (eq? x n)))) (f 'sym)))").should eq("#t")
+    end
+
+    it "computes correctly for the if/when fused compare-and-branch (TestIsEq family)" do
+      w("(if (eq? 'x 'x) 'yes 'no)").should eq("yes")
+      w("(if (eq? 'x 'y) 'yes 'no)").should eq("no")
+      w("(let ((n 5)) (if (eq? n 5) 'yes 'no))").should eq("yes")
+      w("(let ((n 5)) (let ((f (lambda (x) (if (eq? x n) 'yes 'no)))) (f 5)))").should eq("yes")
+      w("(when (eq? 1 1) 'yes)").should eq("yes")
+      w("(unless (eq? 1 1) 'yes)").should eq("()")
+    end
+
+    it "leaves cond/guard clause tests unfused (materializes via base IsEq + TestFalse), since their value can be observed" do
+      w("(cond ((eq? 1 1)) (else 'none))").should eq("#t")
+      w(<<-SCM).should eq("b")
+        (define (get-list alist key)
+          (cond ((null? alist) #f)
+                ((eq? (caar alist) key) (cdar alist))
+                (else (get-list (cdr alist) key))))
+        (get-list (list (cons 'a 'a-val) (cons 'b 'b)) 'b)
+      SCM
+    end
+
+    it "fuses a plain 2-register-operand tail call (IsEqReturn)" do
+      w("(define (f a b) (eq? a b)) (f 3 3)").should eq("#t")
+      w("(define (f a b) (eq? a b)) (f 3 4)").should eq("#f")
+    end
+
+    it "still deopts to a runtime redefinition" do
+      w("(define (eq? a b) 'shadowed) (eq? 1 1)").should eq("shadowed")
+      w("(define (eq? a b) 'shadowed) (if (eq? 1 1) 'yes 'no)").should eq("yes")
+      w("(define (eq? a b) 'shadowed) (define (f a b) (eq? a b)) (f 1 1)").should eq("shadowed")
+    end
+
+    it "does not specialize a call whose head is shadowed by a local binding" do
+      w("(let ((eq? (lambda (a b) 'local))) (eq? 1 1))").should eq("local")
+    end
+  end
 end

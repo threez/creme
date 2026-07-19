@@ -384,7 +384,8 @@ module Scheme
                Op::AddUp, Op::SubUp, Op::MulUp, Op::NumLtUp, Op::NumLeUp, Op::NumGtUp, Op::NumGeUp, Op::NumEqUp,
                Op::VecRef, Op::VecLen, Op::StrRef, Op::BvRef, Op::VecSet, Op::StrSet, Op::BvSet,
                Op::VecRefUp, Op::VecSetUp, Op::VecLenUp, Op::StrRefUp, Op::StrSetUp, Op::BvRefUp, Op::BvSetUp,
-               Op::Cons, Op::Not, Op::IsNull, Op::IsPair
+               Op::Cons, Op::Not, Op::IsNull, Op::IsPair,
+               Op::IsEq, Op::IsEqImm, Op::IsEqUp
             exec_prim(frame, base, instr)
           when Op::CaseMatch
             key = @stack.unsafe_fetch(base + instr.b)
@@ -593,7 +594,7 @@ module Scheme
             result = deliver_return(res.as(SchemeValue))
             return result unless result.nil?
           when Op::NumLtReturn, Op::NumLeReturn,
-               Op::NumGtReturn, Op::NumGeReturn, Op::NumEqReturn
+               Op::NumGtReturn, Op::NumGeReturn, Op::NumEqReturn, Op::IsEqReturn
             # The comparison-Returns stay routed through exec_prim (rarer in
             # tail position than the arithmetic trio above). Own arm at the
             # END of the chain — see opcode.cr's AddReturn doc and the
@@ -649,6 +650,26 @@ module Scheme
                     unary_prim_deopt(frame, instr)
                   end
             @stack.unsafe_put(base + instr.a, res)
+          when Op::TestIsEq
+            # eq?'s fused compare+branch — unlike TestEq (numeric `=`), no int
+            # fast path/fallback split is needed: scheme_eqv? is already a
+            # cheap, allocation-free case dispatch that handles every
+            # SchemeValue type (including two ints) in one call. Own arm at
+            # the END of the chain — appending, never inserting mid-chain
+            # (see the Cxr/Abs arms above / doc/optimization.md), even though
+            # it's conceptually part of the TestEq family above.
+            x = @stack.unsafe_fetch(base + instr.a); y = @stack.unsafe_fetch(base + instr.c)
+            frame.ip += instr.b unless Scheme.scheme_eqv?(x, y)
+          when Op::TestIsEqImm
+            # c is always logically a SchemeInt (imm_operand? only ever bakes
+            # an integer literal), and scheme_eqv? says a non-int is never
+            # eqv? an int — so this needs no SchemeInt allocation or
+            # fallback, just a direct int comparison.
+            x = @stack.unsafe_fetch(base + instr.a)
+            frame.ip += instr.b unless x.is_a?(SchemeInt) && x.value == instr.c.to_i64
+          when Op::TestIsEqUp
+            x = @stack.unsafe_fetch(base + instr.a); y = closure_of(frame).upvalues[instr.c].get
+            frame.ip += instr.b unless Scheme.scheme_eqv?(x, y)
           end
         rescue ex : SchemeExecutionLimitError
           # Sandboxing budgets must never be interceptable by guard — always
@@ -1077,6 +1098,17 @@ module Scheme
         regs[base + instr.a] = SchemeBool.of(regs[base + instr.b].is_a?(SchemeNil))
       when Op::IsPair
         regs[base + instr.a] = SchemeBool.of(regs[base + instr.b].is_a?(Cons))
+      when Op::IsEq, Op::IsEqReturn
+        regs[base + instr.a] = SchemeBool.of(Scheme.scheme_eqv?(regs[base + instr.b], regs[base + instr.c]))
+      when Op::IsEqImm
+        # c is always logically a SchemeInt (imm_operand? only ever bakes an
+        # integer literal) — same reasoning as TestIsEqImm above.
+        x = regs[base + instr.b]
+        regs[base + instr.a] = SchemeBool.of(x.is_a?(SchemeInt) && x.value == instr.c.to_i64)
+      when Op::IsEqUp
+        x = regs[base + instr.b]
+        y = closure_of(frame).upvalues[instr.c].get
+        regs[base + instr.a] = SchemeBool.of(Scheme.scheme_eqv?(x, y))
       end
     end
 

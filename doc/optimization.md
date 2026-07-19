@@ -232,6 +232,38 @@ doc comment there.
   loops each **~2× faster** (~1.5s → ~0.8s on 20M iterations), every other
   workload flat.
 
+- **`eq?` as a 2-arg predicate prim, full `NumEq`-style family** —
+  `Op::IsEq`/`IsEqImm`/`IsEqUp`/`TestIsEq`/`TestIsEqImm`/`TestIsEqUp`/
+  `IsEqReturn`. Unlike `null?`/`pair?` (already prims), `eq?` wasn't in
+  `PRIM_OPS` at all — every use paid full dynamic-call overhead (arg-array
+  alloc, builtin dispatch). Profiling `competition/scheme/demo-todo/
+  app.scm` under load surfaced `(eq? (caar alist) key)` — `(creme sxql)`'s
+  alist-lookup loop — as a real hot spot. `eq?`/`eqv?` are literally the
+  same implementation in this codebase (`Scheme.scheme_eqv?`), and unlike
+  the numeric comparisons it fuses alongside, `eq?` never raises and needs
+  no numeric-tower/overflow fallback — so the fused op is just a direct
+  call to that helper (or, for the `*Imm` shapes, an even simpler check:
+  `imm_operand?` only ever bakes an integer literal, and `scheme_eqv?`
+  says a non-int is never `eqv?` an int, so no `SchemeInt` allocation is
+  needed there either). Named `IsEq` throughout (not `Eq`) to stay clear of
+  `Op::TestEq`, which already exists for `=` (numeric equality) — an
+  unrelated predicate that happens to share an English name with `eq?`.
+  Measured with a standalone 5-entry-alist `eq?`-walk microbenchmark (3M
+  iterations, isolating exactly the hot shape the profile found — see
+  `spec/scheme/compile/prim_call_spec.cr`'s "eq? fusion" spec for the same
+  shapes as correctness tests): **~35s → ~1.04s (about 34×)**; re-profiling
+  `competition/bench.scm --profile` afterward shows the `call (eq? (caar
+  alist) key)`/its `local-ref key` argument-staging row gone entirely from
+  the "hot Scheme functions" table, replaced by a single `eq?` row. Same
+  append-only-arm and redefinition-safety rules as every other prim (a
+  shadowed/redefined `eq?` deopts at analyze time to a normal call) — and,
+  per this section's own append-only invariant below, `TestIsEq`/
+  `TestIsEqImm`/`TestIsEqUp` are appended at the true end of the dispatch
+  loop's `case` (after `Op::CmpZero`), not inserted next to `TestEq`/
+  `TestEqImm`/`TestEqUp` despite being conceptually part of that family —
+  inserting there would've pushed every later arm (including `Call`/
+  `Return`, among the hottest ops in the VM) back by one comparison.
+
 - **Folding `not` in test position** — not a new op, a codegen rewrite in
   `compile_if`/`compile_when`. `(if (not X) a b)` ≡ `(if X b a)` exactly (both
   only consult the test's truthiness), so `peel_not` strips leading `not`

@@ -433,7 +433,8 @@ module Scheme
 
     # If `node` is a bare 2-arg comparison call, the base (non-Imm/Up)
     # fused-branch Op it maps to — else nil. Mirrors compile_prim_call's
-    # own PrimOp->Op mapping for exactly the 5 comparison ops.
+    # own PrimOp->Op mapping for exactly the 6 comparison-shaped ops
+    # (the 5 numeric comparisons plus eq?).
     private def comparison_op_of(node : Node) : Op?
       return nil unless node.is_a?(PrimCallNode) && node.args.size == 2
       case node.op
@@ -442,6 +443,7 @@ module Scheme
       when PrimOp::NumGt then Op::NumGt
       when PrimOp::NumGe then Op::NumGe
       when PrimOp::NumEq then Op::NumEq
+      when PrimOp::IsEq  then Op::IsEq
       else                    nil
       end
     end
@@ -453,6 +455,7 @@ module Scheme
       when Op::NumGt then Op::TestGt
       when Op::NumGe then Op::TestGe
       when Op::NumEq then Op::TestEq
+      when Op::IsEq  then Op::TestIsEq
       else                nil
       end
     end
@@ -464,6 +467,7 @@ module Scheme
       when Op::NumGt then Op::TestGtImm
       when Op::NumGe then Op::TestGeImm
       when Op::NumEq then Op::TestEqImm
+      when Op::IsEq  then Op::TestIsEqImm
       else                nil
       end
     end
@@ -475,6 +479,7 @@ module Scheme
       when Op::NumGt then Op::TestGtUp
       when Op::NumGe then Op::TestGeUp
       when Op::NumEq then Op::TestEqUp
+      when Op::IsEq  then Op::TestIsEqUp
       else                nil
       end
     end
@@ -1231,6 +1236,7 @@ module Scheme
       when Op::NumGt then Op::NumGtImm
       when Op::NumGe then Op::NumGeImm
       when Op::NumEq then Op::NumEqImm
+      when Op::IsEq  then Op::IsEqImm
       else                nil
       end
     end
@@ -1262,6 +1268,7 @@ module Scheme
       when Op::NumGt then Op::NumGtUp
       when Op::NumGe then Op::NumGeUp
       when Op::NumEq then Op::NumEqUp
+      when Op::IsEq  then Op::IsEqUp
       else                nil
       end
     end
@@ -1297,6 +1304,7 @@ module Scheme
       when Op::NumGt then Op::NumGtReturn
       when Op::NumGe then Op::NumGeReturn
       when Op::NumEq then Op::NumEqReturn
+      when Op::IsEq  then Op::IsEqReturn
       else                nil
       end
     end
@@ -1329,6 +1337,7 @@ module Scheme
            in PrimOp::Not             then Op::Not
            in PrimOp::IsNull          then Op::IsNull
            in PrimOp::IsPair          then Op::IsPair
+           in PrimOp::IsEq            then Op::IsEq
            in PrimOp::Cxr             then Op::Cxr
            in PrimOp::Abs             then Op::Abs
            in PrimOp::IsZero          then Op::CmpZero

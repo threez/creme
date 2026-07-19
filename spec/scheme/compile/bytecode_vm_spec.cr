@@ -96,7 +96,7 @@ describe "BytecodeCompiler + VM" do
     end
   end
 
-  describe "cons/not/null?/pair? (fused prim ops)" do
+  describe "cons/not/null?/pair?/eq? (fused prim ops)" do
     it "computes correctly" do
       w("(cons 1 2)").should eq("(1 . 2)")
       w("(not #f)").should eq("#t")
@@ -105,6 +105,8 @@ describe "BytecodeCompiler + VM" do
       w("(null? 5)").should eq("#f")
       w("(pair? (cons 1 2))").should eq("#t")
       w("(pair? '())").should eq("#f")
+      w("(eq? 'x 'x)").should eq("#t")
+      w("(eq? 'x 'y)").should eq("#f")
     end
   end
 
