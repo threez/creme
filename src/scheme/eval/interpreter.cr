@@ -147,7 +147,7 @@ module Scheme
       @current_pos = nil.as(SourcePos?)
       @sample_interval = nil.as(Int32?)
       @sample_countdown = 0
-      @sample_counts = {} of SampleKey => Int32
+      @sample_sink = nil.as(SampleSink?)
       @start_instant = Time.instant
       @exception_handlers = [] of SchemeValue
       # Compile-time macro scope for the analyzer's analyze-time expansion (see
@@ -234,9 +234,17 @@ module Scheme
       @live_continuation_tags = Set(Int64).new
       @call_stack = [] of Frame
       @current_pos = nil.as(SourcePos?)
-      @sample_interval = nil.as(Int32?)
-      @sample_countdown = 0
-      @sample_counts = {} of SampleKey => Int32
+      # Inherits the parent's sampling config (if profile-scheme is
+      # currently running on it) and shares its SampleSink by reference, so
+      # samples this child's own VM instance records (e.g. one HTTP
+      # request's worth of work under (creme mux) — see mux.cr's own
+      # request_interpreter) are aggregated into the same report the parent
+      # eventually gets back from stop_scheme_sampling — see SampleSink's
+      # own doc comment for why this sharing is required at all. A parent
+      # that ISN'T sampling propagates nil/0 here exactly as before.
+      @sample_interval = parent.sample_interval
+      @sample_countdown = (interval = @sample_interval) ? jittered_sample_countdown(interval) : 0
+      @sample_sink = parent.sample_sink
       @start_instant = Time.instant
       @exception_handlers = [] of SchemeValue
       @analyzing_macros = MacroEnv.new
@@ -442,16 +450,50 @@ module Scheme
     # Chunk#positions).
     alias SampleKey = {String, String, String?, Int32?}
 
+    # The actual counts hash, plus a Mutex, as one object so it can be
+    # SHARED BY REFERENCE across every request's own Interpreter under
+    # (creme mux) (see `initialize(inherit_from:)` below) — required for
+    # profile-scheme to see anything at all when profiling a mux server:
+    # each HTTP request runs against its own child Interpreter (mux.cr's own
+    # per-request isolation), so without sharing this sink, only the
+    # top-level script's own (near-idle, mostly-blocked-on-read-line)
+    # Interpreter instance would ever record a sample. The Mutex matters
+    # under -Dpreview_mt with more than one OS thread (see mux.cr's own doc
+    # comment on request_interpreter) — under the ordinary single-thread/
+    # cooperative-Fiber build this project ships by default there's no real
+    # concurrent writer, but the lock only taken once per `interval`
+    # dispatched instructions (see #tick_sample), never per-instruction, so
+    # it costs nothing worth avoiding either way.
+    private class SampleSink
+      def initialize
+        @mutex = Mutex.new
+        @counts = {} of SampleKey => Int32
+      end
+
+      def record(key : SampleKey) : Nil
+        @mutex.synchronize { @counts[key] = (@counts[key]? || 0) + 1 }
+      end
+
+      def snapshot : Hash(SampleKey, Int32)
+        @mutex.synchronize { @counts.dup }
+      end
+    end
+
+    # Shared with any child Interpreter spawned (via `inherit_from`) while
+    # sampling is active — see SampleSink's own doc comment.
+    protected getter sample_sink : SampleSink?
+
     def start_scheme_sampling(interval_steps : Int32) : Nil
       @sample_interval = interval_steps
       @sample_countdown = jittered_sample_countdown(interval_steps)
-      @sample_counts = {} of SampleKey => Int32
+      @sample_sink = SampleSink.new
     end
 
     def stop_scheme_sampling : Hash(SampleKey, Int32)
-      counts = @sample_counts
+      sink = @sample_sink
       @sample_interval = nil
-      counts
+      @sample_sink = nil
+      sink ? sink.snapshot : {} of SampleKey => Int32
     end
 
     private def jittered_sample_countdown(interval_steps : Int32) : Int32
@@ -492,8 +534,7 @@ module Scheme
     end
 
     private def record_sample(chunk : Chunk, ip : Int32) : Nil
-      key = sample_key(chunk, ip)
-      @sample_counts[key] = (@sample_counts[key]? || 0) + 1
+      @sample_sink.try(&.record(sample_key(chunk, ip)))
     end
 
     private def sample_key(chunk : Chunk, ip : Int32) : SampleKey

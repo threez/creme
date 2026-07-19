@@ -79,4 +79,40 @@ describe "prof-vm module" do
       (profile-scheme-report? (profile-scheme (lambda () (fib 20)) 50))
     SCM
   end
+
+  # Regression test: a child Interpreter spawned mid-sample via
+  # Interpreter.new(inherit_from:) -- e.g. (creme mux)'s own per-request
+  # Interpreter, or a (creme actor) spawn -- used to always start with its
+  # OWN fresh (and thus permanently empty, since nothing ever calls
+  # start_scheme_sampling on it directly) sample state, so any work done on
+  # such a child was invisible to profile-scheme entirely. It must now
+  # share the parent's still-active sampler (see Interpreter::SampleSink)
+  # so the parent's own report reflects work done on the child too.
+  it "a child interpreter spawned while sampling is active contributes samples to the parent's report" do
+    parent = Scheme::Interpreter.new
+    parent.start_scheme_sampling(1)
+    child = Scheme::Interpreter.new(inherit_from: parent)
+    Scheme::BytecodeCompiler.run_program(
+      child,
+      Scheme::Reader.read_all(<<-SCM, "<child>"),
+        (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+        (fib 22)
+      SCM
+      child.global)
+    counts = parent.stop_scheme_sampling
+    counts.values.sum.should be > 0
+  end
+
+  it "a child interpreter spawned while the parent is NOT sampling stays uninstrumented" do
+    parent = Scheme::Interpreter.new
+    child = Scheme::Interpreter.new(inherit_from: parent)
+    Scheme::BytecodeCompiler.run_program(
+      child,
+      Scheme::Reader.read_all(<<-SCM, "<child>"),
+        (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+        (fib 22)
+      SCM
+      child.global)
+    parent.stop_scheme_sampling.values.sum.should eq(0)
+  end
 end
