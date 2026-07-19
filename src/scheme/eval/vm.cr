@@ -192,6 +192,24 @@ module Scheme
       end
     end
 
+    # Returns this VM to a clean, ready-to-reuse state so a single instance
+    # can be pooled across many Interpreter#apply calls instead of allocated
+    # fresh each time (see ObjectPool / Interpreter#vm_pool). After a normal
+    # `call` the VM is already clean (@depth back to 0, handler/unwind stacks
+    # balanced to empty); this also covers the exception-unwound case, where
+    # `call` left @depth > 0 or a partial handler/unwind stack behind. @stack
+    # and the @frames pool keep their capacity (their contents are always
+    # overwritten before being read on the next call), so reuse is O(1) — the
+    # whole point. Continuations capture only an Int64 tag, never VM state
+    # (see Interpreter#apply / SchemeContinuation), so a reused VM can't
+    # corrupt an escape continuation captured during an earlier call.
+    def reset_for_reuse : Nil
+      @depth = 0
+      @handlers.clear
+      @unwind_stack.clear
+      @pending_reraise = nil
+    end
+
     private def ensure_stack_size(min_size : Int32) : Nil
       while @stack.size < min_size
         @stack << NIL

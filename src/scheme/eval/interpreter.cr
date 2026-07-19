@@ -13,7 +13,17 @@ module Scheme
 
     DEFAULT_MAX_EVAL_DEPTH = 5_000
 
+    # Warm baseline of pooled VM instances kept per Interpreter (see
+    # @vm_pool / ObjectPool). Small: covers the common non-nested apply
+    # callback depth without pre-allocating much; the pool grows past it
+    # under deeper nesting and declines back toward it when idle.
+    VM_POOL_MIN = 4
+
     getter global : Env
+    # Lazily built on first apply (see #vm_pool) rather than in initialize:
+    # the factory block captures `self`, which Crystal's in-initialize ivar
+    # analysis rejects. nil until first use.
+    @vm_pool : ObjectPool(VM)? = nil
     # Where builtins/prelude/bytevectors/exceptions/special-forms physically
     # live — the source every (scheme base)/(scheme write)/sub-library/
     # (list ...) installer copies its bindings from via `@base_env.get(name)`.
@@ -252,6 +262,14 @@ module Scheme
       @current_output_port = SchemeParameter.new(SchemePort.new(@stdout, false, true))
       @current_input_port = SchemeParameter.new(SchemePort.new(@stdin, true, false))
       @current_error_port = SchemeParameter.new(SchemePort.new(@stderr, false, true))
+    end
+
+    # Pool of reusable VM instances for apply's callback bridge (map/for-each/
+    # handler dispatch/...), which otherwise allocated a fresh VM + 256-slot
+    # register array per call. Built on first use (VM_POOL_MIN warm, grows
+    # under load, declines slowly when idle — see ObjectPool).
+    def vm_pool : ObjectPool(VM)
+      @vm_pool ||= ObjectPool(VM).new(VM_POOL_MIN, ->(vm : VM) { vm.reset_for_reuse }) { VM.new(self, nil) }
     end
 
     # @base_env conveniences that aren't (scheme base) exports but have always
@@ -657,17 +675,21 @@ module Scheme
         # so a later self-tail-call from THIS closure correctly overwrites
         # it instead of leaving it doubled up.
         active.push_frame(Frame.new(callee.chunk.name, pos))
+        vm = active.vm_pool.acquire
         begin
-          VM.new(active, callee.root_env).call(callee, args)
+          vm.call(callee, args)
         ensure
+          active.vm_pool.release(vm)
           active.pop_frame
         end
       when BytecodeCaseClosure
         clause = callee.select_clause(args.size)
         active.push_frame(Frame.new(clause.chunk.name, pos))
+        vm = active.vm_pool.acquire
         begin
-          VM.new(active, clause.root_env).call(clause, args)
+          vm.call(clause, args)
         ensure
+          active.vm_pool.release(vm)
           active.pop_frame
         end
       when Macro
