@@ -1534,17 +1534,22 @@ module Scheme
       # Crystal calls in the VM dispatch loop; the rest go through exec_prim.
       builtin_idx = fc.chunk.add_const(node.prim)
       mark = fc.next_reg
-      # When every argument is a side-effect-free leaf (no call/set!/begin
-      # anywhere in the list can run before a later argument reads a local),
-      # a bare local-variable argument can read its own register directly
-      # instead of being staged through a fresh temp via Move — see
-      # local_register_of?. Gated on the WHOLE call, not per-argument: eliding
-      # only some locals' Moves while a sibling argument could still mutate
-      # one of them before the op runs would risk observing a post-mutation
-      # value where a pre-mutation snapshot was needed.
-      all_leaves = node.args.all? { |arg| leaf_node?(arg) }
-      arg_regs = node.args.map do |arg|
-        if all_leaves && (local_reg = local_register_of?(fc, arg))
+      # A bare local-variable argument can read its own register directly
+      # instead of being staged through a fresh temp via Move (see
+      # local_register_of?) — but only when every argument evaluated AFTER it
+      # is a side-effect-free leaf. Otherwise a later non-leaf sibling could
+      # mutate the local (via set!/a call) between this argument's snapshot
+      # point and when the op runs, and strict left-to-right evaluation
+      # requires the pre-mutation value. So an operand qualifies iff its whole
+      # suffix is leaves — equivalently, iff its index is past the last
+      # non-leaf argument (`last_non_leaf`). The last argument therefore always
+      # qualifies (nothing runs after it), which covers the very common
+      # `(op (compound…) local)` comparison shape, e.g. `(= (car x) col)`;
+      # an all-leaves call has `last_non_leaf == -1` so every operand qualifies.
+      last_non_leaf = -1
+      node.args.each_with_index { |arg, i| last_non_leaf = i unless leaf_node?(arg) }
+      arg_regs = node.args.map_with_index do |arg, i|
+        if i > last_non_leaf && (local_reg = local_register_of?(fc, arg))
           local_reg
         else
           r = fc.alloc_reg
