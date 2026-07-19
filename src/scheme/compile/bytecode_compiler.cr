@@ -137,9 +137,28 @@ module Scheme
     # already-analyzed top-level forms, run for effect except the last form's
     # value is returned (matching Scheme.run_source's per-form semantics).
     def self.compile_program(nodes : Array(Node)) : Chunk
+      compiler = new
       fc = FunctionCompiler.new(nil, "program", is_toplevel: true)
-      new.compile_body(fc, nodes, tail: true)
+      compiler.compile_body(fc, nodes, tail: true)
+      compiler.append_return_sentinel(fc)
       fc.chunk
+    end
+
+    # Appends a dead LoadNil+Return to the chunk being finalized. This backs
+    # the VM's bounds-check-free dispatch fetch (see vm.cr's `execute`): it
+    # guarantees the chunk's last instruction is a Return, so sequential
+    # execution can never run off the end, AND that the instruction array has
+    # a valid index one past every possible jump target (patch_jump_to_here
+    # only ever records the instruction count AT patch time, i.e. <= the size
+    # before this append), so no jump can land out of range either. A
+    # well-formed body already ends in a real Return, making this pair dead
+    # code — reached only if a (buggy) chunk ever fell through, where it
+    # preserves the historical fall-off-returns-NIL semantics rather than
+    # reading past the array.
+    def append_return_sentinel(fc : FunctionCompiler) : Nil
+      r = fc.alloc_reg
+      emit_nil(fc, r)
+      fc.emit(Op::Return, r)
     end
 
     # Analyzes, compiles, and runs each top-level form in turn — mirroring
@@ -1010,6 +1029,7 @@ module Scheme
       child.chunk.param_count = params.size
       child.chunk.has_rest = !rest_name.nil?
       compile_body(child, body, tail: true)
+      append_return_sentinel(child)
       child.pop_scope
       proto_idx = fc.chunk.add_proto(child.chunk)
       fc.emit(Op::Closure, dst, proto_idx)

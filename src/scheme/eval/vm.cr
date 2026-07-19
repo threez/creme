@@ -261,22 +261,19 @@ module Scheme
         begin
           frame = top_frame
           instructions = frame.chunk.instructions
-          if frame.ip >= instructions.size
-            # Fell off the end without an explicit Return — only reachable
-            # for a chunk whose compiled body never itself provided one
-            # (e.g. an empty top-level program). Treat as an implicit NIL
-            # return.
-            top_result = deliver_return(NIL)
-            return top_result unless top_result.nil?
-            next
-          end
           {% if sampled %}
             sampled_ip = frame.ip
           {% end %}
-          # Bounds-check-free: the `frame.ip >= instructions.size` guard above
-          # dominates this fetch with nothing in between mutating frame.ip, so
-          # frame.ip is provably in range here (LLVM can't prove it across the
-          # intervening heap loads on its own).
+          # Bounds-check-free fetch, with NO per-instruction end-of-chunk
+          # guard: frame.ip is provably always in range because every chunk
+          # ends in a Return sentinel and no jump can target past it (see
+          # BytecodeCompiler#append_return_sentinel), so execution always
+          # leaves a chunk via a Return before ip could reach instructions.size
+          # — sequentially or by jump. Dropping the guard's per-instruction
+          # branch is a measurable win on tight loops (e.g. sum-to ~12%,
+          # fib ~6%). A malformed chunk lacking the sentinel would read out of
+          # bounds here rather than raising; that invariant is the compiler's
+          # to keep.
           instr = instructions.unsafe_fetch(frame.ip)
           frame.ip += 1
           {% if sampled %}
@@ -292,7 +289,11 @@ module Scheme
           base = frame.base
           case instr.op
           when Op::LoadK
-            @stack.unsafe_put(base + instr.a, frame.chunk.consts[instr.b])
+            # Bounds-check-free: `instr.b` is always a const-pool index
+            # BytecodeCompiler obtained from THIS chunk's own `add_const`
+            # call, so it's provably < chunk.consts.size (same reasoning as
+            # `top_frame`'s @frames.unsafe_fetch above).
+            @stack.unsafe_put(base + instr.a, frame.chunk.consts.unsafe_fetch(instr.b))
           when Op::LoadNil
             @stack.unsafe_put(base + instr.a, NIL)
           when Op::LoadTrue
@@ -1157,13 +1158,20 @@ module Scheme
     # on every single invocation, so skipping the Env hash lookup while
     # nothing has (re)defined it at top level matters a lot in practice.
     private def get_global_cached(frame : CallFrame, instr_idx : Int32, const_idx : Int32) : SchemeValue
+      # Bounds-check-free: `instr_idx` is always frame.ip - 1 for the
+      # GetGlobal/CallGlobal-family instruction currently executing, and
+      # Chunk#emit keeps both cache arrays 1:1-sized with `instructions` (a
+      # slot appended for every instruction, not just GetGlobal-family ones)
+      # — so instr_idx is provably < both arrays' size, same reasoning as
+      # `top_frame`'s @frames.unsafe_fetch.
       versions = frame.chunk.global_cache_versions
-      if versions[instr_idx] == frame.root_env.version
-        return frame.chunk.global_cache_values[instr_idx].not_nil!
+      values = frame.chunk.global_cache_values
+      if versions.unsafe_fetch(instr_idx) == frame.root_env.version
+        return values.unsafe_fetch(instr_idx).not_nil!
       end
       value = frame.root_env.get(const_name(frame, const_idx))
-      frame.chunk.global_cache_values[instr_idx] = value
-      versions[instr_idx] = frame.root_env.version
+      values.unsafe_put(instr_idx, value)
+      versions.unsafe_put(instr_idx, frame.root_env.version)
       value
     end
 
