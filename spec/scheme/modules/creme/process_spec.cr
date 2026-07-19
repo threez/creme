@@ -80,6 +80,35 @@ describe "process module" do
       result.as(Scheme::SchemeBool).value?.should be_true
     end
 
+    it "process-write-line! wakes a child blocking on its own stdin read" do
+      result = run(<<-SCM)
+        (define pid (process-spawn "sh" (list "-c" "read line; echo done")
+                                    'stdin 'keep-open 'stdout "/tmp/creme-process-spec-write-line.log"))
+        (process-write-line! pid "hello")
+        (process-wait! pid)
+        SCM
+      result.as(Scheme::SchemeInt).value.should eq(0)
+      File.read("/tmp/creme-process-spec-write-line.log").should eq("done\n")
+    end
+
+    it "process-write-line! raises for a pid never spawned via process-spawn" do
+      expect_raises(Scheme::SchemeRuntimeError, /process-write-line!:/) do
+        run(%((process-write-line! 999999999 "hello")))
+      end
+    end
+
+    it "process-write-line! raises when the child's stdin wasn't opened with 'keep-open" do
+      result = run(<<-SCM)
+        (define pid (process-spawn "sleep" (list "5")))
+        (define ok
+          (guard (e (#t (process-kill! pid) #f))
+            (process-write-line! pid "hello")
+            #t))
+        ok
+        SCM
+      result.as(Scheme::SchemeBool).value?.should be_false
+    end
+
     it "process-wait! blocks for a spawned pid and reports a signal-terminated exit as a negative code" do
       result = run(<<-SCM)
         (define pid (process-spawn "sleep" (list "5")))

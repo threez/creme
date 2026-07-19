@@ -10,7 +10,7 @@
 
 (import (scheme base) (scheme write) (scheme cxr) (scheme process-context)
         (creme process) (creme http) (creme file) (creme cli) (creme wrk)
-        (creme shell) (creme table) (creme numfmt) (creme sort))
+        (creme shell) (creme table) (creme numfmt) (creme sort) (creme string))
 
 (define opts
   (cli "Benchmarks the scheme.cr/Ruby/Crystal/Racket demo-todo twins with wrk"
@@ -20,7 +20,9 @@
              (flag "racket-port" "--racket-port" "Racket server port" 'integer 4573)
              (flag "duration" "--duration" "wrk run duration" 'string "8s")
              (flag "threads" "--threads" "wrk thread count" 'integer 4)
-             (flag "conns" "--conns" "wrk connection count" 'integer 32))))
+             (flag "conns" "--conns" "wrk connection count" 'integer 32)
+             (flag "profile" "--profile"
+                   "Also run the scheme.cr server under --profile (creme prof) and print its report after benchmarking"))))
 
 (define scheme-port (number->string (cli-get opts "scheme-port")))
 (define ruby-port (number->string (cli-get opts "ruby-port")))
@@ -28,6 +30,7 @@
 (define racket-port (number->string (cli-get opts "racket-port")))
 (define duration (cli-get opts "duration"))
 (define threads (cli-get opts "threads"))
+(define profile? (cli-flag? opts "profile"))
 (define conns (cli-get opts "conns"))
 
 ;; ---- step logging -----------------------------------------------------------
@@ -46,6 +49,16 @@
 (define running-pids '())
 
 (define (track! pid) (set! running-pids (cons pid running-pids)) pid)
+
+;; Drops a pid from running-pids without signaling it -- for a pid that has
+;; already exited on its own (see the --profile server shutdown below),
+;; so cleanup! doesn't later try to kill an already-reaped pid.
+(define (untrack! pid)
+  (set! running-pids
+        (let loop ((pids running-pids))
+          (cond ((null? pids) '())
+                ((= (car pids) pid) (loop (cdr pids)))
+                (else (cons (car pids) (loop (cdr pids))))))))
 
 (define (cleanup!)
   (for-each (lambda (pid) (process-kill! pid)) running-pids)
@@ -172,16 +185,44 @@
   (print-ranking! "Ranked by HTML throughput" (lambda (row) (stats-req (cadr row))))
   (print-ranking! "Ranked by JSON throughput" (lambda (row) (stats-req (caddr row)))))
 
+;; ---- --profile: the scheme.cr server's own profile report -----------------
+
+;; app.scm's --profile mode prints its (creme bench) profile-report->string
+;; report to stdout right after it stops -- which, here, is /tmp/bench-
+;; scheme.log (same redirect used for its ordinary request log). Everything
+;; before the report's own "demo-todo server" heading is per-request log
+;; noise from the wrk runs, so this prints from that heading onward instead
+;; of the whole (potentially huge) log file.
+(define (print-scheme-profile!)
+  (let* ((log (file-read "/tmp/bench-scheme.log"))
+         (idx (string-index-of log "demo-todo server")))
+    (newline)
+    (step! "scheme.cr / bin/creme -- profile (--profile)")
+    (display (if idx (substring log idx (string-length log)) log))
+    (newline)))
+
 ;; ---- scheme.cr / bin/creme --------------------------------------------------
 
 (step! (string-append "scheme.cr / bin/creme -- starting on port " scheme-port))
-(track! (process-spawn "./bin/creme" (list "competition/scheme/demo-todo/app.scm")
-                       'env (list (cons "PORT" scheme-port))
-                       'stdout "/tmp/bench-scheme.log" 'stderr "/tmp/bench-scheme.log"
-                       'stdin 'keep-open))
+(define scheme-pid
+  (track! (process-spawn "./bin/creme"
+                         (append (list "competition/scheme/demo-todo/app.scm")
+                                 (if profile? (list "--profile") '()))
+                         'env (list (cons "PORT" scheme-port))
+                         'stdout "/tmp/bench-scheme.log" 'stderr "/tmp/bench-scheme.log"
+                         'stdin 'keep-open)))
 (wait-for-port! scheme-port)
 (bench-app! "scheme.cr / bin/creme" scheme-port)
-(cleanup!)
+(if profile?
+    (begin
+      ;; Wakes app.scm's (read-line), rather than killing it outright, so it
+      ;; can print/flush its profile report and exit on its own -- see
+      ;; process-write-line!'s own doc comment ((creme process)).
+      (process-write-line! scheme-pid "")
+      (process-wait! scheme-pid)
+      (untrack! scheme-pid)
+      (print-scheme-profile!))
+    (cleanup!))
 (sleep! 1)
 
 ;; ---- Ruby / Sinatra+ERB+Sequel+SQLite ---------------------------------------

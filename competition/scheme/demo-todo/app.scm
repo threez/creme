@@ -1,4 +1,4 @@
-(import (scheme base) (scheme write) (scheme process-context) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao) (creme memoize))
+(import (scheme base) (scheme write) (scheme process-context) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao) (creme memoize) (creme prof) (creme bench))
 
 ;; A todo-list demo app for the scheme.cr-vs-Ruby benchmark in this
 ;; directory -- see ../../README.md and ../../results.md. Port defaults to
@@ -9,6 +9,23 @@
 (define port
   (let ((p (get-environment-variable "PORT")))
     (if p (string->number p) 0)))
+
+;; --profile -- profiles request handling (both of (creme prof)'s samplers,
+;; nested the same way (creme bench)'s profile-workload does) for however
+;; long the server actually serves, printing the report right after it
+;; stops instead of the plain "Press Enter" prompt. Each request runs
+;; against its own child Interpreter (mux-listen!'s own per-request
+;; isolation -- see mux.cr), which shares this Interpreter's Scheme-level
+;; sampler by reference precisely so its samples still show up here (see
+;; Interpreter::SampleSink's own doc comment, src/scheme/eval/
+;; interpreter.cr) -- without that, the cooperative sampler would only ever
+;; see this script's own top-level (idle, blocked-on-read-line) Interpreter
+;; and report 0 samples no matter how much request traffic runs
+;; concurrently. Driven interactively by just pressing Enter as usual, or
+;; by ../../bench.scm's own --profile flag via process-write-line!, which
+;; wakes the (read-line) below without killing the process outright so
+;; this can still print/flush its report.
+(define profile? (if (member "--profile" (command-line) string=?) #t #f))
 
 (define conn (sql-open ":memory:"))
 
@@ -118,8 +135,25 @@
 
 (define server (mux-listen! router port))
 (display "Serving the todo list at ") (display (mux-base-url server)) (newline)
-(display "Press Enter here to stop the server.") (newline)
-(read-line)
+
+(define (wait-for-stop!)
+  (display "Press Enter here to stop the server.") (newline)
+  (read-line))
+
+(if profile?
+    (let* ((scheme-report #f)
+           (crystal-report
+            (profile (lambda ()
+                       (set! scheme-report (profile-scheme (lambda () (wait-for-stop!)) 200))))))
+      (display
+       (profile-report->string
+        (list (cons "name" "demo-todo server")
+              (cons "repeat" 1)
+              (cons "scheme-report" scheme-report)
+              (cons "crystal-report" crystal-report)
+              (cons "scheme-total" (profile-scheme-total-samples scheme-report))
+              (cons "crystal-total" (profile-total-samples crystal-report))))))
+    (wait-for-stop!))
 
 (mux-close! server)
 (sql-close conn)

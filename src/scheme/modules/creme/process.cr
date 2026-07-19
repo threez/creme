@@ -255,6 +255,32 @@ module Scheme::Builtins::ProcessExtra
     sig
   end
 
+  # (process-write-line! pid line) -> unspecified. Writes line followed by
+  # a newline to the child's stdin and flushes -- the one legitimate use
+  # for 'keep-open's otherwise-untouched write end (see process-spawn's
+  # own doc comment): waking a child that's blocking on its own (read-line)
+  # as a "wait until told to stop" signal, so it can shut down gracefully
+  # (e.g. competition/scheme/demo-todo/app.scm under --profile, woken by
+  # competition/bench.scm's --profile so the app can print/flush its
+  # profile report and exit instead of being killed outright via
+  # process-kill!). Raises if pid was never spawned via process-spawn (or
+  # was already waited on), or if its stdin wasn't opened with 'keep-open
+  # (i.e. there is no write end to write to).
+  @[Scheme::SchemeFn("process-write-line!", min: 2, max: 2)]
+  def process_write_line(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    pid = int_arg(args[0], "process-write-line!")
+    line = string_arg(args[1], "process-write-line!")
+    process = @@handles_mutex.synchronize { @@handles[pid]? }
+    raise SchemeRuntimeError.new("process-write-line!: pid #{pid} was not spawned via process-spawn, or was already waited on") unless process
+    begin
+      process.input.puts(line)
+      process.input.flush
+    rescue ex : Exception
+      raise SchemeRuntimeError.new("process-write-line!: #{ex.message}")
+    end
+    NIL.as(SchemeValue)
+  end
+
   # (process-wait! pid) -> exit code (SchemeInt), blocking until that
   # pid (which MUST have been spawned via process-spawn -- this is what
   # lets us find its live Process object and call #wait on it) exits.
