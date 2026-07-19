@@ -140,9 +140,14 @@ module Scheme::Builtins::SqlLibrary
     params = args[2..-1].map { |arg| lisp_to_db_any(arg, "sql-query") }
     rows = [] of SchemeValue
     conn.reader.query(sql, args: params) do |result_set|
-      cols = result_set.column_names
+      # Column names are identical for every row, so build each key string
+      # ONCE and share it across all rows' alists instead of allocating a
+      # fresh SchemeStr per cell (the driver's biggest per-row allocation on
+      # a large result set). Callers treat these keys as read-only alist
+      # keys — the row shape contract never promised distinct key objects.
+      keys = result_set.column_names.map { |name| SchemeStr.new(name).as(SchemeValue) }
       result_set.each do
-        pairs = cols.map { |name| Cons.new(SchemeStr.new(name), db_any_to_scheme(result_set.read)).as(SchemeValue) }
+        pairs = keys.map { |key| Cons.new(key, db_any_to_scheme(result_set.read)).as(SchemeValue) }
         rows << Scheme.a_to_list(pairs)
       end
     end

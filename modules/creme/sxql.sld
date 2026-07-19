@@ -751,16 +751,32 @@
     ;; pairs, e.g. (("title" . "...")) -> ((:title . "...")).
     (define (sxql-row->kw-alist row)
       (map (lambda (pair) (cons (string->symbol (string-append ":" (car pair))) (cdr pair))) row))
-    
+
+    ;; Builds one row's (:col . value) alist reusing the pre-interned `keys`
+    ;; (the :col symbols) instead of re-deriving them from the column names
+    ;; per row -- the values come from `row` positionally (a SQL result set's
+    ;; rows all share the first row's column order).
+    (define (sxql-zip-kw-row keys row)
+      (if (null? keys)
+          '()
+          (cons (cons (car keys) (cdar row)) (sxql-zip-kw-row (cdr keys) (cdr row)))))
+
     ;; Executes an already-built statement against `conn` and returns the
     ;; converted rows. A plain function of its two arguments -- no hidden
-    ;; state -- reusing the exact sxql-yield + sql-query call shape.
+    ;; state -- reusing the exact sxql-yield + sql-query call shape. The
+    ;; :col keyword symbols are interned ONCE from the first row's column
+    ;; names and shared across every row (rather than string-append'd and
+    ;; re-interned per cell by sxql-row->kw-alist), since a result set's
+    ;; columns are the same for every row.
     (define (sxql-run conn stmt)
       (let* ((yielded (sxql-yield stmt))
              (sql-str (car yielded))
              (params (cadr yielded))
-             (rows (apply sql-query conn sql-str params)))
-        (map sxql-row->kw-alist (vector->list rows))))
+             (rows (vector->list (apply sql-query conn sql-str params))))
+        (if (null? rows)
+            '()
+            (let ((keys (map (lambda (pair) (string->symbol (string-append ":" (car pair)))) (car rows))))
+              (map (lambda (row) (sxql-zip-kw-row keys row)) rows)))))
     
     (defmacro sxql-select! (conn fields . clauses)
       (let ((stmt (apply sxql-select (map sxql-compile-tree fields) (map sxql-compile-tree clauses))))
