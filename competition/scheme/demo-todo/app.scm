@@ -97,15 +97,11 @@
 
 (define cached-todo-row->json (memoize todo-row->json))
 
+(define (todo-row->json-node row)
+  (list 'raw (cached-todo-row->json (dao-ref row 'id) (todo-done? row) (dao-ref row 'title))))
+
 (define (write-todos-json! port)
-  (write-string "[" port)
-  (let loop ((rows (todo-all)) (first #t))
-    (if (pair? rows)
-        (let ((row (car rows)))
-          (if (not first) (write-string "," port))
-          (write-string (cached-todo-row->json (dao-ref row 'id) (todo-done? row) (dao-ref row 'title)) port)
-          (loop (cdr rows) #f))))
-  (write-string "]" port))
+  (json-render port (json-array-map todo-row->json-node (todo-all))))
 
 (define router
   (surf
