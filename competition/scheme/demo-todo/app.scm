@@ -1,4 +1,4 @@
-(import (scheme base) (scheme write) (scheme process-context) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao) (creme memoize) (creme prof) (creme bench))
+(import (scheme base) (scheme write) (scheme process-context) (creme surf) (creme mux) (creme html) (creme css) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao) (creme memoize) (creme prof) (creme bench) (creme for))
 
 ;; A todo-list demo app for the scheme.cr-vs-Ruby benchmark in this
 ;; directory -- see ../../README.md and ../../results.md. Port defaults to
@@ -54,6 +54,9 @@
 
 (define cached-todo-row->string (memoize todo-row->string))
 
+(define (todo-row->html-node row)
+  (list 'raw (cached-todo-row->string (dao-ref row 'id) (todo-done? row) (dao-ref row 'title))))
+
 (define css
   (css! ((body (font-family "sans-serif"))
          (".todo-app" (max-width "28rem") (margin "2rem auto"))
@@ -85,15 +88,13 @@
                    (input (@ (type "text") (name "title") (placeholder "New todo") (required #t)))
                    (button (@ (type "submit")) "Add"))
              (ul (@ (class "todos"))
-                 ,@(map (lambda (row)
-                          (list 'raw (cached-todo-row->string (dao-ref row 'id) (todo-done? row) (dao-ref row 'title))))
-                        (todo-all)))
+                 ,@(for/list ((row (in-list (todo-all)))) (todo-row->html-node row)))
              (p (@ (class "count")) ,(string-append (number->string (todo-count (lambda (row) (not (todo-done? row))))) " remaining"))))))))
 
 (define (page-response) (surf-html write-page!))
 
 (define (todo-row->json id done title)
-  (json->string `(object (id ,id) (title ,title) (done ,done))))
+  (json! `(object (id ,id) (title ,title) (done ,done))))
 
 (define cached-todo-row->json (memoize todo-row->json))
 
