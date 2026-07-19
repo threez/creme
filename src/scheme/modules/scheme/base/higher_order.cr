@@ -16,10 +16,7 @@ module Scheme::Builtins::HigherOrder
     lists = args[1..-1].map { |list| Scheme.list_to_a(list) }
     minlen = lists.min_of(&.size)
     acc = [] of SchemeValue
-    (0...minlen).each do |i|
-      call_args = lists.map { |list| list[i] }
-      acc << interp.apply(f, call_args)
-    end
+    each_call_args(f, lists, minlen) { |ca| acc << interp.apply(f, ca) }
     Scheme.a_to_list(acc)
   end
 
@@ -28,11 +25,29 @@ module Scheme::Builtins::HigherOrder
     f = args[0]
     lists = args[1..-1].map { |list| Scheme.list_to_a(list) }
     minlen = lists.min_of(&.size)
-    (0...minlen).each do |i|
-      call_args = lists.map { |list| list[i] }
-      interp.apply(f, call_args)
-    end
+    each_call_args(f, lists, minlen) { |ca| interp.apply(f, ca) }
     NIL.as(SchemeValue)
+  end
+
+  # Yields the per-element argument array for each of `minlen` positions
+  # across `lists` (column i of each list). When `f` is a closure, one array
+  # is REUSED across all iterations — safe because apply copies a closure's
+  # args into VM registers (bind_args_from_array) before its body runs and
+  # never retains the array, so refilling it can't corrupt an earlier call.
+  # A Builtin callback might retain the array (e.g. values -> SchemeValues),
+  # so those get a fresh array per call, exactly as before.
+  private def each_call_args(f : SchemeValue, lists : Array(Array(SchemeValue)), minlen : Int32, & : Array(SchemeValue) -> _) : Nil
+    if f.is_a?(Scheme::BytecodeClosure) || f.is_a?(Scheme::BytecodeCaseClosure)
+      call_args = Array(SchemeValue).new(lists.size, NIL)
+      (0...minlen).each do |i|
+        lists.each_with_index { |list, j| call_args[j] = list[i] }
+        yield call_args
+      end
+    else
+      (0...minlen).each do |i|
+        yield lists.map { |list| list[i] }
+      end
+    end
   end
 
   @[Scheme::SchemeFn("apply", min: 2, max: -1)]
