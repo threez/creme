@@ -10,6 +10,7 @@
 ;   - bench/bench.rb, the same 7 workloads under Ruby (MRI)
 ;   - bench/racket.scm, the same 7 workloads under Racket's #lang r7rs
 ;   - bench/guile.scm, the same 7 workloads under GNU Guile (run with --r7rs)
+;   - bench/bench.js, the same 7 workloads under Node.js (V8)
 ;
 ; Each variant is optional: if its command isn't found (or exits non-zero),
 ; that column falls back to "n/a" instead of raising, so this script — and
@@ -52,6 +53,7 @@
 (define ruby-output (run-variant "ruby" (list "bench/bench.rb")))
 (define racket-output (run-variant "racket" (list "bench/racket.scm")))
 (define guile-output (run-variant "guile" (list "--r7rs" "bench/guile.scm")))
+(define node-output (run-variant "node" (list "bench/bench.js")))
 
 ; ---- parse "<label> = <result>  (<elapsed>s)" / "total = <elapsed>s" -------
 
@@ -75,6 +77,7 @@
 (define racket-times (parse-elapsed-alist racket-output))
 (define ruby-times (parse-elapsed-alist ruby-output))
 (define guile-times (parse-elapsed-alist guile-output))
+(define node-times (parse-elapsed-alist node-output))
 (define creme-times (parse-elapsed-alist creme-output))
 
 ; ---- print the table --------------------------------------------------------
@@ -89,11 +92,12 @@
         "tak(18,12,6)" "nqueens(9)" "total"))
 
 (define headers
-  (list "workload" "crystal" "go" "racket" "ruby" "guile" "creme"
-        "creme/crystal" "creme/go" "creme/racket" "creme/ruby" "creme/guile"))
+  (list "workload" "crystal" "go" "racket" "ruby" "guile" "node" "creme"
+        "creme/crystal" "creme/go" "creme/racket" "creme/ruby" "creme/guile" "creme/node"))
 
 (define aligns
-  (list 'left 'right 'right 'right 'right 'right 'right 'right 'right 'right 'right 'right))
+  (list 'left 'right 'right 'right 'right 'right 'right 'right
+        'right 'right 'right 'right 'right 'right))
 
 (define data-rows
   (map (lambda (label)
@@ -102,12 +106,13 @@
                (r (lookup label racket-times))
                (rb (lookup label ruby-times))
                (g (lookup label guile-times))
+               (n (lookup label node-times))
                (cr (lookup label creme-times)))
            (list label
                  (numfmt-fixed c 5) (numfmt-fixed go 5) (numfmt-fixed r 5)
-                 (numfmt-fixed rb 5) (numfmt-fixed g 5) (numfmt-fixed cr 5)
+                 (numfmt-fixed rb 5) (numfmt-fixed g 5) (numfmt-fixed n 5) (numfmt-fixed cr 5)
                  (numfmt-ratio cr c) (numfmt-ratio cr go) (numfmt-ratio cr r)
-                 (numfmt-ratio cr rb) (numfmt-ratio cr g))))
+                 (numfmt-ratio cr rb) (numfmt-ratio cr g) (numfmt-ratio cr n))))
        workloads))
 
 (display (bench-table->string headers data-rows aligns 1))

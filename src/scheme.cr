@@ -73,6 +73,7 @@ require "./scheme/modules/creme/treelist"
 require "./scheme/modules/creme/introspection"
 require "./scheme/modules/creme/actor"
 require "./scheme/modules/creme/raft"
+require "./scheme/modules/creme/reader"
 # prof_vm.cr (the (creme prof-vm) cooperative sampler) has no native/
 # backtrace(3) dependency, so it's required unconditionally. prof_native.cr
 # (the (creme prof-native) SIGPROF sampler) has no backtrace(3) on musl

@@ -1,0 +1,47 @@
+#lang (creme syntax scss) (export css)
+// A natural-SCSS-syntax rewrite of the todo demo's stylesheet (compare
+// against competition/scheme/demo-todo/app.scm's `css` definition, and
+// app.mex's own css! call) -- loaded by app.mex via (load "style.scss"),
+// which then has `css` bound to the compiled CSS string, same as the
+// original's (define css (css! ...)) did by hand.
+//
+// (this is real SCSS-dialect comment syntax, not Scheme's ";" -- (creme
+// syntax scss) doesn't understand ";" as a comment starter at all, only
+// "//" and "/* */", matching real SCSS/CSS.)
+$muted: #888;
+
+body { font-family: sans-serif; }
+
+.todo-app {
+  max-width: 28rem;
+  margin: 2rem auto;
+}
+
+.todos {
+  list-style: none;
+  padding-left: 0;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 4px 0;
+
+    .title { flex: 1; }
+  }
+}
+
+.done .title {
+  text-decoration: line-through;
+  color: $muted;
+}
+
+form.toggle, form.delete, form.add {
+  display: inline;
+}
+
+form.add {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}

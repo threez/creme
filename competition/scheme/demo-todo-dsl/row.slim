@@ -1,0 +1,7 @@
+#lang (creme syntax slim) (export row) (params id done title) (import (creme path) (creme format))
+li(class=(if done "done" "pending"))
+  form.toggle(method="post" action=(path 'todos id 'complete))
+    button(type="submit") = (if done "Undo" "Done")
+  span.title = title
+  form.delete(method="post" action=(path 'todos id 'delete))
+    button(type="submit") Delete

@@ -1,6 +1,7 @@
 ;; Benchmarks the scheme.cr demo-todo app (competition/scheme/demo-todo/app.scm)
 ;; against its Sinatra+ERB+Sequel+SQLite, Kemal+Granite+ECR, Racket web-server,
-;; and Go Fiber+GORM+html-template twins using wrk. A scheme.cr port of bench.sh -- same
+;; Go Fiber+GORM+html-template, and Node Express+Drizzle+Eta twins using wrk.
+;; A scheme.cr port of bench.sh -- same
 ;; sequence, same wrk invocations, same cleanup patterns, just orchestrated
 ;; from creme instead of bash. Prints one line per step as it runs, then a
 ;; results table at the end (see print-results-table! below) instead of
@@ -19,6 +20,7 @@
              (flag "crystal-port" "--crystal-port" "Crystal server port" 'integer 4572)
              (flag "racket-port" "--racket-port" "Racket server port" 'integer 4573)
              (flag "go-port" "--go-port" "Go server port" 'integer 4574)
+             (flag "node-port" "--node-port" "Node server port" 'integer 4575)
              (flag "duration" "--duration" "wrk run duration" 'string "8s")
              (flag "threads" "--threads" "wrk thread count" 'integer 4)
              (flag "conns" "--conns" "wrk connection count" 'integer 32)
@@ -30,6 +32,7 @@
 (define crystal-port (number->string (cli-get opts "crystal-port")))
 (define racket-port (number->string (cli-get opts "racket-port")))
 (define go-port (number->string (cli-get opts "go-port")))
+(define node-port (number->string (cli-get opts "node-port")))
 (define duration (cli-get opts "duration"))
 (define threads (cli-get opts "threads"))
 (define profile? (cli-flag? opts "profile"))
@@ -189,15 +192,19 @@
 
 ;; ---- --profile: the scheme.cr server's own profile report -----------------
 
-;; app.scm's --profile mode prints its (creme bench) profile-report->string
-;; report to stdout right after it stops -- which, here, is /tmp/bench-
-;; scheme.log (same redirect used for its ordinary request log). Everything
-;; before the report's own "demo-todo server" heading is per-request log
-;; noise from the wrk runs, so this prints from that heading onward instead
-;; of the whole (potentially huge) log file.
+(define scheme-script "competition/scheme/demo-todo/app.scm")
+
+;; `./bin/creme --profile table` (src/main.cr) prints its (creme bench)
+;; profile-report->string report to stdout right after the wrapped script
+;; stops -- which, here, is /tmp/bench-scheme.log (same redirect used for
+;; its ordinary request log). Everything before the report's own
+;; "<script-path> (x1)" heading is per-request log noise from the wrk
+;; runs, so this prints from that heading onward (found by searching for
+;; the same script path passed to --profile below) instead of the whole
+;; (potentially huge) log file.
 (define (print-scheme-profile!)
   (let* ((log (file-read "/tmp/bench-scheme.log"))
-         (idx (string-index-of log "demo-todo server")))
+         (idx (string-index-of log scheme-script)))
     (newline)
     (step! "scheme.cr / bin/creme -- profile (--profile)")
     (display (if idx (substring log idx (string-length log)) log))
@@ -208,8 +215,8 @@
 (step! (string-append "scheme.cr / bin/creme -- starting on port " scheme-port))
 (define scheme-pid
   (track! (process-spawn "./bin/creme"
-                         (append (list "competition/scheme/demo-todo/app.scm")
-                                 (if profile? (list "--profile") '()))
+                         (append (if profile? (list "--profile" "table") '())
+                                 (list scheme-script))
                          'env (list (cons "PORT" scheme-port))
                          'stdout "/tmp/bench-scheme.log" 'stderr "/tmp/bench-scheme.log"
                          'stdin 'keep-open)))
@@ -290,6 +297,23 @@
                        'stdout "/tmp/bench-go.log" 'stderr "/tmp/bench-go.log"))
 (wait-for-port! go-port)
 (bench-app! "Go / Fiber+GORM+html-template+SQLite" go-port)
+(cleanup!)
+(sleep! 1)
+
+;; ---- Node / Express+Drizzle+Eta+SQLite ------------------------------------
+
+(step! (string-append "Node / Express+Drizzle+Eta+SQLite -- starting on port " node-port))
+;; Node has no compiled binary to go stale -- just install if node_modules is
+;; missing, unlike the Crystal/Go mtime-based freshness checks above.
+(if (not (cdr (assoc "success" (shell-run "sh"
+                            (list "-c" "[ -d competition/node/demo-todo/node_modules ]")))))
+    (shell-checked! "sh" (list "-c" "cd competition/node/demo-todo && npm install") "npm install"))
+(track! (process-spawn "node" (list "app.js")
+                       'chdir "competition/node/demo-todo"
+                       'env (list (cons "PORT" node-port))
+                       'stdout "/tmp/bench-node.log" 'stderr "/tmp/bench-node.log"))
+(wait-for-port! node-port)
+(bench-app! "Node / Express+Drizzle+Eta+SQLite" node-port)
 (cleanup!)
 
 (print-results-table!)

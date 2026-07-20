@@ -85,4 +85,76 @@ describe "main.cr (CLI)" do
     status.success?.should be_true
     out.should eq("done")
   end
+
+  it "--profile table runs a file normally and prints a profiling report after it" do
+    file = File.tempfile("main_spec_profile", ".scm") do |io|
+      io.print(<<-SCHEME)
+        (import (scheme base) (scheme write))
+        (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+        (display (fib 24))
+        (newline)
+        SCHEME
+    end
+    begin
+      out, err, status = run_cli(["--profile", "table", file.path])
+      status.success?.should be_true
+      err.should eq("")
+      out.should contain("46368\n") # (fib 24) -- the script's own ordinary output, unaffected
+      out.should contain("(x1)")
+      out.should contain("hot Scheme functions")
+      out.should contain("hot Crystal frames")
+    ensure
+      File.delete(file.path)
+    end
+  end
+
+  it "--profile requires \"table\" as its first argument" do
+    _, err, status = run_cli(["--profile", "nonsense", "somefile.scm"])
+    status.success?.should be_false
+    err.should contain("Usage: creme --profile table <file.scm>")
+  end
+
+  it "--profile table requires a file argument" do
+    _, err, status = run_cli(["--profile", "table"])
+    status.success?.should be_false
+    err.should contain("Usage: creme --profile table <file.scm>")
+  end
+
+  it "-- runs the given file as a plain script, unaffected by any of creme's own flags" do
+    file = File.tempfile("main_spec_dashdash", ".scm") do |io|
+      io.print(%((import (scheme base) (scheme write)) (display "hello from --") (newline)))
+    end
+    begin
+      out, err, status = run_cli(["--", file.path])
+      status.success?.should be_true
+      out.should eq("hello from --\n")
+      err.should eq("")
+    ensure
+      File.delete(file.path)
+    end
+  end
+
+  it "-- hands a literal --profile through to the script's own (command-line)" do
+    file = File.tempfile("main_spec_dashdash_profile", ".scm") do |io|
+      io.print(<<-SCHEME)
+        (import (scheme base) (scheme write) (scheme process-context))
+        (display (command-line))
+        (newline)
+        SCHEME
+    end
+    begin
+      out, err, status = run_cli(["--", file.path, "--profile"])
+      status.success?.should be_true
+      err.should eq("")
+      out.should contain(%(--profile))
+    ensure
+      File.delete(file.path)
+    end
+  end
+
+  it "-- requires a file argument" do
+    _, err, status = run_cli(["--"])
+    status.success?.should be_false
+    err.should contain("Usage: creme -- <file.scm>")
+  end
 end

@@ -115,3 +115,35 @@ describe "Scheme.run_source with bindings/parent" do
     Scheme.run_source(interp, "x", parent: session).as(Scheme::SchemeInt).value.should eq(5_i64)
   end
 end
+
+describe "#lang" do
+  it "run_source runs a file whose #lang line names a dialect library with no extra header-args" do
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    result = Scheme.run_source(interp, "#lang (creme syntax scss)\na { color: red; }\n")
+    result.write_string.should eq("()")
+  end
+
+  it "run_source passes extra header-line data through as header-args, selecting a dialect's define-mode" do
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    Scheme.run_source(interp, "#lang (creme syntax scss) (export css)\na { color: red; }\n")
+    interp.global.get("css").as(Scheme::SchemeStr).value.should eq("a {\n  color: red;\n}\n")
+  end
+
+  it "load respects a #lang header exactly like run_source, defining into the target env" do
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    file = File.tempfile("lisp_runner_spec_lang", ".scss") do |io|
+      io.print("#lang (creme syntax scss) (export css)\na { color: blue; }\n")
+    end
+    begin
+      Scheme.run_source(interp, %(#{"(import (scheme base) (scheme load))"} (load #{file.path.inspect})))
+      interp.global.get("css").as(Scheme::SchemeStr).value.should eq("a {\n  color: blue;\n}\n")
+    ensure
+      File.delete(file.path)
+    end
+  end
+
+  it "a plain file with no #lang line is completely unaffected" do
+    interp = Scheme::Interpreter.new
+    Scheme.run_source(interp, "(+ 1 2)").as(Scheme::SchemeInt).value.should eq(3_i64)
+  end
+end

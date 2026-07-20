@@ -1,0 +1,16 @@
+{
+  "name": "demo-todo-node",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Node.js/Express/Drizzle/Eta/SQLite twin of the demo-todo benchmark app",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2",
+    "eta": "^4.6.0",
+    "express": "^4.19.2"
+  }
+}

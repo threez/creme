@@ -90,6 +90,33 @@ module Scheme
     end
   end
 
+  # Sits as the very first handler in mux-listen!'s chain (see mux_listen
+  # below): acquires this request's own child Interpreter from the
+  # ROOT Interpreter's pool (Interpreter#acquire_child_interpreter — see its
+  # own doc comment for why a real pool, not just Interpreter.new(
+  # inherit_from:) every time, is worth the trouble), stashes it on the
+  # context for every downstream middleware/route handler to share (see
+  # HTTP::Server::Context#mux_interp), then releases it back to the pool
+  # once the ENTIRE chain has unwound. Centralizing acquire/release here
+  # (rather than in request_interpreter, which runs once per handler in the
+  # chain) guarantees exactly one acquire and one release per request
+  # regardless of how many middlewares are registered — request_interpreter
+  # itself just reads whatever this handler already stashed.
+  class MuxInterpreterPoolHandler
+    include HTTP::Handler
+
+    def initialize(@interp : Interpreter)
+    end
+
+    def call(context : HTTP::Server::Context) : Nil
+      child = @interp.acquire_child_interpreter
+      context.mux_interp = child
+      call_next(context)
+    ensure
+      @interp.release_child_interpreter(child) if child
+    end
+  end
+
   # Wraps one Scheme middleware as a Crystal HTTP::Handler, so it can sit in
   # Crystal's own handler chain in front of the router. Builds the request
   # alist once (the same shape every route handler gets) and a `next`
@@ -153,7 +180,8 @@ module Scheme::Builtins::MuxLibrary
                  else
                    {"127.0.0.1", mux_int_arg(args[1], "mux-listen!")}
                  end
-    handlers = app.middlewares.map { |mw| Scheme::MuxMiddlewareHandler.new(interp, mw).as(HTTP::Handler) }
+    handlers = [Scheme::MuxInterpreterPoolHandler.new(interp).as(HTTP::Handler)]
+    handlers.concat(app.middlewares.map { |mw| Scheme::MuxMiddlewareHandler.new(interp, mw).as(HTTP::Handler) })
     handlers << app.router.as(HTTP::Handler)
     server = HTTP::Server.new(handlers)
     address = server.bind_tcp(host, port)
@@ -202,11 +230,10 @@ module Scheme::Builtins::MuxLibrary
 
   # Every request handled by mux-listen! runs against its OWN Interpreter —
   # a lightweight child of whichever Interpreter registered the route/
-  # middleware (Interpreter.new(inherit_from:), the exact same mechanism
-  # (creme actor)'s `spawn` uses to give each actor its own isolated
-  # execution state). This is required, not just tidy: an Interpreter's
-  # own @call_stack (backtrace tracking, mutated on every function call)
-  # and other per-instance bookkeeping (gensym counter, eval-depth,
+  # middleware (the exact same isolation (creme actor)'s `spawn` gives each
+  # actor). This is required, not just tidy: an Interpreter's own
+  # @call_stack (backtrace tracking, mutated on every function call) and
+  # other per-instance bookkeeping (gensym counter, eval-depth,
   # exception-handler stack, ...) are NOT safe for two Fibers to touch at
   # the same instant — reusing the single router-registration-time
   # Interpreter directly across every concurrently-handled request
@@ -214,12 +241,20 @@ module Scheme::Builtins::MuxLibrary
   # (-Dpreview_mt with more than one OS thread; see competition/results.md
   # in the repo root for how this was found). One Interpreter per HTTP
   # request (shared across that request's own middleware chain + route
-  # handler via HTTP::Server::Context#mux_interp, set once by whichever
-  # handler runs first) mirrors actor isolation at HTTP-request
-  # granularity, at the cost of one cheap Interpreter allocation per
-  # request (@base_env is shared by reference; @global/@libraries are
-  # small per-request overlays) — far cheaper than the SQL query or
-  # template render most handlers do anyway.
+  # handler via HTTP::Server::Context#mux_interp) mirrors actor isolation
+  # at HTTP-request granularity.
+  #
+  # The actual acquire (and matching release) happens once per request in
+  # MuxInterpreterPoolHandler, the first handler in mux-listen!'s chain —
+  # this just reads whatever it already stashed on the context, so every
+  # downstream middleware/route handler in the same request shares exactly
+  # one child Interpreter. Interpreter#acquire_child_interpreter pulls a
+  # reset, already-warm child (own @vm_pool intact) from the root
+  # Interpreter's pool instead of allocating a fresh one — see its own doc
+  # comment. The `||=` fallback below only matters if a caller invokes a
+  # registered route/middleware handler directly, bypassing
+  # MuxInterpreterPoolHandler entirely (e.g. a test harness) — that path
+  # still works, just unpooled, exactly as this used to always behave.
   def request_interpreter(context : HTTP::Server::Context, interp : Interpreter) : Interpreter
     context.mux_interp ||= Interpreter.new(inherit_from: interp)
   end

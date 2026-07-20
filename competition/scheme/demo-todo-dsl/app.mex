@@ -1,0 +1,172 @@
+#lang (creme syntax mex)
+;; A rewrite of ../demo-todo/app.scm in an adjacency-based M-expression
+;; style -- and, via the `#lang (creme syntax mex)` line above, this one
+;; genuinely runs: ./bin/creme competition/scheme/demo-todo-dsl/app.mex
+;; works exactly like ./bin/creme competition/scheme/demo-todo/app.scm
+;; does.
+;;
+;; `#lang <library-name>` is a general mechanism (see the doc comment on
+;; Scheme.lang_header_form/run_source in src/scheme/runner.cr), recognized
+;; only there -- i.e. only for a whole file run as a script, not by the
+;; REPL, `eval`, or --dump-bytecode (`load` recognizes it too, see below).
+;; The named library must export a `read-program` procedure that turns
+;; the rest of the file's text into ordinary forms; everything after
+;; that (analyzer/compiler/VM) is completely unmodified and has no idea
+;; a dialect was involved. `(creme syntax mex)` (modules/creme/syntax/
+;; mex.sld) implements its `read-program` on top of `(creme reader)`
+;; (src/scheme/modules/creme/reader.cr), which exposes the real Lexer/
+;; Reader to Scheme as a token-stream hook -- `(creme syntax mex)`
+;; itself does nothing but tokenize, run one swap-pass over the token
+;; list, and hand the result back for parsing. A different dialect is
+;; just a different library implementing the same `read-program`
+;; contract; nothing here is specific to adjacency syntax. `#lang`
+;; dialects live under (creme syntax ...) -- modules/creme/syntax/{mex,
+;; scss,slim}.sld -- to group them apart from ordinary (creme ...)
+;; libraries; the small scanning helpers they share ((creme scanner),
+;; modules/creme/scanner.sld) stay a regular, ungrouped library since
+;; it's generically useful text-parsing code, not specific to writing a
+;; `#lang` dialect. Not wired into spec/scheme_examples_spec.cr (it's a
+;; long-running HTTP server demo, same reason ../demo-todo/app.scm isn't
+;; wired there either).
+;;
+;; Unlike the earlier version of this file, there is no more raw
+;; html!/css! template code here at all -- the stylesheet and markup
+;; live in their own natural-syntax files (style.scss, row.slim,
+;; page.slim), loaded via the SAME `#lang` mechanism, extended to `load`
+;; too (see src/scheme/modules/scheme/load.cr): loading a `#lang (creme
+;; syntax scss) (export css)` file defines `css` as the compiled CSS
+;; string in this file's own environment, and loading a `#lang (creme
+;; syntax slim) (export row) (params ...)` file defines `row` as a
+;; reusable, ordinary procedure -- exactly the same role (define css
+;; (css! ...)) and (define (todo-row->string id done title) (html!
+;; `(...))) played by hand before, just written in real SCSS/Slim syntax
+;; instead of Scheme trees, and parsed/compiled once (at load time), not
+;; per call. See modules/creme/syntax/scss.sld and modules/creme/syntax/
+;; slim.sld for the full contract.
+;;
+;; Convention used below -- adjacency-based application, no second bracket
+;; character:
+;;   name(arg arg ...)   an application -- replaces (name arg arg ...).
+;;                       No commas: args are whitespace-separated, exactly
+;;                       like inside an ordinary s-expression's parens.
+;;                       What marks this as an application rather than a
+;;                       data list is purely that there is NO SPACE between
+;;                       `name` and `(` -- the same signal C-family
+;;                       languages use for a call vs. a parenthesized
+;;                       group. `name (arg arg ...)` (WITH a space) is NOT
+;;                       sugar -- it reads as two separate forms, exactly
+;;                       as it does today.
+;;   (...)               with a preceding space (or at the start of a
+;;                       form) is left alone wherever it's actual DATA
+;;                       rather than code: quote/quasiquote trees,
+;;                       import specs, let/let*/lambda binding shapes,
+;;                       define's (name . params) head, and the surf
+;;                       router's route-pattern lists. This mirrors
+;;                       McCarthy's original split -- M-expressions were
+;;                       only ever meant to notate code; data stayed
+;;                       s-expressions -- except the disambiguator here
+;;                       is whitespace adjacency instead of a distinct
+;;                       bracket glyph.
+
+import((scheme base) (scheme write) (scheme process-context) (scheme load) (creme surf) (creme mux) (creme path) (creme format) (creme json-builder) (creme string) (creme sql) (creme dao) (creme memoize) (creme for))
+
+;; Port defaults to 0 (OS-assigned ephemeral) but a benchmark script needs a
+;; known, fixed port -- set the PORT env var to override.
+;;
+;; Profile request handling with `./bin/creme --profile table
+;; competition/scheme/demo-todo-dsl/app.mex` instead of a plain run.
+define(port
+  let(((p get-environment-variable("PORT")))
+    if(p string->number(p) 0)))
+
+define(conn sql-open(":memory:"))
+
+define-dao(todo conn
+  (id integer primary-key auto-increment)
+  (title text not-null)
+  (done bool not-null (default #f)))
+
+define((add-todo! title) todo-create!('title title 'done #f))
+
+define((toggle-todo! id)
+  let*( ((row todo-find(id))
+         (old-done todo-done?(row))
+         (title dao-ref(row 'title)))
+    todo-update!(id 'done if(old-done #f #t))
+    memoize-forget!(cached-todo-row->string id old-done title)
+    memoize-forget!(cached-todo-row->json id old-done title)))
+
+;; row.slim's own `#lang (creme syntax slim) (export row) (params id done
+;; title) ...` header defines `row` as an ordinary 3-argument procedure
+;; -- (row id done title), returning the row's rendered HTML string --
+;; parsed and compiled once, at this load, not per call.
+load("row.slim")
+
+define(cached-todo-row->string memoize(row))
+
+define((todo-row->html-node row)
+  list('raw cached-todo-row->string(dao-ref(row 'id) todo-done?(row) dao-ref(row 'title))))
+
+;; style.scss's own `#lang (creme syntax scss) (export css)` header defines
+;; `css` as the compiled CSS string directly.
+load("style.scss")
+
+;; page.slim's own `#lang (creme syntax slim) (export page) (params css rows
+;; count-text)` header defines `page` as an ordinary 3-argument
+;; procedure -- (page css rows count-text).
+load("page.slim")
+
+define((write-page! port)
+  write-string(
+    page(css
+         for/list(((row in-list(todo-all()))) todo-row->html-node(row))
+         string-append(number->string(todo-count(lambda((row) not(todo-done?(row))))) " remaining"))
+    port))
+
+define((page-response) surf-html(write-page!))
+
+define((todo-row->json id done title)
+  json!(`(object (id ,id) (title ,title) (done ,done))))
+
+define(cached-todo-row->json memoize(todo-row->json))
+
+define((todo-row->json-node row)
+  list('raw cached-todo-row->json(dao-ref(row 'id) todo-done?(row) dao-ref(row 'title))))
+
+define((write-todos-json! port)
+  json-render(port json-array-map(todo-row->json-node todo-all())))
+
+define(router
+  surf(
+   get(("") (request)
+     surf-accept(request
+       ("text/html" page-response())
+       ("application/json" surf-json(write-todos-json!))
+       (else surf-text("Not Acceptable: this route serves text/html or application/json" 406))))
+
+   post(("todos") (request title)
+     add-todo!(title)
+     surf-redirect("/"))
+
+   at(("todos" (id integer))
+     post(("complete") (request)
+       toggle-todo!(id)
+       surf-redirect("/"))
+
+     post(("delete") (request)
+       todo-delete!(id)
+       surf-redirect("/")))))
+
+add-todo!("Write report")
+add-todo!("Review PR")
+add-todo!("Ship release")
+toggle-todo!(2)
+
+define(server mux-listen!(router port))
+display("Serving the todo list at ") display(mux-base-url(server)) newline()
+
+display("Press Enter here to stop the server.") newline()
+read-line()
+
+mux-close!(server)
+sql-close(conn)

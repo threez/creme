@@ -19,11 +19,35 @@ module Scheme
     # under deeper nesting and declines back toward it when idle.
     VM_POOL_MIN = 4
 
+    # Warm baseline of pooled child Interpreters kept per ROOT Interpreter
+    # (see #interp_pool) — e.g. one per concurrently in-flight HTTP request
+    # under (creme mux). Same rationale as VM_POOL_MIN: small, grows under
+    # load, declines when idle.
+    INTERP_POOL_MIN = 4
+
     getter global : Env
     # Lazily built on first apply (see #vm_pool) rather than in initialize:
     # the factory block captures `self`, which Crystal's in-initialize ivar
     # analysis rejects. nil until first use.
     @vm_pool : ObjectPool(VM)? = nil
+    # Lazily built on first #acquire_child_interpreter, same reason as
+    # @vm_pool above. nil until first use.
+    @interp_pool : ObjectPool(Interpreter)? = nil
+    # Guards @interp_pool. Unlike @vm_pool (which lives on a CHILD
+    # Interpreter only ever touched by the one Fiber that owns it for the
+    # length of one request), @interp_pool lives on the ROOT Interpreter and
+    # is acquired/released by every concurrently-handled request's own
+    # Fiber — exactly the kind of shared mutable state that made
+    # per-request Interpreter isolation necessary in the first place (see
+    # initialize(inherit_from:)'s own doc comment, and (creme mux)'s
+    # request_interpreter). ObjectPool's acquire/release are bare
+    # Array#pop/#push, safe only when strictly one Fiber touches the
+    # structure at an instant; under -Dpreview_mt with more than one OS
+    # thread, two request Fibers can call acquire/release on the SAME root
+    # Interpreter's pool at literally the same time, so this needs a real
+    # Mutex — cheap next to the Interpreter+4-VM+register-array allocation
+    # it's saving.
+    @interp_pool_mutex = Mutex.new
     # Where builtins/prelude/bytevectors/exceptions/special-forms physically
     # live — the source every (scheme base)/(scheme write)/sub-library/
     # (list ...) installer copies its bindings from via `@base_env.get(name)`.
@@ -270,6 +294,102 @@ module Scheme
     # under load, declines slowly when idle — see ObjectPool).
     def vm_pool : ObjectPool(VM)
       @vm_pool ||= ObjectPool(VM).new(VM_POOL_MIN, ->(vm : VM) { vm.reset_for_reuse }) { VM.new(self, nil) }
+    end
+
+    # Returns THIS (previously in-use, now-released) child Interpreter to a
+    # clean per-request starting state — the same per-request-mutable
+    # fields initialize(inherit_from:) sets up for a brand-new child, but
+    # reapplied with as little fresh allocation as actually matters:
+    #
+    # - @call_stack/@exception_handlers/@live_continuation_tags/
+    #   @libraries_loading are `clear`ed in place rather than replaced with
+    #   a brand-new empty Array/Set. They should already be empty by
+    #   release time (every push is balanced by a pop, even on an abnormal
+    #   unwind — see apply's `ensure` blocks), so this is normally a no-op
+    #   scan; the win is reusing already-grown backing storage instead of
+    #   discarding it and reallocating from scratch next time a deep call
+    #   stack grows it back out.
+    # - @libraries is merged into in place (`clear` + `merge!`) instead of
+    #   `.dup`-ing a brand-new Hash every reset, for the same reason.
+    # - @current_output_port/@current_input_port/@current_error_port are
+    #   left untouched: `parameterize` is dynamic-wind-scoped and restores
+    #   each parameter's `.value` to its default on every exit path
+    #   (including a non-local one, via the VM's own unwind-action stack),
+    #   so by the time a request's top-level handler call returns, these
+    #   are already back to wrapping @stdout/@stdin/@stderr — recreating
+    #   them would just be 6 wasted allocations for identical state.
+    # - @start_instant is NOT refreshed — current-jiffy only needs to be
+    #   /a/ monotonic counter from an arbitrary reference point per R7RS,
+    #   not one reset per request, so there's nothing to gain by touching
+    #   it here.
+    # - @global and @analyzing_macros ARE still reallocated fresh (not
+    #   cleared in place), and deliberately so: a closure created during
+    #   this Interpreter's PREVIOUS request (e.g. one stashed into a
+    #   shared (creme hash-table) or actor mailbox that outlives the
+    #   request) keeps `@global` as its lexical root_env by reference: if
+    #   this method cleared that same Env object's bindings in place
+    #   instead of swapping in a new one, a still-live closure from a
+    #   prior request would see its captured scope corrupted by whatever
+    #   the NEXT request's top-level code defines. A fresh Env.new(parent)
+    #   already costs just the Env object itself (no array allocation —
+    #   see Env's own "empty-frame sentinel storage" doc comment), so
+    #   there's no real allocation to save by trying to reuse it in place.
+    #   @analyzing_macros is the same shape of hazard (a compile-time
+    #   macro scope some captured-but-unevaluated form could still
+    #   reference) and is a comparably tiny allocation, so it gets the
+    #   same treatment.
+    #
+    # Deliberately does NOT touch @vm_pool: every VM #apply hands out from
+    # it is already reset before being returned (see VM#reset_for_reuse),
+    # so the pool itself is safe to leave warm across reuse — keeping it
+    # warm is the entire reason to pool child Interpreters at all rather
+    # than just reallocating them per request (see #interp_pool).
+    def reset_for_reuse(parent : Interpreter) : Nil
+      @global = Env.new(parent.global)
+      @libraries.clear
+      @libraries.merge!(parent.libraries)
+      @libraries_loading.clear
+      @load_dirs.clear
+      @load_dirs.concat(parent.load_dirs)
+      @eval_depth = 0
+      @step_count = 0
+      @gensym_counter = 0
+      @cc_tag_counter = 0_i64
+      @live_continuation_tags.clear
+      @call_stack.clear
+      @current_pos = nil.as(SourcePos?)
+      @sample_interval = parent.sample_interval
+      @sample_countdown = (interval = @sample_interval) ? jittered_sample_countdown(interval) : 0
+      @sample_sink = parent.sample_sink
+      @exception_handlers.clear
+      @analyzing_macros = MacroEnv.new
+      @macro_expand_depth = 0
+    end
+
+    # Pool of reusable CHILD Interpreters (mirrors #vm_pool one level up).
+    # Reusing the whole child Interpreter instance, not just rebuilding its
+    # per-request state, means its own @vm_pool survives across
+    # acquisitions instead of being rebuilt from scratch (4 VMs x 256-slot
+    # register arrays) on every single request — which is exactly what a
+    # fresh `Interpreter.new(inherit_from: self)` per request was paying
+    # for, with zero cross-request benefit (see (creme mux)'s
+    # request_interpreter, mux.cr). Built on first use (INTERP_POOL_MIN
+    # warm, grows under load, declines slowly when idle — see ObjectPool).
+    # Call #acquire_child_interpreter/#release_child_interpreter, not this
+    # directly — those two hold @interp_pool_mutex for the whole
+    # acquire/release, this accessor does not (see @interp_pool_mutex's own
+    # doc comment for why the lock is needed at all).
+    private def interp_pool : ObjectPool(Interpreter)
+      @interp_pool ||= ObjectPool(Interpreter).new(INTERP_POOL_MIN,
+        ->(child : Interpreter) { child.reset_for_reuse(self) }) { Interpreter.new(inherit_from: self) }
+    end
+
+    def acquire_child_interpreter : Interpreter
+      @interp_pool_mutex.synchronize { interp_pool.acquire }
+    end
+
+    def release_child_interpreter(child : Interpreter) : Nil
+      @interp_pool_mutex.synchronize { interp_pool.release(child) }
     end
 
     # @base_env conveniences that aren't (scheme base) exports but have always

@@ -1,0 +1,9 @@
+<li class="<%= it.done ? "done" : "pending" %>">
+  <form method="post" action="/todos/<%= it.id %>/complete" class="toggle">
+    <button type="submit"><%= it.done ? "Undo" : "Done" %></button>
+  </form>
+  <span class="title"><%= it.title %></span>
+  <form method="post" action="/todos/<%= it.id %>/delete" class="delete">
+    <button type="submit">Delete</button>
+  </form>
+</li>
