@@ -115,16 +115,8 @@
 
 (define-library (creme css)
   (export css-fold-rules css-pieces->body css-render css->string css! css-write! write-decl)
-  (import (scheme base) (scheme write) (creme string))
+  (import (scheme base) (scheme write) (creme string) (only (creme extra) filter))
   (begin
-    ;; Local, private SRFI-1-style filter, to keep this module's imports
-    ;; minimal (same rationale as modules/creme/table.sld's own private
-    ;; filter/take/drop).
-    (define (filter pred lst)
-      (cond ((null? lst) '())
-            ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
-            (else (filter pred (cdr lst)))))
-
     (define (decl-name->string name)
       (if (symbol? name) (symbol->string name) name))
 

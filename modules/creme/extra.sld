@@ -43,7 +43,7 @@
   (export
     any append-map cons* count delete delete!
     every exact->inexact filter filter-map float? foldl foldr
-    inexact->exact iota last-pair partition print println
+    inexact->exact iota last-pair map-indexed partition print println
     reduce times)
   (import (scheme base) (scheme write))
   (begin
@@ -142,6 +142,16 @@
 
     (define (last-pair lst)
       (if (pair? (cdr lst)) (last-pair (cdr lst)) lst))
+
+    ;; (map-indexed f list) — f applied to each element AND its 0-based
+    ;; index; e.g. used to unroll a fixed-size, compile-time-known-length
+    ;; structure (one vector-ref/vector-set! pair per element, literal
+    ;; index baked in) instead of needing a run-time loop.
+    (define (map-indexed f lst)
+      (let loop ((lst lst) (i 0) (acc '()))
+        (if (null? lst)
+            (reverse acc)
+            (loop (cdr lst) (+ i 1) (cons (f (car lst) i) acc)))))
 
     (define exact->inexact inexact)
     (define inexact->exact exact)

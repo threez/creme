@@ -107,9 +107,8 @@
 ;;                                              value); builds a (key .
 ;;                                              value) alist in iteration
 ;;                                              order — this project's own
-;;                                              convention for
-;;                                              object-shaped data (see
-;;                                              CLAUDE.md), rather than a
+;;                                              convention for object-shaped
+;;                                              data, rather than a
 ;;                                              real (creme hash-table)
 ;;                                              object (which would need
 ;;                                              importing that separate

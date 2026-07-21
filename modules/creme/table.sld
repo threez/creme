@@ -65,7 +65,7 @@
 (define-library (creme table)
   (export bordered-style borderless-style make-bordered-style
           make-borderless-style table-style table->string)
-  (import (scheme base) (scheme write) (scheme cxr) (creme string))
+  (import (scheme base) (scheme write) (scheme cxr) (creme string) (only (creme extra) filter))
   (begin
     ;; (0 1 ... n-1), for indexed list-ref access — kept local rather than
     ;; pulling in (creme extra)'s iota, to keep this module's imports minimal.
@@ -85,13 +85,9 @@
 
     (define (non-empty? s) (> (string-length s) 0))
 
-    ;; SRFI-1-style helpers, not exported by (scheme base) — kept local
-    ;; rather than pulling in (creme extra) for these few uses.
-    (define (filter pred lst)
-      (cond ((null? lst) '())
-            ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
-            (else (filter pred (cdr lst)))))
-
+    ;; take/drop aren't (creme extra) exports (SRFI-1 has them under
+    ;; slightly different names) — kept local for these few uses; filter
+    ;; itself is (creme extra)'s own (see this file's import list).
     (define (take lst n)
       (if (or (<= n 0) (null? lst)) '() (cons (car lst) (take (cdr lst) (- n 1)))))
 
