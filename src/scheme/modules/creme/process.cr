@@ -66,7 +66,7 @@ module Scheme::Builtins::ProcessExtra
   #
   # @@handles is a plain class variable, not an Interpreter ivar, despite
   # this codebase's usual rule that shared *mutable* builtin state must
-  # live on Interpreter (see CLAUDE.md, and (creme random)'s random_rng)
+  # live on Interpreter (see (creme random)'s random_rng)
   # to avoid leaking across sandboxed Interpreter instances. That rule
   # protects *simulated* per-interpreter state (a seeded RNG stream, where
   # two sandboxes must diverge). A spawned OS child is not simulated

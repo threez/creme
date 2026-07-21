@@ -255,6 +255,103 @@ describe "primitive call specialization" do
     end
   end
 
+  # A vector-ref/vector-set!/string-ref/string-set!/bytevector-u8-ref/
+  # bytevector-u8-set! call whose INDEX argument is a small integer
+  # literal (fitting Instruction's Int32 operand fields) compiles to a
+  # *RefImm/*SetImm op instead of staging it through its own register +
+  # LoadK first — see the dedicated index-immediate branch in
+  # bytecode_compiler.cr's compile_prim_call (reuses imm_operand? from the
+  # arithmetic Imm family, but applies to the INDEX argument rather than
+  # the whole 2nd operand, and covers the *Set ops' 3-arg shape too, not
+  # just 2-arg calls) and imm_index_ref_op_for/imm_index_set_op_for
+  # (mirroring up_op_for_1st's uniform vector/string/bytevector treatment).
+  describe "vector/string/bytevector index immediate operand (*RefImm/*SetImm ops)" do
+    it "computes correctly for vector-ref/vector-set! with a literal index" do
+      w("(vector-ref (vector 10 20 30) 1)").should eq("20")
+      w("(let ((v (vector 1 2 3))) (vector-set! v 1 99) v)").should eq("#(1 99 3)")
+    end
+
+    it "computes correctly with a local vector operand" do
+      w("(let ((v (vector 10 20 30))) (vector-ref v 2))").should eq("30")
+      w("(let ((v (vector 1 2 3))) (vector-set! v 0 9) v)").should eq("#(9 2 3)")
+    end
+
+    it "computes correctly with a global vector operand" do
+      w("(define v (vector 10 20 30)) (vector-ref v 0)").should eq("10")
+    end
+
+    it "still evaluates a non-literal index correctly (general path, not fused)" do
+      w("(vector-ref (vector 1 2 3) (+ 1 0))").should eq("2")
+    end
+
+    it "still snapshots the object before a later argument's side effect mutates it (vector-set!)" do
+      w(<<-SCM).should eq("#(99 99 99)")
+        (let ((v (vector 10 20 30)))
+          (vector-set! v 0 (begin (set! v (vector 99 99 99)) 5))
+          v)
+        SCM
+    end
+
+    it "raises on an out-of-range literal index" do
+      expect_raises(Scheme::SchemeRuntimeError, /index 5 out of range/) do
+        run("(vector-ref (vector 1 2 3) 5)")
+      end
+    end
+
+    it "still deopts to a runtime redefinition (VecRefImm/VecSetImm-shaped call site)" do
+      w("(define (vector-ref v i) 'shadowed) (vector-ref (vector 1 2) 0)").should eq("shadowed")
+      w("(define (vector-set! v i x) 'shadowed) (vector-set! (vector 1 2) 0 9)").should eq("shadowed")
+    end
+
+    it "computes correctly for string-ref/string-set! with a literal index" do
+      w("(string-ref \"abc\" 1)").should eq("#\\b")
+      w("(let ((s (make-string 3 #\\a))) (string-set! s 1 #\\z) s)").should eq("\"aza\"")
+    end
+
+    it "still snapshots the string before a later argument's side effect mutates it (string-set!)" do
+      w(<<-SCM).should eq("\"zzz\"")
+        (let ((s (make-string 3 #\\a)))
+          (string-set! s 0 (begin (set! s (make-string 3 #\\z)) #\\q))
+          s)
+        SCM
+    end
+
+    it "raises on an out-of-range literal index (string-ref)" do
+      expect_raises(Scheme::SchemeRuntimeError, /index out of range/) do
+        run("(string-ref \"abc\" 5)")
+      end
+    end
+
+    it "still deopts to a runtime redefinition (string Imm-shaped call site)" do
+      w("(define (string-ref s i) 'shadowed) (string-ref \"ab\" 0)").should eq("shadowed")
+      w("(define (string-set! s i c) 'shadowed) (string-set! (make-string 2) 0 #\\a)").should eq("shadowed")
+    end
+
+    it "computes correctly for bytevector-u8-ref/bytevector-u8-set! with a literal index" do
+      w("(bytevector-u8-ref (bytevector 1 2 3) 1)").should eq("2")
+      w("(let ((b (make-bytevector 3 0))) (bytevector-u8-set! b 1 42) b)").should eq("#u8(0 42 0)")
+    end
+
+    it "still snapshots the bytevector before a later argument's side effect mutates it (bytevector-u8-set!)" do
+      w(<<-SCM).should eq("#u8(9 9 9)")
+        (let ((b (make-bytevector 3 0)))
+          (bytevector-u8-set! b 0 (begin (set! b (make-bytevector 3 9)) 1))
+          b)
+        SCM
+    end
+
+    it "raises on an out-of-range literal index (bytevector-u8-ref)" do
+      expect_raises(Scheme::SchemeRuntimeError, /index out of range/) do
+        run("(bytevector-u8-ref (bytevector 1 2 3) 5)")
+      end
+    end
+
+    it "still deopts to a runtime redefinition (bytevector Imm-shaped call site)" do
+      w("(define (bytevector-u8-ref b i) 'shadowed) (bytevector-u8-ref (make-bytevector 2) 0)").should eq("shadowed")
+      w("(define (bytevector-u8-set! b i x) 'shadowed) (bytevector-u8-set! (make-bytevector 2) 0 1)").should eq("shadowed")
+    end
+  end
+
   # (if/when test ...) compiles a fused TestLt-family instruction instead
   # of a comparison op followed by a separate TestFalse, when the test
   # expression IS exactly a bare 2-arg comparison call — see

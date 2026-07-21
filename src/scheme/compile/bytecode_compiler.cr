@@ -1429,6 +1429,28 @@ module Scheme
       end
     end
 
+    # The *RefImm/*SetImm counterpart of a vector/string/bytevector
+    # index-taking Ref/Set op — see opcode.cr's VecRefImm/StrRefImm/
+    # BvRefImm/VecSetImm/StrSetImm/BvSetImm doc. nil for anything else
+    # (VecLen has no index argument to fuse a literal into at all).
+    private def imm_index_ref_op_for(op : Op) : Op?
+      case op
+      when Op::VecRef then Op::VecRefImm
+      when Op::StrRef then Op::StrRefImm
+      when Op::BvRef  then Op::BvRefImm
+      else                 nil
+      end
+    end
+
+    private def imm_index_set_op_for(op : Op) : Op?
+      case op
+      when Op::VecSet then Op::VecSetImm
+      when Op::StrSet then Op::StrSetImm
+      when Op::BvSet  then Op::BvSetImm
+      else                 nil
+      end
+    end
+
     # The Return-fused counterpart of a base 2-arg arithmetic/comparison Op
     # — see opcode.cr's AddReturn doc. nil for anything else (the Imm/Up/
     # vector-family shapes emit a plain trailing Return in tail position;
@@ -1532,6 +1554,68 @@ module Scheme
         prim_src = node.src.write_string
         ip = fc.emit(up_op2, dst, first_reg, up_idx2)
         fc.chunk.tag_sample(ip, node.name, prim_src)
+        return false
+      end
+      # (vector-ref v N)/(string-ref s N)/(bytevector-u8-ref b N)-shaped
+      # calls: a Ref/Set op whose INDEX argument is a compile-time
+      # integer literal skips staging it through its own register +
+      # LoadK, baking it directly into the *RefImm/*SetImm instruction's
+      # own operand instead — the Ref/Set-family counterpart of the
+      # AddImm-family fusion above, since these ops' index operand isn't
+      # covered by imm_op_for's arithmetic/comparison table. Also skips
+      # the runtime vector_index_arg/int_arg bounds-checked coercion the
+      # base ops still pay (see opcode.cr's *RefImm/*SetImm doc — the
+      # index is already a verified Int32 at compile time). Applies just
+      # as much to ordinary hand-written Scheme doing fixed-position
+      # access as to generated code — a query-compiling #lang dialect
+      # like (creme sql-compile), whose every field access resolves to a
+      # literal vector index, is simply the single heaviest USER of this,
+      # not a special case of it.
+      if node.args.size == 2 && (imm_ref_op = imm_index_ref_op_for(op)) && (imm = imm_operand?(node.args[1]))
+        mark = fc.next_reg
+        # Safe to alias the object's own register directly (no snapshot
+        # copy needed): with the index argument now a pure literal, there
+        # is no later sibling left at all whose side effect could
+        # invalidate an elided-Move read — same reasoning as the
+        # arithmetic Imm case above, whose 2nd argument is likewise
+        # dropped from the evaluation sequence entirely.
+        obj_reg = local_register_of?(fc, node.args[0]) || begin
+          r = fc.alloc_reg
+          compile_expr(fc, node.args[0], r, false)
+          r
+        end
+        fc.reclaim_to(mark)
+        prim_src = node.src.write_string
+        ip = fc.emit(imm_ref_op, dst, obj_reg, imm)
+        fc.chunk.tag_sample(ip, node.name, prim_src)
+        return false
+      end
+      if node.args.size == 3 && (imm_set_op = imm_index_set_op_for(op)) && (imm = imm_operand?(node.args[1]))
+        mark = fc.next_reg
+        # Unlike the *RefImm case above, there IS a later argument here
+        # (the value, node.args[2]) that could still mutate whatever
+        # local variable the object lives in — so the object only
+        # qualifies for a direct register-reuse read when that value
+        # argument is a leaf (same all_leaves-style reasoning as the
+        # general path below); otherwise it must be snapshotted into a
+        # fresh register BEFORE the value argument's own (potentially
+        # side-effecting) code runs.
+        reusable_obj_reg = leaf_node?(node.args[2]) ? local_register_of?(fc, node.args[0]) : nil
+        obj_reg = reusable_obj_reg || begin
+          r = fc.alloc_reg
+          compile_expr(fc, node.args[0], r, false)
+          r
+        end
+        value_reg = local_register_of?(fc, node.args[2]) || begin
+          r = fc.alloc_reg
+          compile_expr(fc, node.args[2], r, false)
+          r
+        end
+        fc.reclaim_to(mark)
+        prim_src = node.src.write_string
+        ip = fc.emit(imm_set_op, obj_reg, imm, value_reg)
+        fc.chunk.tag_sample(ip, node.name, prim_src)
+        fc.emit(Op::Move, dst, obj_reg) unless dst == obj_reg
         return false
       end
       # (vector-ref v i)-shaped calls: a vector/string/bytevector op whose

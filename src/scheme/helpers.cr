@@ -209,4 +209,63 @@ module Scheme
       b.is_a?(Reference) && a.same?(b)
     end
   end
+
+  # A structural hash consistent with scheme_equal? — any two values with
+  # scheme_equal?(a, b) == true MUST produce the same scheme_hash (the
+  # converse need not hold: unequal values may collide, that's an
+  # ordinary hash bucket collision, not a correctness bug). Backs
+  # SchemeHashTable's real O(1)-average bucket lookup (see
+  # modules/creme/hash_table.cr) rather than the plain-Array linear scan
+  # it used to be — a GROUP BY/JOIN-style workload doing one lookup per
+  # row of a large CSV made that O(n) cost dominate in practice (profiled:
+  # SchemeHashTable#unsafe_index_of/scheme_equal? alone ate real wall time
+  # scanning a multi-million-row file, on top of the GC pressure that
+  # linear rescanning caused).
+  #
+  # Cons/SchemeVector/treelists recurse into their elements, guarded
+  # against a genuine cycle the same way scheme_equal? is (a `seen` set of
+  # already-visited object ids) — re-entering one just contributes a fixed
+  # value rather than looping forever. Every reference-identity-fallback
+  # type in scheme_equal?'s own `else` branch (ports, closures, records,
+  # hash tables, boxes, ...) hashes by object_id here too, consistent with
+  # being compared by identity rather than structure.
+  # ameba:disable Metrics/CyclomaticComplexity
+  def self.scheme_hash(v : SchemeValue, seen : Set(UInt64)? = nil) : UInt64
+    case v
+    when SchemeInt      then v.value.hash
+    when SchemeFloat    then v.value.hash
+    when SchemeRational then {v.numerator, v.denominator}.hash
+    when SchemeStr      then v.value.hash
+    when SchemeChar     then v.value.hash
+    when SchemeBool     then v.value?.hash
+    when SchemeSym      then v.name.hash
+    when SchemeNil      then 0_u64
+    when Cons
+      id = v.object_id
+      seen ||= Set(UInt64).new
+      return 0_u64 unless seen.add?(id)
+      combine_hash(scheme_hash(v.car, seen), scheme_hash(v.cdr, seen))
+    when SchemeVector
+      id = v.object_id
+      seen ||= Set(UInt64).new
+      return 0_u64 unless seen.add?(id)
+      hash_sequence(v.value, seen)
+    when SchemeBlob
+      v.value.hash
+    when SchemeTreelist
+      hash_sequence(v.tree.to_a, seen)
+    when SchemeMutableTreelist
+      hash_sequence(v.tree.to_a, seen)
+    else
+      v.object_id.hash
+    end
+  end
+
+  private def self.combine_hash(a : UInt64, b : UInt64) : UInt64
+    a &* 31_u64 &+ b
+  end
+
+  private def self.hash_sequence(vs : Array(SchemeValue), seen : Set(UInt64)?) : UInt64
+    vs.reduce(0_u64) { |acc, e| combine_hash(acc, scheme_hash(e, seen)) }
+  end
 end

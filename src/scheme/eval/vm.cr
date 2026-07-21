@@ -415,6 +415,7 @@ module Scheme
                Op::AddUp, Op::SubUp, Op::MulUp, Op::NumLtUp, Op::NumLeUp, Op::NumGtUp, Op::NumGeUp, Op::NumEqUp,
                Op::VecRef, Op::VecLen, Op::StrRef, Op::BvRef, Op::VecSet, Op::StrSet, Op::BvSet,
                Op::VecRefUp, Op::VecSetUp, Op::VecLenUp, Op::StrRefUp, Op::StrSetUp, Op::BvRefUp, Op::BvSetUp,
+               Op::VecRefImm, Op::VecSetImm, Op::StrRefImm, Op::StrSetImm, Op::BvRefImm, Op::BvSetImm,
                Op::Cons, Op::Not, Op::IsNull, Op::IsPair,
                Op::IsEq, Op::IsEqImm, Op::IsEqUp
             exec_prim(frame, base, instr)
@@ -546,7 +547,7 @@ module Scheme
             end
             frame.ip += instr.b unless truthy
           when Op::Closure
-            @stack.unsafe_put(base + instr.a, make_closure(frame, frame.chunk.protos.unsafe_fetch(instr.b)))
+            @stack.unsafe_put(base + instr.a, make_closure(frame, frame.chunk.protos.unsafe_fetch(instr.b), instr.b))
           when Op::MakeCaseClosure
             clauses = Array(BytecodeClosure).new(instr.c) { |i| @stack.unsafe_fetch(base + instr.b + i).as(BytecodeClosure) }
             @stack.unsafe_put(base + instr.a, BytecodeCaseClosure.new(clauses, frame.root_env))
@@ -1061,6 +1062,16 @@ module Scheme
         i = @interp.vector_index_arg(regs[base + instr.b], "vector-set!")
         raise SchemeRuntimeError.new("vector-set!: index #{i} out of range") if i < 0 || i >= arr.size
         arr[i] = regs[base + instr.c]
+      when Op::VecRefImm
+        arr = @interp.vector_arg(regs[base + instr.b], "vector-ref")
+        i = instr.c
+        raise SchemeRuntimeError.new("vector-ref: index #{i} out of range") if i < 0 || i >= arr.size
+        regs[base + instr.a] = arr[i]
+      when Op::VecSetImm
+        arr = @interp.vector_arg(regs[base + instr.a], "vector-set!")
+        i = instr.b
+        raise SchemeRuntimeError.new("vector-set!: index #{i} out of range") if i < 0 || i >= arr.size
+        arr[i] = regs[base + instr.c]
       when Op::StrRef
         sv = regs[base + instr.b]
         raise SchemeRuntimeError.new("string-ref: expected string, got #{sv.write_string}") unless sv.is_a?(SchemeStr)
@@ -1085,6 +1096,33 @@ module Scheme
       when Op::BvSet
         bytes = @interp.blob_arg(regs[base + instr.a], "bytevector-u8-set!")
         idx = @interp.int_arg(regs[base + instr.b], "bytevector-u8-set!")
+        b = @interp.byte_arg(regs[base + instr.c], "bytevector-u8-set!")
+        raise SchemeRuntimeError.new("bytevector-u8-set!: index out of range") if idx < 0 || idx >= bytes.size
+        bytes[idx] = b
+      when Op::StrRefImm
+        sv = regs[base + instr.b]
+        raise SchemeRuntimeError.new("string-ref: expected string, got #{sv.write_string}") unless sv.is_a?(SchemeStr)
+        idx = instr.c
+        raise SchemeRuntimeError.new("string-ref: index out of range") if idx < 0 || idx >= sv.value.size
+        regs[base + instr.a] = SchemeChar.new(sv.value[idx])
+      when Op::StrSetImm
+        sv = regs[base + instr.a]
+        raise SchemeRuntimeError.new("string-set!: expected string, got #{sv.write_string}") unless sv.is_a?(SchemeStr)
+        idx = instr.b
+        chv = regs[base + instr.c]
+        raise SchemeRuntimeError.new("string-set!: expected char, got #{chv.write_string}") unless chv.is_a?(SchemeChar)
+        chars = sv.value.chars
+        raise SchemeRuntimeError.new("string-set!: index out of range") if idx < 0 || idx >= chars.size
+        chars[idx] = chv.value
+        sv.value = chars.join
+      when Op::BvRefImm
+        bytes = @interp.blob_arg(regs[base + instr.b], "bytevector-u8-ref")
+        idx = instr.c
+        raise SchemeRuntimeError.new("bytevector-u8-ref: index out of range") if idx < 0 || idx >= bytes.size
+        regs[base + instr.a] = SchemeInt.new(bytes[idx].to_i64)
+      when Op::BvSetImm
+        bytes = @interp.blob_arg(regs[base + instr.a], "bytevector-u8-set!")
+        idx = instr.b
         b = @interp.byte_arg(regs[base + instr.c], "bytevector-u8-set!")
         raise SchemeRuntimeError.new("bytevector-u8-set!: index out of range") if idx < 0 || idx >= bytes.size
         bytes[idx] = b
@@ -1243,7 +1281,25 @@ module Scheme
       end
     end
 
-    private def make_closure(frame : CallFrame, proto : Chunk) : BytecodeClosure
+    # `proto_idx` is `proto`'s own slot within `frame.chunk.protos` — used
+    # only to key the zero-upvalue memoization below (see
+    # BytecodeClosure#cached_zero_upvalue_closure's own doc comment for why
+    # caching there, keyed by this, is sound). A lambda literal with zero
+    # captured upvalues is re-evaluated with an identical result every
+    # time (no free variables to vary), so — as long as the CURRENTLY
+    # RUNNING closure itself (`frame.closure`) doesn't change, which holds
+    # across every iteration of a tail-recursive loop reusing the same
+    # frame — the very first instance created is safe to keep reusing
+    # instead of allocating a fresh, immediately-identical one on every
+    # single execution (the actual cost this avoids: hot loops evaluating
+    # a lambda literal, e.g. as a default-value thunk, once per iteration).
+    # Skipped for a top-level (non-closure) frame — `frame.closure` is nil
+    # there and there's no owning instance to cache the memo on; those
+    # aren't normally hot loops anyway.
+    private def make_closure(frame : CallFrame, proto : Chunk, proto_idx : Int32) : BytecodeClosure
+      if proto.upvalues.empty? && (owner = frame.closure)
+        return owner.cached_zero_upvalue_closure(proto_idx) { BytecodeClosure.new(proto, [] of Upvalue, frame.root_env) }
+      end
       upvalues = proto.upvalues.map do |desc|
         if desc.from_parent_local
           upvalue = Upvalue.new(@stack, frame.base + desc.index)

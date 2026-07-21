@@ -114,6 +114,35 @@ module Scheme
     # (unlike Imm, this isn't restricted to integers), so this always
     # calls Scheme.scheme_eqv?(x, y) in full, same as the base IsEq op.
     IsEqUp
+    # a=dst, b=vector/string/bytevector register, c=raw Int32 immediate
+    # index — the *Ref-family counterpart of the AddImm family, fusing a
+    # compile-time-literal index directly into the instruction instead of
+    # staging it through its own register + LoadK first (e.g. `(vector-ref
+    # row 3)`, `(string-ref s 0)`, `(bytevector-u8-ref b 1)` — ordinary
+    # hand-written Scheme code doing fixed-position access is just as
+    # eligible as generated code; the single most common shape a query-
+    # compiling #lang dialect like (creme sql-compile) generates is one
+    # instance of this, not a special case of it). Since the index is
+    # already a verified Int32 at compile time (see
+    # BytecodeCompiler#imm_operand?), execution skips vector_index_arg/
+    # int_arg's runtime type-check entirely, not just the LoadK. One enum
+    # value per object kind, same as the base Vec/Str/Bv split above,
+    # rather than a single polymorphic op, so the VM's exec_prim dispatch
+    # stays a flat case (no extra runtime "which kind of object" branch).
+    VecRefImm
+    StrRefImm
+    BvRefImm
+    # a=vector/string/bytevector register, b=raw Int32 immediate index,
+    # c=value register — the *Set-family counterpart, same rationale as
+    # the *RefImm trio above. Same operand shape as the base Vec/Str/BvSet
+    # ops (object already in `a`), so the compiler handles "returns the
+    # mutated object" the exact same way it does for those: a trailing
+    # Move from `a` to dst, no separate `d` operand needed here (unlike
+    # the *SetUp family, whose object comes from an upvalue instead of an
+    # already-populated register).
+    VecSetImm
+    StrSetImm
+    BvSetImm
     # a=dst, b=upvalue index of the vector, c=index register — the closed-
     # over-vector-as-object specialization of VecRef, same rationale as
     # AddUp above (e.g. `(vector-ref v i)` where `v` is captured by a

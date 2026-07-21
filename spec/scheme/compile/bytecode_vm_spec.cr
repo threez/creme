@@ -79,6 +79,55 @@ describe "BytecodeCompiler + VM" do
         "(define adders (make-adders 3))" \
         "(map (lambda (f) (f 100)) adders)").should eq("(102 101 100)")
     end
+
+    # A lambda literal with ZERO captured upvalues (no free variables at
+    # all) is re-evaluated to an identical result every time — R7RS never
+    # distinguishes separate evaluations of such a literal (eq?-identity
+    # across them is unspecified either way), so VM#make_closure memoizes
+    # one instance per (owning closure instance, proto slot) instead of
+    # allocating a fresh, immediately-identical object on every evaluation
+    # — the actual win being hot loops that evaluate a lambda literal once
+    # per iteration (e.g. a default-value thunk argument).
+    it "memoizes a zero-upvalue lambda literal evaluated repeatedly inside a tail-recursive loop" do
+      w("(define (make-thunks n)" \
+        "  (let loop ((i 0) (acc '()))" \
+        "    (if (= i n) acc (loop (+ i 1) (cons (lambda () 42) acc)))))" \
+        "(define thunks (make-thunks 5))" \
+        "(list (map (lambda (t) (eq? t (car thunks))) thunks) (map (lambda (t) (t)) thunks))")
+        .should eq("((#t #t #t #t #t) (42 42 42 42 42))")
+    end
+
+    # A top-level `define`d function is itself a single, stable closure
+    # instance invoked repeatedly (not re-created per call), so a
+    # zero-upvalue lambda nested directly inside one is legitimately the
+    # SAME cached instance across separate top-level calls to it — this
+    # spec instead forces two GENUINELY separate instances of the
+    # enclosing (middle) closure (by giving it a real, non-zero upvalue,
+    # so IT can't be memoized and gets freshly allocated per make-middle
+    # call) to confirm each such instance gets its own independent memo,
+    # not one shared globally by the nested lambda's Chunk/proto alone.
+    it "gives each separate instance of the enclosing closure its own independent memo" do
+      w("(define (make-middle tag)" \
+        "  (lambda ()" \
+        "    (if (< tag 0) 'unreachable #f)" \
+        "    (lambda () 'x)))" \
+        "(define middle1 (make-middle 1))" \
+        "(define middle2 (make-middle 2))" \
+        "(list (eq? (middle1) (middle1)) (eq? (middle1) (middle2)))")
+        .should eq("(#t #f)")
+    end
+
+    it "still captures the current value correctly for a lambda literal with real (non-zero) upvalues, unaffected by memoization" do
+      w("(define (make-adders n)" \
+        "  (let loop ((i 0) (acc '()))" \
+        "    (if (= i n) acc (loop (+ i 1) (cons (lambda () i) acc)))))" \
+        "(map (lambda (f) (f)) (make-adders 3))").should eq("(2 1 0)")
+    end
+
+    it "memoizes a zero-upvalue clause inside case-lambda the same way" do
+      w("(define f (case-lambda (() 'none) ((x) (lambda () 'inner))))" \
+        "(eq? (f 1) (f 2))").should eq("#t")
+    end
   end
 
   describe "vectors, strings, bytevectors (fused prim ops)" do

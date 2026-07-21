@@ -113,10 +113,17 @@ end
 # (import (scheme base)) of its own yet. `strict: true` opts back into plain
 # R7RS behavior (no auto-import) for scripts that manage their own imports
 # and want to see exactly what they compile to before any import runs.
+#
+# Uses Scheme.forms_for (not a bare Reader.read_all) so a `#lang` file (e.g.
+# a `#lang (creme syntax sql)` query) is disassembled the same way running it
+# actually would be — via its own dialect's read_program, whatever generated
+# code that produces — rather than failing outright on `#lang` as unknown `#`
+# syntax. A plain (non-`#lang`) script is unaffected either way, since
+# forms_for falls through to the ordinary Reader for it.
 def dump_bytecode(path : String, strict : Bool = false) : Nil
   interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: !strict)
   src = File.read(path)
-  forms = Scheme::Reader.read_all(src, path)
+  forms = Scheme.forms_for(interp, src, path)
   forms.each_with_index do |form, i|
     node = interp.analyze(form, interp.global)
     chunk = Scheme::BytecodeCompiler.compile_program([node])

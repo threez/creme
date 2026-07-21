@@ -2,19 +2,29 @@
 # hash-table module: a simple equal?-keyed hash table.
 #
 # Not R7RS-small (no hash tables are mandated there), but a common practical
-# need. Backed by an Array of {key, value} pairs with linear scan via
-# Scheme.scheme_equal? for lookup, rather than a Crystal-native Hash (which
-# keys by Crystal's own ==/hash, not Scheme equal? semantics — a Cons or
-# SchemeVector key wouldn't hash/compare the way Scheme code expects).
-# Correctness over performance for a first implementation; fine for the
-# table sizes typical scripts create.
+# need. Backed by a real Crystal Hash from Scheme.scheme_hash(key) to a
+# same-hash-bucket Array of {key, value} pairs, rather than one plain Array
+# scanned linearly on every lookup — the bucket collapses the scan down to
+# only the (typically 0-or-1-entry) set of keys that actually hash the same,
+# instead of every entry the table has ever held. A Crystal-native Hash
+# can't be used directly (it keys by Crystal's own ==/hash, not Scheme
+# equal? semantics — a Cons or SchemeVector key wouldn't hash/compare the
+# way Scheme code expects), hence the bucket-of-Scheme.scheme_equal?
+# indirection: scheme_hash narrows to a small candidate set in O(1),
+# scheme_equal? breaks ties within it. (Earlier this was a single Array
+# scanned end to end on every get?/set!/delete — correct, but O(n) per
+# lookup; a GROUP BY/JOIN-style workload hashing every row of a large CSV
+# made that dominate real wall time, profiled via `creme --profile table`.)
 # ===========================================================================
 
 module Scheme
   class SchemeHashTable
     include SchemeBaseValue
 
-    def initialize(@entries : Array({SchemeValue, SchemeValue}) = [] of {SchemeValue, SchemeValue})
+    def initialize(entries : Array({SchemeValue, SchemeValue}) = [] of {SchemeValue, SchemeValue})
+      @buckets = Hash(UInt64, Array({SchemeValue, SchemeValue})).new
+      @size = 0
+      entries.each { |(k, v)| set(k, v) }
     end
 
     # Every entry-point below takes @mutex, so a table shared as a cache
@@ -22,56 +32,70 @@ module Scheme
     # cache, shared by every concurrently-handled request in an HTTP app)
     # is safe under real OS-thread parallelism (-Dpreview_mt with
     # CRYSTAL_WORKERS > 1) —
-    # Array#<</#[]=/#delete_at can all reallocate the shared backing store,
-    # and two threads doing that at once corrupts it (this reproduced in
-    # practice as a GC "duplicate large block deallocation" abort under
-    # load). A no-op cost under the single-OS-thread cooperative-fiber case
-    # this interpreter otherwise assumes, where mutations never truly
-    # overlap. `hash_table_default`'s thunk call (which may re-enter this
-    # same table) must run outside the lock — Crystal's Mutex isn't
-    # reentrant — so `get?` never calls user code while held.
+    # Hash#[]=/Array#<</#delete_at can all reallocate a shared backing
+    # store, and two threads doing that at once corrupts it (this
+    # reproduced in practice as a GC "duplicate large block deallocation"
+    # abort under load). A no-op cost under the single-OS-thread
+    # cooperative-fiber case this interpreter otherwise assumes, where
+    # mutations never truly overlap. `hash_table_default`'s thunk call
+    # (which may re-enter this same table) must run outside the lock —
+    # Crystal's Mutex isn't reentrant — so `get?` never calls user code
+    # while held.
     @mutex = Mutex.new
 
     def set(key : SchemeValue, value : SchemeValue) : Nil
       @mutex.synchronize do
-        if idx = unsafe_index_of(key)
-          @entries[idx] = {key, value}
+        bucket = @buckets[Scheme.scheme_hash(key)] ||= [] of {SchemeValue, SchemeValue}
+        if idx = unsafe_index_in(bucket, key)
+          bucket[idx] = {key, value}
         else
-          @entries << {key, value}
+          bucket << {key, value}
+          @size += 1
         end
       end
     end
 
     def get?(key : SchemeValue) : SchemeValue?
       @mutex.synchronize do
-        idx = unsafe_index_of(key)
-        idx ? @entries[idx][1] : nil
+        bucket = @buckets[Scheme.scheme_hash(key)]?
+        return nil unless bucket
+        idx = unsafe_index_in(bucket, key)
+        idx ? bucket[idx][1] : nil
       end
     end
 
     def contains?(key : SchemeValue) : Bool
-      @mutex.synchronize { !unsafe_index_of(key).nil? }
+      @mutex.synchronize do
+        bucket = @buckets[Scheme.scheme_hash(key)]?
+        !bucket.nil? && !unsafe_index_in(bucket, key).nil?
+      end
     end
 
     def delete(key : SchemeValue) : Nil
       @mutex.synchronize do
-        idx = unsafe_index_of(key)
-        @entries.delete_at(idx) if idx
+        h = Scheme.scheme_hash(key)
+        bucket = @buckets[h]?
+        next unless bucket
+        idx = unsafe_index_in(bucket, key)
+        next unless idx
+        bucket.delete_at(idx)
+        @size -= 1
+        @buckets.delete(h) if bucket.empty?
       end
     end
 
     # A point-in-time copy, for callers (keys/values/->alist) that need to
     # iterate without holding the table locked for the whole traversal.
     def snapshot : Array({SchemeValue, SchemeValue})
-      @mutex.synchronize { @entries.dup }
+      @mutex.synchronize { @buckets.each_value.flat_map(&.dup).to_a }
     end
 
     def size : Int32
-      @mutex.synchronize { @entries.size }
+      @mutex.synchronize { @size }
     end
 
-    private def unsafe_index_of(key : SchemeValue) : Int32?
-      @entries.each_with_index do |(k, _), i|
+    private def unsafe_index_in(bucket : Array({SchemeValue, SchemeValue}), key : SchemeValue) : Int32?
+      bucket.each_with_index do |(k, _), i|
         return i if Scheme.scheme_equal?(k, key)
       end
       nil

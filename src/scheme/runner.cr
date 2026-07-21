@@ -18,8 +18,9 @@ module Scheme
   # to be named on a #lang line" apart from ordinary `(creme ...)`
   # libraries; nothing here treats that prefix specially, any library
   # name works. Checked wherever `forms_for` is used — currently
-  # run_source/run_file (a whole script run) and `load` (src/scheme/
-  # modules/scheme/load.cr) — not the REPL, `eval`, or `--dump-bytecode`.
+  # run_source/run_file (a whole script run), `load` (src/scheme/
+  # modules/scheme/load.cr), and `--dump-bytecode` (src/main.cr's
+  # dump_bytecode) — not the REPL or `eval`.
   #
   # Contract: the named library must export a procedure `read-program`
   # with signature `(read-program src source-name header-args) ->
@@ -95,10 +96,9 @@ module Scheme
 
   # The forms `src` (from a file named `source_name`, for error positions)
   # parses to — via the `#lang` dialect its first line names, or the
-  # ordinary Reader otherwise. Shared by run_source and `load` (see
-  # src/scheme/modules/scheme/load.cr) — both "run a whole program" and
-  # "load a file's forms into an existing one" recognize `#lang` the same
-  # way; only the REPL, `eval`, and `--dump-bytecode` don't.
+  # ordinary Reader otherwise. Shared by run_source, `load` (see
+  # src/scheme/modules/scheme/load.cr), and `--dump-bytecode` (src/main.cr) —
+  # each recognizes `#lang` the same way; only the REPL and `eval` don't.
   def self.forms_for(interp : Interpreter, src : String, source_name : String) : Array(SchemeValue)
     if header_data = lang_header_data(src)
       read_via_lang_dialect(interp, header_data, src, source_name)

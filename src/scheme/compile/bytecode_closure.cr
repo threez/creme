@@ -65,6 +65,33 @@ module Scheme
     def to_display(io : IO) : Nil
       io << "#<closure:" << @chunk.name << '>'
     end
+
+    # Memoizes closures for lambda literals nested directly in THIS
+    # closure's own body that capture zero upvalues (VM#make_closure's own
+    # caller checks that) — e.g. a `(lambda () 0)` literal re-evaluated on
+    # every iteration of a tail-recursive loop. Since such a literal has no
+    # free variables at all, R7RS never distinguishes separate evaluations
+    # of it (eq?-identity across separate `lambda` evaluations is
+    # unspecified either way), so reusing one instance is behavior-
+    # preserving — and scoping the cache to THIS specific closure instance
+    # (rather than sharing it across every instantiation of the enclosing
+    # function, e.g. keyed only by its Chunk) keeps it correct even when
+    # the enclosing function itself gets re-created under a genuinely
+    # different `root_env` (e.g. the same source `eval`'d against two
+    # different environments): each such re-creation is a distinct
+    # BytecodeClosure instance with its own independent cache, so a nested
+    # zero-upvalue closure's own `root_env` — which still matters for ITS
+    # OWN GetGlobal/DefGlobal/etc., see this class's `root_env` doc comment
+    # above — is never shared across root_envs that could disagree about
+    # what its global references resolve to. `proto_idx` (the nested
+    # closure's slot within OUR OWN chunk.protos) is the cache key since
+    # one closure body can contain more than one such literal.
+    def cached_zero_upvalue_closure(proto_idx : Int32, & : -> BytecodeClosure) : BytecodeClosure
+      cache = @zero_upvalue_cache ||= {} of Int32 => BytecodeClosure
+      cache[proto_idx] ||= yield
+    end
+
+    @zero_upvalue_cache : Hash(Int32, BytecodeClosure)?
   end
 
   # (case-lambda (formals body...) ...) — one BytecodeClosure per clause
