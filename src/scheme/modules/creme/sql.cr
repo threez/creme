@@ -166,6 +166,132 @@ module Scheme::Builtins::SqlLibrary
     raise SchemeRuntimeError.new("sql-scalar: #{ex.message}")
   end
 
+  # (csv-import! conn table csv-path ['columns '(("name" . "TYPE") ...)]
+  #              ['types '(("name" . "TYPE") ...)] ['create-table "SQL"]
+  #              ['separator #\x] ['quote #\x]) -> row count
+  #
+  # Bulk-loads a CSV file straight into a SQLite table via CREATE TABLE IF
+  # NOT EXISTS + one prepared INSERT statement reused for every row, all
+  # inside a single transaction (the standard fast-bulk-insert pattern --
+  # without a transaction, SQLite's default fsync-per-statement behavior
+  # makes inserting even a few hundred thousand rows painfully slow). A
+  # genuinely native-Crystal alternative to loading the same data through
+  # (creme csvquery)'s interpreted engine, for a real apples-to-apples
+  # comparison against SQLite's own (C, compiled, query-planned) engine.
+  #
+  # Without an explicit 'columns alist, column names come from the CSV's
+  # own header row and every column is declared TEXT by default --
+  # SQLite's manifest typing still converts a numeric-looking TEXT
+  # parameter into the column's declared storage class on insert, so
+  # getting the right storage class matters for correct numeric
+  # comparison/aggregation semantics, not just cosmetically. Three ways to
+  # declare it:
+  #  - 'columns '(("name" . "TYPE") ...) -- the full column list, name AND
+  #    type together, and (matching (creme csvquery)'s own "schema"
+  #    clause) implies a HEADERLESS CSV: every row, including the first,
+  #    is data.
+  #  - 'types '(("name" . "TYPE") ...) -- only for use WITHOUT 'columns:
+  #    column names still come from the CSV's own header row (which is
+  #    still consumed/skipped as usual), but any name present in this
+  #    alist gets its declared TYPE instead of the TEXT default; a header
+  #    name not mentioned here still defaults to TEXT. Combining 'types
+  #    with 'columns is redundant (columns already declares a type per
+  #    column directly) and raises a clear error rather than silently
+  #    picking one.
+  #  - 'create-table "SQL" -- a fully custom CREATE TABLE statement (any
+  #    constraints, indexes-via-DDL, non-default column order, etc.), run
+  #    VERBATIM instead of the auto-generated one; its column NAMES must
+  #    match whatever csv-import! resolves them to itself (from the
+  #    header row, or from 'columns), since the INSERT statement is still
+  #    built from that same resolved name list. 'types has no effect on
+  #    the actual table then (there's no generated CREATE TABLE for it to
+  #    influence) and combining the two raises a clear error rather than
+  #    silently ignoring 'types.
+  @[Scheme::SchemeFn("csv-import!", min: 3, max: -1)]
+  def csv_import(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    conn = sql_connection_arg(args[0], "csv-import!")
+    table = sql_str_arg(args[1], "csv-import!")
+    path = sql_str_arg(args[2], "csv-import!")
+    opts = csv_import_options(args[3..-1], "csv-import!")
+    if opts[:columns] && opts[:types]
+      raise SchemeRuntimeError.new("csv-import!: 'types cannot be combined with 'columns (which already declares a type per column directly)")
+    end
+    if opts[:create_table] && opts[:types]
+      raise SchemeRuntimeError.new("csv-import!: 'types cannot be combined with 'create-table (there's no generated CREATE TABLE for it to affect)")
+    end
+
+    io = File.open(path)
+    begin
+      parser = Scheme::Csv::Parser.new(io, opts[:separator], opts[:quote], opts[:chunk_size])
+      columns, types =
+        if cols = opts[:columns]
+          {cols.map(&.first), cols.map(&.last)}
+        else
+          header = parser.next_row
+          raise SchemeRuntimeError.new("csv-import!: empty CSV file") unless header
+          type_overrides = (opts[:types] || [] of {String, String}).to_h
+          {header, header.map { |name| type_overrides[name]? || "TEXT" }}
+        end
+
+      quoted_cols = columns.map { |col| %("#{col}") }
+      create_sql = opts[:create_table] || "CREATE TABLE IF NOT EXISTS \"#{table}\" (#{quoted_cols.zip(types).map { |col, type| "#{col} #{type}" }.join(", ")})"
+      insert_sql = "INSERT INTO \"#{table}\" (#{quoted_cols.join(", ")}) VALUES (#{columns.map { "?" }.join(", ")})"
+      conn.writer.exec(create_sql)
+
+      count = 0
+      conn.writer.transaction do |tx|
+        stmt = tx.connection.build(insert_sql)
+        while row = parser.next_row
+          stmt.exec(args: row.map(&.as(DB::Any)))
+          count += 1
+        end
+      end
+      SchemeInt.new(count.to_i64)
+    ensure
+      io.close
+    end
+  rescue ex : Exception
+    raise SchemeRuntimeError.new("csv-import!: #{ex.message}")
+  end
+
+  private def csv_import_options(rest : Array(SchemeValue), who : String) : {columns: Array({String, String})?, types: Array({String, String})?, create_table: String?, separator: Char, quote: Char, chunk_size: Int32}
+    raise SchemeRuntimeError.new("#{who}: keyword arguments must come in 'keyword value pairs") if rest.size.odd?
+    columns = nil
+    types = nil
+    create_table = nil
+    separator = ','
+    quote = '"'
+    chunk_size = Scheme::Csv::DEFAULT_CHUNK_SIZE
+    rest.each_slice(2) do |pair|
+      key, value = pair[0], pair[1]
+      raise SchemeRuntimeError.new("#{who}: expected a keyword symbol, got #{key.write_string}") unless key.is_a?(SchemeSym)
+      case key.name
+      when "columns"      then columns = csv_import_columns_arg(value, who, "columns")
+      when "types"        then types = csv_import_columns_arg(value, who, "types")
+      when "create-table" then create_table = sql_str_arg(value, who)
+      when "separator"    then separator = csv_import_char_arg(value, who)
+      when "quote"        then quote = csv_import_char_arg(value, who)
+      when "chunk-size"   then chunk_size = int_arg(value, who).to_i32
+      else                     raise SchemeRuntimeError.new("#{who}: unknown keyword '#{key.name} (expected 'columns, 'types, 'create-table, 'separator, 'quote, or 'chunk-size)")
+      end
+    end
+    {columns: columns, types: types, create_table: create_table, separator: separator, quote: quote, chunk_size: chunk_size}
+  end
+
+  private def csv_import_columns_arg(v : SchemeValue, who : String, keyword : String) : Array({String, String})
+    Scheme.list_to_a(v).map do |entry|
+      raise SchemeRuntimeError.new("#{who}: expected an alist of (name . type) pairs for '#{keyword}") unless entry.is_a?(Cons)
+      name, type = entry.car, entry.cdr
+      raise SchemeRuntimeError.new("#{who}: column name/type must be strings") unless name.is_a?(SchemeStr) && type.is_a?(SchemeStr)
+      {name.value, type.value}
+    end
+  end
+
+  private def csv_import_char_arg(v : SchemeValue, who : String) : Char
+    raise SchemeRuntimeError.new("#{who}: expected a character, got #{v.write_string}") unless v.is_a?(SchemeChar)
+    v.value
+  end
+
   @[Scheme::SchemeFn("sql-connection?", min: 1, max: 1)]
   def sql_connection_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     v = args[0]

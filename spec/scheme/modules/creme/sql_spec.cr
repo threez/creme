@@ -147,4 +147,146 @@ describe "sql module" do
       run(%((sql-open ":memory:" "reader" 4)))
     end
   end
+
+  it "csv-import! loads a headered CSV, inferring TEXT columns from the header row" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "name,dept,salary\nAlice,eng,100\nBob,sales,200\n" }.path
+    w(<<-SCHEME).should eq(%(#((("name" . "Alice") ("dept" . "eng") ("salary" . "100")) (("name" . "Bob") ("dept" . "sales") ("salary" . "200")))))
+      (define conn (sql-open ":memory:"))
+      (csv-import! conn "emp" #{path.inspect})
+      (sql-query conn "select * from emp order by name")
+      SCHEME
+
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! reports the imported row count" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "a,b\n1,2\n3,4\n5,6\n" }.path
+    w(%[
+      (let ((conn (sql-open ":memory:")))
+        (csv-import! conn "t" #{path.inspect}))
+    ]).should eq("3")
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! loads a headerless CSV via an explicit 'columns alist with real numeric types" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "eng\t1\nsales\t2\n" }.path
+    w(<<-SCHEME).should eq("3")
+      (define conn (sql-open ":memory:"))
+      (csv-import! conn "t" #{path.inspect}
+                   'columns (list (cons "dept" "TEXT") (cons "n" "INTEGER"))
+                   'separator #\\tab)
+      (sql-scalar conn "select sum(n) from t where dept = 'sales' or dept = 'eng'")
+      SCHEME
+
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! loads a headered CSV, overriding just some column types via 'types while keeping the header-detected names" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,1\nsales,2\neng,3\n" }.path
+    w(<<-SCHEME).should eq("4")
+      (define conn (sql-open ":memory:"))
+      (csv-import! conn "t" #{path.inspect} 'types (list (cons "n" "INTEGER")))
+      (sql-scalar conn "select sum(n) from t where dept = 'eng'")
+      SCHEME
+
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! defaults an unmentioned header column to TEXT even when 'types is given" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,1\n" }.path
+    w(<<-SCHEME).should eq(%[(("dept" . "eng") ("n" . 1))])
+      (define conn (sql-open ":memory:"))
+      (csv-import! conn "t" #{path.inspect} 'types (list (cons "n" "INTEGER")))
+      (vector-ref (sql-query conn "select * from t") 0)
+      SCHEME
+
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! raises when 'types is combined with 'columns" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "eng\t1\n" }.path
+    expect_raises(Scheme::SchemeRuntimeError, /'types cannot be combined with 'columns/) do
+      run(%[
+        (csv-import! (sql-open ":memory:") "t" #{path.inspect}
+                     'columns (list (cons "dept" "TEXT") (cons "n" "INTEGER"))
+                     'types (list (cons "n" "INTEGER"))
+                     'separator #\\tab)
+      ])
+    end
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! uses a fully custom 'create-table statement verbatim, with a header row for column names" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,1\nsales,2\neng,3\n" }.path
+    w(<<-SCHEME).should eq("4")
+      (define conn (sql-open ":memory:"))
+      (csv-import! conn "t" #{path.inspect}
+                   'create-table "CREATE TABLE t (dept TEXT NOT NULL, n INTEGER CHECK (n > 0))")
+      (sql-scalar conn "select sum(n) from t where dept = 'eng'")
+      SCHEME
+
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import!'s custom 'create-table's own constraints are actually enforced (not just accepted verbatim)" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,-1\n" }.path
+    expect_raises(Scheme::SchemeRuntimeError, /CHECK constraint failed/) do
+      run(%[
+        (csv-import! (sql-open ":memory:") "t" #{path.inspect}
+                     'create-table "CREATE TABLE t (dept TEXT NOT NULL, n INTEGER CHECK (n > 0))")
+      ])
+    end
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! raises when 'types is combined with 'create-table" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,1\n" }.path
+    expect_raises(Scheme::SchemeRuntimeError, /'types cannot be combined with 'create-table/) do
+      run(%[
+        (csv-import! (sql-open ":memory:") "t" #{path.inspect}
+                     'create-table "CREATE TABLE t (dept TEXT, n INTEGER)"
+                     'types (list (cons "n" "INTEGER")))
+      ])
+    end
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! raises on an empty file with no explicit columns" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |_| }.path
+    expect_raises(Scheme::SchemeRuntimeError, /empty CSV file/) do
+      run(%[(csv-import! (sql-open ":memory:") "t" #{path.inspect})])
+    end
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! accepts a tiny 'chunk-size, forcing many internal refills, without affecting results" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "name,dept,salary\nAlice,eng,100\nBob,sales,200\n" }.path
+    w(<<-SCHEME).should eq(%(#((("name" . "Alice") ("dept" . "eng") ("salary" . "100")) (("name" . "Bob") ("dept" . "sales") ("salary" . "200")))))
+      (define conn (sql-open ":memory:"))
+      (csv-import! conn "emp" #{path.inspect} 'chunk-size 4)
+      (sql-query conn "select * from emp order by name")
+      SCHEME
+
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "csv-import! raises on an unknown keyword" do
+    path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "a\n1\n" }.path
+    expect_raises(Scheme::SchemeRuntimeError, /unknown keyword/) do
+      run(%[(csv-import! (sql-open ":memory:") "t" #{path.inspect} 'bogus 1)])
+    end
+  ensure
+    File.delete?(path) if path
+  end
 end
