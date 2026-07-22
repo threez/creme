@@ -242,6 +242,20 @@ module Scheme
       @frames.unsafe_fetch(@depth - 1)
     end
 
+    # Re-derives the (frame, base, instructions) triplet execute's dispatch
+    # loop caches across iterations — called only right after an op that can
+    # change which frame is on top: a non-tail call (pushed one), a tail call
+    # (rewrote the current frame's own base/chunk in place — same CallFrame
+    # object, but `base`/`instructions` still need re-reading), a
+    # Return-family op (popped one), or guard's handle_guarded_error
+    # (unwinds @depth to an arbitrary saved depth). Every other instruction
+    # never touches @depth, so it never calls this — see execute's own doc
+    # comment.
+    private def refresh_frame : {CallFrame, Int32, Array(Instruction)}
+      f = top_frame
+      {f, f.base, f.chunk.instructions}
+    end
+
     # Wrapped in a begin/rescue INSIDE the loop (not around the whole
     # method) so a caught SchemeError resumes the SAME loop rather than
     # unwinding out of `execute` entirely — guard's whole mechanism is
@@ -275,10 +289,20 @@ module Scheme
     {% for sampled in [false, true] %}
     {% for limited in [false, true] %}
     private def execute{{ "_sampled".id if sampled }}{{ "_limited".id if limited }} : SchemeValue
+      # `frame`/`base`/`instructions` used to be re-derived from `top_frame`
+      # at the top of EVERY instruction, even though only a call (push),
+      # tail call (rewrites the current frame's own base/chunk in place), a
+      # Return-family op (pop), or guard unwinding (handle_guarded_error,
+      # below) can actually change which frame is on top or where it starts
+      # — every other op (LoadK/Move/Add/Cxr/jumps/...) never touches
+      # `@depth` at all. Caching them across iterations and refreshing only
+      # right after one of those specific ops (via `refresh_frame`, see its
+      # own doc comment) skips that unconditional @frames.unsafe_fetch +
+      # field-read pair on the hot majority of instructions instead of
+      # paying it on every single one.
+      frame, base, instructions = refresh_frame
       loop do
         begin
-          frame = top_frame
-          instructions = frame.chunk.instructions
           {% if sampled %}
             sampled_ip = frame.ip
           {% end %}
@@ -304,7 +328,6 @@ module Scheme
               @interp.tick_step_limit(limit)
             end
           {% end %}
-          base = frame.base
           case instr.op
           when Op::LoadK
             # Bounds-check-free: `instr.b` is always a const-pool index
@@ -576,33 +599,44 @@ module Scheme
             exec_helper_form_local(frame, base, instr)
           when Op::Call
             exec_call(frame, instr, tail: false)
+            frame, base, instructions = refresh_frame
           when Op::TailCall
             result = exec_call(frame, instr, tail: true)
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::CallGlobal
             exec_call_global(frame, instr, tail: false)
+            frame, base, instructions = refresh_frame
           when Op::TailCallGlobal
             result = exec_call_global(frame, instr, tail: true)
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::CallLocal
             exec_call_local(frame, instr, tail: false)
+            frame, base, instructions = refresh_frame
           when Op::TailCallLocal
             result = exec_call_local(frame, instr, tail: true)
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::CallUpval
             exec_call_upval(frame, instr, tail: false)
+            frame, base, instructions = refresh_frame
           when Op::TailCallUpval
             result = exec_call_upval(frame, instr, tail: true)
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::Return
             result = deliver_return(@stack.unsafe_fetch(base + instr.a))
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::ReturnGlobal
             result = deliver_return(get_global_cached(frame, frame.ip - 1, instr.a))
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::ReturnUpval
             result = deliver_return(upvalue(frame, instr.a).get)
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::AddReturn, Op::SubReturn, Op::MulReturn
             # The Return-fused arithmetic trio (e.g. fib's inner
             # `(+ (fib ...) (fib ...))` in tail position) — inlined here for
@@ -637,6 +671,7 @@ module Scheme
             @stack.unsafe_put(base + instr.a, res.as(SchemeValue))
             result = deliver_return(res.as(SchemeValue))
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::NumLtReturn, Op::NumLeReturn,
                Op::NumGtReturn, Op::NumGeReturn, Op::NumEqReturn, Op::IsEqReturn
             # The comparison-Returns stay routed through exec_prim (rarer in
@@ -647,6 +682,7 @@ module Scheme
             exec_prim(frame, base, instr)
             result = deliver_return(@stack.unsafe_fetch(base + instr.a))
             return result unless result.nil?
+            frame, base, instructions = refresh_frame
           when Op::Cxr
             # The whole (scheme cxr) accessor family (car/cdr/caar/.../cddddr)
             # fused into one op: operand c encodes the car/cdr chain as bits
@@ -722,6 +758,11 @@ module Scheme
         rescue ex : SchemeError
           result = handle_guarded_error(ex)
           return result unless result.nil?
+          # handle_guarded_error unwound @depth to the matching guard's own
+          # saved depth (arbitrary — not necessarily the frame active when
+          # the error was raised), so the cached triplet must be re-derived
+          # before the loop resumes, same as after any Call/Return above.
+          frame, base, instructions = refresh_frame
         rescue ex : ContinuationInvoked | SchemeExit
           # Neither is a SchemeError (deliberately, so guard can never
           # intercept them — see errors.cr) — this VM instance's entire
@@ -1503,7 +1544,14 @@ module Scheme
       # position (see compile_app — Op::Call/TailCall are the only ops that
       # currently thread a real one through; most instructions have nil
       # here, which just leaves current_pos at whatever it was last set to).
-      pos = frame.chunk.positions[frame.ip - 1]?
+      # Bounds-check-free: `frame.ip - 1` is always a valid index into this
+      # same chunk's own `positions` — Chunk#emit keeps it 1:1-sized with
+      # `instructions` (a slot appended for every instruction, exactly the
+      # same invariant global_cache_values/global_cache_versions already
+      # rely on elsewhere in this file) — so unlike most other call sites in
+      # this VM, this one WAS still paying an ordinary bounds-checked
+      # Array#[]? on every single call/tail-call until now.
+      pos = frame.chunk.positions.unsafe_fetch(frame.ip - 1)
       @interp.current_pos = pos if pos
       callee = callee.select_clause(nargs) if callee.is_a?(BytecodeCaseClosure)
       if callee.is_a?(BytecodeClosure)
