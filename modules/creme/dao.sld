@@ -121,7 +121,7 @@
           dao-create-table! dao-insert! dao-select-all dao-select-one dao-update! dao-delete! dao-count
           dao-prepare-all dao-prepare-by-id dao-prepare-delete
           dao-all-prepared dao-one-prepared dao-delete-prepared! dao-count-prepared)
-  (import (scheme base) (scheme write) (creme sxql) (creme sql))
+  (import (scheme base) (scheme write) (creme sxql) (creme sql) (creme hash-table))
   (begin
     ;; SRFI-1's filter isn't an R7RS base export; kept as a small private
     ;; copy for dao-count's own use, same rationale (creme extra)'s header
@@ -132,8 +132,37 @@
             ((pred (car lst)) (cons (car lst) (dao-filter pred (cdr lst))))
             (else (dao-filter pred (cdr lst)))))
 
+    ;; dao-ref is a hot path (every field read on every row, on every
+    ;; request, uncached -- unlike a whole rendered row, a single field
+    ;; read has nothing to memoize against) -- profiled as this project's
+    ;; single biggest shared cost between the HTML and JSON demo-todo
+    ;; routes (competition/scheme/demo-todo/app.scm; see cvm --profile's
+    ;; own hot-spot table). `col` only ever comes from a small, fixed set
+    ;; of column-name symbols per table, so the string->symbol/string-
+    ;; append/symbol->string round trip that derives its `:col`-keyword-
+    ;; alist key (see this file's own header comment on the row shape)
+    ;; only needs to happen once per distinct symbol, ever -- cached here
+    ;; rather than redone on every single dao-ref call.
+    (define dao-ref-keyword-cache (make-hash-table))
+
+    ;; A plain #f default here, not a thunk: Scheme evaluates every
+    ;; argument (including a lambda literal) before hash-table-ref itself
+    ;; ever runs, so a thunk default would allocate a fresh closure on
+    ;; EVERY call regardless of hit or miss -- measured to still show up
+    ;; as a real cost (a Closure sample) even on the hot cache-hit path.
+    ;; #f is never a valid keyword symbol, so `or` unambiguously falls
+    ;; through to the compute-and-cache branch only on an actual miss.
+    (define (dao-ref-keyword col)
+      (or (hash-table-ref dao-ref-keyword-cache col #f)
+          (let ((kw (string->symbol (string-append ":" (symbol->string col)))))
+            (hash-table-set! dao-ref-keyword-cache col kw)
+            kw)))
+
+    ;; assq, not assoc: sxql-row->kw-alist's own keys are always symbols
+    ;; (string->symbol's own interning already makes eq? valid and exact
+    ;; for symbol comparison, cheaper than assoc's default equal?).
     (define (dao-ref row col)
-      (cdr (assoc (string->symbol (string-append ":" (symbol->string col))) row)))
+      (cdr (assq (dao-ref-keyword col) row)))
 
     (define (dao-run-stmt! conn stmt)
       (let ((yielded (sxql-yield stmt)))
