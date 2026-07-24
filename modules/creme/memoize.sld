@@ -54,13 +54,38 @@
 ;;                  fully determines the result, e.g. (id done title)
 ;;                  rather than just (id).
 ;;
+;;   (define-memoize (name arg ...) body ...) -> sugar for the dance a
+;;                  self-recursive memoized function otherwise needs by
+;;                  hand: a plain (define name (memoize (lambda (arg ...)
+;;                  body ...))) would only ever cache the OUTERMOST call,
+;;                  since body's own recursive calls to `name` close over
+;;                  whatever `name` was bound to at lambda-creation time --
+;;                  the raw, unmemoized lambda, not the wrapper memoize
+;;                  returns a moment later -- so every recursive call
+;;                  would bypass the cache entirely. define-memoize
+;;                  expands instead to:
+;;                    (define name #f)
+;;                    (set! name (memoize (lambda (arg ...) body ...)))
+;;                  so body's references to `name` resolve at CALL time
+;;                  (once name has already been set! to the memoized
+;;                  wrapper), not at closure-creation time -- the same
+;;                  forward-reference trick (define x #f) ... (set! x
+;;                  ...) always needs for a self-referential closure whose
+;;                  own name must be the thing callers (including itself)
+;;                  actually call. `(name arg ...)` accepts the same
+;;                  shapes define's own function form does -- fixed args,
+;;                  a dotted rest arg, or a single rest-arg symbol -- and
+;;                  the result is a value memoize itself returned, so
+;;                  memoize-forget! works on it exactly as it would on a
+;;                  by-hand (memoize ...) call.
+;;
 ;; Not auto-imported anywhere — every script that wants this must
 ;; (import (creme memoize)) explicitly, same as any other file-based
 ;; library.
 ;; ===========================================================================
 
 (define-library (creme memoize)
-  (export memoize memoize-forget! memoize-lru)
+  (export memoize memoize-forget! memoize-lru define-memoize)
   (import (scheme base) (creme hash-table))
   (begin
     ;; Maps each memoized wrapper procedure to its own cache, so
@@ -124,4 +149,18 @@
                     (set! order (memoize-list-remove victim order))))
               (hash-table-set! cache args result)
               (set! order (cons args order))
-              result))))))))
+              result))))))
+
+    ;; (define-memoize (name arg ...) body ...) -- see this file's own
+    ;; header comment for the forward-reference problem this solves.
+    ;; header is (name . params): params ends up (arg ...) for fixed
+    ;; args, (arg ... . rest) for a dotted rest arg, or a bare symbol for
+    ;; an all-rest formals list -- exactly the three shapes a lambda's
+    ;; own formals position accepts, so no shape-specific handling is
+    ;; needed beyond car/cdr.
+    (defmacro define-memoize (header . body)
+      (let ((name (car header))
+            (params (cdr header)))
+        (list 'begin
+              (list 'define name #f)
+              (list 'set! name (list 'memoize (append (list 'lambda params) body))))))))

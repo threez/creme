@@ -12,15 +12,17 @@
 (define cached-fib-naive (memoize fib))
 
 ;; The actual fix: fib has to recurse THROUGH the memoized wrapper, not
-;; just be wrapped by one. fib-memo starts unbound and is set! to the real
-;; memoized closure right after fib-inner is defined, so by the time
-;; fib-inner's body runs, its own recursive calls resolve to the memoized
-;; version -- collapsing the exponential tree of overlapping subproblems
-;; into O(n) distinct calls.
-(define fib-memo #f)
-(define (fib-inner n)
+;; just be wrapped by one. By hand, that means a forward-reference dance:
+;;   (define fib-memo #f)
+;;   (define (fib-inner n) (if (< n 2) n (+ (fib-memo (- n 1)) (fib-memo (- n 2)))))
+;;   (set! fib-memo (memoize fib-inner))
+;; so fib-inner's own recursive calls resolve to the memoized version only
+;; once fib-memo has been set! -- collapsing the exponential tree of
+;; overlapping subproblems into O(n) distinct calls. define-memoize is
+;; sugar for exactly that dance: the name being defined is what its own
+;; body should recurse through, so it's simply used directly.
+(define-memoize (fib-memo n)
   (if (< n 2) n (+ (fib-memo (- n 1)) (fib-memo (- n 2)))))
-(set! fib-memo (memoize fib-inner))
 
 (define (elapsed-ms thunk)
   (define start (current-jiffy))
