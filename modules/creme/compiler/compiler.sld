@@ -86,7 +86,7 @@
 
 (define-library (creme compiler compiler)
   (export compile-source-to-bytes compile-program ensure-libraries-loaded!)
-  (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex)
+  (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
           (creme bytecode) (creme bootstrap) (creme compiler reader))
   (begin
 
@@ -542,8 +542,8 @@
           ((eq? head 'define-values) (compile-define-values! fc expr dest tail?))
           ((eq? head 'guard) (compile-guard! fc expr dest tail?))
           ((eq? head 'parameterize) (compile-parameterize! fc expr dest tail?))
-          ((eq? head 'when) (compile-if! fc (list 'if (cadr expr) (cons 'begin (cddr expr))) dest tail?))
-          ((eq? head 'unless) (compile-if! fc (list 'if (list 'not (cadr expr)) (cons 'begin (cddr expr))) dest tail?))
+          ((eq? head 'when) (compile-when! fc (cadr expr) (cddr expr) dest tail?))
+          ((eq? head 'unless) (compile-unless! fc (cadr expr) (cddr expr) dest tail?))
           ((eq? head 'and) (compile-and! fc (cdr expr) dest tail?))
           ((eq? head 'or) (compile-or! fc (cdr expr) dest tail?))
           ((eq? head 'cond) (compile-cond! fc (cdr expr) dest tail?))
@@ -627,8 +627,47 @@
              (val-expr (if (pair? sig) (cons 'lambda (cons (cdr sig) (cddr d))) (caddr d))))
         (list name val-expr)))
 
+    ;; Internal define-values desugars into a hidden temp holding the
+    ;; multi-value result as a list (call-with-values + the `list`
+    ;; procedure), followed by one ordinary (define name (list-ref/-tail
+    ;; tmp i)) per formal -- reusing the exact plain-define shape
+    ;; hoist-internal-defines/define-form->letrec-binding already knows how
+    ;; to fold into a letrec* binding (whose sequential-evaluation
+    ;; semantics, see compile-letrec!, guarantee the temp is assigned
+    ;; before any derived binding reads it). Top-level define-values keeps
+    ;; its own existing Destructure-based compile-define-values! --
+    ;; unrelated to this, only used for the internal/hoisted case.
+    (define (define-values->define-forms expr)
+      (let* ((parsed (parse-formals (cadr expr)))
+             (fixed (car parsed))
+             (rest (cdr parsed))
+             (tmp (fresh-symbol! "define-values-tmp-")))
+        (cons
+          (list 'define tmp (list 'call-with-values (list 'lambda '() (caddr expr)) 'list))
+          (append
+            (let loop ((names fixed) (i 0))
+              (if (null? names)
+                  '()
+                  (cons (list 'define (car names) (list 'list-ref tmp i))
+                        (loop (cdr names) (+ i 1)))))
+            (if rest (list (list 'define rest (list 'list-tail tmp (length fixed)))) '())))))
+
+    ;; Expands a define-record-type/define-values form into an equivalent
+    ;; (begin (define ...) ...) of plain defines, so hoist-internal-defines
+    ;; (which only recognizes plain define) can fold them into the same
+    ;; letrec* as any other internal define -- everything else passes
+    ;; through unchanged.
+    (define (expand-definition-form form)
+      (if (pair? form)
+          (cond
+            ((eq? (car form) 'define-record-type) (cons 'begin (record-type->define-forms form)))
+            ((eq? (car form) 'define-values) (cons 'begin (define-values->define-forms form)))
+            (else form))
+          form))
+
     (define (hoist-internal-defines forms)
-      (let* ((parts (partition-defines (flatten-begins forms)))
+      (let* ((flat (flatten-begins (map expand-definition-form (flatten-begins forms))))
+             (parts (partition-defines flat))
              (defines (car parts))
              (rest (cdr parts)))
         (if (null? defines)
@@ -729,6 +768,39 @@
         (if (and (pair? raw-test) (eq? (car raw-test) 'not) (pair? (cdr raw-test)) (null? (cddr raw-test)))
             (compile-if-branches! fc (cadr raw-test) raw-else raw-then dest tail?)
             (compile-if-branches! fc raw-test raw-then raw-else dest tail?))))
+
+    ;; when/unless -- same single-branch structure and TestFalse jump
+    ;; polarity as compile-if-branches!, but the present branch is a BODY
+    ;; (a list of forms, scoped/hoisted via compile-scoped-body! so an
+    ;; internal (define ...) works here exactly as it does in a lambda/let
+    ;; body -- matching bytecode_compiler.cr's uniform compile_seq_tail
+    ;; use for WhenNode), not a single expr the way compile-if-branches!
+    ;; assumes. `then-forms`/`else-forms` is #f for the absent branch
+    ;; (compiles to the same literal '() compile-if-branches! uses).
+    (define (compile-if-body-branches! fc test-expr then-forms else-forms dest tail?)
+      (let* ((ch (fcomp-chunk fc))
+             (jmp-false (or (compile-fused-test! fc test-expr)
+                            (let ((mark (fcomp-next-reg fc))
+                                  (test-reg (fcomp-alloc-reg! fc)))
+                              (compile-expr! fc test-expr test-reg #f)
+                              (let ((instr (chunk-emit! ch 'TestFalse test-reg 0 0 0)))
+                                (fcomp-reclaim-to! fc mark)
+                                instr)))))
+        (if then-forms (compile-scoped-body! fc then-forms dest tail?) (compile-literal-datum! fc '() dest tail?))
+        (if tail?
+            (begin
+              (chunk-patch-jump-to-here! ch jmp-false)
+              (if else-forms (compile-scoped-body! fc else-forms dest #t) (compile-literal-datum! fc '() dest #t)))
+            (let ((jmp-end (chunk-emit! ch 'Jmp 0 0 0 0)))
+              (chunk-patch-jump-to-here! ch jmp-false)
+              (if else-forms (compile-scoped-body! fc else-forms dest #f) (compile-literal-datum! fc '() dest #f))
+              (chunk-patch-jump-to-here! ch jmp-end)))))
+
+    (define (compile-when! fc test-expr body dest tail?)
+      (compile-if-body-branches! fc test-expr body #f dest tail?))
+
+    (define (compile-unless! fc test-expr body dest tail?)
+      (compile-if-body-branches! fc test-expr #f body dest tail?))
 
     (define (compile-and! fc exprs dest tail?)
       (cond
@@ -864,7 +936,7 @@
     ;; has no library registry to query the way the real analyzer does) --
     ;; (library ...) requirements are conservatively treated as unsatisfied
     ;; rather than guessed at.
-    (define cond-expand-known-features (list 'else 'r7rs 'scheme 'exact-closed 'ratios))
+    (define cond-expand-known-features (list 'else 'r7rs 'creme 'creme.cr))
 
     (define (feature-satisfied? req)
       (cond
@@ -911,7 +983,7 @@
                  (body (cdr clause))
                  (ch (fcomp-chunk fc)))
             (cond
-              ((eq? test 'else) (compile-body! fc body dest tail?))
+              ((eq? test 'else) (compile-scoped-body! fc body dest tail?))
               ((null? body)
                (let ((mark (fcomp-next-reg fc)))
                  (compile-expr! fc test dest #f)
@@ -946,7 +1018,7 @@
                  (compile-expr! fc test dest #f)
                  (fcomp-reclaim-to! fc mark))
                (let ((jmp-false (chunk-emit! ch 'TestFalse dest 0 0 0)))
-                 (compile-body! fc body dest tail?)
+                 (compile-scoped-body! fc body dest tail?)
                  (if tail?
                      (begin
                        (chunk-patch-jump-to-here! ch jmp-false)
@@ -1705,8 +1777,14 @@
       (compile-scoped-body! fc body dest tail?)
       (fcomp-pop-scope! fc))
 
-    ;; Top level only, same restriction as compile-define!/compile-define-
-    ;; record-type!. Destructures into scratch registers, then DefGlobals
+    ;; Top level only -- internal define-values is expanded away before it
+    ;; ever reaches here, see hoist-internal-defines/expand-definition-form/
+    ;; define-values->define-forms (a different, list-based desugaring;
+    ;; unrelated to this Destructure-based one, which stays the top-level
+    ;; path since there's no local scope to bind into at the top level
+    ;; anyway). This guard is a safety net for the rare non-body position,
+    ;; same as compile-define!/compile-define-record-type!'s own. Destructures
+    ;; into scratch registers, then DefGlobals
     ;; each name -- there's no local scope to bind into at the top level.
     (define (compile-define-values! fc expr dest tail?)
       (if (fcomp-parent fc)
@@ -1769,16 +1847,20 @@
     ;; resolve_library/build_library shape (verified against that file
     ;; this session), deliberately narrowed to what a flat-global-
     ;; namespace runtime like cvm needs:
-    ;; - only/except/prefix/rename import-set filtering is NOT honored --
-    ;;   every exported name (and, in practice, every top-level binding at
-    ;;   all, since a library's whole body is compiled as one program) just
-    ;;   lands in the same flat global table unprefixed/unrenamed, exactly
-    ;;   matching cvm's own already-accepted "no per-import scoping"
-    ;;   design. Confirmed safe for this project's own pure-Scheme
-    ;;   libraries (checked every one app.scm transitively depends on --
-    ;;   only css.sld uses a filtered import-set, `(only (creme extra)
-    ;;   filter)`, and importing all of (creme extra) unfiltered instead
-    ;;   doesn't collide with anything).
+    ;; - only/except don't restrict VISIBILITY -- every top-level binding
+    ;;   a library defines (exported or not) still lands in the same flat
+    ;;   global table, exactly matching cvm's own already-accepted "no
+    ;;   per-import scoping" design; only/except are accepted as a no-op
+    ;;   beyond that (confirmed safe for this project's own pure-Scheme
+    ;;   libraries -- checked every one app.scm transitively depends on).
+    ;;   prefix/rename, though, DO now work: apply-import-set-aliases!
+    ;;   (below) additionally defines the prefixed/renamed name as a real
+    ;;   alias for the library's own internal binding (resolved against
+    ;;   its (export ...) clause, via library-export-alist), so code that
+    ;;   uses the name the importer actually asked for isn't left with an
+    ;;   unbound-variable error under cvm -- the ORIGINAL unprefixed/
+    ;;   un-renamed name also stays visible, for the same flat-namespace
+    ;;   reason only/except can't hide anything either.
     ;; - cond-expand/include/include-ci inside a .sld file are NOT
     ;;   supported (none of this project's own pure-Scheme libraries use
     ;;   them in a way this loader would ever see -- checked this session).
@@ -1801,12 +1883,111 @@
 
     ;; Strips only/except/prefix/rename wrapping down to the bare
     ;; library-name import-set underneath (these all nest one <import-set>
-    ;; inside another, per R7RS's own grammar) -- filtering itself is
-    ;; deliberately not honored, see this section's own header comment.
+    ;; inside another, per R7RS's own grammar).
     (define (import-set-library-name spec)
       (if (memq (car spec) '(only except prefix rename))
           (import-set-library-name (cadr spec))
           spec))
+
+    ;; name -> ((external . internal) ...), one pair per <export spec> in
+    ;; the library's own (export ...) clause (a bare identifier exports
+    ;; itself under its own name; (rename internal external) exports
+    ;; internal under a different external name) -- used by
+    ;; apply-import-set-aliases! below to resolve prefix/rename against
+    ;; the names the library ACTUALLY declares exported, not just
+    ;; whatever it happens to `define` internally. #f for a library with
+    ;; no .sld file on disk (ordinary Crystal/cvm-native, no export list
+    ;; this Scheme-level code can see -- same restriction as everywhere
+    ;; else in this section).
+    (define (library-export-alist name)
+      (let ((src (try-read-whole-file (library-name->path name))))
+        (if (not src)
+            #f
+            (let* ((forms (read-program src))
+                   (lib-form (car forms))
+                   (clauses (cddr lib-form)))
+              (let loop ((cs clauses))
+                (cond
+                  ((null? cs) '())
+                  ((and (pair? (car cs)) (eq? (car (car cs)) 'export))
+                   (map (lambda (spec)
+                          (if (and (pair? spec) (eq? (car spec) 'rename))
+                              (cons (caddr spec) (cadr spec))
+                              (cons spec spec)))
+                        (cdr (car cs))))
+                  (else (loop (cdr cs)))))))))
+
+    ;; #t if `name` already resolves as a global RIGHT NOW (called only at
+    ;; compile time, directly from import-set-alias-defines below -- never
+    ;; through a native higher-order-procedure callback, see that
+    ;; function's own doc comment on why that distinction matters here).
+    ;; Used to detect when Crystal's OWN real `import!` (already run for
+    ;; real by the time compile-import! gets here) has ALREADY correctly
+    ;; bound the requested prefix/rename name -- true for every library
+    ;; Crystal can see directly, whether native or file-based, since its
+    ;; apply_import_set (library.cr) is a full, correct implementation;
+    ;; only a pure-Scheme library loaded SOLELY through this file's own
+    ;; self-hosted loader (the cvm case, where import! is a no-op) needs
+    ;; import-set-alias-defines to actually generate anything.
+    (define (global-bound? name)
+      (guard (e (#t #f)) (eval name) #t))
+
+    ;; Returns the list of ordinary (define new old) forms needed to make
+    ;; a prefix/rename import-set's requested names resolve to real
+    ;; bindings (only/except recurse through with no forms of their own --
+    ;; see this section's header comment for why they can't restrict
+    ;; visibility in this flat-global-namespace design). Pure data, no
+    ;; execution here -- compile-import! below compiles+emits each
+    ;; returned form via the EXISTING compile-define!, so the alias
+    ;; becomes ordinary compiled bytecode (DefGlobal off an ordinary
+    ;; variable-reference read of the original name) running at PROGRAM
+    ;; EXECUTION time, same as any other top-level define in the compiled
+    ;; chunk. global-bound? (above) still needs a live `eval` to check
+    ;; each candidate name at COMPILE time, which only resolves because
+    ;; this library's own (import ...) clause now lists (scheme eval) --
+    ;; every helper in this section (compile-import!, ensure-library-
+    ;; loaded!, etc) runs with root_env = THIS LIBRARY's own private env
+    ;; (Crystal's real library system is NOT the flat global namespace
+    ;; the self-hosted loader below provides; that flatness is this
+    ;; loader's OWN design for cvm, not how Crystal loads (creme compiler
+    ;; compiler) itself) -- so any global this file's own procedures call
+    ;; must be in ITS OWN import clause, not just the caller's.
+    (define (import-set-alias-defines spec)
+      (cond
+        ((eq? (car spec) 'only) (import-set-alias-defines (cadr spec)))
+        ((eq? (car spec) 'except) (import-set-alias-defines (cadr spec)))
+        ((eq? (car spec) 'prefix)
+         (let* ((inner (cadr spec))
+                (prefix-sym (caddr spec))
+                (exports (library-export-alist (import-set-library-name inner))))
+           (append
+             (import-set-alias-defines inner)
+             (if exports
+                 (let loop ((es exports))
+                   (cond
+                     ((null? es) '())
+                     (else
+                      (let ((prefixed (string->symbol (string-append (symbol->string prefix-sym) (symbol->string (car (car es)))))))
+                        (if (global-bound? prefixed)
+                            (loop (cdr es))
+                            (cons (list 'define prefixed (cdr (car es))) (loop (cdr es))))))))
+                 '()))))
+        ((eq? (car spec) 'rename)
+         (let* ((inner (cadr spec))
+                (renames (cddr spec))
+                (exports (library-export-alist (import-set-library-name inner))))
+           (append
+             (import-set-alias-defines inner)
+             (let loop ((rs renames))
+               (cond
+                 ((null? rs) '())
+                 ((global-bound? (cadr (car rs))) (loop (cdr rs)))
+                 (else
+                  (let* ((from (car (car rs))) (to (cadr (car rs)))
+                         (hit (and exports (assq from exports))))
+                    (cons (list 'define to (if hit (cdr hit) from))
+                          (loop (cdr rs))))))))))
+        (else '())))
 
     ;; (creme dao) -> "modules/creme/dao.sld" -- mirrors import.cr's own
     ;; File.join(dir, "a/b/c.sld") convention, just against this project's
@@ -1884,6 +2065,18 @@
     ;; PROVIDED that process still has this same compiler's own
     ;; ensure-libraries-loaded! defined as a global (true for cvm's own
     ;; compiler-mode/REPL images, which always bundle this whole file).
+    ;; import-set-alias-defines for every spec in one (import ...) form,
+    ;; in order -- manual recursion (not map), matching this section's own
+    ;; care about avoiding any reentrant-native-higher-order-procedure call
+    ;; path here (see import-set-alias-defines's own doc comment); this
+    ;; one is a perfectly ordinary compile-time helper call, not itself
+    ;; suspected of the same issue, but there's no reason to take the risk
+    ;; over a rarely-hot loop like this.
+    (define (alias-defines-for-specs specs)
+      (if (null? specs)
+          '()
+          (append (import-set-alias-defines (car specs)) (alias-defines-for-specs (cdr specs)))))
+
     (define (compile-import! fc expr dest tail?)
       (if (fcomp-parent fc)
           (error "bootstrap compiler: import is only supported at the top level" expr)
@@ -1891,9 +2084,12 @@
             (import! (cdr expr))
             (ensure-libraries-loaded! (cdr expr))
             (compile-expr! fc
-              (list 'begin
-                    (list 'import! (list 'quote (cdr expr)))
-                    (list 'ensure-libraries-loaded! (list 'quote (cdr expr))))
+              (cons 'begin
+                    (append
+                      (list
+                        (list 'import! (list 'quote (cdr expr)))
+                        (list 'ensure-libraries-loaded! (list 'quote (cdr expr))))
+                      (alias-defines-for-specs (cdr expr))))
               dest tail?))))
 
     ;; Shared by compile-define!/compile-define-values! -- emits DefGlobal
@@ -1928,51 +2124,60 @@
           ((eq? (car l) x) i)
           (else (loop (cdr l) (+ i 1))))))
 
-    ;; Top level only, same restriction as compile-define!. Desugars into
-    ;; ordinary (define ...) forms -- a record is just a vector tagged with
-    ;; the type name symbol at index 0, fields at 1.. in the order their
-    ;; (field accessor [mutator]) specs appear in the form (NOT necessarily
-    ;; the constructor's own parameter order, which R7RS allows to be any
-    ;; subset/order of the declared fields) -- then each generated define is
-    ;; handed to the EXISTING compile-define!, rather than hand-writing new
-    ;; register/bytecode logic for records at all.
-    (define (compile-define-record-type! fc expr dest tail?)
-      (if (fcomp-parent fc)
-          (error "bootstrap compiler: internal define-record-type is not yet supported" expr)
-          (let* ((tag (cadr expr))
-                 (ctor-spec (caddr expr))
-                 (ctor-name (car ctor-spec))
-                 (ctor-fields (cdr ctor-spec))
-                 (pred-name (cadddr expr))
-                 (field-specs (cddddr expr))
-                 (all-fields (map car field-specs))
-                 (total-size (+ 1 (length all-fields)))
-                 ;; a let*-bound lambda, not an internal define -- this file's
-                 ;; own source must stay compilable by THIS compiler, which
-                 ;; doesn't support internal defines yet.
-                 (field-index (lambda (name) (+ 1 (list-index-of all-fields name)))))
-            (compile-define! fc
-              (list 'define (cons ctor-name ctor-fields)
-                    (append
-                      (list 'let (list (list 'r (list 'make-vector total-size #f))))
-                      (list (list 'vector-set! 'r 0 (list 'quote tag)))
-                      (map (lambda (f) (list 'vector-set! 'r (field-index f) f)) ctor-fields)
-                      (list 'r)))
-              0 #f)
-            (compile-define! fc
-              (list 'define (list pred-name 'v)
-                    (list 'and (list 'vector? 'v) (list '= (list 'vector-length 'v) total-size) (list 'eq? (list 'vector-ref 'v 0) (list 'quote tag))))
-              0 #f)
-            (for-each
+    ;; Shared by compile-define-record-type! (top level) and the internal-
+    ;; define hoisting expansion below (hoist-internal-defines/expand-
+    ;; definition-form) -- both need the SAME desugaring, so it's built
+    ;; once here rather than risking the two drifting apart. A record is
+    ;; just a vector tagged with the type name symbol at index 0, fields at
+    ;; 1.. in the order their (field accessor [mutator]) specs appear in
+    ;; the form (NOT necessarily the constructor's own parameter order,
+    ;; which R7RS allows to be any subset/order of the declared fields).
+    ;; Returns a list of ordinary (define ...) forms; the caller decides
+    ;; how to compile each (compile-define! directly at top level, or
+    ;; folded into a letrec* binding list when hoisted).
+    (define (record-type->define-forms expr)
+      (let* ((tag (cadr expr))
+             (ctor-spec (caddr expr))
+             (ctor-name (car ctor-spec))
+             (ctor-fields (cdr ctor-spec))
+             (pred-name (cadddr expr))
+             (field-specs (cddddr expr))
+             (all-fields (map car field-specs))
+             (total-size (+ 1 (length all-fields)))
+             (field-index (lambda (name) (+ 1 (list-index-of all-fields name)))))
+        (append
+          (list
+            (list 'define (cons ctor-name ctor-fields)
+                  (append
+                    (list 'let (list (list 'r (list 'make-vector total-size #f))))
+                    (list (list 'vector-set! 'r 0 (list 'quote tag)))
+                    (map (lambda (f) (list 'vector-set! 'r (field-index f) f)) ctor-fields)
+                    (list 'r)))
+            (list 'define (list pred-name 'v)
+                  (list 'and (list 'vector? 'v) (list '= (list 'vector-length 'v) total-size) (list 'eq? (list 'vector-ref 'v 0) (list 'quote tag)))))
+          (apply append
+            (map
               (lambda (spec)
                 (let* ((name (car spec))
                        (idx (field-index name))
                        (accessor (cadr spec))
                        (mutator (if (pair? (cddr spec)) (caddr spec) #f)))
-                  (compile-define! fc (list 'define (list accessor 'v) (list 'vector-ref 'v idx)) 0 #f)
                   (if mutator
-                      (compile-define! fc (list 'define (list mutator 'v 'val) (list 'vector-set! 'v idx 'val)) 0 #f))))
-              field-specs)
+                      (list (list 'define (list accessor 'v) (list 'vector-ref 'v idx))
+                            (list 'define (list mutator 'v 'val) (list 'vector-set! 'v idx 'val)))
+                      (list (list 'define (list accessor 'v) (list 'vector-ref 'v idx))))))
+              field-specs)))))
+
+    ;; Top level only -- internal define-record-type is expanded away
+    ;; before it ever reaches here, see hoist-internal-defines/expand-
+    ;; definition-form; this guard is a safety net for the rare non-body
+    ;; position (e.g. inside an expression-level begin) that also isn't
+    ;; hoisted, matching plain (define ...)'s own compile-define! guard.
+    (define (compile-define-record-type! fc expr dest tail?)
+      (if (fcomp-parent fc)
+          (error "bootstrap compiler: internal define-record-type is not yet supported" expr)
+          (begin
+            (for-each (lambda (d) (compile-define! fc d 0 #f)) (record-type->define-forms expr))
             (if tail? (compile-literal-datum! fc '() dest #t)))))
 
     (define (compile-program forms)

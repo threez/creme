@@ -95,6 +95,9 @@ describe "bootstrap-compiler module" do
       %((let ((name 'foo) (val 42)) `(define ,name ,val))),
       %((cond-expand (else 'ok))),
       %((cond-expand ((library (does not exist)) 'no) (r7rs 'yes) (else 'fallback))),
+      %((cond-expand (creme 'yes) (else 'no))),
+      %((cond-expand ((and creme creme.cr) 'yes) (else 'no))),
+      %((cond-expand ((or (library (does not exist)) creme) 'yes) (else 'no))),
       %((import (creme regex)) (regexp-matches? (regexp "a+") "aaa")),
       %((import (only (creme regex) regexp regexp-matches?)) (regexp-matches? (regexp "[0-9]+") "42")),
       "(define (f x) (when (> x 0) (display \"pos \") x)) (list (f 5) (f -5))",
@@ -182,6 +185,25 @@ describe "bootstrap-compiler module" do
       "(define (deep n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc (* (+ i 1) (- i 1) (+ i i))))))) (deep 200)",
       "(define f (case-lambda ((a) (list 'one a)) ((a b) (+ a b)) ((a b . rest) (list a b rest)))) (list (f 1) (f 1 2) (f 1 2 3 4))",
       "(define p (make-parameter 1)) (define (g) (parameterize ((p 10)) (+ (p) (p)))) (list (g) (g) (p))",
+      # Internal (define ...) hoisted into a letrec* in every body position
+      # that introduces a scope, not just lambda/let bodies directly --
+      # cond clauses (else and plain), case clauses (desugars into cond),
+      # and when/unless bodies.
+      "(define (f x) (cond (else (define y (* x 2)) (+ y 1)))) (f 5)",
+      "(define (f x) (cond ((> x 0) (define y (* x 2)) (+ y 1)) (else 'neg))) (list (f 5) (f -5))",
+      "(define (f n) (case n ((1 2 3) (define y 'small) y) (else (define y 'large) y))) (list (f 2) (f 99))",
+      "(define (f x) (when (> x 0) (define y (* x 10)) y)) (list (f 5) (f -5))",
+      "(define (f x) (unless (> x 0) (define y (* x 10)) y)) (list (f 5) (f -5))",
+      # Internal define-values and internal define-record-type, both
+      # hoisted through the same letrec* mechanism as plain internal
+      # defines -- exercised in a lambda body, a let body, and a cond
+      # clause body (so a rest-arg define-values and a mutable record
+      # field both get covered).
+      "(define (f) (define-values (a b) (values 1 2)) (+ a b)) (f)",
+      "(define (f) (define-values (a . rest) (values 1 2 3)) (list a rest)) (f)",
+      "(let () (define-values (a b c) (values 1 2 3)) (* a b c))",
+      %((define (f) (define-record-type <pt> (make-pt x y) pt? (x pt-x set-pt-x!) (y pt-y)) (define p (make-pt 3 4)) (set-pt-x! p 9) (list (pt? p) (pt-x p) (pt-y p))) (f)),
+      %((define (f flag) (cond (flag (define-record-type <box> (make-box v) box? (v box-v)) (box-v (make-box 42))) (else 'no))) (list (f #t) (f #f))),
     ].each { |src| check(interp, src) }
   end
 
@@ -301,6 +323,34 @@ describe "bootstrap-compiler module" do
     load_toolchain(interp)
     interp.global.define("sxql-test-source", Scheme::SchemeStr.new(src))
     bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes sxql-test-source))").write_string
+
+    bootstrap_result.should eq(native_result)
+  end
+
+  it "honors a prefix import-set filter against a pure-Scheme file-based library" do
+    src = %((import (prefix (creme extra) extra:)) (extra:filter odd? '(1 2 3 4 5)))
+
+    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Scheme.run_source(native, src).write_string
+
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    load_toolchain(interp)
+    interp.global.define("import-prefix-test-source", Scheme::SchemeStr.new(src))
+    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes import-prefix-test-source))").write_string
+
+    bootstrap_result.should eq(native_result)
+  end
+
+  it "honors a rename import-set filter against a pure-Scheme file-based library" do
+    src = %((import (rename (creme extra) (filter my-filter))) (my-filter odd? '(1 2 3 4 5)))
+
+    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Scheme.run_source(native, src).write_string
+
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    load_toolchain(interp)
+    interp.global.define("import-rename-test-source", Scheme::SchemeStr.new(src))
+    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes import-rename-test-source))").write_string
 
     bootstrap_result.should eq(native_result)
   end
