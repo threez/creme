@@ -118,6 +118,18 @@ def usage : Nil
                                  `cvm/cvm --profile <that file>` (see
                                  cvm/README.md's "Profiling" section)
                                  instead of a plain run.
+    creme --self-hosted <file.scm>
+                                 Run <file.scm> exactly like plain `creme
+                                 <file.scm>`, but compiled by the self-
+                                 hosted Scheme-to-bytecode compiler
+                                 ((creme compiler compiler), see modules/
+                                 creme/compiler/compiler.sld) instead of
+                                 the native Crystal BytecodeCompiler, then
+                                 run on the SAME real Crystal VM either
+                                 way — an opt-in way to exercise/benchmark
+                                 the self-hosted compiler on a real script
+                                 without it being the interpreter's
+                                 default execution path.
     creme --help | -h            Show this help
   USAGE
 end
@@ -372,6 +384,55 @@ rescue ex
   exit 1
 end
 
+# The (import ...) form that loads the self-hosted compiler's own
+# toolchain -- same import list compiler_spec.cr's own load_toolchain
+# helper uses, kept in sync with it by hand since there's no shared
+# constant between a _spec.cr file and src/main.cr.
+SELF_HOSTED_TOOLCHAIN_IMPORT = %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler)))
+
+# Runs `path` through the self-hosted (creme compiler compiler) instead
+# of the native Crystal BytecodeCompiler run_script/Scheme.run_file uses —
+# for `creme --self-hosted`, an explicit opt-in rather than the
+# interpreter's default execution path (see that flag's own usage text
+# for why: real performance cost, since compilation itself now runs as
+# interpreted Scheme on the VM, and this compiler's own surface area
+# hasn't been exercised across every corner of the codebase the way the
+# native compiler has). Mirrors run_script's own auto_import_base: false
+# (a script must explicitly import what it uses, per R7RS) and load-dir
+# push/pop (so a relative (include ...) inside the script resolves
+# against where the script lives, matching Scheme.run_file's own
+# convention) -- the only difference from run_script is compiling via
+# compile-source-to-bytes + load-chunk-bytes instead of BytecodeCompiler.
+def run_self_hosted(path : String) : Nil
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_IMPORT)
+  interp.push_load_dir(File.dirname(File.expand_path(path)))
+  begin
+    interp.global.define("self-hosted-script-source", Scheme::SchemeStr.new(File.read(path)))
+    Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes self-hosted-script-source))", source_name: path)
+  ensure
+    interp.pop_load_dir
+  end
+rescue ex : Scheme::SchemeExit
+  exit(ex.code)
+rescue ex : Scheme::SchemeError
+  STDERR.puts format_error(ex)
+  exit 1
+rescue ex
+  STDERR.puts "Internal error: #{ex.message}"
+  exit 1
+end
+
+# Handles `creme --self-hosted <file.scm>` — split out of `main` purely to
+# keep that method's own top-level dispatch simple.
+def handle_self_hosted(args : Array(String)) : Nil
+  unless path = args[1]?
+    STDERR.puts "Usage: creme --self-hosted <file.scm>"
+    exit 1
+  end
+  run_self_hosted(path)
+end
+
 def main : Nil
   args = ARGV
   if args.empty?
@@ -413,6 +474,8 @@ def main : Nil
     handle_emit_cvm(args)
   when "--cvm"
     handle_cvm(args)
+  when "--self-hosted"
+    handle_self_hosted(args)
   when "--profile"
     if args[1]? == "--cvm"
       handle_profile_cvm(args)

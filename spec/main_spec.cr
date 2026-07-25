@@ -157,4 +157,45 @@ describe "main.cr (CLI)" do
     status.success?.should be_false
     err.should contain("Usage: creme -- <file.scm>")
   end
+
+  it "--self-hosted runs a file via the self-hosted compiler, matching a plain run" do
+    file = File.tempfile("main_spec_self_hosted", ".scm") do |io|
+      io.print(<<-SCHEME)
+        (import (scheme base) (scheme write))
+        (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+        (display (fact 10))
+        (newline)
+        SCHEME
+    end
+    begin
+      native_out, native_err, native_status = run_cli([file.path])
+      self_hosted_out, self_hosted_err, self_hosted_status = run_cli(["--self-hosted", file.path])
+
+      self_hosted_status.success?.should be_true
+      self_hosted_out.should eq(native_out)
+      self_hosted_err.should eq(native_err)
+      native_status.success?.should be_true
+    ensure
+      File.delete(file.path)
+    end
+  end
+
+  it "--self-hosted requires a file argument" do
+    _, err, status = run_cli(["--self-hosted"])
+    status.success?.should be_false
+    err.should contain("Usage: creme --self-hosted <file.scm>")
+  end
+
+  it "--self-hosted exits non-zero and prints an error for a runtime error" do
+    file = File.tempfile("main_spec_self_hosted_err", ".scm") do |io|
+      io.print("(import (scheme base)) (car 1)")
+    end
+    begin
+      _, err, status = run_cli(["--self-hosted", file.path])
+      status.success?.should be_false
+      err.should contain("Error:")
+    ensure
+      File.delete(file.path)
+    end
+  end
 end
