@@ -137,8 +137,8 @@ module Scheme
     # majority) pass through unescaped, matching every other Scheme writer.
     private def needs_pipe_escape? : Bool
       return true if @name.empty?
-      @name.each_char do |c|
-        case c
+      @name.each_char do |char|
+        case char
         when ' ', '\t', '\r', '\n', '(', ')', '[', ']', '"', ';', '\'', '`', ',', '|', '\\'
           return true
         end

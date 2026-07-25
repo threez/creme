@@ -100,13 +100,25 @@ module Scheme
       nil
     end
 
+    # Array-backed frames always have both @names and @values set (only
+    # promote_to_hash! clears them, at the same time it sets @hash) — these
+    # raise instead of silently returning nil so a violation of that
+    # invariant surfaces immediately rather than as a mysterious NoMethodError.
+    private def names! : Array(String)
+      @names || raise "Env: array-backed frame missing names"
+    end
+
+    private def values! : Array(SchemeValue)
+      @values || raise "Env: array-backed frame missing values"
+    end
+
     protected def lookup_local(name : String) : SchemeValue?
       if hash = @hash
         hash[name]?
       else
-        names = @names.not_nil!
+        names = names!
         idx = names.index(name)
-        idx ? @values.not_nil![idx] : nil
+        idx ? values![idx] : nil
       end
     end
 
@@ -116,8 +128,8 @@ module Scheme
         hash[name] = v
         return v
       end
-      names = @names.not_nil!
-      values = @values.not_nil!
+      names = names!
+      values = values!
       idx = names.index(name)
       if idx
         values[idx] = v
@@ -144,10 +156,10 @@ module Scheme
     end
 
     private def promote_to_hash! : Nil
-      names = @names.not_nil!
-      values = @values.not_nil!
+      names = names!
+      values = values!
       hash = {} of String => SchemeValue
-      names.each_with_index { |n, i| hash[n] = values[i] }
+      names.each_with_index { |name, i| hash[name] = values[i] }
       @hash = hash
       @names = nil
       @values = nil
@@ -177,7 +189,7 @@ module Scheme
       if hash = @hash
         hash.has_key?(name)
       else
-        @names.not_nil!.includes?(name)
+        names!.includes?(name)
       end
     end
 
@@ -186,17 +198,17 @@ module Scheme
       if hash = @hash
         hash[name] = v
       else
-        names = @names.not_nil!
+        names = names!
         idx = names.index(name)
         if idx
-          @values.not_nil![idx] = v
+          values![idx] = v
         else
           if @names_shared
             names = @names = names.dup
             @names_shared = false
           end
           names << name
-          @values.not_nil! << v
+          values! << v
         end
       end
     end

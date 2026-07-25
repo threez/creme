@@ -126,6 +126,7 @@ module Scheme
   # Only Cons/SchemeVector can participate in a cycle (the other cases are
   # either atomic or, for strings/bytevectors, compared by value with no
   # further recursion), so only those two branches consult/extend `seen`.
+  # ameba:disable Metrics/CyclomaticComplexity
   def self.scheme_equal?(a : SchemeValue, b : SchemeValue, seen : Set({UInt64, UInt64})? = nil) : Bool
     case a
     when SchemeInt

@@ -285,7 +285,7 @@ module Scheme
 
     private def add_upvalue(fc : FunctionCompiler, from_parent_local : Bool, index : Int32, name : String) : Int32
       fc.chunk.upvalues.each_with_index do |existing, i|
-        return i if existing.from_parent_local == from_parent_local && existing.index == index
+        return i if existing.from_parent_local? == from_parent_local && existing.index == index
       end
       fc.chunk.upvalues << UpvalDesc.new(from_parent_local, index, name)
       fc.chunk.upvalues.size - 1
@@ -1023,7 +1023,7 @@ module Scheme
                                name : String, dst : Int32) : Nil
       child = FunctionCompiler.new(fc, name)
       child.push_scope
-      params.each { |p| child.declare_local(p) }
+      params.each { |param| child.declare_local(param) }
       rest_name = rest
       child.declare_local(rest_name) if rest_name
       child.chunk.param_count = params.size
@@ -1793,7 +1793,7 @@ module Scheme
       mark = fc.next_reg
       callee_reg = fc.alloc_reg
       compile_expr(fc, node.callee, callee_reg, false)
-      arg_regs = node.args.map { |arg| r = fc.alloc_reg; compile_expr(fc, arg, r, false); r }
+      node.args.each { |arg| r = fc.alloc_reg; compile_expr(fc, arg, r, false) }
       # Args must be contiguous immediately after callee_reg for Call/TailCall
       # — true here since nothing shrinks next_reg between these allocations.
       if tail

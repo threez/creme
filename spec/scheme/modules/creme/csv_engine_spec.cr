@@ -28,7 +28,7 @@ end
 private def parse(string_or_io, separator = Scheme::Csv::DEFAULT_SEPARATOR, quote_char = Scheme::Csv::DEFAULT_QUOTE_CHAR)
   rows = [] of Array(String)
   parser = new_parser(string_or_io, separator, quote_char)
-  while (row = parser.next_row)
+  while row = parser.next_row
     rows << row
   end
   rows
@@ -306,7 +306,7 @@ describe Scheme::Csv do
     end
 
     it "builds row from enumerable" do
-      build { |csv| csv.row [1, 2, 3] }.should eq("1,2,3\n")
+      build(&.row([1, 2, 3])).should eq("1,2,3\n")
     end
 
     it "builds with quoting" do
@@ -362,7 +362,7 @@ describe Scheme::Csv do
     csv = "one,two\nthree,four\nfive,six"
     parser = new_parser(IO::Memory.new(csv), chunk_size: 4)
     rows = [] of Array(String)
-    while (row = parser.next_row)
+    while row = parser.next_row
       rows << row
     end
     rows.should eq([%w(one two), %w(three four), %w(five six)])
@@ -382,7 +382,7 @@ describe Scheme::Csv do
     one_byte_at_a_time = IO::Memory.new("Antípodas\t1857\t1\t1\nAntípodas\t1969\t1\t1\n")
     parser = new_parser(OneByteIO.new(one_byte_at_a_time), separator: '\t', quote_char: '\0', chunk_size: 8)
     rows = [] of Array(String)
-    while (row = parser.next_row)
+    while row = parser.next_row
       rows << row
     end
     rows.should eq([

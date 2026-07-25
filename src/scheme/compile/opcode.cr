@@ -393,7 +393,7 @@ module Scheme
   # upvalue array (`from_parent_local = false`, `index` = that upvalue's
   # index there) — the standard Lua-style upvalue-chain scheme.
   struct UpvalDesc
-    getter from_parent_local : Bool
+    getter? from_parent_local : Bool
     getter index : Int32
     getter name : String
 

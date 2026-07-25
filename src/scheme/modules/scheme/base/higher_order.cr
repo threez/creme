@@ -16,7 +16,7 @@ module Scheme::Builtins::HigherOrder
     lists = args[1..-1].map { |list| Scheme.list_to_a(list) }
     minlen = lists.min_of(&.size)
     acc = [] of SchemeValue
-    each_call_args(f, lists, minlen) { |ca| acc << interp.apply(f, ca) }
+    each_call_args(f, lists, minlen) { |call_args| acc << interp.apply(f, call_args) }
     Scheme.a_to_list(acc)
   end
 
@@ -25,7 +25,7 @@ module Scheme::Builtins::HigherOrder
     f = args[0]
     lists = args[1..-1].map { |list| Scheme.list_to_a(list) }
     minlen = lists.min_of(&.size)
-    each_call_args(f, lists, minlen) { |ca| interp.apply(f, ca) }
+    each_call_args(f, lists, minlen) { |call_args| interp.apply(f, call_args) }
     NIL.as(SchemeValue)
   end
 

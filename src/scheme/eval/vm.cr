@@ -64,7 +64,7 @@ module Scheme
     # a tail-call reset REUSES the same @call_stack slot/identity across
     # iterations, only a genuinely NEW activation (via VM#push_frame's
     # pool-reuse branch) needs it cleared, which its callers do explicitly.
-    property has_interp_frame : Bool = false
+    property? has_interp_frame : Bool = false
     # Whether THIS VM's deliver_return is the one that should pop that
     # frame — false for the one case where has_interp_frame is true but
     # something ELSE already owns the push/pop (Interpreter#apply's
@@ -72,7 +72,7 @@ module Scheme
     # VM#call and pop it in their own `ensure`, exactly like the Lambda arm
     # — VM#call marks its outermost frame accordingly so deliver_return
     # doesn't ALSO pop it, double-popping @call_stack).
-    property owns_interp_frame : Bool = false
+    property? owns_interp_frame : Bool = false
 
     def initialize(@chunk : Chunk, @base : Int32, @closure : BytecodeClosure?, @return_reg : Int32?, @root_env : Env)
     end
@@ -812,7 +812,7 @@ module Scheme
       while @unwind_stack.size > handler.unwind_mark
         @unwind_stack.pop.run
       end
-      (handler.depth...@depth).each { |d| close_upvalues(@frames[d]) }
+      (handler.depth...@depth).each { |depth| close_upvalues(@frames[depth]) }
       @depth = handler.depth
       condition = ex.payload || SchemeRecord.new(CONDITION_TYPE, [SchemeStr.new(ex.message || "error"), NIL] of SchemeValue).as(SchemeValue)
       @stack.unsafe_put(handler.frame.base + handler.condition_reg, condition)
@@ -1269,7 +1269,7 @@ module Scheme
       versions = frame.chunk.global_cache_versions
       values = frame.chunk.global_cache_values
       if versions.unsafe_fetch(instr_idx) == frame.root_env.version
-        return values.unsafe_fetch(instr_idx).not_nil!
+        return values.unsafe_fetch(instr_idx).as(SchemeValue)
       end
       value = frame.root_env.get(const_name(frame, const_idx))
       values.unsafe_put(instr_idx, value)
@@ -1310,7 +1310,7 @@ module Scheme
     private def deliver_return(val : SchemeValue) : SchemeValue?
       finished = top_frame
       close_upvalues(finished)
-      @interp.pop_frame if finished.owns_interp_frame
+      @interp.pop_frame if finished.owns_interp_frame?
       @depth -= 1
       if @depth == 0
         val
@@ -1342,7 +1342,7 @@ module Scheme
         return owner.cached_zero_upvalue_closure(proto_idx) { BytecodeClosure.new(proto, [] of Upvalue, frame.root_env) }
       end
       upvalues = proto.upvalues.map do |desc|
-        if desc.from_parent_local
+        if desc.from_parent_local?
           upvalue = Upvalue.new(@stack, frame.base + desc.index)
           (frame.opened_upvalues ||= [] of Upvalue) << upvalue
           upvalue
@@ -1445,7 +1445,7 @@ module Scheme
       form = frame.chunk.consts.unsafe_fetch(instr.b).as(Cons)
       scratch_env = Env.new
       @interp.eval_define_record_type(form, scratch_env)
-      names = Scheme.record_type_names(form).not_nil!
+      names = Scheme.record_type_names(form).as(Array(String))
       names.each_with_index { |name, i| @stack.unsafe_put(base + instr.a + i, scratch_env.get(name)) }
     end
 
@@ -1555,78 +1555,92 @@ module Scheme
       @interp.current_pos = pos if pos
       callee = callee.select_clause(nargs) if callee.is_a?(BytecodeCaseClosure)
       if callee.is_a?(BytecodeClosure)
-        # Tail calls reuse the current frame (@depth doesn't grow for a tail
-        # loop) — only a non-tail push can run away, so only THIS path
-        # needs the check. Without it, unbounded non-tail recursion just
-        # grows @stack/@frames forever instead of raising a clean,
-        # sandboxable error, exactly what max_eval_depth exists to prevent.
-        if !tail && @depth >= @interp.max_eval_depth
-          raise SchemeExecutionLimitError.new("recursion depth exceeded")
-        end
-        new_base = tail ? caller_base : caller_base + frame.chunk.num_registers
-        ensure_stack_size(new_base + callee.chunk.num_registers)
-        # Reading args out of @stack BEFORE writing params back into
-        # (possibly, for a tail call) the very same stack region is safe
-        # without an intermediate copy: the compiler always allocates a
-        # call's callee+args registers strictly ABOVE any of the current
-        # function's own live locals, so arg_base is always > any
-        # destination param index a tail call could overwrite here.
-        close_upvalues(frame) if tail
-        bind_args(callee.chunk, nargs, new_base, @stack) { |i| @stack.unsafe_fetch(arg_base + i) }
-        if tail
-          # Collapse into the SAME interpreter frame if one's already
-          # installed for this activation (the common case, so a tail loop
-          # shows one backtrace frame, not one per iteration); the two exceptions
-          # with nothing yet to overwrite are VM#run's still-nameless
-          # outermost activation, and VM#call's outermost activation (whose
-          # frame belongs to Interpreter#apply, not us — pushing our OWN
-          # here instead of overwriting keeps that ownership distinction
-          # intact, see CallFrame#owns_interp_frame).
-          if frame.has_interp_frame
-            @interp.set_top_frame(callee.chunk.name, pos)
-          else
-            @interp.push_frame(callee.chunk.name, pos)
-            frame.owns_interp_frame = true
-          end
-          frame.reset(callee.chunk, new_base, callee, frame.return_reg, callee.root_env)
-          frame.has_interp_frame = true
+        dispatch_bytecode_call(frame, instr, callee, tail, caller_base, arg_base, nargs, pos)
+      else
+        dispatch_builtin_call(instr, callee, tail, caller_base, arg_base, nargs, pos)
+      end
+    end
+
+    private def dispatch_bytecode_call(frame : CallFrame, instr : Instruction, callee : BytecodeClosure, tail : Bool, caller_base : Int32, arg_base : Int32, nargs : Int32, pos : SourcePos?) : SchemeValue?
+      # Tail calls reuse the current frame (@depth doesn't grow for a tail
+      # loop) — only a non-tail push can run away, so only THIS path
+      # needs the check. Without it, unbounded non-tail recursion just
+      # grows @stack/@frames forever instead of raising a clean,
+      # sandboxable error, exactly what max_eval_depth exists to prevent.
+      if !tail && @depth >= @interp.max_eval_depth
+        raise SchemeExecutionLimitError.new("recursion depth exceeded")
+      end
+      new_base = tail ? caller_base : caller_base + frame.chunk.num_registers
+      ensure_stack_size(new_base + callee.chunk.num_registers)
+      # Reading args out of @stack BEFORE writing params back into
+      # (possibly, for a tail call) the very same stack region is safe
+      # without an intermediate copy: the compiler always allocates a
+      # call's callee+args registers strictly ABOVE any of the current
+      # function's own live locals, so arg_base is always > any
+      # destination param index a tail call could overwrite here.
+      close_upvalues(frame) if tail
+      bind_args(callee.chunk, nargs, new_base, @stack) { |i| @stack.unsafe_fetch(arg_base + i) }
+      if tail
+        # Collapse into the SAME interpreter frame if one's already
+        # installed for this activation (the common case, so a tail loop
+        # shows one backtrace frame, not one per iteration); the two exceptions
+        # with nothing yet to overwrite are VM#run's still-nameless
+        # outermost activation, and VM#call's outermost activation (whose
+        # frame belongs to Interpreter#apply, not us — pushing our OWN
+        # here instead of overwriting keeps that ownership distinction
+        # intact, see CallFrame#owns_interp_frame).
+        if frame.has_interp_frame?
+          @interp.set_top_frame(callee.chunk.name, pos)
         else
           @interp.push_frame(callee.chunk.name, pos)
-          push_frame(callee.chunk, new_base, callee, instr.c, callee.root_env)
-          top_frame.has_interp_frame = true
-          top_frame.owns_interp_frame = true
+          frame.owns_interp_frame = true
         end
-        nil
+        frame.reset(callee.chunk, new_base, callee, frame.return_reg, callee.root_env)
+        frame.has_interp_frame = true
       else
-        # Shape-guarded fast path for record accessors/mutators (see
-        # RecordAccessor/RecordMutator in record.cr): the accessor value
-        # carries its target record_type + field_index statically, so a
-        # matching-type call is just a type guard + a direct field load/store
-        # — skipping the per-call args-array allocation and the generic apply
-        # path (arity check, etc.) that every other builtin pays. An arity or
-        # type mismatch falls through to the generic path below, which raises
-        # with the accessor's own fn (identical message/semantics).
-        if callee.is_a?(RecordAccessor) && nargs == 1
-          rec = @stack.unsafe_fetch(arg_base)
-          if rec.is_a?(SchemeRecord) && rec.type.same?(callee.record_type)
-            val = rec.fields.unsafe_fetch(callee.field_index)
-            return tail ? deliver_return(val) : (@stack.unsafe_put(caller_base + instr.c, val); nil)
-          end
-        elsif callee.is_a?(RecordMutator) && nargs == 2
-          rec = @stack.unsafe_fetch(arg_base)
-          if rec.is_a?(SchemeRecord) && rec.type.same?(callee.record_type)
-            rec.fields[callee.field_index] = @stack.unsafe_fetch(arg_base + 1)
-            return tail ? deliver_return(NIL) : (@stack.unsafe_put(caller_base + instr.c, NIL); nil)
-          end
+        @interp.push_frame(callee.chunk.name, pos)
+        push_frame(callee.chunk, new_base, callee, instr.c, callee.root_env)
+        top_frame.has_interp_frame = true
+        top_frame.owns_interp_frame = true
+      end
+      nil
+    end
+
+    # Shape-guarded fast path for record accessors/mutators (see
+    # RecordAccessor/RecordMutator in record.cr): the accessor value
+    # carries its target record_type + field_index statically, so a
+    # matching-type call is just a type guard + a direct field load/store
+    # — skipping the per-call args-array allocation and the generic apply
+    # path (arity check, etc.) that every other builtin pays. An arity or
+    # type mismatch falls through to the generic path below, which raises
+    # with the accessor's own fn (identical message/semantics).
+    private def dispatch_builtin_call(instr : Instruction, callee : SchemeValue, tail : Bool, caller_base : Int32, arg_base : Int32, nargs : Int32, pos : SourcePos?) : SchemeValue?
+      if callee.is_a?(RecordAccessor) && nargs == 1
+        rec = @stack.unsafe_fetch(arg_base)
+        if rec.is_a?(SchemeRecord) && rec.type.same?(callee.record_type)
+          return finish_call(tail, caller_base, instr, rec.fields.unsafe_fetch(callee.field_index))
         end
-        args = Array(SchemeValue).new(nargs) { |i| @stack.unsafe_fetch(arg_base + i) }
-        val = @interp.apply(callee, args, pos)
-        if tail
-          deliver_return(val)
-        else
-          @stack.unsafe_put(caller_base + instr.c, val)
-          nil
+      elsif callee.is_a?(RecordMutator) && nargs == 2
+        rec = @stack.unsafe_fetch(arg_base)
+        if rec.is_a?(SchemeRecord) && rec.type.same?(callee.record_type)
+          rec.fields[callee.field_index] = @stack.unsafe_fetch(arg_base + 1)
+          return finish_call(tail, caller_base, instr, NIL)
         end
+      end
+      args = Array(SchemeValue).new(nargs) { |i| @stack.unsafe_fetch(arg_base + i) }
+      val = @interp.apply(callee, args, pos)
+      finish_call(tail, caller_base, instr, val)
+    end
+
+    # Delivers a call's result the two ways a Call/TailCall op can consume
+    # it: unwind through deliver_return for a tail call, or store into the
+    # caller's destination register and fall through for a non-tail one.
+    private def finish_call(tail : Bool, caller_base : Int32, instr : Instruction, val : SchemeValue) : SchemeValue?
+      if tail
+        deliver_return(val)
+      else
+        @stack.unsafe_put(caller_base + instr.c, val)
+        nil
       end
     end
   end

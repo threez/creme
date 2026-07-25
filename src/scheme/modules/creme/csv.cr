@@ -153,7 +153,7 @@ module Scheme::Csv
 
     private def consume_quoted_cell
       @buffer.clear
-      while true
+      loop do
         case char = next_char
         when '\0'
           raise "Unclosed quote"
@@ -215,7 +215,7 @@ module Scheme::Csv
     private def consume_unquoted_cell
       start_pos = @reader.pos
       end_pos = start_pos
-      while true
+      loop do
         case next_char
         when @separator
           end_pos = @reader.pos
@@ -279,7 +279,7 @@ module Scheme::Csv
       chunk = @reader.string
       chunk_start = @reader.pos
       crossed = false
-      while true
+      loop do
         case current_char
         when @separator
           cell = finish_unquoted_cell(chunk, chunk_start, crossed)
@@ -555,7 +555,7 @@ module Scheme::Builtins::CsvLibrary
     quote = csv_quote_char_arg(args, 2, "csv-read")
     parser = Scheme::Csv::Parser.new(s, sep, quote)
     rows = [] of SchemeValue
-    while (cells = parser.next_row { |cell| SchemeStr.new(cell).as(SchemeValue) })
+    while cells = parser.next_row { |cell| SchemeStr.new(cell).as(SchemeValue) }
       rows << SchemeVector.new(cells)
     end
     SchemeVector.new(rows)
@@ -572,7 +572,7 @@ module Scheme::Builtins::CsvLibrary
     to_scheme = ->(cell : String) { SchemeStr.new(cell).as(SchemeValue) }
     headers = parser.next_row(&to_scheme) || ([] of SchemeValue)
     rows = [] of SchemeValue
-    while (cells = parser.next_row(&to_scheme))
+    while cells = parser.next_row(&to_scheme)
       pairs = headers.map_with_index { |header, i| Cons.new(header, cells[i]).as(SchemeValue) }
       rows << Scheme.a_to_list(pairs)
     end

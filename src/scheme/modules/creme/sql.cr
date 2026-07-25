@@ -223,15 +223,7 @@ module Scheme::Builtins::SqlLibrary
     io = File.open(path)
     begin
       parser = Scheme::Csv::Parser.new(io, opts[:separator], opts[:quote], opts[:chunk_size])
-      columns, types =
-        if cols = opts[:columns]
-          {cols.map(&.first), cols.map(&.last)}
-        else
-          header = parser.next_row
-          raise SchemeRuntimeError.new("csv-import!: empty CSV file") unless header
-          type_overrides = (opts[:types] || [] of {String, String}).to_h
-          {header, header.map { |name| type_overrides[name]? || "TEXT" }}
-        end
+      columns, types = csv_import_columns_and_types(parser, opts)
 
       quoted_cols = columns.map { |col| %("#{col}") }
       create_sql = opts[:create_table] || "CREATE TABLE IF NOT EXISTS \"#{table}\" (#{quoted_cols.zip(types).map { |col, type| "#{col} #{type}" }.join(", ")})"
@@ -252,6 +244,20 @@ module Scheme::Builtins::SqlLibrary
     end
   rescue ex : Exception
     raise SchemeRuntimeError.new("csv-import!: #{ex.message}")
+  end
+
+  # Column names + SQL types for the table being imported into: either the
+  # caller-declared `'columns` list verbatim, or the CSV's own header row
+  # with any `'types` overrides applied (defaulting to TEXT).
+  private def csv_import_columns_and_types(parser : Scheme::Csv::Parser, opts) : {Array(String), Array(String)}
+    if cols = opts[:columns]
+      {cols.map(&.first), cols.map(&.last)}
+    else
+      header = parser.next_row
+      raise SchemeRuntimeError.new("csv-import!: empty CSV file") unless header
+      type_overrides = (opts[:types] || [] of {String, String}).to_h
+      {header, header.map { |name| type_overrides[name]? || "TEXT" }}
+    end
   end
 
   private def csv_import_options(rest : Array(SchemeValue), who : String) : {columns: Array({String, String})?, types: Array({String, String})?, create_table: String?, separator: Char, quote: Char, chunk_size: Int32}

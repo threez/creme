@@ -114,6 +114,7 @@ module Scheme
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def next_token : Token
       skip_whitespace_and_comments
       line = @line
@@ -257,6 +258,7 @@ module Scheme
     # escapes as string literals. Always emitted as a Symbol token — the
     # reader treats it exactly like an ordinary identifier, just with a
     # richer character set and no case-folding/leading-digit restriction.
+    # ameba:disable Metrics/CyclomaticComplexity
     private def lex_piped_identifier(line : Int32, col : Int32) : Token
       advance # opening '|'
       buf = String::Builder.new
@@ -291,6 +293,7 @@ module Scheme
       tok(TokKind::Symbol, buf.to_s, line, col)
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def lex_hash(line : Int32, col : Int32) : Token
       # peek is '#'
       nxt = peek2
@@ -361,6 +364,7 @@ module Scheme
     # remaining numeral text, and converts it — entirely lexer-side, so the
     # emitted token is always a plain base-10 IntLit/FloatLit and neither
     # Reader nor the rest of the pipeline needs to know prefixes existed.
+    # ameba:disable Metrics/CyclomaticComplexity
     private def lex_prefixed_number(line : Int32, col : Int32) : Token
       radix = 10
       exactness : Char? = nil
@@ -471,6 +475,7 @@ module Scheme
       "-nan.0" => Float64::NAN,
     }
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def lex_atom(line : Int32, col : Int32) : Token
       text = read_atom_text
       if text == "."

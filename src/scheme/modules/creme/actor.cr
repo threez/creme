@@ -145,7 +145,7 @@ module Scheme
     end
 
     def uri : String
-      @address.not_nil!.uri(@id)
+      @address.as(ActorAddress).uri(@id)
     end
 
     def uri_or_id : String
@@ -282,7 +282,7 @@ module Scheme
         @listener.try(&.close)
         @connections.each_value(&.close)
         @connections.clear
-        @inbound_sockets.each { |s| s.close rescue nil }
+        @inbound_sockets.each { |socket| socket.close rescue nil }
         @inbound_sockets.clear
       end
       if name = @local_node_name
@@ -567,12 +567,12 @@ module Scheme::Builtins::ActorLibrary
   # whichever Interpreter's `.call`/`.apply` is actually on this fiber's
   # stack right now — correct per-actor identity.
   private def current_interp : Interpreter
-    Interpreter.current.not_nil!
+    Interpreter.current.as(Interpreter)
   end
 
   private def ensure_system : ActorSystem
     interp = current_interp
-    interp.actor_system ||= ActorSystem.new.tap { |s| s.global_env = interp.global }
+    interp.actor_system ||= ActorSystem.new.tap(&.global_env=(interp.global))
   end
 
   private def ensure_context : ActorContext
@@ -657,7 +657,7 @@ module Scheme::Builtins::ActorLibrary
   end
 
   private def handle_inbound(socket : TCPSocket | UNIXSocket, system : ActorSystem) : Nil
-    handshake_respond(socket, system.cookie.not_nil!)
+    handshake_respond(socket, system.cookie.as(String))
     loop do
       type, body = read_frame(socket)
       next unless type == FRAME_DELIVER
@@ -672,7 +672,7 @@ module Scheme::Builtins::ActorLibrary
   end
 
   private def send_remote(system : ActorSystem, ref : ActorRefData, msg : SchemeValue) : Nil
-    address = ref.address.not_nil!
+    address = ref.address.as(ActorAddress)
     if address.is_a?(LocalAddress)
       # In-process delivery: no socket, no handshake, no string (de)serial-
       # ization — the message is delivered by direct object reference, the
@@ -867,7 +867,7 @@ module Scheme::Builtins::ActorLibrary
   private def to_wire_plain(v : SchemeValue, system : ActorSystem) : SchemeValue
     case v
     when SchemeRecord
-      fields = v.fields.map { |f| to_wire_plain(f, system) }
+      fields = v.fields.map { |field| to_wire_plain(field, system) }
       Scheme.a_to_list([SchemeStr.new("@record").as(SchemeValue), SchemeStr.new(v.type.name).as(SchemeValue)] + fields)
     when SchemeBox
       if v.tag == "actor-ref"
@@ -900,7 +900,7 @@ module Scheme::Builtins::ActorLibrary
         type_name = items[1].as(SchemeStr).value
         type = system.global_env.try(&.get?(type_name)).as?(SchemeRecordType)
         raise SchemeRuntimeError.new("actor: received unknown record type '#{type_name}' over the network") unless type
-        SchemeRecord.new(type, items[2..].map { |f| from_wire_plain(f, system) }).as(SchemeValue)
+        SchemeRecord.new(type, items[2..].map { |field| from_wire_plain(field, system) }).as(SchemeValue)
       else
         Cons.new(from_wire_plain(v.car, system), from_wire_plain(v.cdr, system)).as(SchemeValue)
       end

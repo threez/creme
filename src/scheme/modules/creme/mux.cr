@@ -181,7 +181,7 @@ module Scheme::Builtins::MuxLibrary
                    {"127.0.0.1", mux_int_arg(args[1], "mux-listen!")}
                  end
     handlers = [Scheme::MuxInterpreterPoolHandler.new(interp).as(HTTP::Handler)]
-    handlers.concat(app.middlewares.map { |mw| Scheme::MuxMiddlewareHandler.new(interp, mw).as(HTTP::Handler) })
+    handlers.concat(app.middlewares.map { |middleware| Scheme::MuxMiddlewareHandler.new(interp, middleware).as(HTTP::Handler) })
     handlers << app.router.as(HTTP::Handler)
     server = HTTP::Server.new(handlers)
     address = server.bind_tcp(host, port)

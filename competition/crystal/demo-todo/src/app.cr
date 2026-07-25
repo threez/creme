@@ -21,13 +21,16 @@ class Todo < Granite::Base
   connection sqlite
   table todos
 
+  # ameba:disable Lint/UselessAssign
   column id : Int64, primary: true
+  # ameba:disable Lint/UselessAssign
   column title : String
+  # ameba:disable Lint/UselessAssign
   column done : Bool = false
 end
 
-Todo.adapter.open do |db|
-  db.exec "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done BOOLEAN NOT NULL DEFAULT 0)"
+Todo.adapter.open do |conn|
+  conn.exec "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done BOOLEAN NOT NULL DEFAULT 0)"
 end
 
 def add_todo!(title : String)
@@ -99,7 +102,7 @@ class PageView
 end
 
 def page_html
-  rows = todo_all.map { |row| cached_todo_row_html(row.id.not_nil!, row.done, row.title) }.join
+  rows = todo_all.map { |row| cached_todo_row_html(row.id.as(Int64), row.done, row.title) }.join
   PageView.new(CSS, rows, todo_count_remaining).to_s
 end
 
@@ -113,8 +116,8 @@ end
 
 get "/" do |env|
   accept = env.request.headers["Accept"]?
-  types = accept ? accept.split(',').map { |t| t.split(';').first.strip } : [] of String
-  case types.find { |t| t == "text/html" || t == "application/json" }
+  types = accept ? accept.split(',').map(&.split(';').first.strip) : [] of String
+  case types.find { |type| type == "text/html" || type == "application/json" }
   when "text/html"
     env.response.content_type = "text/html"
     page_html
