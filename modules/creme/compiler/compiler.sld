@@ -744,7 +744,7 @@
                          (imm-op (op-table-lookup 'test-imm op))
                          (imm-val (and imm-op (imm-literal-int arg2)))
                          (up-op (and (not imm-val) (op-table-lookup 'test-up op)))
-                         (up-idx (and up-op (leaf-expr? arg1) (upvalue-operand fc arg2)))
+                         (up-idx (and up-op (leaf-expr? fc arg1) (upvalue-operand fc arg2)))
                          (mark (fcomp-next-reg fc))
                          (result
                            (cond
@@ -755,7 +755,7 @@
                               (let ((r1 (compile-arg! fc arg1 #t)))
                                 (chunk-emit! ch up-op r1 0 up-idx 0)))
                              (else
-                              (let* ((r1 (compile-arg! fc arg1 (leaf-expr? arg2)))
+                              (let* ((r1 (compile-arg! fc arg1 (leaf-expr? fc arg2)))
                                      (r2 (compile-arg! fc arg2 #t)))
                                 (chunk-emit! ch (op-table-lookup 'test-base op) r1 0 r2 0))))))
                     (fcomp-reclaim-to! fc mark)
@@ -1370,14 +1370,45 @@
     (define (imm-literal-int expr)
       (and (integer? expr) (exact? expr) (>= expr -2147483648) (<= expr 2147483647) expr))
 
-    ;; Side-effect-free expression -- bare variable reference or
-    ;; self-evaluating literal (mirrors leaf_node?'s base cases; recursing
-    ;; into a nested fusable-prim-call the way the real leaf_node? does for
-    ;; PrimCallNode is an optional refinement not needed for the core win).
-    (define (leaf-expr? expr)
+    ;; Side-effect-free expression -- safe to evaluate anywhere relative
+    ;; to another argument's own evaluation, with no observable reordering
+    ;; effect. Mirrors bytecode_compiler.cr's own leaf_node? exactly,
+    ;; including its recursive case: a bare variable reference or self-
+    ;; evaluating literal, OR (recursively) a call to a known, un-shadowed
+    ;; fusable primitive whose own arguments are ALL leaves too -- e.g.
+    ;; (vector-length v) is a leaf whenever v is, since that call provably
+    ;; only reads its own operands and writes its own destination
+    ;; register, unlike an arbitrary function call (which might set!
+    ;; something, invoke a captured continuation, etc). This distinction
+    ;; is what let native's own compiler compare `i` directly against
+    ;; `(vector-length v)` in a named-let's own termination test with no
+    ;; register copy, while this compiler used to always copy `i` first
+    ;; (treating ANY compound expression as unsafe to reorder around) --
+    ;; found by diffing disassembled bytecode between the two compilers
+    ;; for the exact same source.
+    ;;
+    ;; Needs `fc` (unlike a purely syntactic check) to confirm a
+    ;; candidate primitive name isn't locally shadowed/redefined -- the
+    ;; same three checks compile-fused-test!'s own fusion gate already
+    ;; makes, factored out here (fusable-head?) so this predicate and
+    ;; that gate always agree on what counts as fusable.
+    (define (fusable-head? fc name arity)
+      (and (symbol? name)
+           (not (fcomp-lookup-local fc name))
+           (not (fcomp-resolve-upvalue! fc name))
+           (not (memq name redefined-fusable-globals))
+           (fused-prim-lookup name arity)))
+
+    (define (leaf-expr? fc expr)
       (or (symbol? expr)
           (number? expr) (string? expr) (char? expr) (boolean? expr) (vector? expr) (bytevector? expr)
-          (and (pair? expr) (eq? (car expr) 'quote))))
+          (and (pair? expr) (eq? (car expr) 'quote))
+          (and (pair? expr)
+               (fusable-head? fc (car expr) (length (cdr expr)))
+               (leaf-args? fc (cdr expr)))))
+
+    (define (leaf-args? fc exprs)
+      (or (null? exprs) (and (leaf-expr? fc (car exprs)) (leaf-args? fc (cdr exprs)))))
 
     ;; A candidate operand resolves to an upvalue iff it's a bare symbol,
     ;; NOT shadowed by a local in the CURRENT function (checked first, same
@@ -1497,9 +1528,9 @@
                (imm-op (op-table-lookup 'imm2 op))
                (imm-val (and imm-op (imm-literal-int arg2)))
                (up2-op (and (not imm-val) (op-table-lookup 'up2 op)))
-               (up2-idx (and up2-op (leaf-expr? arg1) (upvalue-operand fc arg2)))
+               (up2-idx (and up2-op (leaf-expr? fc arg1) (upvalue-operand fc arg2)))
                (up1-op (and (not imm-val) (not up2-idx) (op-table-lookup 'up1 op)))
-               (up1-idx (and up1-op (leaf-expr? arg2) (upvalue-operand fc arg1))))
+               (up1-idx (and up1-op (leaf-expr? fc arg2) (upvalue-operand fc arg1))))
           (cond
             (imm-val
              (let ((r1 (compile-arg! fc arg1 #t)))
@@ -1514,7 +1545,7 @@
                (chunk-emit! ch up1-op dest up1-idx r2 0)
                (if tail? (chunk-emit! ch 'Return dest 0 0 0))))
             (else
-             (let* ((r1 (compile-arg! fc arg1 (leaf-expr? arg2)))
+             (let* ((r1 (compile-arg! fc arg1 (leaf-expr? fc arg2)))
                     (r2 (compile-arg! fc arg2 #t))
                     (builtin-idx (chunk-add-const! ch (fp-name entry)))
                     (return-op (and tail? (fp-return-op entry))))
@@ -1582,22 +1613,22 @@
                (imm-op (op-table-lookup 'imm2 op))
                (imm-val (and imm-op (imm-literal-int idx-expr)))
                (up-op (and (not imm-val) (op-table-lookup 'up1 op)))
-               (up-idx (and up-op (leaf-expr? idx-expr) (leaf-expr? val-expr) (upvalue-operand fc obj-expr))))
+               (up-idx (and up-op (leaf-expr? fc idx-expr) (leaf-expr? fc val-expr) (upvalue-operand fc obj-expr))))
           (cond
             (imm-val
-             (let* ((obj-reg (compile-arg! fc obj-expr (leaf-expr? val-expr)))
+             (let* ((obj-reg (compile-arg! fc obj-expr (leaf-expr? fc val-expr)))
                     (val-reg (compile-arg! fc val-expr #t)))
                (chunk-emit! ch imm-op obj-reg imm-val val-reg 0)
                (if (not (= dest obj-reg)) (chunk-emit! ch 'Move dest obj-reg 0 0))
                (if tail? (chunk-emit! ch 'Return dest 0 0 0))))
             (up-idx
-             (let* ((idx-reg (compile-arg! fc idx-expr (leaf-expr? val-expr)))
+             (let* ((idx-reg (compile-arg! fc idx-expr (leaf-expr? fc val-expr)))
                     (val-reg (compile-arg! fc val-expr #t)))
                (chunk-emit! ch up-op up-idx idx-reg val-reg dest)
                (if tail? (chunk-emit! ch 'Return dest 0 0 0))))
             (else
-             (let* ((obj-reg (compile-arg! fc obj-expr (and (leaf-expr? idx-expr) (leaf-expr? val-expr))))
-                    (idx-reg (compile-arg! fc idx-expr (leaf-expr? val-expr)))
+             (let* ((obj-reg (compile-arg! fc obj-expr (and (leaf-expr? fc idx-expr) (leaf-expr? fc val-expr))))
+                    (idx-reg (compile-arg! fc idx-expr (leaf-expr? fc val-expr)))
                     (val-reg (compile-arg! fc val-expr #t))
                     (builtin-idx (chunk-add-const! ch (fp-name entry))))
                (chunk-emit! ch op obj-reg idx-reg val-reg builtin-idx)
@@ -1640,8 +1671,8 @@
         ((eq? kind 'upvalue) (if tail? 'TailCallUpval 'CallUpval))
         (else (if tail? 'TailCallGlobal 'CallGlobal))))
 
-    (define (every-leaf? exprs)
-      (let loop ((es exprs)) (or (null? es) (and (leaf-expr? (car es)) (loop (cdr es))))))
+    (define (every-leaf? fc exprs)
+      (let loop ((es exprs)) (or (null? es) (and (leaf-expr? fc (car es)) (loop (cdr es))))))
 
     ;; Bumps fcomp-next-reg up to (at least) n WITHOUT touching any register
     ;; below it -- a no-op whenever this function already has n or more
@@ -1652,11 +1683,31 @@
     (define (fcomp-ensure-next-reg! fc n)
       (let loop () (if (< (fcomp-next-reg fc) n) (begin (fcomp-alloc-reg! fc) (loop)))))
 
-    ;; Is `expr` a bare symbol whose CURRENT local register is exactly
-    ;; `reg`? The only way a leaf argument's own expression can "read"
-    ;; a specific register -- a self-evaluating literal never does.
+    ;; Does `expr` (already known to be a leaf-expr?, i.e. a symbol,
+    ;; self-evaluating literal, quoted datum, or a fusable-prim-call whose
+    ;; own arguments are all leaves too -- see every-leaf?'s own gate on
+    ;; every caller of this function) read the CURRENT local register
+    ;; `reg` anywhere in its own evaluation? A bare symbol reads it iff
+    ;; that's its own register; a quoted datum never does (its contents
+    ;; are literal data, not variable references, so this deliberately
+    ;; does NOT recurse into a (quote ...) the way it does an ordinary
+    ;; fusable-prim-call); a fusable-prim-call reads it iff any of its OWN
+    ;; arguments (recursively) does -- e.g. (+ acc (vector-ref v i)) reads
+    ;; i's register through vector-ref's own 2nd argument. Must stay
+    ;; exactly as deep as leaf-expr?'s own recursion: this used to only
+    ;; check the bare-symbol case, silently missing exactly this
+    ;; compound-argument hazard once every-leaf?/leaf-expr? started
+    ;; recognizing a fusable-prim-call as a leaf too.
     (define (arg-reads-register? fc expr reg)
-      (and (symbol? expr) (eqv? (fcomp-lookup-local fc expr) reg)))
+      (or (and (symbol? expr) (eqv? (fcomp-lookup-local fc expr) reg))
+          (and (pair? expr)
+               (not (eq? (car expr) 'quote))
+               (args-read-register? fc (cdr expr) reg))))
+
+    (define (args-read-register? fc exprs reg)
+      (and (pair? exprs)
+           (or (arg-reads-register? fc (car exprs) reg)
+               (args-read-register? fc (cdr exprs) reg))))
 
     ;; None of a tail call's own target registers 0..nargs-1 may be an open
     ;; upvalue some nested closure captured earlier in THIS function (see
@@ -1729,7 +1780,7 @@
                    (operand (cdr resolved))
                    (op (call-op-for kind tail?))
                    (nargs (length arg-exprs)))
-              (if (and tail? (every-leaf? arg-exprs) (fast-tail-args-safe? fc nargs))
+              (if (and tail? (every-leaf? fc arg-exprs) (fast-tail-args-safe? fc nargs))
                   (let ((mark (fcomp-next-reg fc)))
                     (fcomp-ensure-next-reg! fc nargs)
                     (let ((safe-operand

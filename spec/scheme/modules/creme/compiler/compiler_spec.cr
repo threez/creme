@@ -208,6 +208,25 @@ describe "bootstrap-compiler module" do
       # safety-relevant case for fcomp-captured-regs).
       "(define (count-with-limit i limit) (if (= i limit) 'done (count-with-limit (+ i 1) limit))) (count-with-limit 0 1000)",
       "(define (swap-loop n a b) (if (= n 0) (list a b) (swap-loop (- n 1) b a))) (swap-loop 4 1 2)",
+      # leaf-expr? recognizes a fusable-primitive call (whose own
+      # arguments are all leaves too) as a leaf, mirroring
+      # bytecode_compiler.cr's own recursive leaf_node? -- found by
+      # diffing disassembled bytecode between the two compilers: sum-vec
+      # above (its named-let compares its own parameter `i` directly
+      # against the compound `(vector-length v)`) used to always copy `i`
+      # into a fresh register first, treating ANY compound expression as
+      # unsafe to reorder around, unlike native; making leaf-expr?
+      # recursive fixed that. But that ALSO widens which tail calls take
+      # the fast in-place-argument path (every-leaf?), which depends on
+      # arg-reads-register? correctly detecting a register read INSIDE a
+      # compound leaf argument, not just a bare symbol -- this case
+      # exercises exactly that: a tail call that swaps two parameters via
+      # compound (fusable-call) expressions rather than bare variables,
+      # which MUST still take the deferred-scratch-register path despite
+      # each argument being compound, not a bare symbol -- silently
+      # reading the WRONG (already-overwritten) value if
+      # arg-reads-register? didn't recurse into it.
+      "(define (swap-loop-compound n a b) (if (= n 0) (list a b) (swap-loop-compound (- n 1) (+ b 0) (+ a 0)))) (swap-loop-compound 4 1 2)",
       "(define (loop-with-closure n) (let loop ((i 0) (snapshots '())) (if (= i n) (map (lambda (f) (f)) (reverse snapshots)) (let ((snap (lambda () i))) (loop (+ i 1) (cons snap snapshots)))))) (loop-with-closure 5)",
       # Scope-based register reclaim: several sequential lets/statements in
       # one body (register count must not keep growing across siblings --
