@@ -89,7 +89,7 @@
 ;; ===========================================================================
 
 (define-library (creme compiler compiler)
-  (export compile-source-to-bytes compile-program ensure-libraries-loaded!)
+  (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
           (creme bytecode) (creme bootstrap) (creme compiler reader))
   (begin
@@ -483,21 +483,39 @@
     ;; comment: a defmacro transformer already can't see its OWN
     ;; library's private, non-exported bindings under the real
     ;; interpreter either, for exactly this reason).
-    (define (compile-defmacro! fc expr dest tail?)
-      (let* ((name (cadr expr))
-             (parsed (parse-formals (caddr expr)))
+    ;;
+    ;; Shared by compile-defmacro!'s own registered transformer below (for
+    ;; a LOCAL, same-compile-session macro use) and cvm's bootstrap.c
+    ;; (bi_expand_if_macro, via cvm_apply, looking this up by name in
+    ;; vm->globals) for a defmacro EXPORTED from a library compiled
+    ;; straight to bytecode -- e.g. sxql-select! from (creme sxql),
+    ;; Crystal-native-precompiled into a cvm image -- whose runtime value,
+    ;; once Op::HelperForm's kind==4 case binds it (vm.c), is a T_MACRO
+    ;; wrapping this exact (defmacro name (params...) body...) form. Both
+    ;; call sites need the SAME "bind params positionally to the call's
+    ;; own raw, unevaluated argument forms, then compile+run the body"
+    ;; semantics (mirrors the real interpreter's own expand_defmacro
+    ;; exactly, see compile-defmacro!'s own doc comment below), so it's
+    ;; built once here from the RAW form rather than risking the two
+    ;; drifting apart. Exported under this exact name (compiler.sld's own
+    ;; export clause) since a C builtin can only ever find a Scheme
+    ;; procedure by looking it up as a named global.
+    (define (defmacro-expand-form macro-def-form call-form)
+      (let* ((parsed (parse-formals (caddr macro-def-form)))
              (fixed (car parsed))
              (rest (cdr parsed))
-             (body (cdddr expr)))
-        (macro-register! name
-          (lambda (form)
-            (let* ((args (cdr form))
-                   (n (length fixed))
-                   (fixed-args (sr-list-take args n))
-                   (rest-args (sr-list-drop args n))
-                   (fixed-bindings (map (lambda (p a) (list p (list 'quote a))) fixed fixed-args))
-                   (rest-binding (if rest (list (list rest (list 'quote rest-args))) '())))
-              (run-compiled-forms! (list (cons 'let (cons (append fixed-bindings rest-binding) body)))))))
+             (body (cdddr macro-def-form))
+             (args (cdr call-form))
+             (n (length fixed))
+             (fixed-args (sr-list-take args n))
+             (rest-args (sr-list-drop args n))
+             (fixed-bindings (map (lambda (p a) (list p (list 'quote a))) fixed fixed-args))
+             (rest-binding (if rest (list (list rest (list 'quote rest-args))) '())))
+        (run-compiled-forms! (list (cons 'let (cons (append fixed-bindings rest-binding) body))))))
+
+    (define (compile-defmacro! fc expr dest tail?)
+      (let ((name (cadr expr)))
+        (macro-register! name (lambda (form) (defmacro-expand-form expr form)))
         (if tail? (compile-literal-datum! fc '() dest #t))))
 
     ;; let-syntax/letrec-syntax -- treated identically (macro-table lookup

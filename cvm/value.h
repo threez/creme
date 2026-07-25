@@ -73,6 +73,22 @@ typedef enum {
   T_BOX,    /* opaque native handle -- a hash table, sql connection, mux
              * router/server, etc. `kind` (BOX_KIND_*) disambiguates which;
              * mirrors the real interpreter's SchemeBox. */
+  T_MACRO,  /* a defmacro's raw, unexpanded (defmacro name (params...)
+             * body...) form, bound under `name` in vm->globals by
+             * Op::HelperForm's kind==4 case -- reuses .as.pair (the tag
+             * alone distinguishes it from an ordinary T_PAIR value bound
+             * to the same name, e.g. `(define name '(defmacro ...))`).
+             * Lets expand-if-macro (bootstrap.c) recognize a defmacro
+             * EXPORTED from a library compiled straight to bytecode
+             * (Crystal natively, or this project's own self-hosted
+             * compiler ahead of time) as a real runtime macro, the same
+             * way Crystal's own Macro/env-bound value does -- see
+             * bootstrap.c's own header comment and modules/creme/
+             * compiler/compiler.sld's cvm-expand-defmacro-form, which
+             * does the actual expansion (bind params, compile+run body)
+             * reentrant from C via cvm_apply. define-syntax (syntax-rules)
+             * macros aren't covered by this -- see bootstrap.c's
+             * bi_expand_if_macro for why that's a narrower, separate gap. */
 } Tag;
 
 /* RecordCallable kinds -- mirrors the real interpreter's split between an
@@ -283,6 +299,15 @@ static inline Value v_pair(Pair *p) {
   Value v;
   v.tag = T_PAIR;
   v.as.pair = p;
+  return v;
+}
+
+/* `form` is the raw (defmacro name (params...) body...) Pair -- see
+ * T_MACRO's own doc comment above. */
+static inline Value v_macro(Pair *form) {
+  Value v;
+  v.tag = T_MACRO;
+  v.as.pair = form;
   return v;
 }
 

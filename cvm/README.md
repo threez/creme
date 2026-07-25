@@ -88,23 +88,38 @@ and `vm.c`'s reentrant `cvm_run_loaded_chunk`.
 `cvm/bootstrap.c` also provides `import!` (a no-op — cvm's global table
 is already unconditionally flat, so "importing" anything already baked
 into the running image, which is everything reachable at all, has
-nothing left to do) and `expand-if-macro` (always `#f` — cvm has no
-runtime `Macro`/`SchemeSyntaxRules` representation at all, so nothing in
-its global table can ever truthfully be one). The self-hosted compiler's
-own `compile-import!`/`compile-form!` call both of these unconditionally,
-so both need to exist for it to run at all, REPL or not.
+nothing left to do) and `expand-if-macro`. The self-hosted compiler's own
+`compile-import!`/`compile-form!` call both of these unconditionally, so
+both need to exist for it to run at all, REPL or not.
 
-**Real, inherent limitation**: a REPL session can define and use its own
-`define-syntax`/`defmacro` macros — the compiler's own `macro-table` is
-an ordinary mutable Scheme variable inside the loaded image, so it
-persists naturally across separate `load-chunk-bytes` calls in the same
-process — but can never use a macro that was only defined inside a
-flattened/precompiled library baked into the image (e.g. `sxql-select!`
-from `(creme sxql)`, if the image happened to import it): that library's
-own macro *definition* never produces a runtime value under cvm in the
-first place (`define-syntax`/`defmacro` are analyze-time-only regardless
-of backend — see "Deliberate cuts" below), so there is nothing for
-`expand-if-macro` to ever find.
+`expand-if-macro` recognizes a **`defmacro`** exported from a library
+compiled straight to bytecode (Crystal-native ahead of time via
+`--emit-cvm`, or this project's own self-hosted compiler) — e.g.
+`sxql-select!` from `(creme sxql)`, if the image happened to bundle it: a
+top-level `defmacro`'s `Op::HelperForm` (kind 4, `vm.c`) binds a genuine
+`T_MACRO` value (`value.h`) under the macro's name, wrapping its raw
+`(defmacro name (params...) body...)` form. `bi_expand_if_macro`
+recognizes that tag and delegates the actual expansion (bind params
+positionally to the call's own raw, unevaluated argument forms; compile +
+run the body) to `modules/creme/compiler/compiler.sld`'s own
+`defmacro-expand-form`, reached by name via `cvm_apply` — this file has
+no compiler of its own to do that reentrant compile-and-run step in C,
+but the self-hosted compiler is necessarily already loaded for
+`expand-if-macro` to ever be called at all (it's `compiler.sld`'s own
+compiled bytecode that calls it), and already has exactly this logic in
+`compile-defmacro!`'s own transformer.
+
+**Still-open, narrower limitation**: `define-syntax`/`syntax-rules`
+macros are NOT covered by this — expanding one needs real pattern
+matching (`sr-expand`, `compiler.sld`), unlike `defmacro`'s plain
+bind-and-run-the-body semantics where there's no pattern to match at all.
+A REPL session can still define and use its own `define-syntax`/
+`defmacro` macros regardless (the compiler's own `macro-table` is an
+ordinary mutable Scheme variable inside the loaded image, persisting
+naturally across separate `load-chunk-bytes` calls in the same process),
+and can now also use a **`defmacro`** exported from a flattened/
+precompiled library baked into the image — just not one defined via
+`define-syntax`.
 
 Getting the self-hosted compiler to run under cvm at all also needed two
 small, genuinely new capabilities cvm never had before, independent of
@@ -498,7 +513,14 @@ above) — Scheme-level calls never become real C stack frames.
   the program needs. There is no R7RS library/import system *at runtime* —
   no `eval`, no dynamically loading a library cvm wasn't built with.
 - Macros (`define-syntax`/`syntax-rules`/`defmacro`) are always gone by
-  compile time regardless of backend — nothing cvm-specific there.
+  compile time regardless of backend — nothing cvm-specific there, for an
+  ordinary precompiled program. `Op::HelperForm`'s kind==4 (top-level
+  `defmacro`) is the one exception, needed for the "Compiler mode"/REPL
+  scenario above: it binds a real `T_MACRO` runtime value so `expand-if-
+  macro` can recognize a `defmacro` exported from a library compiled
+  straight to bytecode when the self-hosted compiler runs reentrant under
+  cvm — see that section's own description. `define-syntax` stays a pure
+  no-op either way (no runtime pattern-matching support in this VM).
 
 ## Files
 

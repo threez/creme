@@ -68,25 +68,54 @@ static Value bi_import_bang(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 
-/* Always #f -- and this is the actually correct answer, not a stub.
- * cvm's value model has no runtime Macro/SchemeSyntaxRules representation
- * at all: define-syntax/defmacro are analyze-time-only regardless of
- * backend, and their own top-level form already compiles to a no-op
- * (OP_HELPERFORM's c=3/c=4 cases -- see cvm/README.md's "Deliberate
- * cuts"). Nothing vm->globals can ever contain IS a macro, so this can
- * never truthfully find one. Real consequence: a REPL session can define
- * and use its OWN define-syntax/defmacro macros (the self-hosted
- * compiler's own macro-table is an ordinary mutable Scheme variable in
- * the loaded image, so it persists naturally across separate
- * load-chunk-bytes calls in the same process), but can never use one
- * that was only defined inside a flattened/precompiled library (e.g.
- * sxql-select! from (creme sxql)) -- that library's own macro definition
- * never produced a runtime value under cvm in the first place. */
+/* `args[0]` is the whole call form under consideration (e.g. `(sxql-
+ * select! conn fields ...)`), same contract as the real interpreter's own
+ * expand-if-macro (see modules/creme/compiler/compiler.sld's target-env-
+ * macro-expand). Returns `(cons #t expansion)` if `form`'s head resolves,
+ * in vm->globals, to a defmacro EXPORTED from a library compiled straight
+ * to bytecode (Crystal-native, or this project's own self-hosted compiler
+ * ahead of time) -- Op::HelperForm's kind==4 case (vm.c) binds exactly
+ * this: a T_MACRO value wrapping the macro's raw (defmacro name
+ * (params...) body...) form, e.g. sxql-select! from (creme sxql), the
+ * flagship case this exists for. The actual expansion (bind params
+ * positionally to the call's own raw, unevaluated argument forms;
+ * compile+run the body) is delegated to compiler.sld's own
+ * defmacro-expand-form via cvm_apply -- this file has no compiler of
+ * its own to do that reentrant compile-and-run step in C, but the self-
+ * hosted compiler that's necessarily ALREADY LOADED for expand-if-macro
+ * to ever be called at all (it's compiler.sld's own compiled bytecode
+ * that calls this) already has exactly the logic needed, in
+ * compile-defmacro!'s own transformer -- defmacro-expand-form is that
+ * same logic, exported so this builtin can reach it by name.
+ *
+ * define-syntax (syntax-rules) macros are NOT covered by this: expanding
+ * one needs real pattern matching (sr-expand, compiler.sld), which this
+ * builtin doesn't attempt to bridge to (unlike defmacro's plain
+ * bind-and-run-the-body semantics, a syntax-rules use's own PATTERN needs
+ * to be matched before there's even a param/arg correspondence to bind --
+ * a real, separate, still-open gap, left for follow-up work). */
 static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  (void)args;
-  (void)nargs;
-  return v_bool(0);
+  if (nargs != 1) cvm_abort("expand-if-macro: expected 1 argument");
+  Value form = args[0];
+  if (form.tag != T_PAIR) return v_bool(0);
+  Value head = form.as.pair->car;
+  if (head.tag != T_SYM) return v_bool(0);
+
+  int slot = cvm_global_intern(vm, head.as.str.chars, head.as.str.len);
+  if (!vm->globals[slot].bound || vm->globals[slot].value.tag != T_MACRO) return v_bool(0);
+  Pair *macro_form = vm->globals[slot].value.as.pair;
+
+  const char *bridge_name = "defmacro-expand-form";
+  int bridge_slot = cvm_global_intern(vm, bridge_name, (int)strlen(bridge_name));
+  if (!vm->globals[bridge_slot].bound) {
+    cvm_abort("expand-if-macro: %s is not loaded (is (creme compiler compiler) imported?)", bridge_name);
+  }
+
+  Value bridge_args[2];
+  bridge_args[0] = v_pair(macro_form); /* re-tag as an ordinary pair for Scheme code */
+  bridge_args[1] = form;
+  Value expansion = cvm_apply(vm, vm->globals[bridge_slot].value, bridge_args, 2);
+  return cvm_cons(vm, v_bool(1), expansion);
 }
 
 /* Reads `path`'s entire contents into one T_STR -- cvm's only other file-

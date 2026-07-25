@@ -1054,11 +1054,19 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
      * never actually appears as a compiled top-level form (only a
      * library's OWN body forms get flattened into the chunk, never the
      * define-library wrapper itself), so it's also unreachable-in-
-     * practice as a no-op. c=3/c=4 (define-syntax/defmacro) are
-     * compile-time-only regardless of backend (macros are fully expanded
-     * away before bytecode compilation even happens) — a runtime no-op is
-     * the CORRECT behavior for these three, not a limitation. Only c=2
-     * (top-level define-record-type) needs real work here. */
+     * practice as a no-op. c=3 (define-syntax) stays compile-time-only —
+     * expanding a syntax-rules use needs real pattern matching, which
+     * this VM doesn't implement (see bootstrap.c's bi_expand_if_macro for
+     * that narrower, still-open gap). c=4 (defmacro) DOES need real work
+     * now: binds a genuine T_MACRO value (see value.h's own doc comment)
+     * under the macro's name, so a defmacro EXPORTED from a library
+     * compiled straight to bytecode (e.g. sxql-select! from (creme
+     * sxql), Crystal-native-precompiled into this image) is recognizable
+     * as a macro by expand-if-macro when the self-hosted compiler runs
+     * reentrant under cvm and later compiles a USE of it — matching what
+     * Crystal's own eval_defmacro does (env.define(name, mac)) for
+     * exactly the same reason. c=2 (top-level define-record-type) is the
+     * pre-existing real-work case below. */
     if (ins->c == 2) {
       Value form = frame->chunk->consts[ins->b];
       RecordBindings rb = build_record_bindings(form);
@@ -1072,6 +1080,20 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
        * (not the type descriptor) -- record_type_names.cr's `names[0]`/
        * rb.names[0] is exactly that symbol. */
       stack[base + ins->a] = rb.names[0];
+    } else if (ins->c == 4) {
+      Value form = frame->chunk->consts[ins->b];
+      if (form.tag != T_PAIR) cvm_abort("defmacro: malformed form");
+      Value parts = form.as.pair->cdr; /* drop the leading `defmacro` symbol */
+      if (parts.tag != T_PAIR) cvm_abort("defmacro: malformed form");
+      Value name = parts.as.pair->car;
+      if (name.tag != T_SYM) cvm_abort("defmacro: name must be a symbol");
+      int slot = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
+      vm->globals[slot].value = v_macro(form.as.pair);
+      vm->globals[slot].bound = 1;
+      /* eval_defmacro returns the macro's own name symbol (interpreter.cr),
+       * same convention record-type-definition's own HelperForm result
+       * above already follows. */
+      stack[base + ins->a] = name;
     } else {
       stack[base + ins->a] = v_nil();
     }
