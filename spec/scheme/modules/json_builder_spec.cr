@@ -90,4 +90,24 @@ describe "json-builder module" do
       (get-output-string port)
       SCM
   end
+
+  describe "json-array-write!" do
+    it "writes each element via proc, comma-separated, into an already-open port" do
+      w(<<-SCM).should eq(%("[1,4,9]"))
+        (define port (open-output-string))
+        (json-array-write! port
+          (lambda (port n) (json-write! port `(raw ,(number->string (* n n)))))
+          '(1 2 3))
+        (get-output-string port)
+        SCM
+    end
+
+    it "writes [] for an empty list" do
+      w(<<-SCM).should eq(%("[]"))
+        (define port (open-output-string))
+        (json-array-write! port (lambda (port n) (json-write! port `,n)) '())
+        (get-output-string port)
+        SCM
+    end
+  end
 end

@@ -388,6 +388,10 @@ describe "surf module" do
       w(%((mux-router? (surf-app)))).should eq("#t")
     end
 
+    it "surf-app 'logging #f skips registering surf-log-middleware, still recognized by mux-router?" do
+      w(%((mux-router? (surf-app 'logging #f)))).should eq("#t")
+    end
+
     it "surf-log-middleware logs one line: method, path, status, elapsed ms" do
       # Called directly (not through a live server): request handling for a
       # real mux-listen! server runs on its own connection fiber, and a

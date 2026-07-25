@@ -135,6 +135,33 @@
 ;;                                      for a script that wants to build its
 ;;                                      routing table up incrementally
 ;;                                      rather than as one surf form.
+;;   (surf-app 'logging #f)         -> same, but skips registering
+;;                                      surf-log-middleware — for a script
+;;                                      that wants to register its own
+;;                                      logging (or none at all), e.g. a
+;;                                      throughput benchmark: every other
+;;                                      language competitor in this repo's
+;;                                      own competition/ apps explicitly
+;;                                      disables per-request access logging
+;;                                      for that same reason (see
+;;                                      competition/go/demo-todo/main.go's
+;;                                      gorm.Config{Logger: logger.Silent}
+;;                                      and competition/c/demo-todo/main.c's
+;;                                      http_listen(..., .log = 0)) — surf
+;;                                      itself always calls plain
+;;                                      (surf-app), so this has no effect on
+;;                                      anything built via the surf macro;
+;;                                      reach for surf-app/surf-clauses
+;;                                      directly (see surf-route! above)
+;;                                      when this control is needed. Flat
+;;                                      key/value pairs, same convention
+;;                                      (creme dao)'s todo-create!/todo-
+;;                                      update! kvs and (creme sql)'s
+;;                                      csv-import! options use — not a
+;;                                      bare positional flag, so a future
+;;                                      second option has an obvious,
+;;                                      self-documenting place to go.
+;;                                      'logging is the only option today.
 ;;   (surf-route! app clause)       -> registers one more clause (same
 ;;                                      leaf-or-group shape as above) onto
 ;;                                      an already-existing app value;
@@ -275,14 +302,16 @@
 ;;
 ;;   (surf-log-middleware request next) -> the default logging middleware,
 ;;                                      registered automatically by
-;;                                      surf-app (and so by surf too, which
-;;                                      is built out of surf-app) via
-;;                                      (creme mux)'s own mux-use! — every
-;;                                      request through a surf-built app
-;;                                      logs one line, "client-addr METHOD
-;;                                      /path -> status (Nms)", to
-;;                                      (current-output-port) once
-;;                                      handling finishes. Exported so a
+;;                                      (surf-app) (and so by surf too,
+;;                                      which is built out of plain
+;;                                      (surf-app)) via (creme mux)'s own
+;;                                      mux-use! — every request through
+;;                                      such an app logs one line,
+;;                                      "client-addr METHOD /path -> status
+;;                                      (Nms)", to (current-output-port)
+;;                                      once handling finishes. Skipped
+;;                                      entirely by (surf-app 'logging #f)
+;;                                      — see surf-app above. Exported so a
 ;;                                      script can also register it
 ;;                                      manually on a router built via
 ;;                                      bare (creme mux) (mux-router)
@@ -318,9 +347,20 @@
          (current-output-port))
         status))
 
-    (define (surf-app)
+    ;; Scans a flat key/value option list (e.g. surf-app's own opts below)
+    ;; for `key`, returning its paired value or `default` if absent — same
+    ;; flat convention (creme dao)'s todo-create!/todo-update! kvs and
+    ;; (creme sql)'s csv-import! options use, just read back rather than
+    ;; built into a query. Private: surf-app is its only caller today.
+    (define (surf-opt-ref opts key default)
+      (cond
+       ((null? opts) default)
+       ((eq? (car opts) key) (cadr opts))
+       (else (surf-opt-ref (cddr opts) key default))))
+
+    (define (surf-app . opts)
       (let ((app (mux-router)))
-        (mux-use! app surf-log-middleware)
+        (if (surf-opt-ref opts 'logging #t) (mux-use! app surf-log-middleware))
         app))
 
     ;; A clause's binding form is (req name ...) -- req is the request alist

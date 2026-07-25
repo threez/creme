@@ -86,19 +86,24 @@
 ;;                               via (creme mux)); returns unspecified, not
 ;;                               a string. Same @global-visibility
 ;;                               requirement as json!
-;;   (json-array-map proc lst) -> (array (proc elt) ...), an ordinary node
-;;                               (see json-render above), NOT a macro — `lst`
-;;                               is genuinely dynamic (e.g. every row a
-;;                               (creme dao) query returns), so there is no
-;;                               fixed set of array items for json!'s
-;;                               compile-time fold to see. `proc` maps one
-;;                               element to its own node (typically
-;;                               (object ...)); pass the result straight to
-;;                               json->string/json-render/json-write! —
-;;                               replaces the previous idiom of rendering
-;;                               each element to its own JSON string with
-;;                               json->string and string-joining the
-;;                               results with "," under a (raw ...) node.
+;;   (json-array-write! port proc lst) -> writes a JSON array directly into
+;;                               `port`: "[", then for each element of
+;;                               `lst` calls (proc port elt) -- expected to
+;;                               write that element's own JSON rendering
+;;                               directly into `port` itself (typically via
+;;                               json-write!), separated by ",", then "]".
+;;                               NOT a macro, same reason json-write! itself
+;;                               isn't one: `lst` is genuinely dynamic (e.g.
+;;                               every row a (creme dao) query returns), so
+;;                               there is no fixed set of array items for
+;;                               json!'s compile-time fold to see. The
+;;                               port-threaded counterpart to json-render/
+;;                               json->string's node-walking: no per-element
+;;                               node or string is ever materialized, so
+;;                               streaming a large array into an HTTP
+;;                               response port (e.g. via (creme mux)) is
+;;                               O(total output size) with no intermediate
+;;                               allocation.
 ;;
 ;; Example:
 ;;
@@ -112,32 +117,40 @@
 
 (define-library (creme json-builder)
   (export json-escape json-render json->string json-fold json-merge-pieces
-          json-pieces->body json! json-write! json-array-map)
-  (import (scheme base) (scheme write))
+          json-pieces->body json! json-write! json-array-write!)
+  (import (scheme base) (scheme write) (creme string))
   (begin
-    ;; A generic \u00XX fallback covers every control character; the four
-    ;; named escapes (\" \\ \n \t \r) are just the common, more-readable
-    ;; special cases JSON also allows.
-    (define (json-escape-char->string c)
-      (cond
-       ((char=? c #\") "\\\"")
-       ((char=? c #\\) "\\\\")
-       ((char=? c #\newline) "\\n")
-       ((char=? c #\tab) "\\t")
-       ((char=? c #\return) "\\r")
-       ((< (char->integer c) 32)
-        (let* ((code (char->integer c))
-               (hex (number->string code 16))
-               (padded (string-append (make-string (- 4 (string-length hex)) #\0) hex)))
-          (string-append "\\u" padded)))
-       (else (string c))))
+    ;; Every character JSON needs escaped (control codes 0x00-0x1F, plus "
+    ;; and \) is a small, fully enumerable, static set, so -- exactly like
+    ;; (creme html)'s own html-escape-table (see html.sld's header comment
+    ;; for the measured char-by-char-Scheme-loop-vs-native-pass rationale
+    ;; this mirrors) -- the whole substitution table is built ONCE here,
+    ;; rather than re-decided per character on every json-escape call. The
+    ;; three 2-char escapes JSON singles out for readability (\n \t \r)
+    ;; override the generic \u00XX form for their own codes; every other
+    ;; control character gets \u00XX.
+    (define json-escape-table
+      (let loop ((code 0) (acc (list (cons #\" "\\\"") (cons #\\ "\\\\"))))
+        (if (> code 31)
+            acc
+            (loop (+ code 1)
+                  (cons (cons (integer->char code)
+                              (cond
+                               ((= code 10) "\\n")
+                               ((= code 9) "\\t")
+                               ((= code 13) "\\r")
+                               (else
+                                (let* ((hex (number->string code 16))
+                                       (padded (string-append (make-string (- 4 (string-length hex)) #\0) hex)))
+                                  (string-append "\\u" padded)))))
+                        acc)))))
 
-    ;; (json-escape s) -> s as a quoted, escaped JSON string literal.
+    ;; (json-escape s) -> s as a quoted, escaped JSON string literal, every
+    ;; substitution found in a SINGLE native pass over s (string-translate,
+    ;; (creme string)) rather than a per-character Scheme loop -- see
+    ;; json-escape-table's own comment above.
     (define (json-escape s)
-      (let loop ((i 0) (acc (list "\"")))
-        (if (>= i (string-length s))
-            (apply string-append (reverse (cons "\"" acc)))
-            (loop (+ i 1) (cons (json-escape-char->string (string-ref s i)) acc)))))
+      (string-append "\"" (string-translate s json-escape-table) "\""))
 
     (define (json-key->string key)
       (if (symbol? key) (symbol->string key) key))
@@ -190,13 +203,18 @@
         (json-render port node)
         (get-output-string port)))
 
-    ;; (json-array-map proc lst) -> (array (proc elt) ...) -- an ordinary
-    ;; node, not a macro, for mapping a genuinely dynamic list (e.g. every
-    ;; row a (creme dao) query returns) to a JSON array of per-element
-    ;; nodes. Pass the result straight to json->string/json-render/
-    ;; json-write!.
-    (define (json-array-map proc lst)
-      (cons 'array (map proc lst)))
+    ;; (json-array-write! port proc lst) -> writes a JSON array directly
+    ;; into `port`, calling (proc port elt) for each element's own write --
+    ;; see the header comment above for the full contract/rationale.
+    (define (json-array-write! port proc lst)
+      (write-string "[" port)
+      (let loop ((lst lst) (first #t))
+        (if (pair? lst)
+            (begin
+              (if (not first) (write-string "," port))
+              (proc port (car lst))
+              (loop (cdr lst) #f))))
+      (write-string "]" port))
 
     ;; ---- compile-time template folding (json!) -----------------------------
 

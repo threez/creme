@@ -33,8 +33,7 @@
          (old-done (todo-done? row))
          (title (dao-ref row 'title)))
     (todo-update! id 'done (if old-done #f #t))
-    (memoize-forget! cached-todo-row->string id old-done title)
-    (memoize-forget! cached-todo-row->json id old-done title)))
+    (memoize-forget! cached-todo-row->string id old-done title)))
 
 (define (todo-row->string id done title)
   (html! `(li (@ (class ,(if done "done" "pending")))
@@ -85,37 +84,41 @@
 
 (define (page-response) (surf-html write-page!))
 
-(define (todo-row->json id done title)
-  (json! `(object (id ,id) (title ,title) (done ,done))))
-
-(define cached-todo-row->json (memoize todo-row->json))
-
-(define (todo-row->json-node row)
-  (list 'raw (cached-todo-row->json (dao-ref row 'id) (todo-done? row) (dao-ref row 'title))))
-
 (define (write-todos-json! port)
-  (json-render port (json-array-map todo-row->json-node (todo-all))))
+  (json-array-write! port
+    (lambda (port row)
+      (json-write! port `(object (id ,(dao-ref row 'id)) (title ,(dao-ref row 'title)) (done ,(todo-done? row)))))
+    (todo-all)))
 
+;; (surf-app 'logging #f), not the plain (surf ...) macro: skips
+;; surf-log-middleware, which otherwise writes one line per request to
+;; (current-output-port) -- every other language competitor in this
+;; benchmark explicitly disables its own framework's per-request access
+;; logging too (see (creme surf)'s own header comment on surf-app for the
+;; specific Go/C references), so this keeps the comparison fair rather
+;; than charging only creme for it.
 (define router
-  (surf
-   (get ("") (request)
-     (surf-accept request
-       ("text/html" (page-response))
-       ("application/json" (surf-json write-todos-json!))
-       (else (surf-text "Not Acceptable: this route serves text/html or application/json" 406))))
+  (let ((app (surf-app 'logging #f)))
+    (surf-clauses app ()
+      (get ("") (request)
+        (surf-accept request
+          ("text/html" (page-response))
+          ("application/json" (surf-json write-todos-json!))
+          (else (surf-text "Not Acceptable: this route serves text/html or application/json" 406))))
 
-   (post ("todos") (request title)
-     (add-todo! title)
-     (surf-redirect "/"))
+      (post ("todos") (request title)
+        (add-todo! title)
+        (surf-redirect "/"))
 
-   (at ("todos" (id integer))
-     (post ("complete") (request)
-       (toggle-todo! id)
-       (surf-redirect "/"))
+      (at ("todos" (id integer))
+        (post ("complete") (request)
+          (toggle-todo! id)
+          (surf-redirect "/"))
 
-     (post ("delete") (request)
-       (todo-delete! id)
-       (surf-redirect "/")))))
+        (post ("delete") (request)
+          (todo-delete! id)
+          (surf-redirect "/"))))
+    app))
 
 (add-todo! "Write report")
 (add-todo! "Review PR")
