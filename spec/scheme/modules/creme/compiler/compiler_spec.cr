@@ -95,6 +95,19 @@ describe "bootstrap-compiler module" do
       "(list 3.14 -2.5 1e10 (/ 1.0 3))",
       %((let-syntax ((double (syntax-rules () ((_ x) (* 2 x))))) (list (double 5) (double 10)))),
       %((define-syntax outer-macro (syntax-rules () ((_ x) (+ x 1)))) (letrec-syntax ((double (syntax-rules () ((_ x) (* 2 (outer-macro x)))))) (double 5))),
+      # let-syntax/letrec-syntax scoping edge cases -- the Creme compiler
+      # uses a whole-macro-table snapshot/restore (compile-let-syntax!)
+      # instead of Crystal's own parent-chained MacroEnv (analyze_let_syntax);
+      # these check that's behaviorally equivalent for shadowing an outer
+      # macro of the same name (and correctly un-shadowing it afterward),
+      # sibling let-syntax forms not leaking into each other, and nested
+      # let-syntax shadowing an enclosing let-syntax's own same-named macro.
+      %((define-syntax id (syntax-rules () ((_ x) (list 'outer x))))
+        (list (id 1) (let-syntax ((id (syntax-rules () ((_ x) (list 'inner x))))) (id 2)) (id 3))),
+      %((list (let-syntax ((tag (syntax-rules () ((_ x) (list 'a x))))) (tag 1))
+              (let-syntax ((tag (syntax-rules () ((_ x) (list 'b x))))) (tag 2)))),
+      %((let-syntax ((tag (syntax-rules () ((_ x) (list 'outer x)))))
+          (list (tag 1) (let-syntax ((tag (syntax-rules () ((_ x) (list 'inner x))))) (tag 2)) (tag 3)))),
       "(define (f) (display \"a\") (begin (define y 10)) (+ y 1)) (f)",
       %((let ((x 1)) `(a `(b ,(+ 1 2) ,,x)))),
       %((let ((name 'foo) (val 42)) `(define ,name ,val))),

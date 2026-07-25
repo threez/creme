@@ -509,7 +509,18 @@
     ;; shadowing an outer macro of the same name also un-shadows correctly
     ;; once the body's done. Simplification: a define-syntax textually
     ;; nested inside the body that's meant to escape this scope (unusual)
-    ;; would also get discarded by the restore -- rare enough to accept.
+    ;; would also get discarded by the restore -- rare enough to accept
+    ;; (and, checked this session against analyzer.cr's own analyze_
+    ;; define_syntax: Crystal's parent-chained MacroEnv discards it the
+    ;; same way, registering into whatever @analyzing_macros is current --
+    ;; the child, while inside let-syntax -- so this isn't even a
+    ;; divergence from Crystal, just a shared restriction). Verified
+    ;; equivalent to Crystal's child-MacroEnv chain (analyze_let_syntax)
+    ;; for shadowing an outer macro of the same name and correctly un-
+    ;; shadowing it afterward, sibling let-syntax forms not leaking into
+    ;; each other, and nested let-syntax shadowing an enclosing let-
+    ;; syntax's own same-named macro -- see compiler_spec.cr's own
+    ;; "let-syntax/letrec-syntax scoping edge cases" comment.
     (define (compile-let-syntax! fc bindings body dest tail?)
       (let ((saved macro-table))
         (for-each
