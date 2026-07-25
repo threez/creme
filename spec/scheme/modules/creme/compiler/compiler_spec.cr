@@ -66,6 +66,13 @@ describe "bootstrap-compiler module" do
       "(define (counter) (let ((n 0)) (lambda () (set! n (+ n 1)) n))) (define c (counter)) (list (c) (c) (c))",
       "(define x 1) (set! x (+ x 41)) x",
       "(define (classify n) (case n ((1 2 3) 'small) ((4 5 6) 'medium) (else 'large))) (list (classify 2) (classify 5) (classify 99))",
+      # case with a => clause (calls the proc on the KEY's own value, not
+      # a boolean), and case keyed on symbols/chars (eqv?, not eq?/=)
+      # rather than just integers, exercising Op::CaseMatch's own eqv?
+      # comparison across value types.
+      "(define (f n) (case n ((1 2 3) => (lambda (x) (* x 10))) (else 'other))) (list (f 2) (f 99))",
+      "(define (f s) (case s ((a b) 'ab) ((c) 'c) (else 'other))) (list (f 'a) (f 'b) (f 'c) (f 'z))",
+      "(define (f c) (case c ((#\\a #\\b) 'ab) (else 'other))) (list (f #\\a) (f #\\z))",
       "(do ((i 0 (+ i 1)) (acc 0 (+ acc i))) ((= i 5) acc))",
       "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd? (lambda (n) (if (= n 0) #f (even? (- n 1)))))) (list (even? 10) (odd? 10)))",
       "(let ((a 1) (b 2) (c 3)) `(x ,a ,@(list b c) y))",

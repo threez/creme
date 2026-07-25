@@ -889,19 +889,59 @@
       (set! fresh-symbol-counter (+ fresh-symbol-counter 1))
       (string->symbol (string-append prefix (number->string fresh-symbol-counter))))
 
-    ;; case -- desugars into (let ((k key-expr)) (cond ((memv k '(d ...)) body...) ... (else body...))),
-    ;; compiled via the EXISTING compile-let!/compile-cond!, not new bytecode logic.
-    (define (case-clause->cond-clause k-sym clause)
-      (if (eq? (car clause) 'else)
-          clause
-          (cons (list 'memv k-sym (list 'quote (car clause))) (cdr clause))))
+    ;; case -- each non-else clause emits Op::CaseMatch (key eqv? against a
+    ;; vector of the clause's own datums, same op + same const shape
+    ;; bytecode_compiler.cr's own compile_case_clauses emits) + TestFalse,
+    ;; the same jump shape as an ordinary cond clause; the else clause (if
+    ;; present) is unconditional at the end; a => clause calls its proc on
+    ;; the KEY's own value (key-reg), per R7RS, exactly like compile-cond!'s
+    ;; own => handling calls it on the test's value.
+    ;;
+    ;; Only the LINEAR path -- Crystal's own >=8-hashable-datum
+    ;; Op::CaseDispatch hash-table fast path (compile_case_hash_dispatch)
+    ;; needs a CaseDispatchTable structure this chunk format has no
+    ;; constructor for yet (chunk-add-case-dispatch-table!/case-dispatch-
+    ;; tables, which would need wiring through (creme bytecode)'s own
+    ;; chunk record AND chunk_serializer.cr/chunk_deserializer.cr/cvm's
+    ;; SCB1 (de)serialization, not just this compiler) -- a real,
+    ;; deliberately out-of-scope-for-now gap. Behavior is identical either
+    ;; way: CaseDispatch is a pure O(1)-vs-O(n) perf optimization over
+    ;; CaseMatch (see hashable_case?'s own gating), and this compiler's
+    ;; always-CaseMatch path is exactly what Crystal itself also falls
+    ;; back to below the 8-datum threshold.
+    (define (compile-case-clauses! fc key-reg clauses dest tail?)
+      (if (null? clauses)
+          (compile-literal-datum! fc '() dest tail?)
+          (let* ((clause (car clauses))
+                 (test (car clause))
+                 (body (cdr clause))
+                 (ch (fcomp-chunk fc)))
+            (if (eq? test 'else)
+                (compile-scoped-body! fc body dest tail?)
+                (let* ((mark (fcomp-next-reg fc))
+                       (match-reg (fcomp-alloc-reg! fc))
+                       (datums-const (chunk-add-const! ch (list->vector test))))
+                  (chunk-emit! ch 'CaseMatch match-reg key-reg datums-const 0)
+                  (let ((jmp-false (chunk-emit! ch 'TestFalse match-reg 0 0 0)))
+                    (fcomp-reclaim-to! fc mark)
+                    (if (and (pair? body) (eq? (car body) '=>))
+                        (compile-arrow-call! fc (cadr body) key-reg dest tail?)
+                        (compile-scoped-body! fc body dest tail?))
+                    (if tail?
+                        (begin
+                          (chunk-patch-jump-to-here! ch jmp-false)
+                          (compile-case-clauses! fc key-reg (cdr clauses) dest #t))
+                        (let ((jmp-end (chunk-emit! ch 'Jmp 0 0 0 0)))
+                          (chunk-patch-jump-to-here! ch jmp-false)
+                          (compile-case-clauses! fc key-reg (cdr clauses) dest #f)
+                          (chunk-patch-jump-to-here! ch jmp-end)))))))))
 
     (define (compile-case! fc expr dest tail?)
       (let* ((key-expr (cadr expr))
              (clauses (cddr expr))
-             (k-sym (fresh-symbol! "case-key-"))
-             (cond-clauses (map (lambda (c) (case-clause->cond-clause k-sym c)) clauses)))
-        (compile-expr! fc (list 'let (list (list k-sym key-expr)) (cons 'cond cond-clauses)) dest tail?)))
+             (key-reg (fcomp-alloc-reg! fc)))
+        (compile-expr! fc key-expr key-reg #f)
+        (compile-case-clauses! fc key-reg clauses dest tail?)))
 
     ;; do -- the standard named-let desugaring: (var init step) bindings
     ;; become the loop's params/initial args, step defaults to the var
