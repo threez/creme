@@ -4,11 +4,13 @@
  * growable buffer (fiobj_str_buf/fiobj_str_write) rather than hand-rolled
  * malloc/realloc bookkeeping — the actual find/compare/transform logic is
  * still an ordinary C loop either way (FIOBJ has no string-utility API of
- * its own beyond the growable buffer itself). Functions that only ever
- * return an existing substring (string-trim, string-split's own pieces)
- * just share the source buffer directly, matching bi_substring's existing
- * convention elsewhere in this prototype — no need to copy through FIOBJ
- * when nothing is actually being built.
+ * its own beyond the growable buffer itself). Every function that returns
+ * a string copies its bytes into a fresh buffer, even one that only ever
+ * picks out an existing substring (string-trim, string-split's own
+ * pieces) — T_STR is mutable (string-set!) as of Group C, so aliasing a
+ * source buffer directly (this file's own earlier convention, back when
+ * strings were immutable) would let mutating a derived string silently
+ * corrupt whatever it was derived from.
  *
  * ASCII-only (upcase/downcase/whitespace) — this prototype's strings are
  * plain bytes throughout (see string-ref's own comment in vm.c), not
@@ -79,7 +81,12 @@ static Value bi_string_trim(VM *vm, Value *args, int nargs) {
   int len = args[0].as.str.len, start = 0, end = len;
   while (start < end && is_ws(s[start])) start++;
   while (end > start && is_ws(s[end - 1])) end--;
-  return v_str(s + start, end - start);
+  /* A genuine copy, not the source buffer offset directly (the header
+   * comment above used to say this shares the source buffer -- that was
+   * only safe while T_STR was immutable; now that string-set! exists,
+   * aliasing here would let mutating the trimmed result also mutate the
+   * original string). */
+  return v_gcstr(s + start, (size_t)(end - start));
 }
 
 static Value bi_string_reverse(VM *vm, Value *args, int nargs) {

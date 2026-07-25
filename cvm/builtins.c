@@ -32,6 +32,198 @@ static Value bi_make_vector(VM *vm, Value *args, int nargs) {
   return v_vector(vec);
 }
 
+static Value bi_make_bytevector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("make-bytevector: expected a length");
+  int64_t n = args[0].as.i;
+  int64_t fill = nargs >= 2 && args[1].tag == T_INT ? args[1].as.i : 0;
+  if (fill < 0 || fill > 255) cvm_abort("make-bytevector: fill value out of byte range");
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->len = (int)n;
+  bv->bytes = GC_MALLOC((size_t)(n ? n : 1));
+  for (int64_t i = 0; i < n; i++) bv->bytes[i] = (unsigned char)fill;
+  return v_bytevector(bv);
+}
+
+static Value bi_bytevector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->len = nargs;
+  bv->bytes = GC_MALLOC((size_t)(nargs ? nargs : 1));
+  for (int i = 0; i < nargs; i++) {
+    if (args[i].tag != T_INT || args[i].as.i < 0 || args[i].as.i > 255) cvm_abort("bytevector: byte out of range");
+    bv->bytes[i] = (unsigned char)args[i].as.i;
+  }
+  return v_bytevector(bv);
+}
+
+static Value bi_bytevector_length(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)nargs;
+  if (args[0].tag != T_BYTEVECTOR) cvm_abort("bytevector-length: not a bytevector");
+  return v_int(args[0].as.bv->len);
+}
+
+static Value bi_bytevector_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)nargs;
+  return v_bool(args[0].tag == T_BYTEVECTOR);
+}
+
+/* force: mirrors Interpreter#force's own memoization exactly (see
+ * src/scheme/value/values.cr's SchemePromise) — if `args[0]` isn't itself a
+ * promise, R7RS says force may just return it unchanged. Only ever invokes
+ * the wrapped 0-arg thunk once; the result is cached in place so a second
+ * force on the same promise is free. delay-force's own re-entrant "the
+ * thunk itself returns another promise, keep forcing" chaining isn't
+ * implemented (this prototype's `delay-force` compiles to the exact same
+ * MakePromise op as `delay` — see opcode.cr), so a delay-force thunk that
+ * returns a promise here just yields that inner promise value itself
+ * rather than transparently forcing through it. */
+static Value bi_force(VM *vm, Value *args, int nargs) {
+  (void)nargs;
+  if (args[0].tag != T_PROMISE) return args[0];
+  Promise *p = args[0].as.promise;
+  if (!p->forced) {
+    p->cached = cvm_apply(vm, p->thunk, NULL, 0);
+    p->forced = 1;
+  }
+  return p->cached;
+}
+
+static Value bi_promise_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)nargs;
+  return v_bool(args[0].tag == T_PROMISE);
+}
+
+/* +, -, *, /, and the comparisons as REAL, ordinary global procedures -- never needed
+ * for a program compiled by the REAL Crystal analyzer (its own PRIM_OPS
+ * table fuses a 2-arg call to one of these names straight into an Add/
+ * Sub/etc. op at compile time, see cvm/README.md's "builtins actually
+ * called" note), but the SELF-HOSTED compiler (modules/creme/compiler/
+ * compiler.sld) does no such fusion -- it compiles every call, including
+ * these, as an ordinary CallGlobal, so anything IT compiles (e.g. a REPL
+ * line) needs these names to genuinely exist. Reuse vm.c's own
+ * num_add/num_sub/num_mul/num_lt/.../as_double so the semantics
+ * (int/float promotion, overflow aborts) are identical to the fused
+ * fast-path ops, not a second implementation to keep in sync. */
+static Value bi_plus(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Value acc = v_int(0);
+  for (int i = 0; i < nargs; i++) acc = num_add(acc, args[i]);
+  return acc;
+}
+
+static Value bi_minus(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("-: expected at least 1 argument");
+  if (nargs == 1) return num_sub(v_int(0), args[0]);
+  Value acc = args[0];
+  for (int i = 1; i < nargs; i++) acc = num_sub(acc, args[i]);
+  return acc;
+}
+
+static Value bi_star(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Value acc = v_int(1);
+  for (int i = 0; i < nargs; i++) acc = num_mul(acc, args[i]);
+  return acc;
+}
+
+/* No rational tower here (see cvm/README.md's "Value/type model"), so an
+ * unevenly-divided integer division falls back to a float, matching this
+ * prototype's existing "int+float only" scope everywhere else -- only
+ * returns an exact int back when every operand was an int AND the
+ * mathematical result happens to be a whole number. */
+static Value bi_slash(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("/: expected at least 1 argument");
+  Value first = nargs == 1 ? v_int(1) : args[0];
+  int start = nargs == 1 ? 0 : 1;
+  double acc = as_double(first, "/");
+  int all_int = first.tag == T_INT;
+  for (int i = start; i < nargs; i++) {
+    double d = as_double(args[i], "/");
+    if (d == 0.0) cvm_abort("/: division by zero");
+    acc /= d;
+    if (args[i].tag != T_INT) all_int = 0;
+  }
+  if (all_int && acc == floor(acc) && fabs(acc) < 9.2e18) return v_int((int64_t)acc);
+  return v_float(acc);
+}
+
+static Value bi_num_lt(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("<: expected at least 1 argument");
+  for (int i = 1; i < nargs; i++)
+    if (!num_lt(args[i - 1], args[i])) return v_bool(0);
+  return v_bool(1);
+}
+
+static Value bi_num_gt(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort(">: expected at least 1 argument");
+  for (int i = 1; i < nargs; i++)
+    if (!num_gt(args[i - 1], args[i])) return v_bool(0);
+  return v_bool(1);
+}
+
+static Value bi_num_le(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("<=: expected at least 1 argument");
+  for (int i = 1; i < nargs; i++)
+    if (!num_le(args[i - 1], args[i])) return v_bool(0);
+  return v_bool(1);
+}
+
+static Value bi_num_ge(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort(">=: expected at least 1 argument");
+  for (int i = 1; i < nargs; i++)
+    if (!num_ge(args[i - 1], args[i])) return v_bool(0);
+  return v_bool(1);
+}
+
+static Value bi_num_eq(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("=: expected at least 1 argument");
+  for (int i = 1; i < nargs; i++)
+    if (!num_eq(args[i - 1], args[i])) return v_bool(0);
+  return v_bool(1);
+}
+
+/* quotient/remainder truncate toward zero (R7RS) -- exactly what C's own
+ * `/`/`%` already do for integers, so no extra logic needed beyond a
+ * zero-divisor check. modulo floors instead (result's sign matches the
+ * divisor, not the dividend) -- needed by the self-hosted compiler's own
+ * (creme bytecode) int->le-bytes for correct full-range little-endian
+ * encoding of negative integers (see modules/creme/bytecode.sld's own
+ * comment on exactly this). */
+static Value bi_quotient(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("quotient: expected two integers");
+  if (args[1].as.i == 0) cvm_abort("quotient: division by zero");
+  return v_int(args[0].as.i / args[1].as.i);
+}
+
+static Value bi_remainder(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("remainder: expected two integers");
+  if (args[1].as.i == 0) cvm_abort("remainder: division by zero");
+  return v_int(args[0].as.i % args[1].as.i);
+}
+
+static Value bi_modulo(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("modulo: expected two integers");
+  int64_t b = args[1].as.i;
+  if (b == 0) cvm_abort("modulo: division by zero");
+  int64_t r = args[0].as.i % b;
+  if (r != 0 && ((r < 0) != (b < 0))) r += b;
+  return v_int(r);
+}
+
 static Value bi_current_second(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
@@ -107,9 +299,45 @@ static void print_value(FILE *out, Value v) {
     fputc(')', out);
     break;
   }
+  case T_BYTEVECTOR:
+    /* Mirrors SchemeBlob#to_display exactly (values.cr) — the opaque
+     * "#<blob:N bytes>" form, not R7RS's #u8(...) write-style rendering
+     * (this prototype has no separate `write`, only `display` — see this
+     * function's own header comment). */
+    fprintf(out, "#<blob:%d bytes>", v.as.bv->len);
+    break;
+  case T_PROMISE:
+    fprintf(out, "#<promise%s>", v.as.promise->forced ? " forced" : "");
+    break;
   case T_CLOSURE:
+  case T_CASE_CLOSURE:
+  case T_RECORD_CALLABLE:
     fputs("#<procedure>", out);
     break;
+  case T_PARAMETER:
+    fputs("#<parameter>", out);
+    break;
+  case T_RECORD_TYPE:
+    fputs("#<record-type:", out);
+    fwrite(v.as.record_type->name.as.str.chars, 1, (size_t)v.as.record_type->name.as.str.len, out);
+    fputc('>', out);
+    break;
+  case T_RECORD: {
+    /* Mirrors SchemeRecord#to_display exactly (record.cr): "#<name
+     * field=val field=val ...>". */
+    RecordType *rt = v.as.record->type;
+    fputc('#', out);
+    fputc('<', out);
+    fwrite(rt->name.as.str.chars, 1, (size_t)rt->name.as.str.len, out);
+    for (int i = 0; i < rt->n_fields; i++) {
+      fputc(' ', out);
+      fwrite(rt->field_names[i].as.str.chars, 1, (size_t)rt->field_names[i].as.str.len, out);
+      fputc('=', out);
+      print_value(out, v.as.record->fields[i]);
+    }
+    fputc('>', out);
+    break;
+  }
   case T_BUILTIN:
     fputs("#<procedure>", out);
     break;
@@ -244,14 +472,98 @@ static int cvm_equal(Value a, Value b) {
 static Value bi_not(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("not: expected an argument"); return v_bool(v_falsy(args[0])); }
 static Value bi_pair_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("pair?: expected an argument"); return v_bool(args[0].tag == T_PAIR); }
 static Value bi_null_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("null?: expected an argument"); return v_bool(args[0].tag == T_NIL); }
+/* Walks cdr's until a non-pair; #t iff that's T_NIL -- mirrors the real
+ * interpreter's own Scheme.proper_list? (helpers.cr) exactly, including
+ * NOT being cycle-safe (a genuinely circular list would infinite-loop
+ * here too, same as there -- a known, already-accepted simplification in
+ * the reference implementation this isn't introducing anything new). */
+static Value bi_list_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("list?: expected an argument");
+  Value cur = args[0];
+  while (cur.tag == T_PAIR) cur = cur.as.pair->cdr;
+  return v_bool(cur.tag == T_NIL);
+}
 static Value bi_boolean_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("boolean?: expected an argument"); return v_bool(args[0].tag == T_BOOL); }
 static Value bi_symbol_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("symbol?: expected an argument"); return v_bool(args[0].tag == T_SYM); }
 static Value bi_string_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("string?: expected an argument"); return v_bool(args[0].tag == T_STR); }
 static Value bi_vector_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("vector?: expected an argument"); return v_bool(args[0].tag == T_VECTOR); }
+
+/* vector-ref/-set!/-length, string-ref/-set!, bytevector-u8-ref/-set! as
+ * REAL global procedures -- same story as +/-/cadr/etc. above: a program
+ * the real analyzer compiles never needs these (its PRIM_OPS table fuses
+ * a call site straight into VecRef/VecSet/StrRef/etc.), but the self-
+ * hosted compiler does no such fusion, so anything it compiles needs
+ * these to genuinely exist. Semantics mirror the fused ops' own bounds
+ * checks exactly (vm.c's OP_VECREF/OP_VECSET/etc.). */
+static Value bi_vector_ref(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || args[0].tag != T_VECTOR || args[1].tag != T_INT) cvm_abort("vector-ref: expected (vector index)");
+  int idx = (int)args[1].as.i;
+  if (idx < 0 || idx >= args[0].as.vec->len) cvm_abort("vector-ref: index %d out of range", idx);
+  return args[0].as.vec->items[idx];
+}
+
+static Value bi_vector_set(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 3 || args[0].tag != T_VECTOR || args[1].tag != T_INT) cvm_abort("vector-set!: expected (vector index value)");
+  int idx = (int)args[1].as.i;
+  if (idx < 0 || idx >= args[0].as.vec->len) cvm_abort("vector-set!: index %d out of range", idx);
+  args[0].as.vec->items[idx] = args[2];
+  return v_nil();
+}
+
+static Value bi_vector_length(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 1 || args[0].tag != T_VECTOR) cvm_abort("vector-length: expected a vector");
+  return v_int(args[0].as.vec->len);
+}
+
+static Value bi_string_ref(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_INT) cvm_abort("string-ref: expected (string index)");
+  int idx = (int)args[1].as.i;
+  if (idx < 0 || idx >= args[0].as.str.len) cvm_abort("string-ref: index %d out of range", idx);
+  return v_char((unsigned char)args[0].as.str.chars[idx]);
+}
+
+static Value bi_string_set(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_CHAR) cvm_abort("string-set!: expected (string index char)");
+  int idx = (int)args[1].as.i;
+  if (idx < 0 || idx >= args[0].as.str.len) cvm_abort("string-set!: index %d out of range", idx);
+  ((char *)args[0].as.str.chars)[idx] = (char)args[2].as.i;
+  return v_nil();
+}
+
+static Value bi_bytevector_u8_ref(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT) cvm_abort("bytevector-u8-ref: expected (bytevector index)");
+  int idx = (int)args[1].as.i;
+  if (idx < 0 || idx >= args[0].as.bv->len) cvm_abort("bytevector-u8-ref: index %d out of range", idx);
+  return v_int(args[0].as.bv->bytes[idx]);
+}
+
+static Value bi_bytevector_u8_set(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 3 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT || args[2].tag != T_INT) cvm_abort("bytevector-u8-set!: expected (bytevector index byte)");
+  int idx = (int)args[1].as.i;
+  if (idx < 0 || idx >= args[0].as.bv->len) cvm_abort("bytevector-u8-set!: index %d out of range", idx);
+  if (args[2].as.i < 0 || args[2].as.i > 255) cvm_abort("bytevector-u8-set!: byte out of range");
+  args[0].as.bv->bytes[idx] = (unsigned char)args[2].as.i;
+  return v_nil();
+}
 static Value bi_char_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("char?: expected an argument"); return v_bool(args[0].tag == T_CHAR); }
-static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("procedure?: expected an argument"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_BUILTIN); }
+/* Mirrors the real interpreter's own procedure? exactly (predicates.cr):
+ * deliberately narrow -- Builtin/BytecodeClosure/BytecodeCaseClosure
+ * (T_RECORD_CALLABLE counts because RecordAccessor/RecordMutator/ctor/
+ * pred are real Builtin SUBCLASSES there), but NOT SchemeParameter
+ * (T_PARAMETER) -- a parameter is callable via apply's generic dispatch
+ * without being procedure?-true. */
+static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("procedure?: expected an argument"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_CASE_CLOSURE || args[0].tag == T_RECORD_CALLABLE || args[0].tag == T_BUILTIN); }
 static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("number?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT); }
 static Value bi_real_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); } /* no complex tower */
+static Value bi_complex_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); } /* every number cvm has IS real, and every real is complex -- no genuinely-complex-but-not-real value exists here */
 static Value bi_integer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("integer?: expected an argument");
@@ -357,6 +669,60 @@ static Value bi_inexact(VM *vm, Value *args, int nargs) {
 /* ---- pairs / lists ---- */
 static Value bi_car(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) cvm_abort("car: expected a pair"); return args[0].as.pair->car; }
 static Value bi_cdr(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) cvm_abort("cdr: expected a pair"); return args[0].as.pair->cdr; }
+
+/* (scheme cxr)'s full caar..cddddr family, as REAL global procedures --
+ * cvm already handles a car/cdr/cadr/etc. CALL SITE via the fused Cxr op
+ * (a program the real analyzer compiles never needs these as ordinary
+ * globals), but the self-hosted compiler does no such fusion, so anything
+ * it compiles (e.g. `(scheme cxr)`'s own re-export, or a REPL/compiler-
+ * mode target script using cadr directly) needs these to genuinely exist.
+ * `ops` is read left-to-right exactly as it appears between the `c`/`r`
+ * in the Scheme name (e.g. cadr's ops is "ad"); applied right-to-left
+ * (innermost/last-in-the-string first), matching R7RS's own nesting
+ * (cadr = (car (cdr x))). */
+static Value cxr_apply(const char *ops, int n, Value v) {
+  for (int i = n - 1; i >= 0; i--) {
+    if (v.tag != T_PAIR) cvm_abort("c%.*sr: expected a pair", n, ops);
+    v = (ops[i] == 'a') ? v.as.pair->car : v.as.pair->cdr;
+  }
+  return v;
+}
+
+#define DEFINE_CXR(name, opstr)                                                     \
+  static Value bi_##name(VM *vm, Value *args, int nargs) {                          \
+    (void)vm;                                                                       \
+    if (nargs != 1) cvm_abort(#name ": expected 1 argument");                       \
+    return cxr_apply(opstr, (int)(sizeof(opstr) - 1), args[0]);                     \
+  }
+
+DEFINE_CXR(caar, "aa")
+DEFINE_CXR(cadr, "ad")
+DEFINE_CXR(cdar, "da")
+DEFINE_CXR(cddr, "dd")
+DEFINE_CXR(caaar, "aaa")
+DEFINE_CXR(caadr, "aad")
+DEFINE_CXR(cadar, "ada")
+DEFINE_CXR(caddr, "add")
+DEFINE_CXR(cdaar, "daa")
+DEFINE_CXR(cdadr, "dad")
+DEFINE_CXR(cddar, "dda")
+DEFINE_CXR(cdddr, "ddd")
+DEFINE_CXR(caaaar, "aaaa")
+DEFINE_CXR(caaadr, "aaad")
+DEFINE_CXR(caadar, "aada")
+DEFINE_CXR(caaddr, "aadd")
+DEFINE_CXR(cadaar, "adaa")
+DEFINE_CXR(cadadr, "adad")
+DEFINE_CXR(caddar, "adda")
+DEFINE_CXR(cadddr, "addd")
+DEFINE_CXR(cdaaar, "daaa")
+DEFINE_CXR(cdaadr, "daad")
+DEFINE_CXR(cdadar, "dada")
+DEFINE_CXR(cdaddr, "dadd")
+DEFINE_CXR(cddaar, "ddaa")
+DEFINE_CXR(cddadr, "ddad")
+DEFINE_CXR(cdddar, "ddda")
+DEFINE_CXR(cddddr, "dddd")
 static Value bi_cons(VM *vm, Value *args, int nargs) { if (nargs < 2) cvm_abort("cons: expected two arguments"); return cvm_cons(vm, args[0], args[1]); }
 static Value bi_list(VM *vm, Value *args, int nargs) {
   Value r = v_nil();
@@ -519,6 +885,23 @@ static Value bi_for_each(VM *vm, Value *args, int nargs) {
   free(items);
   return v_nil();
 }
+static Value bi_string_for_each(VM *vm, Value *args, int nargs) {
+  if (nargs < 2) cvm_abort("string-for-each: expected a procedure and at least one string");
+  int n_strs = nargs - 1;
+  int minlen = -1;
+  for (int i = 0; i < n_strs; i++) {
+    if (args[1 + i].tag != T_STR) cvm_abort("string-for-each: expected a string");
+    int len = args[1 + i].as.str.len;
+    if (minlen < 0 || len < minlen) minlen = len;
+  }
+  Value *chars = malloc(sizeof(Value) * (size_t)n_strs);
+  for (int idx = 0; idx < minlen; idx++) {
+    for (int i = 0; i < n_strs; i++) chars[i] = v_char((unsigned char)args[1 + i].as.str.chars[idx]);
+    cvm_apply(vm, args[0], chars, n_strs);
+  }
+  free(chars);
+  return v_nil();
+}
 static Value bi_filter(VM *vm, Value *args, int nargs) {
   if (nargs < 2) cvm_abort("filter: expected (pred list)");
   Value *acc = NULL;
@@ -543,10 +926,25 @@ static Value bi_filter(VM *vm, Value *args, int nargs) {
  * the common single-value-passthrough shape (call-with-values immediately
  * destructuring one value) — genuine (values a b ...) with other than
  * exactly one value isn't representable here. */
-static Value bi_values(VM *vm, Value *args, int nargs) { (void)vm; return nargs >= 1 ? args[0] : v_nil(); }
+/* A single value is returned as itself, never wrapped in a T_VALUES
+ * carrier — mirrors the real interpreter's own single-value convention
+ * (see Op::Destructure's doc comment), so `(+ 1 (values 2))` and similar
+ * single-value uses of `values` need no special handling anywhere else. */
+static Value bi_values(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs == 1) return args[0];
+  MultiValues *mv = GC_MALLOC(sizeof(MultiValues));
+  mv->len = nargs;
+  mv->items = GC_MALLOC(sizeof(Value) * (size_t)(nargs ? nargs : 1));
+  for (int i = 0; i < nargs; i++) mv->items[i] = args[i];
+  return v_values(mv);
+}
 static Value bi_call_with_values(VM *vm, Value *args, int nargs) {
   if (nargs < 2) cvm_abort("call-with-values: expected (producer consumer)");
   Value produced = cvm_apply(vm, args[0], NULL, 0);
+  if (produced.tag == T_VALUES) {
+    return cvm_apply(vm, args[1], produced.as.values->items, produced.as.values->len);
+  }
   return cvm_apply(vm, args[1], &produced, 1);
 }
 
@@ -566,13 +964,34 @@ static Value bi_string_append(VM *vm, Value *args, int nargs) {
   }
   return v_str(buf, (int)total);
 }
+/* Copies `len` bytes starting at `chars` into a fresh, independently owned
+ * buffer — used everywhere a "new string" is conceptually supposed to be
+ * independent of whatever it was derived from (substring, symbol<->string
+ * conversion), now that T_STR is mutable via string-set!: aliasing the
+ * source's buffer directly (as this prototype used to do) would let a
+ * later mutation of one silently corrupt the other. */
+static char *copy_bytes(const char *chars, int len) {
+  char *buf = GC_MALLOC((size_t)(len ? len : 1));
+  if (len > 0) memcpy(buf, chars, (size_t)len);
+  return buf;
+}
+
 static Value bi_substring(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_INT) cvm_abort("substring: expected (string start [end])");
   int start = (int)args[1].as.i;
   int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].as.str.len;
   if (start < 0 || end > args[0].as.str.len || start > end) cvm_abort("substring: index out of range");
-  return v_str(args[0].as.str.chars + start, end - start);
+  return v_str(copy_bytes(args[0].as.str.chars + start, end - start), end - start);
+}
+
+static Value bi_string_copy(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string-copy: expected a string");
+  int start = (nargs >= 2 && args[1].tag == T_INT) ? (int)args[1].as.i : 0;
+  int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].as.str.len;
+  if (start < 0 || end > args[0].as.str.len || start > end) cvm_abort("string-copy: index out of range");
+  return v_str(copy_bytes(args[0].as.str.chars + start, end - start), end - start);
 }
 static Value bi_string_to_list(VM *vm, Value *args, int nargs) {
   if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->list: expected a string");
@@ -662,8 +1081,8 @@ static Value bi_number_to_string(VM *vm, Value *args, int nargs) {
   memcpy(copy, buf, (size_t)len);
   return v_str(copy, len);
 }
-static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->symbol: expected a string"); return v_sym(args[0].as.str.chars, args[0].as.str.len); }
-static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) cvm_abort("symbol->string: expected a symbol"); return v_str(args[0].as.str.chars, args[0].as.str.len); }
+static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->symbol: expected a string"); return v_sym(copy_bytes(args[0].as.str.chars, args[0].as.str.len), args[0].as.str.len); }
+static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) cvm_abort("symbol->string: expected a symbol"); return v_str(copy_bytes(args[0].as.str.chars, args[0].as.str.len), args[0].as.str.len); }
 static Value bi_char_to_integer(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char->integer: expected a char"); return v_int(args[0].as.i); }
 static Value bi_integer_to_char(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) cvm_abort("integer->char: expected an integer"); return v_char(args[0].as.i); }
 static Value bi_char_eq(VM *vm, Value *args, int nargs) {
@@ -674,6 +1093,66 @@ static Value bi_char_eq(VM *vm, Value *args, int nargs) {
     if (args[i - 1].as.i != args[i].as.i) return v_bool(0);
   }
   return v_bool(1);
+}
+
+static Value bi_char_lt(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2) cvm_abort("char<?: expected at least two chars");
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char<?: expected chars");
+    if (!(args[i - 1].as.i < args[i].as.i)) return v_bool(0);
+  }
+  return v_bool(1);
+}
+
+static Value bi_char_gt(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2) cvm_abort("char>?: expected at least two chars");
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char>?: expected chars");
+    if (!(args[i - 1].as.i > args[i].as.i)) return v_bool(0);
+  }
+  return v_bool(1);
+}
+
+static Value bi_char_le(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2) cvm_abort("char<=?: expected at least two chars");
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char<=?: expected chars");
+    if (!(args[i - 1].as.i <= args[i].as.i)) return v_bool(0);
+  }
+  return v_bool(1);
+}
+
+static Value bi_char_ge(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2) cvm_abort("char>=?: expected at least two chars");
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char>=?: expected chars");
+    if (!(args[i - 1].as.i >= args[i].as.i)) return v_bool(0);
+  }
+  return v_bool(1);
+}
+
+/* ASCII-only (matches strings.c's own upcase/downcase scope, and cvm's
+ * bytes-not-Unicode string-ref elsewhere) -- the self-hosted reader only
+ * ever calls this on single-byte ASCII characters (radix/exactness prefix
+ * letters, hex digits), so full Unicode case-folding isn't needed here. */
+static Value bi_char_downcase(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 1 || args[0].tag != T_CHAR) cvm_abort("char-downcase: expected a char");
+  int64_t c = args[0].as.i;
+  if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+  return v_char(c);
+}
+
+static Value bi_char_upcase(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 1 || args[0].tag != T_CHAR) cvm_abort("char-upcase: expected a char");
+  int64_t c = args[0].as.i;
+  if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
+  return v_char(c);
 }
 
 /* ---- vectors ---- */
@@ -708,15 +1187,82 @@ static Value bi_list_to_vector(VM *vm, Value *args, int nargs) {
 }
 
 /* ---- misc ---- */
+/* Builds a real condition (message + irritants list, not just a printed
+ * string) so guard's error-object-message/error-object-irritants work
+ * correctly on it -- unlike the old always-exits version, this raises to
+ * the nearest guard handler if one is installed (see cvm_raise_condition/
+ * Group G). */
 static Value bi_error(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  fprintf(stderr, "error: ");
-  for (int i = 0; i < nargs; i++) {
-    if (i) fputc(' ', stderr);
-    print_value(stderr, args[i]);
+  if (nargs < 1) cvm_abort("error: expected at least 1 argument");
+  char *buf = NULL;
+  size_t size = 0;
+  FILE *ms = open_memstream(&buf, &size);
+  print_value(ms, args[0]);
+  for (int i = 1; i < nargs; i++) {
+    fputc(' ', ms);
+    print_value(ms, args[i]);
   }
+  fclose(ms);
+
+  Value irritants = v_nil();
+  for (int i = nargs - 1; i >= 1; i--) irritants = cvm_cons(vm, args[i], irritants);
+  Value cond = cvm_make_condition(vm, buf, size, irritants);
+  free(buf);
+
+  if (vm->n_handlers > 0) cvm_raise_condition(vm, cond);
+
+  Value msg = cond.as.record->fields[0];
+  fwrite(msg.as.str.chars, 1, (size_t)msg.as.str.len, stderr);
   fputc('\n', stderr);
   exit(1);
+}
+
+/* raise: signals `args[0]` AS-IS (no message/irritants wrapping -- unlike
+ * `error`, the condition IS whatever value was passed, e.g. a bare
+ * symbol), matching R7RS. */
+static Value bi_raise(VM *vm, Value *args, int nargs) {
+  if (nargs != 1) cvm_abort("raise: expected 1 argument");
+  if (vm->n_handlers > 0) cvm_raise_condition(vm, args[0]);
+  char *buf = NULL;
+  size_t size = 0;
+  FILE *ms = open_memstream(&buf, &size);
+  fputs("uncaught exception: ", ms);
+  print_value(ms, args[0]);
+  fclose(ms);
+  fwrite(buf, 1, size, stderr);
+  fputc('\n', stderr);
+  free(buf);
+  exit(1);
+}
+
+static Value bi_error_object_p(VM *vm, Value *args, int nargs) {
+  if (nargs < 1) cvm_abort("error-object?: expected an argument");
+  return v_bool(cvm_is_condition(vm, args[0]));
+}
+
+static Value bi_error_object_message(VM *vm, Value *args, int nargs) {
+  if (nargs < 1 || !cvm_is_condition(vm, args[0])) cvm_abort("error-object-message: expected an error object");
+  return args[0].as.record->fields[0];
+}
+
+static Value bi_error_object_irritants(VM *vm, Value *args, int nargs) {
+  if (nargs < 1 || !cvm_is_condition(vm, args[0])) cvm_abort("error-object-irritants: expected an error object");
+  return args[0].as.record->fields[1];
+}
+
+static Value bi_make_parameter(VM *vm, Value *args, int nargs) {
+  if (nargs < 1) cvm_abort("make-parameter: expected at least 1 argument");
+  Parameter *p = GC_MALLOC(sizeof(Parameter));
+  if (nargs >= 2) {
+    p->has_converter = 1;
+    p->converter = args[1];
+    p->value = cvm_apply(vm, args[1], &args[0], 1);
+  } else {
+    p->has_converter = 0;
+    p->converter = v_nil();
+    p->value = args[0];
+  }
+  return v_parameter(p);
 }
 static Value bi_read_line(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -781,14 +1327,23 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "not", bi_not);
   cvm_register_builtin(vm, "pair?", bi_pair_p);
   cvm_register_builtin(vm, "null?", bi_null_p);
+  cvm_register_builtin(vm, "list?", bi_list_p);
   cvm_register_builtin(vm, "boolean?", bi_boolean_p);
   cvm_register_builtin(vm, "symbol?", bi_symbol_p);
   cvm_register_builtin(vm, "string?", bi_string_p);
   cvm_register_builtin(vm, "vector?", bi_vector_p);
+  cvm_register_builtin(vm, "vector-ref", bi_vector_ref);
+  cvm_register_builtin(vm, "vector-set!", bi_vector_set);
+  cvm_register_builtin(vm, "vector-length", bi_vector_length);
+  cvm_register_builtin(vm, "string-ref", bi_string_ref);
+  cvm_register_builtin(vm, "string-set!", bi_string_set);
+  cvm_register_builtin(vm, "bytevector-u8-ref", bi_bytevector_u8_ref);
+  cvm_register_builtin(vm, "bytevector-u8-set!", bi_bytevector_u8_set);
   cvm_register_builtin(vm, "char?", bi_char_p);
   cvm_register_builtin(vm, "procedure?", bi_procedure_p);
   cvm_register_builtin(vm, "number?", bi_number_p);
   cvm_register_builtin(vm, "real?", bi_real_p);
+  cvm_register_builtin(vm, "complex?", bi_complex_p);
   cvm_register_builtin(vm, "integer?", bi_integer_p);
   cvm_register_builtin(vm, "exact?", bi_exact_p);
   cvm_register_builtin(vm, "inexact?", bi_inexact_p);
@@ -816,6 +1371,34 @@ void cvm_register_builtins(VM *vm) {
 
   cvm_register_builtin(vm, "car", bi_car);
   cvm_register_builtin(vm, "cdr", bi_cdr);
+  cvm_register_builtin(vm, "caar", bi_caar);
+  cvm_register_builtin(vm, "cadr", bi_cadr);
+  cvm_register_builtin(vm, "cdar", bi_cdar);
+  cvm_register_builtin(vm, "cddr", bi_cddr);
+  cvm_register_builtin(vm, "caaar", bi_caaar);
+  cvm_register_builtin(vm, "caadr", bi_caadr);
+  cvm_register_builtin(vm, "cadar", bi_cadar);
+  cvm_register_builtin(vm, "caddr", bi_caddr);
+  cvm_register_builtin(vm, "cdaar", bi_cdaar);
+  cvm_register_builtin(vm, "cdadr", bi_cdadr);
+  cvm_register_builtin(vm, "cddar", bi_cddar);
+  cvm_register_builtin(vm, "cdddr", bi_cdddr);
+  cvm_register_builtin(vm, "caaaar", bi_caaaar);
+  cvm_register_builtin(vm, "caaadr", bi_caaadr);
+  cvm_register_builtin(vm, "caadar", bi_caadar);
+  cvm_register_builtin(vm, "caaddr", bi_caaddr);
+  cvm_register_builtin(vm, "cadaar", bi_cadaar);
+  cvm_register_builtin(vm, "cadadr", bi_cadadr);
+  cvm_register_builtin(vm, "caddar", bi_caddar);
+  cvm_register_builtin(vm, "cadddr", bi_cadddr);
+  cvm_register_builtin(vm, "cdaaar", bi_cdaaar);
+  cvm_register_builtin(vm, "cdaadr", bi_cdaadr);
+  cvm_register_builtin(vm, "cdadar", bi_cdadar);
+  cvm_register_builtin(vm, "cdaddr", bi_cdaddr);
+  cvm_register_builtin(vm, "cddaar", bi_cddaar);
+  cvm_register_builtin(vm, "cddadr", bi_cddadr);
+  cvm_register_builtin(vm, "cdddar", bi_cdddar);
+  cvm_register_builtin(vm, "cddddr", bi_cddddr);
   cvm_register_builtin(vm, "cons", bi_cons);
   cvm_register_builtin(vm, "list", bi_list);
   cvm_register_builtin(vm, "cons*", bi_cons_star);
@@ -833,12 +1416,14 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "apply", bi_apply);
   cvm_register_builtin(vm, "map", bi_map);
   cvm_register_builtin(vm, "for-each", bi_for_each);
+  cvm_register_builtin(vm, "string-for-each", bi_string_for_each);
   cvm_register_builtin(vm, "filter", bi_filter);
   cvm_register_builtin(vm, "values", bi_values);
   cvm_register_builtin(vm, "call-with-values", bi_call_with_values);
 
   cvm_register_builtin(vm, "string-append", bi_string_append);
   cvm_register_builtin(vm, "substring", bi_substring);
+  cvm_register_builtin(vm, "string-copy", bi_string_copy);
   cvm_register_builtin(vm, "string->list", bi_string_to_list);
   cvm_register_builtin(vm, "list->string", bi_list_to_string);
   cvm_register_builtin(vm, "make-string", bi_make_string);
@@ -851,12 +1436,43 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "char->integer", bi_char_to_integer);
   cvm_register_builtin(vm, "integer->char", bi_integer_to_char);
   cvm_register_builtin(vm, "char=?", bi_char_eq);
+  cvm_register_builtin(vm, "char<?", bi_char_lt);
+  cvm_register_builtin(vm, "char>?", bi_char_gt);
+  cvm_register_builtin(vm, "char<=?", bi_char_le);
+  cvm_register_builtin(vm, "char>=?", bi_char_ge);
+  cvm_register_builtin(vm, "char-downcase", bi_char_downcase);
+  cvm_register_builtin(vm, "char-upcase", bi_char_upcase);
 
   cvm_register_builtin(vm, "vector", bi_vector);
   cvm_register_builtin(vm, "vector->list", bi_vector_to_list);
   cvm_register_builtin(vm, "list->vector", bi_list_to_vector);
 
+  cvm_register_builtin(vm, "make-bytevector", bi_make_bytevector);
+  cvm_register_builtin(vm, "bytevector", bi_bytevector);
+  cvm_register_builtin(vm, "bytevector-length", bi_bytevector_length);
+  cvm_register_builtin(vm, "bytevector?", bi_bytevector_p);
+
+  cvm_register_builtin(vm, "force", bi_force);
+  cvm_register_builtin(vm, "promise?", bi_promise_p);
+
   cvm_register_builtin(vm, "error", bi_error);
+  cvm_register_builtin(vm, "raise", bi_raise);
+  cvm_register_builtin(vm, "error-object?", bi_error_object_p);
+  cvm_register_builtin(vm, "error-object-message", bi_error_object_message);
+  cvm_register_builtin(vm, "error-object-irritants", bi_error_object_irritants);
+  cvm_register_builtin(vm, "make-parameter", bi_make_parameter);
+  cvm_register_builtin(vm, "quotient", bi_quotient);
+  cvm_register_builtin(vm, "remainder", bi_remainder);
+  cvm_register_builtin(vm, "modulo", bi_modulo);
+  cvm_register_builtin(vm, "+", bi_plus);
+  cvm_register_builtin(vm, "-", bi_minus);
+  cvm_register_builtin(vm, "*", bi_star);
+  cvm_register_builtin(vm, "/", bi_slash);
+  cvm_register_builtin(vm, "<", bi_num_lt);
+  cvm_register_builtin(vm, ">", bi_num_gt);
+  cvm_register_builtin(vm, "<=", bi_num_le);
+  cvm_register_builtin(vm, ">=", bi_num_ge);
+  cvm_register_builtin(vm, "=", bi_num_eq);
   cvm_register_builtin(vm, "read-line", bi_read_line);
   cvm_register_builtin(vm, "current-time", bi_current_time);
   cvm_register_builtin(vm, "time-difference", bi_time_difference);

@@ -2,23 +2,30 @@
 
 A second backend for this project's own compiled bytecode: the Crystal
 front end (Lexer → Reader → `analyze` → `BytecodeCompiler`) is unchanged and
-still owns compilation. `creme --emit-cvm <file.scm> <out.cvmc>` serializes
-the resulting `Chunk` tree (see `src/scheme/compile/cvm_serializer.cr`) to a
-small binary format; this directory is a from-scratch C11 VM that loads and
-executes that file. `creme --cvm <file.scm>` / `creme --profile --cvm
-<file.scm>` do the compile-then-run step in one command (see `src/main.cr`'s
-`run_via_cvm`).
+still owns compilation. `creme --emit-cvm <file.scm> <out.cvmc>` compiles the
+whole script (plus its transitively-imported pure-Scheme library bodies)
+into one combined `Chunk` and serializes it (see
+`src/scheme/compile/cvm_emitter.cr`) as "SCB1" — the SAME format
+`src/scheme/compile/chunk_serializer.cr`/`chunk_deserializer.cr` round-trip
+on the Crystal side, and the format `(creme bootstrap)`'s `load-chunk-bytes`
+already reads. This directory is a from-scratch C11 VM that loads and
+executes that file directly, using `Scheme::Op`'s own opcode numbering —
+there's no separate cvm-specific bytecode format anymore. `creme --cvm
+<file.scm>` / `creme --profile --cvm <file.scm>` do the compile-then-run
+step in one command (see `src/main.cr`'s `run_via_cvm`).
 
 **Scope**: cvm started as a narrow experiment scoped to exactly what
-`bench/creme.scm` compiled down to, but has since grown a substantial (if
-still deliberately incomplete) chunk of the real opcode/builtin surface —
-enough to run `competition/scheme/demo-todo/app.scm`, a genuine long-running
-HTTP CRUD app using SQLite, a real HTTP server, and several pure-Scheme
-libraries, end to end (see "Compatibility with `creme`" below for exactly
-what is and isn't covered). It is still not a general Scheme runtime — no
-continuations, no `guard`/`parameterize`, no bignum, no bytevectors — but the
-right framing today is "a second backend implementing most of the language,"
-not "a benchmark-only prototype."
+`bench/creme.scm` compiled down to, but has since grown to full 119/119
+opcode parity with the real VM — including `guard`/`parameterize`,
+`define-record-type`, `case-lambda`, multiple values, bytevectors, and
+mutable strings — enough to run `competition/scheme/demo-todo/app.scm`, a
+genuine long-running HTTP CRUD app using SQLite, a real HTTP server, and
+several pure-Scheme libraries, end to end (see "Compatibility with `creme`"
+below for exactly what's covered and the value-model/numeric-tower/
+continuation gaps that remain). It is still not a general Scheme runtime —
+no continuations, no bignum/rational/complex — but the right framing today
+is "a second backend implementing the language's control-flow surface
+faithfully," not "a benchmark-only prototype."
 
 ## Building and running
 
@@ -53,6 +60,133 @@ curl -H "Accept: application/json" http://127.0.0.1:4599/   # JSON API
 curl -X POST -d "title=Buy milk" http://127.0.0.1:4599/todos
 ```
 
+## REPL
+
+`cvm/repl.scm` bundles the self-hosted, Scheme-written compiler
+(`modules/creme/compiler/{reader,bytecode,compiler}.sld`) and a small
+read-compile-run loop, precompiled into ONE SCB1 image — after that
+one-time build, an interactive session depends on nothing but this one
+running cvm process; no live Crystal `creme` process is involved:
+
+```sh
+./bin/creme --emit-cvm cvm/repl.scm cvm/repl.cvmc   # one-time build
+./cvm/cvm cvm/repl.cvmc                              # interactive REPL
+```
+
+This works because two things were already true before this file existed:
+`cvm_global_intern` interns by name against one persistent `vm->globals`
+table, so repeated chunk loads against the same `VM*` already share
+bindings for free (`(define x 5)` on one line, `(display x)` on the
+next); and the self-hosted compiler's `compile-source-to-bytes` already
+produces exactly the SCB1 bytes cvm reads natively. The one missing piece
+was a way to load-and-run a freshly-computed bytevector of those bytes
+*from within an already-running cvm program* — `cvm/bootstrap.c`'s
+`load-chunk-bytes` (mirroring `(creme bootstrap)`'s Crystal-side builtin
+of the same name), backed by `loader.c`'s in-memory `cvm_load_from_bytes`
+and `vm.c`'s reentrant `cvm_run_loaded_chunk`.
+
+`cvm/bootstrap.c` also provides `import!` (a no-op — cvm's global table
+is already unconditionally flat, so "importing" anything already baked
+into the running image, which is everything reachable at all, has
+nothing left to do) and `expand-if-macro` (always `#f` — cvm has no
+runtime `Macro`/`SchemeSyntaxRules` representation at all, so nothing in
+its global table can ever truthfully be one). The self-hosted compiler's
+own `compile-import!`/`compile-form!` call both of these unconditionally,
+so both need to exist for it to run at all, REPL or not.
+
+**Real, inherent limitation**: a REPL session can define and use its own
+`define-syntax`/`defmacro` macros — the compiler's own `macro-table` is
+an ordinary mutable Scheme variable inside the loaded image, so it
+persists naturally across separate `load-chunk-bytes` calls in the same
+process — but can never use a macro that was only defined inside a
+flattened/precompiled library baked into the image (e.g. `sxql-select!`
+from `(creme sxql)`, if the image happened to import it): that library's
+own macro *definition* never produces a runtime value under cvm in the
+first place (`define-syntax`/`defmacro` are analyze-time-only regardless
+of backend — see "Deliberate cuts" below), so there is nothing for
+`expand-if-macro` to ever find.
+
+Getting the self-hosted compiler to run under cvm at all also needed two
+small, genuinely new capabilities cvm never had before, independent of
+the REPL feature itself:
+- **`(creme regex)`**, narrowed to just `regexp`/`regexp-matches?`
+  (`cvm/regex.c`) — the self-hosted reader uses these for numeric-token
+  classification. Backed by PCRE2 (the same regex flavor the real
+  Crystal `Regex` class uses), specifically so `reader.sld`'s own
+  `\A`/`\z`-anchored patterns work completely unchanged under cvm.
+- **`+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` as real global procedures**
+  (`cvm/builtins.c`) — a program the *real* Crystal analyzer compiles
+  never needs these as builtins (its `PRIM_OPS` table fuses a 2-arg call
+  straight into an `Add`/`Sub`/etc. op), but the self-hosted compiler
+  does no such fusion; anything it compiles calls these as ordinary
+  global procedures. Reuse `vm.c`'s own `num_add`/`num_sub`/`num_lt`/…
+  so the semantics (int/float promotion, overflow aborts) are identical
+  to the fused fast-path ops. Also added along the way: `quotient`/
+  `remainder`/`modulo` (needed by `(creme bytecode)`'s own integer
+  encoding), `complex?` (needed by `(creme bytecode)`'s datum-type
+  dispatch — always true for any number cvm has, since there's no
+  genuinely-complex-but-not-real value here), and `string-for-each`
+  (needed by `(creme bytecode)`'s own string-writing helper).
+
+**Scope (v1)**: one top-level form per line — no multi-line input. A
+paren-balance-based line-accumulation loop is a natural follow-up, not
+needed for the core deliverable.
+
+## Compiler mode
+
+Building on the REPL: point `cvm` at a plain `.scm` file and it compiles
+and runs it directly — the target script never touches the Crystal
+`creme` binary, only a small bundled "compiler driver" image (built once,
+same as `repl.cvmc`) still needed Crystal to produce:
+
+```sh
+./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc   # one-time build
+./cvm/cvm bench/creme.scm                                            # compiles + runs directly
+```
+
+`cvm/main.c` decides which mode to use by peeking a given file's first 4
+bytes: `"SCB1"` means an already-compiled binary (today's behavior,
+completely unchanged — `./cvm/cvm bench/creme.cvmc` still works exactly
+as before), anything else means plain Scheme source needing compiler
+mode. This is content-based, not extension-based — a `.scm` file's first
+bytes (whitespace/`(`/`;`) can never coincidentally read as `"SCB1"` — so
+no separate `--compile` flag is needed. In compiler mode, `main.c` stashes
+the real target path (a new `cvm-target-path` builtin exposes it) and
+loads+runs `cvm/compiler-run.cvmc` instead; that chunk's own driver code
+(`cvm/compiler-run.scm`) reads the real target (a new `read-whole-file`
+builtin — cvm's only other read capability, `read-line`, is hardwired to
+stdin), compiles it, and `load-chunk-bytes`s the result — the same
+mechanism the REPL already uses, just non-interactive and reading from a
+file instead of stdin.
+
+**`include`/`include-ci`**: the self-hosted compiler itself deliberately
+doesn't support these (`reader.sld`'s own header comment — real support
+needs a path-resolution design this project hasn't needed yet). Rather
+than take that on, `cvm/compiler-run.scm` expands them itself, entirely
+from already-exported toolchain primitives (`read-program`/
+`compile-program`/`chunk->bytes` — no changes to `reader.sld`/
+`compiler.sld`/`bytecode.sld`): parse the target into forms, recursively
+splice in each top-level `(include "path" ...)`'s own parsed forms
+(resolved relative to the *including* file's own directory, so a nested
+include resolves against wherever its own file lives), then compile the
+flattened list. This is exactly what makes `bench/creme.scm` — which
+itself `(include "workloads.scm")`/`(include "workloads-demo.scm")` —
+work under compiler mode at all.
+
+Getting the self-hosted compiler to actually compile a real, non-trivial
+program like `bench/creme.scm` (as opposed to the REPL's simple one-line
+inputs) surfaced the rest of the pattern the REPL work had already
+started: a program the *real* Crystal analyzer compiles never needs
+`cadr`/`vector-ref`/`vector-set!`/`string-ref`/`string-set!`/
+`bytevector-u8-ref`/`bytevector-u8-set!`/`char-downcase`/`char-upcase`/
+`char<?`/`char>?`/`char<=?`/`char>=?` (or the whole rest of `(scheme
+cxr)`'s `caar`..`cddddr` family) as *builtins* — the analyzer's `PRIM_OPS`
+table fuses each call site straight into a `Cxr`/`VecRef`/`VecSet`/etc.
+op — but the self-hosted compiler does no such fusion, so anything it
+compiles needs every one of these to genuinely exist as an ordinary
+global procedure too (`cvm/builtins.c`). Semantics mirror the fused ops'
+own bounds checks exactly.
+
 ## Profiling
 
 `cvm --profile <file.cvmc>` runs the program under two independent samplers
@@ -84,10 +218,11 @@ isn't passed (guarded by a single `if (vm->profiler.enabled)` check per
 instruction, and the `SIGPROF` timer is only installed for the duration of
 a profiled run).
 
-**Format note**: adding per-instruction source lines required a `.cvmc`
-format bump (`"CVM1"` → `"CVM2"`, in `cvm_serializer.cr`/`cvm/loader.c`) — a
-file emitted by an older `creme` build won't load; re-run `creme --emit-cvm`
-to regenerate it.
+**Format note**: cvm reads "SCB1" (magic `"SCB1"`), the same format the real
+Crystal VM's `ChunkSerializer`/`ChunkDeserializer` round-trip — there is no
+separate cvm-specific format/opcode-numbering to keep in sync anymore. A
+`.cvmc` file from before this change (the old "CVM2" format) won't load;
+re-run `creme --emit-cvm` to regenerate it.
 
 facil.io (vendored — see the mux/sql/string/format sections below) prints a
 single bare `\n` to **stderr** at process exit unconditionally, via its own
@@ -109,70 +244,137 @@ This section is the actual, current boundary — regenerate it by re-running
 the checks below rather than trusting it blindly if this file feels old
 again.
 
-### Opcodes: 84 of the real 119
+### Opcodes: 119 of 119 — full parity
 
-`cvm/opcodes.h`'s `OP_COUNT` (kept in sync with
-`cvm_serializer.cr`'s `OP_IDS`, not `Scheme::Op`'s own enum ordinals)
-currently covers: all load/move/global-read ops; the full fused
-arithmetic/comparison family (`Add`/`Sub`/`Mul`/`NumLt`/`NumLe`/`NumGt`/
-`NumGe`/`NumEq`/`IsEq`) with their `*Imm`/`*Up` specializations; `Cxr`,
-`Abs`, `Not`, `IsNull`/`IsPair`; vector ops (`VecRef`/`VecSet`/`VecLen` +
-`*Imm`/`*Up`); the string *read* side only (`StrRef`/`StrRefImm`/
-`StrRefUp`); `Cons`; `Quasiquote` (+ its own `build_qq` in `vm.c`); the full
-`Call`/`TailCall` family (`Call`, `TailCall`, `*Global`, `*Local`,
-`*Upval`); the arithmetic `*Return` fusions (`AddReturn`/`SubReturn`/
-`MulReturn`); `Closure`; `HelperForm`; the fused-branch `Test*` family; and
-`CaseMatch`/`CaseDispatch` (so `case` — both the linear-scan and
-hash-dispatch forms — is fully supported, along with `cond`/`when`/`unless`,
-which compile to ordinary jump ops with nothing special of their own).
+`cvm/opcodes.h`'s enum now IS `Scheme::Op`'s own enum, in the exact same
+declaration order — no separate compacted numbering to keep in lockstep by
+hand anymore, and no unimplemented ops left (`OP_COUNT` = 119, all real).
+Covers all
+load/move/global-read/global-write ops (including top-level `set!`); the
+full fused arithmetic/comparison family (`Add`/`Sub`/`Mul`/`NumLt`/`NumLe`/
+`NumGt`/`NumGe`/`NumEq`/`IsEq`) with their `*Imm`/`*Up` specializations,
+including every fused-branch `Test*` variant; `Cxr`, `Abs`, `CmpZero`
+(`zero?`/`positive?`/`negative?`), `Not`, `IsNull`/`IsPair`; vector ops
+(`VecRef`/`VecSet`/`VecLen` + `*Imm`/`*Up`); bytevector ops (`BvRef`/`BvSet`
++ `Imm`/`Up` — read AND write, backed by a real `T_BYTEVECTOR` value kind,
+see "Value/type model" below); the full string family (`StrRef`/`StrSet` +
+`Imm`/`Up`, read AND write — `string-set!` mutates `T_STR`'s buffer in
+place, see "Value/type model" below for the aliasing invariant that makes
+this safe); `Cons`; `Quasiquote` (+ its own `build_qq` in `vm.c`);
+`MakePromise` (`delay`/`delay-force`, backed by a real `T_PROMISE` value
+kind + a `force`/`promise?` builtin pair — see "Native builtins" below);
+the full `Call`/`TailCall` family (`Call`, `TailCall`, `*Global`, `*Local`,
+`*Upval`); the full `Return` family, including the bare-global/bare-upvalue
+fusions (`ReturnGlobal`/`ReturnUpval`) and every arithmetic/comparison/
+`eq?` tail fusion (`AddReturn`/`SubReturn`/`MulReturn`/`NumLtReturn`/
+`NumLeReturn`/`NumGtReturn`/`NumGeReturn`/`NumEqReturn`/`IsEqReturn`);
+`Throw`; `Closure`; `HelperForm` (now for real, not just its previous
+import-only scope — see below); `HelperFormLocal`; `Destructure`
+(`let-values`/`let*-values`/`define-values`, backed by a real `T_VALUES`
+multi-value carrier — see "Value/type model" below; `values`/
+`call-with-values` now genuinely carry more than one value, not just the
+first); `MakeCaseClosure` (`case-lambda`, backed by a real
+`T_CASE_CLOSURE` value kind — arity selection happens in
+`dispatch_call`/`cvm_apply`, so a case-lambda called directly, via
+`apply`, or via `map`/`for-each` all resolve the same way, mirroring
+`BytecodeCaseClosure#select_clause` exactly); and `CaseMatch`/
+`CaseDispatch` (so `case` — both the linear-scan and hash-dispatch forms
+— is fully supported, along with `cond`/`when`/`unless`, which compile to
+ordinary jump ops with nothing special of their own).
 
-**Not implemented** (present in `Scheme::Op`, absent from cvm):
+`define-record-type` is fully supported, both top-level (`HelperForm`
+with `c=2`, binding the constructor/predicate/accessor/mutator/type
+directly into the global table by name — this was previously an
+undetected gap, since `HelperForm` used to unconditionally no-op
+regardless of `c`) and function-body-internal (`HelperFormLocal`, a
+genuinely fresh, disjoint `T_RECORD_TYPE` per *call*, not per compile —
+see "Value/type model" below for the `T_RECORD`/`T_RECORD_TYPE`/
+`T_RECORD_CALLABLE` value kinds this needed).
 
-| Missing | Means no... |
-|---|---|
-| `SetGlobal` | top-level `(set! some-global ...)` |
-| `Bv*` (`BvRef`/`BvSet` + `Imm`/`Up`) | bytevectors at all |
-| `StrSet`/`StrSetImm`/`StrSetUp` | mutable strings (`string-set!`) |
-| `NumLtReturn`/`NumLeReturn`/`NumGtReturn`/`NumGeReturn`/`NumEqReturn`/`IsEqReturn` | tail-position comparison fusion (only the arithmetic trio is fused) |
-| `CmpZero` | fused `zero?`/`positive?`/`negative?` fast path |
-| `TestIsEqUp` | one fused-branch corner (rest of `Test*Up` family is present) |
-| `Throw` | a deferred-to-runtime malformed-form error |
-| `MakeCaseClosure` | `case-lambda` |
-| `Destructure` | `let-values`/`let*-values`/`define-values` |
-| `ParamPush`/`ParamPop` | `parameterize` |
-| `PushHandler`/`PopHandler`/`GuardReraise` | `guard` |
-| `MakePromise` | `delay`/`delay-force`/`force` |
-| `HelperFormLocal` | a body-internal `define-record-type` |
+`guard` (`PushHandler`/`PopHandler`/`GuardReraise`) and `parameterize`
+(`ParamPush`/`ParamPop`) are both fully supported now, closing what was by
+far the largest remaining gap — see "Guard/parameterize implementation"
+below for how, since neither maps onto ordinary opcode dispatch the way
+everything else above does.
 
 `call/cc`/`dynamic-wind` aren't opcodes in the real VM either — they're
 Crystal-level exception-unwind mechanics in `Interpreter#apply`/`#call_cc`,
-which cvm has no equivalent of at all (no continuation value, no unwind
-machinery), so they're unsupported regardless of opcode coverage.
+which cvm has no equivalent of at all (no continuation value), so they're
+unsupported regardless of opcode coverage. This is unrelated to guard's own
+unwinding (see below) — `call/cc` needs genuinely re-entrant continuations,
+which is a different, harder problem `setjmp`/`longjmp` alone doesn't solve.
+
+### Guard/parameterize implementation
+
+Unlike every other op, `guard`'s three opcodes don't fit the ordinary
+"read operands, write a register, NEXT()" shape — an error raised
+arbitrarily deep (including through `cvm_apply`'s own reentrant C
+recursion, e.g. inside a `map`/`for-each` callback) has to unwind straight
+back to the nearest enclosing `guard`, in one step, regardless of how many
+C stack frames sit in between. This VM uses `setjmp`/`longjmp` for that:
+
+- `PushHandler` calls `setjmp` and stores the `jmp_buf` in a `GuardHandler`
+  (`vm.h`) alongside the depth/condition-register/resume-ip it needs to
+  restore — mirrors `vm.cr`'s own `GuardHandler` struct exactly. Its own
+  `CASE` body is really two paths sharing one block: the normal path (just
+  installed, `setjmp` returned 0, falls through to the guarded body) and
+  the resume path (returned nonzero via a later `longjmp` — unwinds every
+  pending `parameterize`/`dynamic-wind` action above the handler's own
+  saved mark, closes upvalues for every discarded frame, collapses
+  `vm->depth` straight back to the handler's frame, writes the condition
+  into the clause-checking code's own register, and jumps there).
+- `cvm_abort` (every runtime error in this VM funnels through it) checks
+  a process-global "current VM" (mirrors `profiler.c`'s own
+  `g_profiled_vm` pattern, since `cvm_abort`'s signature has no room for a
+  `VM*` parameter across its ~100 existing call sites) — if a handler is
+  installed, it builds a condition record and calls `cvm_raise_condition`
+  (pop the handler, `longjmp`); otherwise it prints and `exit(1)`s exactly
+  as before. `error`/`raise` (new builtins) do the same check themselves,
+  building a real message+irritants condition (`error`) or raising the
+  given value as-is (`raise`), so `error-object?`/`-message`/`-irritants`
+  work correctly inside a `guard` clause.
+- `ParamPush`/`ParamPop` push/pop an `UnwindAction` (saved parameter
+  values to restore) onto a separate fixed-cap stack — drained either by
+  `ParamPop` on normal exit or by a `guard` handler's own resume path when
+  unwinding past it, so a `parameterize` around code that raises still
+  correctly restores its parameters.
+
+Verified against native `bin/creme` with test programs covering: `error`/
+`raise` caught by `guard`, deeply nested (50-level) non-tail-call unwinds,
+re-raising to an outer `guard`, `error-object?`/`-irritants`,
+`parameterize` (with and without a converter), `parameterize`+`guard`
+interaction (an error escaping a `parameterize`d region still restores
+it), nested `parameterize`, and — the case that specifically exercises
+`longjmp` unwinding through real C recursion — a `guard` around a `map`
+call whose callback raises partway through.
 
 ### Native builtins and library coverage
 
 cvm has no runtime library/import machinery (see "Deliberate cuts" below)
 — it hand-registers a flat, ungrouped set of global builtins in C, spread
-across five files:
+across seven files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
-| `builtins.c` | most of `(scheme base)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)` | 88 | predicates, `car`/`cdr`/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string->number`/etc., `vector`/`vector->list`, `error`, `read-line`, `get-environment-variable` |
+| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)` | 155 | predicates, `car`/`cdr`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number`/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=`, `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?` |
 | `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via vendored facil.io |
 | `sql.c` | `(creme sql)` | 6 | `sql-open`, `sql-execute`, `sql-query`, `sql-scalar` — real SQLite via the C API |
 | `hashtable.c` | `(creme hash-table)` (partial) | 6 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!` — no `hash-table-keys`/`values`/`walk` yet |
 | `strings.c` | `(creme string)` + `(creme format)` | 16 | `string-upcase`/`downcase`/`trim`/`split`/`join`/`replace`/`pad`/etc., `format` |
+| `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) | 5 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path` |
+| `regex.c` | `(creme regex)` (very narrow — see "REPL" above) | 2 | `regexp`, `regexp-matches?` |
 
-`+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` are never builtins here — the
-analyzer's own `PRIM_OPS` table (`ast.cr`) already folds a 2-arg call to one
-of these names straight into a fused op, so no builtin registration is
-needed for the common case; a 3+-arg or non-fused call to them isn't
-supported.
+`+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` didn't used to be builtins here — a
+program the real analyzer compiles never needs them as such (its
+`PRIM_OPS` table, `ast.cr`, already folds a 2-arg call to one of these
+names straight into a fused op), but the self-hosted compiler doesn't do
+that fusion (see "REPL" above), so they're real global procedures now
+too — a 3+-arg or non-fused call to them works either way.
 
 Every other `(scheme ...)` library (`file`, `process-context` beyond
 `get-environment-variable`, `time`, `complex`, `inexact`, `lazy`, `read`,
 `eval`, `repl`, `r5rs`, `case-lambda`, `cxr`) and every other `(creme ...)`
-FFI library (`bigdecimal`, `math`, `regex`, `json`, `file`, `time`,
+FFI library (`bigdecimal`, `math`, `json`, `file`, `time`,
 `random`, `digest`, `env`, `process`, `tui`, `rfc8439`, `http`,
 `prof-native`, `prof-vm`, `introspection`, `actor`, `raft`, `treelist`,
 `csv`, `jose`, `reader`) has **no** cvm-native counterpart at all — a
@@ -184,13 +386,14 @@ File-based libraries under `modules/creme/*.sld` (`dao`, `memoize`, `for`,
 `surf`, `html`, `css`, `path`, `json-builder`, `numfmt`, `table`, `bench`,
 `cli`, `extra`, `sxql`, `match`, `sort`, `pipe`, `scanner`, `ir`, `peg`, …)
 have no FFI of their own — they're ordinary Scheme, compiled down to plain
-ops/builtin calls like anything else. `CVMSerializer.emit` runs every
-`(import ...)` for real at *serialize* time (`interp.eval_import`), then
+ops/builtin calls like anything else. `CVMEmitter.emit` runs every
+`(import ...)` for real at *emit* time (`interp.eval_import`), then
 re-compiles each transitively-loaded file-based library's own body
-(`Interpreter#library_body_forms_for_cvm`) into its own chunk, written
-*before* the target script's chunks — so a `.sld` library "just works"
-under cvm as long as everything it bottoms out in is covered by the tables
-above. This is exactly how `competition/scheme/demo-todo/app.scm`'s
+(`Interpreter#library_body_forms_for_cvm`) along with the target script's
+own forms into ONE combined chunk (library bodies first, so their globals
+are defined before the script's own forms run) — so a `.sld` library "just
+works" under cvm as long as everything it bottoms out in is covered by the
+tables above. This is exactly how `competition/scheme/demo-todo/app.scm`'s
 `(creme dao)`/`(creme memoize)`/`(creme for)`/`(creme surf)`/`(creme
 html)`/`(creme css)`/`(creme path)`/`(creme json-builder)` all work end to
 end with zero library-specific cvm code — only the FFI libraries they
@@ -209,17 +412,49 @@ Per `value.h`'s own header comment — deliberate, not accidental:
   chosen for debuggability over compactness.
 - **Types present**: `T_NIL`, `T_BOOL`, `T_INT`, `T_FLOAT`, `T_SYM`
   (write-only — loaded into a register and discarded, never inspected at
-  runtime), `T_STR` (immutable), `T_CHAR` (a codepoint, same representation
-  as `T_INT`), `T_PAIR`, `T_VECTOR`, `T_PORT` (output-string only — no
-  input ports, no file ports), `T_CLOSURE`, `T_BUILTIN`, and `T_BOX` (an
-  opaque native handle, tagged by `kind`: hash table, SQL connection, mux
-  router, mux server).
-- **Not present at all**: bytevectors, records (`define-record-type`),
-  continuations, promises (`delay`/`force`), any port beyond
-  output-string, first-class environments, parameters
-  (`make-parameter`/`parameterize`). `values`/`call-with-values` exist as
-  builtins but don't carry a true multiple-values encoding — good enough
-  for the common single-value case, not a real multi-value channel.
+  runtime), `T_STR` (**mutable** via `string-set!`, as of Group C — every
+  `T_STR` value always owns a freshly `GC_MALLOC`'d, uniquely-owned buffer;
+  the invariant that makes mutation safe is that nothing may ever alias
+  another Value's buffer, a substring offset, or a C string literal
+  in `.rodata` (which would segfault on the first `string-set!`) — see
+  `builtins.c`'s `copy_bytes`/`bi_substring`/`bi_symbol_to_string`,
+  `strings.c`'s `bi_string_trim`, and `mux.c`/`sql.c`'s `v_litstr`, all of
+  which used to alias and now copy), `T_CHAR` (a codepoint, same
+  representation as `T_INT`), `T_PAIR`, `T_VECTOR`, `T_BYTEVECTOR` (a
+  mutable raw byte buffer — from a `#u8(...)` const, `make-bytevector`, or
+  `bytevector`), `T_PROMISE` (`delay`/`delay-force`'s wrapped thunk,
+  memoized on first `force` — see `builtins.c`'s `bi_force`; a
+  `delay-force` thunk that itself returns another promise is NOT
+  transparently re-forced through, since `delay`/`delay-force` compile to
+  the exact same `MakePromise` op), `T_PORT` (output-string only — no
+  input ports, no file ports), `T_CLOSURE`, `T_CASE_CLOSURE` (`case-lambda`
+  — an ordered array of `Closure`s, one per clause; `dispatch_call`/
+  `cvm_apply` pick the first whose arity accepts the call's argument
+  count), `T_BUILTIN`, and `T_BOX` (an opaque native handle, tagged by
+  `kind`: hash table, SQL connection, mux router, mux server), and
+  `T_VALUES` (a genuine multiple-values carrier —
+  `values` wraps 0 or 2+ args in one, a single arg is returned as itself
+  unwrapped, never appears as an ordinary Scheme value anywhere else;
+  unpacked by `Destructure` and `call-with-values`, see `builtins.c`'s
+  `bi_values`/`bi_call_with_values`), `T_RECORD_TYPE`/`T_RECORD`/
+  `T_RECORD_CALLABLE` (`define-record-type` — a type descriptor, a record
+  instance (type pointer + positional fields array, type compared by
+  IDENTITY not name, so distinct `define-record-type` invocations are
+  always disjoint even when they share a type name), and one generated
+  constructor/predicate/accessor/mutator per type respectively;
+  `dispatch_call`/`cvm_apply` recognize `T_RECORD_CALLABLE` directly,
+  since cvm's plain `BuiltinFn` function pointer has nowhere to stash a
+  captured record type/field index the way a real closure can — see
+  `vm.c`'s `call_record_callable`), and `T_PARAMETER` (`make-parameter`'s
+  own value — current value + optional converter procedure, mirrors
+  `SchemeParameter` exactly; calling it with 0 args returns its current
+  value, same `dispatch_call`/`cvm_apply` recognition pattern as
+  `T_RECORD_CALLABLE`, though `procedure?` deliberately excludes it,
+  matching the real interpreter's own narrower definition).
+- **Not present at all**: continuations, any port beyond output-string,
+  first-class environments, and — unrelated to the value model itself,
+  but worth naming here too — no bignum/rational/complex (fixnum + double
+  only; see "Deliberate cuts" below).
 - **GC**: every heap allocation (pairs, vectors, closures, upvalues,
   output-string port buffers, hash tables, the program's own `Chunk` tree)
   goes through Boehm GC (`GC_MALLOC`/`GC_REALLOC` — the same collector
@@ -256,26 +491,36 @@ above) — Scheme-level calls never become real C stack frames.
   path's precondition fails (non-pair `cxr`, non-fixnum `abs`, ...); this VM
   just aborts with a message instead.
 - **`HelperForm`** (the top-level `(import ...)`) is a runtime no-op —
-  imports are already fully resolved by the Crystal compiler at *serialize*
-  time (see "`.sld` pure-Scheme libraries" above), and the C VM's global
-  table is pre-seeded with whatever native builtins the program needs. There
-  is no R7RS library/import system *at runtime* — no `eval`, no dynamically
-  loading a library cvm wasn't built with.
+  imports are already fully resolved by the Crystal compiler at *emit*
+  time, and any pure-Scheme library body they need is already flattened
+  into the same combined chunk (see "`.sld` pure-Scheme libraries" above);
+  the C VM's global table is also pre-seeded with whatever native builtins
+  the program needs. There is no R7RS library/import system *at runtime* —
+  no `eval`, no dynamically loading a library cvm wasn't built with.
 - Macros (`define-syntax`/`syntax-rules`/`defmacro`) are always gone by
   compile time regardless of backend — nothing cvm-specific there.
 
 ## Files
 
-- `opcodes.h` — on-disk opcode/const-tag ids (kept in sync with
-  `cvm_serializer.cr`'s `OP_IDS` table, not `Scheme::Op`'s own enum).
+- `opcodes.h` — on-disk opcode/const-tag ids: `Scheme::Op`'s own enum
+  ordinals (`src/scheme/compile/opcode.cr`) and SCB1's `TAG_*`/`CDK_*`/`QQ_*`
+  constants (`chunk_serializer.cr`), not a separate cvm-specific numbering.
 - `value.h` — the tagged `Value` struct and heap object types.
 - `vm.h` — `Chunk`/`Frame`/`Closure`/`Upvalue`/`VM` struct definitions.
-- `loader.c` — deserializes a `.cvmc` file, then resolves global names.
-- `vm.c` — the dispatch loop, call/upvalue machinery, global table.
+- `loader.c` — deserializes an SCB1 file OR in-memory byte buffer (one
+  combined `Chunk`, no multi-chunk envelope), then resolves global names.
+- `vm.c` — the dispatch loop, call/upvalue machinery, global table,
+  guard/parameterize unwind machinery (`cvm_abort`/`cvm_raise_condition`).
 - `builtins.c` — the R7RS-base-ish builtin surface (see table above).
 - `mux.c`/`mux.h` — `(creme mux)`, a real HTTP server via facil.io.
 - `sql.c`/`sql.h` — `(creme sql)`, real SQLite via the C API.
 - `hashtable.c`/`hashtable.h` — `(creme hash-table)`, via facil.io's `fiobj_hash`.
 - `strings.c`/`strings.h` — `(creme string)`/`(creme format)`.
+- `bootstrap.c`/`bootstrap.h` — `load-chunk-bytes`/`import!`/
+  `expand-if-macro`, see "REPL" above.
+- `regex.c`/`regex.h` — `regexp`/`regexp-matches?` via PCRE2, see "REPL" above.
+- `repl.scm` — the REPL driver script, precompiled into `repl.cvmc`.
+- `compiler-run.scm` — the compiler-mode driver script (see "Compiler
+  mode" above), precompiled into `compiler-run.cvmc`.
 - `profiler.c`/`profiler.h` — the `--profile` samplers, see "Profiling" above.
-- `main.c` — entry point: load, then run each top-level chunk in order.
+- `main.c` — entry point: load and run the one combined chunk.

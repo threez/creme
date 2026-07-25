@@ -70,6 +70,14 @@ static Value v_gcstr(const char *s, size_t len) {
   return v_str(gc_strndup(s, len), (int)len);
 }
 
+/* Same as v_gcstr, but for a C string literal (e.g. the alist keys below) —
+ * T_STR is mutable (string-set!) as of Group C, so a Value pointing
+ * directly at a literal in .rodata would segfault the moment Scheme code
+ * mutated it; every literal handed to Scheme needs its own GC-owned copy. */
+static Value v_litstr(const char *s) {
+  return v_gcstr(s, strlen(s));
+}
+
 /* ---- registration ---- */
 
 static Value bi_mux_router(VM *vm, Value *args, int nargs) {
@@ -233,16 +241,16 @@ static Value build_request(VM *vm, http_s *h, Value path_params) {
     fio_str_info_s b = fiobj_data_read(h->body, 0);
     body = v_gcstr(b.data, b.len);
   } else {
-    body = v_str("", 0);
+    body = v_litstr("");
   }
 
   Value request = v_nil();
-  request = cvm_cons(vm, cvm_cons(vm, v_str("body", 4), body), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_str("remote-addr", 11), v_gcstr(remote.data, remote.len)), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_str("headers", 7), ctx.alist), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_str("path-params", 11), path_params), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_str("path", 4), v_gcstr(path.data, path.len)), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_str("method", 6), v_gcstr(method.data, method.len)), request);
+  request = cvm_cons(vm, cvm_cons(vm, v_litstr("body"), body), request);
+  request = cvm_cons(vm, cvm_cons(vm, v_litstr("remote-addr"), v_gcstr(remote.data, remote.len)), request);
+  request = cvm_cons(vm, cvm_cons(vm, v_litstr("headers"), ctx.alist), request);
+  request = cvm_cons(vm, cvm_cons(vm, v_litstr("path-params"), path_params), request);
+  request = cvm_cons(vm, cvm_cons(vm, v_litstr("path"), v_gcstr(path.data, path.len)), request);
+  request = cvm_cons(vm, cvm_cons(vm, v_litstr("method"), v_gcstr(method.data, method.len)), request);
   return request;
 }
 
@@ -266,7 +274,7 @@ static void write_response(VM *vm, http_s *h, Value response) {
   Value body = alist_ref(response, "body");
   if (body.tag == T_STR) {
     http_send_body(h, (void *)body.as.str.chars, (uintptr_t)body.as.str.len);
-  } else if (body.tag == T_CLOSURE || body.tag == T_BUILTIN) {
+  } else if (body.tag == T_CLOSURE || body.tag == T_CASE_CLOSURE || body.tag == T_BUILTIN) {
     /* mux.cr's own "streaming callable body" case: the handler passed a
      * (lambda (port) ...) instead of a pre-built string (surf-html/
      * surf-json pass write-page!/write-todos-json! straight through
@@ -408,8 +416,8 @@ static Value bi_mux_address(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("mux-address: expected a server");
   MuxServer *srv = as_mux_server(args[0], "mux-address");
   Value alist = v_nil();
-  alist = cvm_cons(vm, cvm_cons(vm, v_str("port", 4), v_gcstr(srv->port, strlen(srv->port))), alist);
-  alist = cvm_cons(vm, cvm_cons(vm, v_str("host", 4), v_gcstr(srv->host, strlen(srv->host))), alist);
+  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("port"), v_gcstr(srv->port, strlen(srv->port))), alist);
+  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("host"), v_gcstr(srv->host, strlen(srv->host))), alist);
   return alist;
 }
 

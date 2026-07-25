@@ -13,10 +13,14 @@
 ;   - bench/bench.js, the same 7 workloads under Node.js (V8)
 ;   - cvm/cvm, the standalone C11 prototype VM in cvm/ (see cvm/README.md —
 ;     a narrow experiment scoped to exactly bench/creme.scm, not a general
-;     Scheme runtime) running the SAME compiled program creme's own column
-;     runs, via its own serialized bytecode
-;     (build once: make -C cvm, then
-;      ./bin/creme --emit-cvm bench/creme.scm bench/creme.cvmc)
+;     Scheme runtime), compiling and running bench/creme.scm itself through
+;     its own self-hosted (creme compiler compiler) -- a genuinely
+;     independent compile of the same source, not the bytecode creme's own
+;     column runs (build once: make -C cvm; this script regenerates
+;     cvm/compiler-run.cvmc, the precompiled self-hosted-compiler image
+;     cvm's compiler mode depends on, on every run -- see
+;     ensure-cvm-compiler-image! below, cheap enough (~0.15s) not to bother
+;     with a staleness check spanning every .sld the compiler bundles)
 ;
 ; Each variant is optional: if its command isn't found (or exits non-zero),
 ; that column falls back to "n/a" instead of raising, so this script — and
@@ -60,7 +64,16 @@
 (define racket-output (run-variant "racket" (list "bench/racket.scm")))
 (define guile-output (run-variant "guile" (list "--r7rs" "bench/guile.scm")))
 (define node-output (run-variant "node" (list "bench/bench.js")))
-(define cvm-output (run-variant "cvm/cvm" (list "bench/creme.cvmc")))
+
+; Regenerates cvm/compiler-run.cvmc (the precompiled self-hosted-compiler
+; image cvm's own compiler mode depends on to run a plain .scm file
+; directly, see cvm/compiler-run.scm) unconditionally every run rather than
+; tracking a staleness check across every .sld it bundles (reader.sld,
+; bytecode.sld, compiler.sld, ...) -- ~0.15s, cheap enough not to bother.
+; Best-effort like every other variant here: if bin/creme or cvm/cvm aren't
+; built yet, this (and then cvm-output below) just falls back to n/a.
+(run-variant "bin/creme" (list "--emit-cvm" "cvm/compiler-run.scm" "cvm/compiler-run.cvmc"))
+(define cvm-output (run-variant "cvm/cvm" (list "bench/creme.scm")))
 
 ; ---- parse "<label> = <result>  (<elapsed>s)" / "total = <elapsed>s" -------
 

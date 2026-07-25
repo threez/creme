@@ -2,8 +2,18 @@
 ;; against its Sinatra+ERB+Sequel+SQLite, Kemal+Granite+ECR, Racket web-server,
 ;; Go Fiber+GORM+html-template, Node Express+Drizzle+Eta, and C facil.io+
 ;; mustache+SQLite3 twins using wrk -- plus cvm, the standalone C11
-;; prototype VM (../../cvm/), running that SAME app.scm source (compiled to
-;; .cvmc bytecode via `creme --emit-cvm`) instead of a hand-ported twin.
+;; prototype VM (../../cvm/), compiling and running that SAME app.scm source
+;; directly through its own self-hosted (creme compiler compiler) instead
+;; of a hand-ported twin -- including its (creme dao) dependency's
+;; define-dao, a defmacro exported from a pure-Scheme, file-based library:
+;; the self-hosted compiler's own compile-defmacro!/ensure-libraries-
+;; loaded! (modules/creme/compiler/compiler.sld) recursively load and
+;; compile a file-based library's own body the first time it's imported
+;; and register any defmacro/define-syntax it exports into the same
+;; macro-table a textually-local one would use -- needed since cvm's own
+;; `import!`/`expand-if-macro` builtins are permanent stubs (cvm's global
+;; table is unconditionally flat, with no runtime Macro/SchemeSyntaxRules
+;; representation at all -- see cvm/bootstrap.c's own header comment).
 ;; A scheme.cr port of bench.sh -- same
 ;; sequence, same wrk invocations, same cleanup patterns, just orchestrated
 ;; from creme instead of bash. Prints one line per step as it runs, then a
@@ -361,24 +371,14 @@
 ;; own freshness-check comments above), so it's called unconditionally
 ;; rather than replicated as a shell test here.
 (shell-checked! "sh" (list "-c" "cd cvm && make") "cvm make")
-;; Re-emit app.scm's bytecode only if it's missing or older than app.scm --
-;; ALSO older than cvm/cvm itself or cvm_serializer.cr, unlike the other
-;; twins' plain source-vs-binary freshness check: a cached .cvmc's on-disk
-;; FORMAT (not just its content) can change independently of app.scm --
-;; e.g. the CVM1->CVM2 bump adding per-instruction source lines -- and a
-;; stale-but-still-newer-than-app.scm .cvmc from before such a bump fails
-;; to load with a cryptic "not a CVM2 bytecode file" instead of silently
-;; regenerating (see cvm/loader.c's own magic check).
-(if (not (cdr (assoc "success" (shell-run "sh"
-                            (list "-c" (string-append
-                                        "[ -f competition/scheme/demo-todo/app.cvmc ] && "
-                                        "[ ! competition/scheme/demo-todo/app.scm -nt "
-                                        "competition/scheme/demo-todo/app.cvmc ] && "
-                                        "[ ! cvm/cvm -nt competition/scheme/demo-todo/app.cvmc ] && "
-                                        "[ ! src/scheme/compile/cvm_serializer.cr -nt "
-                                        "competition/scheme/demo-todo/app.cvmc ]"))))))
-    (shell-checked! "sh" (list "-c" "./bin/creme --emit-cvm competition/scheme/demo-todo/app.scm competition/scheme/demo-todo/app.cvmc") "creme --emit-cvm"))
-(track! (process-spawn "./cvm/cvm" (list "competition/scheme/demo-todo/app.cvmc")
+;; cvm's own compiler mode compiles+runs app.scm directly (see
+;; cvm/compiler-run.scm) -- no app.cvmc, no per-app freshness check. It
+;; still depends on cvm/compiler-run.cvmc, the precompiled self-hosted-
+;; compiler image, which this regenerates unconditionally every run rather
+;; than tracking a staleness check across every .sld it bundles (reader.sld,
+;; bytecode.sld, compiler.sld, ...) -- cheap enough (~0.15s) not to bother.
+(shell-checked! "sh" (list "-c" "./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc") "creme --emit-cvm (cvm compiler image)")
+(track! (process-spawn "./cvm/cvm" (list "competition/scheme/demo-todo/app.scm")
                        'env (list (cons "PORT" cvm-port))
                        'stdout "/tmp/bench-cvm.log" 'stderr "/tmp/bench-cvm.log"))
 (wait-for-port! cvm-port)

@@ -64,6 +64,8 @@ static FIOBJ value_to_fiobj(Value v) {
   }
   case T_CLOSURE:
     return fiobj_num_new((intptr_t)v.as.closure);
+  case T_CASE_CLOSURE:
+    return fiobj_num_new((intptr_t)v.as.case_closure);
   case T_BUILTIN:
     return fiobj_num_new((intptr_t)v.as.builtin);
   case T_BOX:

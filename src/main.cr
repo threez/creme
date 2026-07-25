@@ -156,11 +156,11 @@ def dump_bytecode(path : String, strict : Bool = false) : Nil
 end
 
 # Compiles `path` (same auto-import-base convention as dump_bytecode above,
-# so builtins fuse the same way a real run would) and serializes every
-# top-level Chunk to `out_path` via CVMSerializer — for `creme --emit-cvm`,
-# feeding the standalone C11 prototype VM in cvm/ (see cvm/README.md for what
-# it does and doesn't support; this flag exists only to feed it
-# bench/creme.scm, not as a general-purpose target). Pushes path's own
+# so builtins fuse the same way a real run would) into a single Chunk and
+# serializes it to `out_path` via CVMEmitter/ChunkSerializer (the same
+# "SCB1" format the real Crystal VM already round-trips through) — for
+# `creme --emit-cvm`, feeding the standalone C11 prototype VM in cvm/ (see
+# cvm/README.md for current opcode/value-model coverage). Pushes path's own
 # directory first, same as Scheme.run_file — bench/creme.scm's own
 # `(include "workloads.scm")` resolves relative to wherever the script
 # lives, not the process's CWD, so this must match run_file's convention
@@ -172,7 +172,8 @@ def emit_cvm(path : String, out_path : String) : Nil
   begin
     src = File.read(path)
     forms = Scheme.forms_for(interp, src, path)
-    Scheme::CVMSerializer.emit(interp, forms, interp.global, out_path, path)
+    bytes = Scheme::CVMEmitter.emit(interp, forms, interp.global)
+    File.write(out_path, bytes)
   ensure
     interp.pop_load_dir
   end

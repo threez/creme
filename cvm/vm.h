@@ -6,6 +6,7 @@
 #ifndef CVM_VM_H
 #define CVM_VM_H
 
+#include <setjmp.h>
 #include <signal.h>
 #include <sys/time.h>
 
@@ -13,15 +14,22 @@
 
 typedef struct {
   int op, a, b, c, d;
-  int line; /* source line this instruction came from, 0 if unknown — see
-             * cvm_serializer.cr's write_chunk; used only by --profile's
-             * report to symbolize a sampled (chunk, ip) as file:line. */
+  int has_pos; /* mirrors ChunkSerializer's per-instruction optional
+                * position record (chunk_serializer.cr) — file/line/col
+                * below are only meaningful when this is set. Used only by
+                * --profile's report to symbolize a sampled (chunk, ip) as
+                * file:line. */
+  const char *file;
+  int line, col;
 } Instruction;
 
-/* Mirrors Scheme::UpvalDesc (chunk.cr). */
+/* Mirrors Scheme::UpvalDesc (chunk.cr). `name` is carried for parity with
+ * the real format's debug info; cvm doesn't currently use it for anything
+ * (upvalues are resolved purely by index). */
 typedef struct {
   int from_parent_local;
   int index;
+  const char *name;
 } UpvalDesc;
 
 /* Mirrors ast.cr's QQTemplate hierarchy (QQConst/QQHole/QQSpliceItem/QQList/
@@ -109,6 +117,34 @@ typedef struct {
   int bound;
 } GlobalCell;
 
+/* One installed `guard` -- mirrors vm.cr's own GuardHandler exactly
+ * (depth/condition_reg/resume_ip), plus the jmp_buf that makes an error
+ * raised arbitrarily deep (including through cvm_apply's own reentrant C
+ * recursion, e.g. inside a map/for-each callback) unwind straight back
+ * here in one step, regardless of how many C stack frames sit between the
+ * raise site and here. `depth` is `vm->depth` AT THE TIME PushHandler
+ * ran -- vm->frames[depth-1] is guard's own frame, valid indefinitely
+ * since `frames` is a fixed array (see CVM_FRAMES_CAP's own comment). */
+typedef struct {
+  jmp_buf buf;
+  int depth;
+  int unwind_mark; /* vm->n_unwind at install time -- see UnwindAction */
+  int condition_reg;
+  int resume_ip;
+} GuardHandler;
+
+/* One pending `parameterize` restoration -- mirrors vm.cr's own
+ * UnwindAction/ParamRestoreAction: on ParamPop (normal exit) OR on an
+ * error unwinding past this parameterize (a guard handler above it
+ * draining the unwind stack down to its own saved mark), every one of
+ * these `n` parameters gets its pre-parameterize value put back, in one
+ * shot. */
+typedef struct {
+  Parameter **params;
+  Value *saved;
+  int n;
+} UnwindAction;
+
 /* Registers and call frames are fixed-capacity, allocated once, and never
  * reallocated for the VM's whole lifetime — deliberately, not just for
  * simplicity: an open Upvalue holds a raw `Value *` into `stack`, and a
@@ -117,10 +153,13 @@ typedef struct {
  * a few registers each), so generous fixed caps cost a few MB and remove an
  * entire class of bugs. A future version wanting to lift this limit would
  * need upvalues to reference the stack indirectly (e.g. index + a stable
- * segment table) instead of a raw pointer. */
+ * segment table) instead of a raw pointer. Same reasoning for the guard
+ * handler / unwind-action stacks below. */
 #define CVM_STACK_CAP (1 << 20)
 #define CVM_FRAMES_CAP 8192
 #define CVM_GLOBALS_CAP 4096
+#define CVM_HANDLERS_CAP 256
+#define CVM_UNWIND_CAP 1024
 
 /* ---- profiling (see profiler.h/profiler.c) ---- */
 
@@ -178,23 +217,52 @@ struct VM {
   int depth;
   GlobalCell globals[CVM_GLOBALS_CAP];
   int n_globals;
-  const char *source_file; /* from the .cvmc header, for --profile's file:line report */
+  GuardHandler handlers[CVM_HANDLERS_CAP];
+  int n_handlers;
+  UnwindAction unwind_stack[CVM_UNWIND_CAP];
+  int n_unwind;
+  Value pending_condition;   /* set by cvm_raise_condition right before its
+                               * longjmp; read back by GuardReraise. */
+  RecordType *condition_type; /* one process-wide type shared by every
+                               * condition cvm_abort/error construct --
+                               * mirrors record.cr's own CONDITION_TYPE
+                               * constant; lazily built on first use (see
+                               * vm.c's get_condition_type). */
+  const char *source_file; /* fallback for --profile's file:line report when an
+                             * instruction has no per-instruction file of its
+                             * own (has_pos unset) — set by main.c from the
+                             * loaded .cvmc path itself, since SCB1 (unlike
+                             * the old CVM2 header) carries no separate
+                             * original-source-file field. */
   Profiler profiler;
 };
 
 /* loader.c */
-Chunk **cvm_load(const char *path, int *n_top_level_chunks, VM *vm);
+Chunk *cvm_load(const char *path, VM *vm);
+Chunk *cvm_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len);
 
 /* vm.c */
 void cvm_run_chunk(VM *vm, Chunk *chunk);
+Value cvm_run_loaded_chunk(VM *vm, Chunk *chunk);
 Value cvm_apply(VM *vm, Value fn, Value *args, int nargs);
 int cvm_global_intern(VM *vm, const char *name, int len);
 void cvm_register_builtin(VM *vm, const char *name, BuiltinFn fn);
 Value cvm_cons(VM *vm, Value car, Value cdr);
 Value cvm_build_qq(VM *vm, QQTemplate *t, Value *stack, int hole_base, int *idx);
 int cvm_eqv(Value a, Value b);
+double as_double(Value v, const char *who);
+Value num_add(Value x, Value y);
+Value num_sub(Value x, Value y);
+Value num_mul(Value x, Value y);
 int num_lt(Value x, Value y);
+int num_le(Value x, Value y);
 int num_gt(Value x, Value y);
+int num_ge(Value x, Value y);
+int num_eq(Value x, Value y);
+void cvm_set_current_vm(VM *vm);
+Value cvm_make_condition(VM *vm, const char *msg, size_t msglen, Value irritants);
+int cvm_is_condition(VM *vm, Value v);
+_Noreturn void cvm_raise_condition(VM *vm, Value condition);
 
 /* profiler.c */
 void cvm_profiler_tick(VM *vm, Frame *frame);

@@ -143,6 +143,18 @@ module Scheme
       @consts.size - 1
     end
 
+    # Unconditional append, no dedup — for a deserializer reconstructing a
+    # chunk from an already-fixed, positionally-addressed serialized const
+    # pool (see ChunkDeserializer): that pool's indices are exactly what
+    # the deserialized instructions reference, so silently collapsing a
+    # repeated atomic constant onto an earlier index (like add_const does)
+    # would desync every later instruction's operand from the slot it
+    # actually meant.
+    def add_const_raw(value : SchemeValue) : Int32
+      @consts << value
+      @consts.size - 1
+    end
+
     def add_proto(proto : Chunk) : Int32
       @protos << proto
       @protos.size - 1

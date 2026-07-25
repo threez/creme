@@ -14,6 +14,18 @@ static sqlite3 *as_sql(Value v, const char *who) {
   return (sqlite3 *)v.as.box.ptr;
 }
 
+/* For a C string literal (e.g. the alist keys below) — T_STR is mutable
+ * (string-set!) as of Group C, so a Value pointing directly at a literal
+ * in .rodata would segfault the moment Scheme code mutated it; every
+ * literal handed to Scheme needs its own GC-owned copy (mirrors mux.c's
+ * own v_litstr). */
+static Value v_litstr(const char *s) {
+  size_t len = strlen(s);
+  char *copy = GC_MALLOC(len ? len : 1);
+  memcpy(copy, s, len);
+  return v_str(copy, (int)len);
+}
+
 static void bind_param(sqlite3_stmt *stmt, int idx, Value v) {
   switch (v.tag) {
   case T_INT:
@@ -109,8 +121,8 @@ static Value bi_sql_execute(VM *vm, Value *args, int nargs) {
   int64_t rows_affected = sqlite3_changes(db);
   int64_t last_id = sqlite3_last_insert_rowid(db);
   Value alist = v_nil();
-  alist = cvm_cons(vm, cvm_cons(vm, v_str("last-insert-id", sizeof("last-insert-id") - 1), v_int(last_id)), alist);
-  alist = cvm_cons(vm, cvm_cons(vm, v_str("rows-affected", sizeof("rows-affected") - 1), v_int(rows_affected)), alist);
+  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("last-insert-id"), v_int(last_id)), alist);
+  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("rows-affected"), v_int(rows_affected)), alist);
   return alist;
 }
 

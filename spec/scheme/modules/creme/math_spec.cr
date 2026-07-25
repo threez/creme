@@ -36,4 +36,12 @@ describe "math module" do
       run(%((sin "x")))
     end
   end
+
+  it "round-trips a float through its raw IEEE754 bit pattern" do
+    w("(flonum->bits 1.0)").should eq("4607182418800017408")
+    w("(bits->flonum (flonum->bits 3.14))").should eq("3.14")
+    w("(bits->flonum (flonum->bits +inf.0))").should eq("+inf.0")
+    w("(bits->flonum (flonum->bits -inf.0))").should eq("-inf.0")
+    w("(bits->flonum (flonum->bits +nan.0))").should eq("+nan.0")
+  end
 end

@@ -22,8 +22,9 @@ spec: $(NEON_OBJ)
 # Run-only: assumes bin/creme is already built (shards build --release
 # --no-debug) and, for the native-Crystal comparison column, bin/bench_cr is
 # already built too (crystal build --release bench/bench.cr -o bin/bench_cr).
-# Same for the cvm column: cvm/cvm built (make -C cvm) and bench/creme.cvmc
-# emitted (./bin/creme --emit-cvm bench/creme.scm bench/creme.cvmc).
+# Same for the cvm column: cvm/cvm built (make -C cvm) -- bench.scm itself
+# regenerates cvm/compiler-run.cvmc (the precompiled self-hosted-compiler
+# image cvm's compiler mode needs) every run, so no separate emit step here.
 # Ruby/Racket/Guile/Node/cvm columns fall back to "n/a" if those aren't built
 # or installed.
 bench:

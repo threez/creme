@@ -1,29 +1,29 @@
-/* cvm — standalone prototype VM entry point. Loads a .cvmc file (produced by
- * `creme --emit-cvm <file.scm> <out.cvmc>`) and runs each of its top-level
- * chunks in order, exactly like Scheme::BytecodeCompiler.run_program runs
- * each top-level form of a real script — except globals persist across
- * chunks via one shared VM/global table while registers/frames reset per
- * chunk (mirroring dump_bytecode's one-fresh-VM-per-form pattern; see
- * cvm_serializer.cr's own doc comment). See cvm/README.md for full scope.
+/* cvm — standalone prototype VM entry point. Loads a "SCB1" file (produced
+ * by `creme --emit-cvm <file.scm> <out.cvmc>`, see cvm_emitter.cr) — a
+ * whole script (plus its transitively-imported pure-Scheme library bodies)
+ * compiled into ONE Chunk — and runs it. See cvm/README.md for full scope.
  *
- * This same "run each chunk in order" loop is also what makes a compiled
- * HTTP server (e.g. competition/scheme/demo-todo/app.scm) run correctly as
- * a genuinely long-running process, with no special-casing needed here:
- * mux.c's mux-listen! calls facil.io's fio_start() itself (see that file's
- * own comment) and blocks right there until the reactor stops (SIGINT/
- * SIGTERM) — so this loop simply doesn't advance past that chunk until the
- * server does. Whatever top-level forms come after (in app.scm's case,
+ * Running one combined chunk is also what makes a compiled HTTP server
+ * (e.g. competition/scheme/demo-todo/app.scm) run correctly as a genuinely
+ * long-running process, with no special-casing needed here: mux.c's
+ * mux-listen! calls facil.io's fio_start() itself (see that file's own
+ * comment) and blocks right there until the reactor stops (SIGINT/
+ * SIGTERM) — so this run simply doesn't return until the server does.
+ * Whatever top-level forms come after it in the source (in app.scm's case,
  * (read-line)/mux-close!/sql-close, originally written for the interactive
  * single-process interpreter) still run afterward as ordinary best-effort
- * cleanup once the server actually stops. */
+ * cleanup once the server actually stops, since they're all part of the
+ * same sequential chunk body. */
 #include <gc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "bootstrap.h"
 #include "hashtable.h"
 #include "mux.h"
 #include "profiler.h"
+#include "regex.h"
 #include "sql.h"
 #include "strings.h"
 #include "vm.h"
@@ -33,6 +33,28 @@
  * src/main.cr's handle_profile). Not currently configurable from the CLI;
  * add a `--profile=<n>` form here if a bench ever needs a different rate. */
 #define CVM_PROFILE_DEFAULT_VM_INTERVAL 200
+
+/* Repo-root-relative, matching this project's existing convention for
+ * locating cvm itself (e.g. src/main.cr's run_via_cvm hardcodes
+ * "cvm/cvm") -- assumes cvm is invoked from the repo root, same
+ * assumption every other cvm/creme cross-reference in this project makes. */
+#define CVM_COMPILER_DRIVER_PATH "cvm/compiler-run.cvmc"
+
+/* A plain .scm file can never coincidentally start with the 4 bytes
+ * "SCB1" (Scheme source always starts with whitespace, `(`, or `;`), so
+ * this is a safe, content-based way to tell "already-compiled SCB1
+ * binary" apart from "raw Scheme source needing compiler mode" -- no
+ * `--compile` flag or file-extension convention needed. A file that
+ * can't even be opened returns 0 here too, letting the real error
+ * surface later from whichever path actually tries to open it. */
+static int is_scb1_file(const char *path) {
+  FILE *f = fopen(path, "rb");
+  if (!f) return 0;
+  char magic[4];
+  size_t n = fread(magic, 1, 4, f);
+  fclose(f);
+  return n == 4 && memcmp(magic, "SCB1", 4) == 0;
+}
 
 int main(int argc, char **argv) {
   int profile = 0;
@@ -63,14 +85,29 @@ int main(int argc, char **argv) {
     fprintf(stderr, "cvm: out of memory allocating VM state\n");
     return 1;
   }
+  cvm_set_current_vm(vm); /* lets cvm_abort reach this VM's guard-handler stack */
   cvm_register_builtins(vm);
   cvm_register_hashtable_builtins(vm);
   cvm_register_sql_builtins(vm);
   cvm_register_mux_builtins(vm);
   cvm_register_string_builtins(vm);
+  cvm_register_bootstrap_builtins(vm);
+  cvm_register_regex_builtins(vm);
 
-  int n_chunks = 0;
-  Chunk **chunks = cvm_load(path, &n_chunks, vm);
+  /* Compiler mode: `path` isn't a compiled SCB1 binary at all -- it's the
+   * plain Scheme source cvm should compile-and-run, entirely via the
+   * bundled self-hosted-compiler driver (see cvm/compiler-run.scm's own
+   * header comment), never touching a live Crystal `creme` process. The
+   * driver learns the real target path via cvm-target-path, reads and
+   * compiles it (expanding any `include`s itself), and runs the result. */
+  const char *load_path = path;
+  if (!is_scb1_file(path)) {
+    cvm_set_target_path(path);
+    load_path = CVM_COMPILER_DRIVER_PATH;
+  }
+
+  vm->source_file = load_path;
+  Chunk *chunk = cvm_load(load_path, vm);
 
   if (profile) {
     vm->profiler.enabled = 1;
@@ -79,9 +116,7 @@ int main(int argc, char **argv) {
     cvm_profiler_start_native(vm);
   }
 
-  for (int i = 0; i < n_chunks; i++) {
-    cvm_run_chunk(vm, chunks[i]);
-  }
+  cvm_run_chunk(vm, chunk);
 
   if (profile) {
     cvm_profiler_stop_native(vm);

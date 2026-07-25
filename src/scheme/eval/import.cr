@@ -286,7 +286,7 @@ module Scheme
     # library with no .sld file of its own, e.g. mux/sql/string/format) and
     # returns just the flat list of body forms its declarations expand to,
     # WITHOUT executing or registering anything. Used only by
-    # CVMSerializer.emit (src/scheme/compile/cvm_serializer.cr): the C VM
+    # CVMEmitter.emit (src/scheme/compile/cvm_emitter.cr): the C VM
     # prototype in cvm/ has no way to run arbitrary library source the way
     # the ordinary import path does (see this file's own header comment on
     # each library getting its own Env populated by evaluating its

@@ -22,19 +22,26 @@ FIO_SRC := $(FIO_LIB)/fio.c \
 GC_CFLAGS := $(shell pkg-config --cflags bdw-gc 2>/dev/null)
 GC_LIBS := $(shell pkg-config --libs bdw-gc 2>/dev/null || echo -lgc)
 
+# PCRE2 -- backs (creme regex)'s `regexp`/`regexp-matches?` (regex.c),
+# needed only so the self-hosted reader (modules/creme/compiler/
+# reader.sld) can run under cvm; see regex.c's own header comment for why
+# PCRE2 specifically (matches the real Crystal Regex class's own flavor).
+PCRE2_CFLAGS := $(shell pkg-config --cflags libpcre2-8 2>/dev/null)
+PCRE2_LIBS := $(shell pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8)
+
 # -g -fno-omit-frame-pointer: not for debugging per se, but so --profile's
 # SIGPROF sampler (backtrace(3)/dladdr(3) in profiler.c) gets meaningful
 # symbol names/unwinding instead of a wall of bare addresses.
 CFLAGS ?= -std=c11 -O2 -g -fno-omit-frame-pointer -Wall -Wextra -Wno-missing-field-initializers \
           -I$(FIO_LIB) -I$(FIO_LIB)/fiobj -I$(FIO_LIB)/http -I$(FIO_LIB)/http/parsers \
-          $(GC_CFLAGS)
+          $(GC_CFLAGS) $(PCRE2_CFLAGS)
 # -rdynamic: exports the executable's own (non-imported) symbols into its
 # dynamic symbol table so dladdr(3) can resolve them on Linux/glibc — a no-op
 # on Darwin, where dladdr already sees the main binary's local symbol table.
 LDFLAGS ?= -rdynamic
-LDLIBS := -lm -lpthread -lsqlite3 $(GC_LIBS)
+LDLIBS := -lm -lpthread -lsqlite3 $(GC_LIBS) $(PCRE2_LIBS)
 
-SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c
+SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c
 OBJS = $(SRCS:.c=.o)
 BIN = cvm
 

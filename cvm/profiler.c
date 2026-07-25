@@ -48,6 +48,23 @@ static const char *op_name(int op) {
       [OP_TESTGEIMM] = "TestGeImm", [OP_TESTISEQIMM] = "TestIsEqImm", [OP_VECREF] = "VecRef",
       [OP_VECLEN] = "VecLen", [OP_VECSET] = "VecSet", [OP_VECLENUP] = "VecLenUp",
       [OP_CASEMATCH] = "CaseMatch", [OP_SUBRETURN] = "SubReturn", [OP_MULRETURN] = "MulReturn",
+      /* Not implemented yet (see vm.c's L_UNIMPL) — named anyway so a
+       * profile report / abort message referencing one of these by ordinal
+       * still prints a real mnemonic instead of "?". */
+      [OP_SETGLOBAL] = "SetGlobal", [OP_STRREF] = "StrRef", [OP_STRSET] = "StrSet",
+      [OP_BVREF] = "BvRef", [OP_BVSET] = "BvSet", [OP_CMPZERO] = "CmpZero",
+      [OP_BVREFIMM] = "BvRefImm", [OP_STRSETIMM] = "StrSetImm", [OP_BVSETIMM] = "BvSetImm",
+      [OP_STRSETUP] = "StrSetUp", [OP_BVREFUP] = "BvRefUp", [OP_BVSETUP] = "BvSetUp",
+      [OP_THROW] = "Throw", [OP_TESTEQ] = "TestEq", [OP_TESTLEUP] = "TestLeUp",
+      [OP_TESTGTUP] = "TestGtUp", [OP_TESTGEUP] = "TestGeUp", [OP_TESTISEQUP] = "TestIsEqUp",
+      [OP_RETURNGLOBAL] = "ReturnGlobal", [OP_RETURNUPVAL] = "ReturnUpval",
+      [OP_NUMLTRETURN] = "NumLtReturn", [OP_NUMLERETURN] = "NumLeReturn",
+      [OP_NUMGTRETURN] = "NumGtReturn", [OP_NUMGERETURN] = "NumGeReturn",
+      [OP_NUMEQRETURN] = "NumEqReturn", [OP_ISEQRETURN] = "IsEqReturn",
+      [OP_MAKECASECLOSURE] = "MakeCaseClosure", [OP_DESTRUCTURE] = "Destructure",
+      [OP_PARAMPUSH] = "ParamPush", [OP_PARAMPOP] = "ParamPop",
+      [OP_PUSHHANDLER] = "PushHandler", [OP_POPHANDLER] = "PopHandler", [OP_GUARDRERAISE] = "GuardReraise",
+      [OP_MAKEPROMISE] = "MakePromise", [OP_HELPERFORMLOCAL] = "HelperFormLocal",
   };
   if (op < 0 || op >= OP_COUNT || !names[op]) return "?";
   return names[op];
@@ -162,8 +179,8 @@ static void report_vm_samples(VM *vm) {
     int ip = p->vm_samples[i].ip;
     Instruction *ins = &c->instrs[ip];
     char loc[128];
-    if (ins->line > 0) {
-      snprintf(loc, sizeof(loc), "%s:%d", vm->source_file ? vm->source_file : "?", ins->line);
+    if (ins->has_pos) {
+      snprintf(loc, sizeof(loc), "%s:%d", ins->file ? ins->file : (vm->source_file ? vm->source_file : "?"), ins->line);
     } else {
       snprintf(loc, sizeof(loc), "-");
     }

@@ -87,6 +87,24 @@ module Scheme::Builtins::MathExtra
   def hypot(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeFloat.new(Math.hypot(Scheme.as_f64(args[0], "hypot"), Scheme.as_f64(args[1], "hypot")))
   end
+
+  # Raw IEEE754 bit-level access — for a Scheme-level caller that needs
+  # to encode/decode a float's exact 64-bit representation itself (e.g.
+  # bootstrap/compiler.scm's SCB1 serializer, which otherwise has no way
+  # to build a general float encoder without bitwise primitives).
+  # Float64/Int64 are both 8 bytes, so `unsafe_as` is an exact bit-level
+  # reinterpret cast — not a numeric conversion — in both directions.
+  @[Scheme::SchemeFn("flonum->bits", min: 1, max: 1)]
+  def flonum_to_bits(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    f = args[0].as?(SchemeFloat) || raise SchemeRuntimeError.new("flonum->bits: expected a float, got #{args[0].write_string}")
+    SchemeInt.new(f.value.unsafe_as(Int64))
+  end
+
+  @[Scheme::SchemeFn("bits->flonum", min: 1, max: 1)]
+  def bits_to_flonum(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    i = args[0].as?(SchemeInt) || raise SchemeRuntimeError.new("bits->flonum: expected an exact integer, got #{args[0].write_string}")
+    SchemeFloat.new(i.value.unsafe_as(Float64))
+  end
 end
 
 module Scheme

@@ -11,7 +11,8 @@ crystal-run-*.tm.core
 /cvm/cvm.dSYM/
 /cvm/*.o
 /cvm/vendor/
-/bench/creme.cvmc
+/cvm/repl.cvmc
+/cvm/compiler-run.cvmc
 
 # Libraries don't need dependency lock
 # Dependencies will be locked in applications that use them
