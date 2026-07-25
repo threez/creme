@@ -57,6 +57,15 @@ describe "bootstrap-compiler module" do
       "(define (classify x) (cond ((assv x (list (cons 1 'one) (cons 2 'two))) => cdr) ((< x 0) 'negative) (else 'other))) (list (classify 1) (classify 2) (classify -5) (classify 42))",
       "(define (sum-vec v) (let loop ((i 0) (acc 0)) (if (= i (vector-length v)) acc (loop (+ i 1) (+ acc (vector-ref v i)))))) (sum-vec (vector 1 2 3 4 5))",
       "(begin (define x 1) (define y 2) (+ x y))",
+      # A bare (define ...) as a program's own LAST top-level form must
+      # evaluate to the defined NAME (a symbol), not the value it was
+      # defined to -- found by comparing disassembled bytecode against
+      # native for the same source: this compiler previously loaded the
+      # VALUE register into dest here instead, diverging only in this
+      # specific (last-form-is-a-bare-define) position.
+      "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))",
+      "(define x 42)",
+      "(list (begin (define z 1)) z)",
       %((define-record-type <point> (make-point x y) point? (x point-x set-point-x!) (y point-y)) (define p (make-point 3 4)) (set-point-x! p 10) (list (point? p) (point? 5) (point-x p) (point-y p))),
       # A top-level record is a genuine SchemeRecord now, not a tagged
       # vector -- vector?/write on it must match native evaluation exactly

@@ -2212,6 +2212,16 @@
     ;; sugar. Internal (nested) defines are hoisted before they ever reach
     ;; here (see compile-scoped-body!); this errors loudly instead of
     ;; silently miscompiling one if it's ever encountered directly.
+    ;; (define ...)'s own "value" is the defined NAME (as a symbol), not
+    ;; whatever it was defined to -- mirrors bytecode_compiler.cr's own
+    ;; DefineNode handling exactly (emit_load_literal(fc, dst, SchemeSym.
+    ;; of(node.name)) unconditionally after the DefGlobal/Move, regardless
+    ;; of top-level vs internal or tail vs non-tail). Only actually
+    ;; observable when a define is used in a position whose value is read
+    ;; -- e.g. the last top-level form of a program -- but must still
+    ;; match: previously this loaded val-reg (the defined VALUE) into
+    ;; dest instead, a real divergence from native caught by comparing
+    ;; disassembled bytecode for the same source against both compilers.
     (define (compile-define! fc expr dest tail?)
       (if (fcomp-parent fc)
           (error "bootstrap compiler: internal (define ...) is not yet supported" expr)
@@ -2222,7 +2232,7 @@
                  (val-reg (fcomp-alloc-reg! fc)))
             (compile-expr! fc val-expr val-reg #f)
             (defglobal! ch name val-reg)
-            (if tail? (chunk-emit! ch 'Return val-reg 0 0 0)))))
+            (compile-literal-datum! fc name dest tail?))))
 
     (define (list-index-of lst x)
       (let loop ((l lst) (i 0))
