@@ -972,6 +972,19 @@
     ;; append/list->vector calls (classic technique), so it needs no runtime
     ;; support of its own (no Quasiquote op, no qq_templates).
     ;;
+    ;; Deliberately NOT using Crystal's own Op::Quasiquote fast path
+    ;; (bytecode_compiler.cr's compile_quasiquote): its own doc comment
+    ;; says its QQTemplate tree is "never serialized into the const pool
+    ;; since only VM#build_qq's Crystal code ever reads it" -- i.e. it's a
+    ;; same-process-only optimization with NO SCB1 wire representation at
+    ;; all. A chunk built by THIS compiler exists specifically to be
+    ;; serialized and reloaded standalone (load-chunk-bytes/cvm), so
+    ;; emitting Op::Quasiquote here wouldn't just need extra format work
+    ;; (unlike Op::CaseDispatch's missing-but-addable table) -- it would
+    ;; produce chunks that never round-trip correctly at all, a real
+    ;; regression rather than a missed optimization. The cons/append
+    ;; desugaring below has no such limitation.
+    ;;
     ;; `depth` tracks nested quasiquote levels: an inner (quasiquote X)
     ;; increments it (X is still just literal DATA being reconstructed, one
     ;; level further removed from evaluation); an (unquote X) or
