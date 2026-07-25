@@ -198,4 +198,52 @@ describe "main.cr (CLI)" do
       File.delete(file.path)
     end
   end
+
+  it "--disassemble prints the bytecode of an already-compiled --emit-cvm file, including nested closures" do
+    src_file = File.tempfile("main_spec_disasm", ".scm") do |io|
+      io.print(%((import (scheme base) (scheme write)) (define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (display (fact 5))))
+    end
+    cvmc_file = File.tempname("main_spec_disasm", ".cvmc")
+    begin
+      _, emit_err, emit_status = run_cli(["--emit-cvm", src_file.path, cvmc_file])
+      emit_status.success?.should be_true
+      emit_err.should eq("")
+
+      out, err, status = run_cli(["--disassemble", cvmc_file])
+      status.success?.should be_true
+      err.should eq("")
+      out.should contain("DefGlobal")
+      out.should contain("; fact")
+      out.should contain("> proto 0 (fact)")
+      out.should contain("TestEqImm")
+    ensure
+      File.delete(src_file.path)
+      File.delete(cvmc_file) if File.exists?(cvmc_file)
+    end
+  end
+
+  it "--disassemble requires a file argument" do
+    _, err, status = run_cli(["--disassemble"])
+    status.success?.should be_false
+    err.should contain("Usage: creme --disassemble <file.cvmc>")
+  end
+
+  it "--disassemble exits non-zero and prints an error when the file doesn't exist" do
+    _, err, status = run_cli(["--disassemble", "/nonexistent/path/does-not-exist.cvmc"])
+    status.success?.should be_false
+    err.should contain("no such file")
+  end
+
+  it "--disassemble exits non-zero and prints an error for a non-SCB1 file" do
+    file = File.tempfile("main_spec_disasm_bad", ".cvmc") do |io|
+      io.print("not a real chunk")
+    end
+    begin
+      _, err, status = run_cli(["--disassemble", file.path])
+      status.success?.should be_false
+      err.should contain("bad magic")
+    ensure
+      File.delete(file.path)
+    end
+  end
 end

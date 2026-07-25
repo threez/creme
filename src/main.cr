@@ -80,6 +80,17 @@ def usage : Nil
                                  behavior of requiring the script's own
                                  (import ...), e.g. to see exactly what an
                                  unfused/not-yet-imported form compiles to
+    creme --disassemble <file.cvmc>
+                                 Disassemble an ALREADY-COMPILED SCB1 file
+                                 (e.g. one written by --emit-cvm, or
+                                 compiled by the self-hosted (creme
+                                 compiler compiler)'s own compile-source-
+                                 to-bytes) — unlike -S/--dump-bytecode
+                                 above, does not recompile from source; it
+                                 reads the file's own raw bytes through the
+                                 exact same deserializer load-chunk-bytes
+                                 and cvm both use, so what it prints is
+                                 exactly what would actually run
     creme --profile table <file.scm> [args...]
                                  Run a script exactly as `creme <file.scm>
                                  [args...]` would, but with the whole run
@@ -164,6 +175,66 @@ def dump_bytecode(path : String, strict : Bool = false) : Nil
     puts "; ---- top-level form #{i} ----" if forms.size > 1
     Scheme::Disassembler.disassemble(chunk, "form #{i}")
     Scheme::VM.new(interp, interp.global).run(chunk)
+  end
+end
+
+# Disassembles an ALREADY-COMPILED SCB1 file (e.g. one written by
+# `--emit-cvm`, or by the self-hosted (creme compiler compiler)'s own
+# compile-source-to-bytes/chunk->bytes) — unlike dump_bytecode above,
+# which always compiles SOURCE fresh, this reads raw bytes straight off
+# disk via the exact same ChunkDeserializer both `load-chunk-bytes` and
+# cvm's own loader.c round-trip through, so what it prints is exactly
+# what would actually run, not a fresh recompile that might legitimately
+# differ (e.g. a different fusable-primitive set already imported at the
+# time the file was originally compiled).
+#
+# ChunkDeserializer resolves each TAG_BUILTIN const by NAME against a
+# live env (chunk_deserializer.cr's own doc comment) — the file itself
+# doesn't record which libraries were imported when it was compiled, so
+# there's no way to know in general which builtins it references. Import
+# a broad, "kitchen sink" set of standard + creme libraries up front
+# (matching this project's own toolchain-loading convention elsewhere,
+# e.g. compiler_spec.cr's load_toolchain) to cover the common case; a
+# file whose original compile also had some OTHER creme library imported
+# (sql/sxql/mux/...) can still raise "unknown builtin" here — a real,
+# accepted limitation of disassembling a file with no record of its own
+# original import list, not a bug.
+KITCHEN_SINK_IMPORT = %((import (scheme base) (scheme write) (scheme cxr) (scheme complex)
+                                 (scheme inexact) (scheme char) (scheme lazy) (scheme eval)
+                                 (scheme time) (scheme process-context) (scheme file)
+                                 (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
+                                 (creme compiler reader) (creme compiler compiler)))
+
+def disassemble_scb1(path : String) : Nil
+  bytes = File.read(path).to_slice
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+  Scheme.run_source(interp, KITCHEN_SINK_IMPORT)
+  chunk = Scheme::ChunkDeserializer.deserialize(bytes, interp.global)
+  Scheme::Disassembler.disassemble(chunk, File.basename(path))
+end
+
+# Handles `creme --disassemble <file.cvmc>` — split out of `main` purely to
+# keep that method's own top-level dispatch simple.
+def handle_disassemble(args : Array(String)) : Nil
+  unless path = args[1]?
+    STDERR.puts "Usage: creme --disassemble <file.cvmc>"
+    exit 1
+  end
+  unless File.exists?(path)
+    STDERR.puts "creme: #{path}: no such file"
+    exit 1
+  end
+  begin
+    disassemble_scb1(path)
+  rescue ex : Scheme::ChunkDeserializer::FormatError
+    STDERR.puts "creme: #{path}: #{ex.message}"
+    exit 1
+  rescue ex : Scheme::SchemeError
+    STDERR.puts format_error(ex)
+    exit 1
+  rescue ex
+    STDERR.puts "Internal error: #{ex.message}"
+    exit 1
   end
 end
 
@@ -470,6 +541,8 @@ def main : Nil
     usage
   when "--dump-bytecode", "-S"
     handle_dump_bytecode(args)
+  when "--disassemble"
+    handle_disassemble(args)
   when "--emit-cvm"
     handle_emit_cvm(args)
   when "--cvm"
