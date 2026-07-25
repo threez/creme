@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Todo List</title>
+    <style>
+      body { font-family: sans-serif; }
+      .todo-app { max-width: 28rem; margin: 2rem auto; }
+      .todos { list-style: none; padding-left: 0; }
+      .todos li { display: flex; align-items: center; gap: 0.5rem; padding: 4px 0; }
+      .todos li .title { flex: 1; }
+      .done .title { text-decoration: line-through; color: #888; }
+      form.toggle, form.delete, form.add { display: inline; }
+      form.add { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    </style>
+  </head>
+  <body>
+    <div class="todo-app">
+      <h1>Todo List</h1>
+      <form method="post" action="/todos" class="add">
+        <input type="text" name="title" placeholder="New todo" required>
+        <button type="submit">Add</button>
+      </form>
+      <ul class="todos">
+{{{rows}}}      </ul>
+      <p class="count">{{remaining}} remaining</p>
+    </div>
+  </body>
+</html>

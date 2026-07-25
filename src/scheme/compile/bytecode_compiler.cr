@@ -59,6 +59,21 @@ module Scheme
     property scope : CompilerScope?
     property? is_toplevel : Bool
 
+    # Every register of THIS function that some nested closure, anywhere in
+    # this function's body, has captured as a `from_parent_local` upvalue
+    # (see resolve_upvalue) — i.e. a register some live closure may hold an
+    # OPEN pointer into. compile_tail_call_args_in_place must never write
+    # into one of these directly: the runtime only closes (snapshots) an
+    # open upvalue right before a TailCall's own dispatch overwrites the
+    # frame (close_upvalues, called from dispatch_call in both vm.cr and
+    # cvm/vm.c) — writing the new value earlier, via an ordinary preceding
+    # instruction, corrupts the still-open upvalue before that protection
+    # ever runs. Deliberately whole-function, not scope-local: a register
+    # number gets reused by a later, unrelated scope once the capturing
+    # scope pops, so this is a conservative (safe, occasionally
+    # over-cautious) approximation rather than true liveness tracking.
+    property captured_registers = Set(Int32).new
+
     def initialize(@enclosing : FunctionCompiler? = nil, name : String = "lambda", @is_toplevel : Bool = false)
       @chunk = Chunk.new
       @chunk.name = name
@@ -275,6 +290,7 @@ module Scheme
       parent = fc.enclosing
       return nil unless parent
       if reg = parent.resolve_local(name)
+        parent.captured_registers.add(reg)
         return add_upvalue(fc, true, reg, name)
       end
       if idx = resolve_upvalue(parent, name)
@@ -1349,6 +1365,92 @@ module Scheme
       kind == :local ? idx : nil
     end
 
+    # True iff `node` (a leaf_node?, so only literals/var-refs/leaf prim
+    # calls can appear) reads local register `reg` anywhere in its tree —
+    # used by compile_tail_call_args_in_place to detect when an EARLIER
+    # argument can't yet be written into its own target register because a
+    # LATER argument still needs to read what's currently there.
+    private def leaf_references_register?(fc : FunctionCompiler, node : Node, reg : Int32) : Bool
+      case node
+      when PrimCallNode
+        node.args.any? { |arg| leaf_references_register?(fc, arg, reg) }
+      when VarRefNode, LocalRefNode, GlobalRefNode
+        local_register_of?(fc, node) == reg
+      else
+        false # LiteralNode — reads nothing
+      end
+    end
+
+    # Compiles a TAIL call's arguments directly into registers 0..n-1 of the
+    # current frame instead of the general path's floating anchor+1.. run —
+    # safe here specifically because every argument is a leaf_node? (the
+    # caller already checked), so none of them can create a closure that
+    # captures one of these registers as an upvalue — the one way writing
+    # into a live register early, before a later argument is compiled, could
+    # observably differ from the general path's behavior.
+    #
+    # `callee_kind`/`callee_reg` is the fused callee's own {kind, register}
+    # from bare_callee_source, when it reads one (:local/:upvalue) — nil for
+    # :global, which is resolved via a cache/const, not a register. Returns
+    # the register the emitted Call*/TailCall* op should actually read the
+    # callee from — ordinarily just `callee_reg` unchanged, EXCEPT when it
+    # falls inside this call's own 0..n-1 target range: that instruction
+    # reads its callee register at ITS OWN execution time, i.e. strictly
+    # AFTER every argument below has already been written — so unlike an
+    # argument (read by the separate bind_args step that runs even later,
+    # once the callee is already resolved), deferring an overwrite via the
+    # settle pass does NOT protect it; the only fix is to copy the callee's
+    # value out to a fresh, out-of-range register BEFORE writing any
+    # argument, and have the op read from that copy instead (caught by
+    # "captures each loop iteration's own value independently" in
+    # bytecode_vm_spec.cr: `(f 100)` inside `(lambda (f) (f 100))` has `f`
+    # at register 0 — the same register argument 0 would otherwise target).
+    #
+    # Each argument is compiled in original left-to-right order (preserving
+    # evaluation order exactly like the general path) directly into its
+    # target register `i`, UNLESS some LATER (not yet compiled) argument
+    # still needs to read register `i`'s current value — in which case
+    # argument `i` is parked in a scratch register instead, and only moved
+    # into place in a final settle pass once every argument has been
+    # evaluated (order-independent then, since a scratch register can never
+    # alias a target register — see the next_reg bump below).
+    private def compile_tail_call_args_in_place(fc : FunctionCompiler, args : Array(Node),
+                                                callee_kind : Symbol, callee_reg : Int32?) : Int32?
+      mark = fc.next_reg
+      # Reserve the WHOLE 0..n-1 target range from being handed out as a
+      # scratch register below, even if the current function has fewer
+      # locals than `args.size` (e.g. a 0-local function tail-calling a
+      # 3-arg function) — alloc_reg is reused here (rather than assigning
+      # next_reg/num_registers directly) purely so chunk.num_registers stays
+      # correctly in sync via its own existing bookkeeping.
+      (args.size - fc.next_reg).times { fc.alloc_reg } if fc.next_reg < args.size
+      # Only :local's operand is a register in THIS frame (comparable to/
+      # movable from a target register) — :upvalue's is an index into
+      # fc.chunk.upvalues (a different space entirely, read via GetUpval
+      # from the ENCLOSING frame's own storage, never this frame's own
+      # registers) and :global's is a const-pool index, so neither can ever
+      # coincide with an argument's target register in the first place.
+      safe_callee_reg = callee_reg
+      if callee_kind == :local && (r = callee_reg) && r < args.size
+        scratch = fc.alloc_reg
+        fc.emit(Op::Move, scratch, r)
+        safe_callee_reg = scratch
+      end
+      pending = [] of {Int32, Int32} # {scratch_reg, target_reg}
+      args.each_with_index do |arg, i|
+        if args[(i + 1)...args.size].any? { |later| leaf_references_register?(fc, later, i) }
+          scratch = fc.alloc_reg
+          compile_expr(fc, arg, scratch, false)
+          pending << {scratch, i}
+        else
+          compile_expr(fc, arg, i, false)
+        end
+      end
+      pending.each { |pair| fc.emit(Op::Move, pair[1], pair[0]) unless pair[0] == pair[1] }
+      fc.reclaim_to(mark)
+      safe_callee_reg
+    end
+
     # If `arg` is a literal wrapping a SchemeInt that fits in Instruction's
     # Int32 operand fields, that raw value — else nil. Anything else (a
     # non-integer literal, or a literal integer too large for Int32) falls
@@ -1759,6 +1861,7 @@ module Scheme
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def compile_app(fc : FunctionCompiler, node : AppNode, dst : Int32, tail : Bool) : Nil
       call_src = node.src.write_string
       # Bare-name callee: fuse the callee load (GetGlobal/Move/GetUpval) into
@@ -1767,12 +1870,6 @@ module Scheme
       # the fused op's `d` operand says where to fetch it (see exec_call_*).
       if source = bare_callee_source(fc, node.callee)
         kind, operand = source
-        mark = fc.next_reg
-        anchor = fc.alloc_reg
-        # Args go in the contiguous run right above the anchor (anchor+1..),
-        # exactly as the general path below — nothing shrinks next_reg between
-        # these allocations, so they stay contiguous.
-        node.args.each { |arg| compile_expr(fc, arg, fc.alloc_reg, false) }
         op = case {kind, tail}
              when {:global, false}  then Op::CallGlobal
              when {:global, true}   then Op::TailCallGlobal
@@ -1781,6 +1878,39 @@ module Scheme
              when {:upvalue, false} then Op::CallUpval
              else                        Op::TailCallUpval
              end
+        # A TAIL call always reuses the CURRENT frame's own base as its new
+        # frame's base (dispatch_call/exec_call*'s `new_base = tail ?
+        # caller_base : ...`, mirrored in cvm/vm.c) — so if every argument is
+        # a leaf_node? (no nested calls/closures — see leaf_node?'s own use
+        # for prim-call operand fusion above), compile them directly into
+        # registers 0..n-1 instead of a floating anchor+1.. run: anchor=-1
+        # makes `arg_base == caller_base` (arg_base = caller_base + a + 1),
+        # so the runtime's own arg-binding copy becomes a same-address
+        # no-op, AND a bare variable-passthrough argument needs no Move at
+        # all — compile_name_read already elides the Move whenever dst
+        # equals the variable's own register, which registers 0..n-1
+        # frequently already are for a loop's own accumulator arguments.
+        # See compile_tail_call_args_in_place's own doc comment for why this
+        # is safe regardless of what the callee turns out to be at runtime.
+        # Also requires none of registers 0...n-1 to ever have been captured
+        # as a from_parent_local upvalue anywhere in this function — see
+        # FunctionCompiler#captured_registers's own doc comment for why an
+        # open upvalue into one of these registers can't tolerate an early
+        # direct-write, even a deferred/settled one.
+        if tail && node.args.all? { |arg| leaf_node?(arg) } &&
+           (0...node.args.size).none? { |target_reg| fc.captured_registers.includes?(target_reg) }
+          anchor = -1
+          safe_operand = compile_tail_call_args_in_place(fc, node.args, kind, kind == :global ? nil : operand)
+          ip = fc.emit(op, anchor, node.args.size, 0, safe_operand || operand, pos: node.pos)
+          fc.chunk.tag_sample(ip, "call", call_src)
+          return
+        end
+        mark = fc.next_reg
+        anchor = fc.alloc_reg
+        # Args go in the contiguous run right above the anchor (anchor+1..),
+        # exactly as the general path below — nothing shrinks next_reg between
+        # these allocations, so they stay contiguous.
+        node.args.each { |arg| compile_expr(fc, arg, fc.alloc_reg, false) }
         ip = if tail
                fc.emit(op, anchor, node.args.size, 0, operand, pos: node.pos)
              else

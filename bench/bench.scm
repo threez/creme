@@ -1,4 +1,4 @@
-; Shells out to all 5 comparison variants the same way and prints a combined
+; Shells out to all 6 comparison variants the same way and prints a combined
 ; cross-language table:
 ;
 ;   - bin/creme, this same interpreter, running bench/creme.scm
@@ -11,6 +11,12 @@
 ;   - bench/racket.scm, the same 7 workloads under Racket's #lang r7rs
 ;   - bench/guile.scm, the same 7 workloads under GNU Guile (run with --r7rs)
 ;   - bench/bench.js, the same 7 workloads under Node.js (V8)
+;   - cvm/cvm, the standalone C11 prototype VM in cvm/ (see cvm/README.md —
+;     a narrow experiment scoped to exactly bench/creme.scm, not a general
+;     Scheme runtime) running the SAME compiled program creme's own column
+;     runs, via its own serialized bytecode
+;     (build once: make -C cvm, then
+;      ./bin/creme --emit-cvm bench/creme.scm bench/creme.cvmc)
 ;
 ; Each variant is optional: if its command isn't found (or exits non-zero),
 ; that column falls back to "n/a" instead of raising, so this script — and
@@ -54,6 +60,7 @@
 (define racket-output (run-variant "racket" (list "bench/racket.scm")))
 (define guile-output (run-variant "guile" (list "--r7rs" "bench/guile.scm")))
 (define node-output (run-variant "node" (list "bench/bench.js")))
+(define cvm-output (run-variant "cvm/cvm" (list "bench/creme.cvmc")))
 
 ; ---- parse "<label> = <result>  (<elapsed>s)" / "total = <elapsed>s" -------
 
@@ -79,8 +86,20 @@
 (define guile-times (parse-elapsed-alist guile-output))
 (define node-times (parse-elapsed-alist node-output))
 (define creme-times (parse-elapsed-alist creme-output))
+(define cvm-times (parse-elapsed-alist cvm-output))
 
-; ---- print the table --------------------------------------------------------
+; ---- build the two tables ---------------------------------------------------
+;
+; Table 1 ("measurements") is the raw per-workload elapsed seconds, one
+; column per variant, nothing derived.
+;
+; Table 2 ("comparison matrix") turns EVERY variant into both a row and a
+; column, cell[row][col] = row's total time / column's total time — reading
+; along a row answers "how many times slower is this variant than each of
+; the others", for every pair at once, not just the handful of ratios
+; anchored to creme/crystal a single flat table could fit before. Built from
+; each variant's aggregate "total" line (not per-workload) so the matrix
+; stays one NxN table instead of 7 of them.
 
 (define (lookup label alist)
   (let ((pair (assoc label alist string=?)))
@@ -91,31 +110,48 @@
         "vector-sum-test(500000)" "string-build-test(4000) length"
         "tak(18,12,6)" "nqueens(9)" "total"))
 
-(define headers
-  (list "workload" "crystal" "go" "racket" "ruby" "guile" "node" "creme"
-        "creme/crystal" "creme/go" "creme/racket" "creme/ruby" "creme/guile" "creme/node"))
+(define variant-names (list "crystal" "go" "racket" "ruby" "guile" "node" "creme" "cvm"))
 
-(define aligns
-  (list 'left 'right 'right 'right 'right 'right 'right 'right
-        'right 'right 'right 'right 'right 'right))
+(define variant-times
+  (list (cons "crystal" crystal-times) (cons "go" go-times) (cons "racket" racket-times)
+        (cons "ruby" ruby-times) (cons "guile" guile-times) (cons "node" node-times)
+        (cons "creme" creme-times) (cons "cvm" cvm-times)))
 
-(define data-rows
+(define (times-of variant) (lookup variant variant-times))
+(define (total-of variant) (lookup "total" (times-of variant)))
+
+; ---- table 1: measurements ---------------------------------------------------
+
+(define measurement-headers (cons "workload" variant-names))
+(define measurement-aligns (cons 'left (map (lambda (v) 'right) variant-names)))
+
+(define measurement-rows
   (map (lambda (label)
-         (let ((c (lookup label crystal-times))
-               (go (lookup label go-times))
-               (r (lookup label racket-times))
-               (rb (lookup label ruby-times))
-               (g (lookup label guile-times))
-               (n (lookup label node-times))
-               (cr (lookup label creme-times)))
-           (list label
-                 (numfmt-fixed c 5) (numfmt-fixed go 5) (numfmt-fixed r 5)
-                 (numfmt-fixed rb 5) (numfmt-fixed g 5) (numfmt-fixed n 5) (numfmt-fixed cr 5)
-                 (numfmt-ratio cr c) (numfmt-ratio cr go) (numfmt-ratio cr r)
-                 (numfmt-ratio cr rb) (numfmt-ratio cr g) (numfmt-ratio cr n))))
+         (cons label (map (lambda (v) (numfmt-fixed (lookup label (times-of v)) 5)) variant-names)))
        workloads))
 
-(display (bench-table->string headers data-rows aligns 1))
+; ---- table 2: comparison matrix (row / column, on total time) --------------
+
+(define matrix-headers (cons "" variant-names))
+(define matrix-aligns (cons 'left (map (lambda (v) 'right) variant-names)))
+
+(define matrix-rows
+  (map (lambda (row-name)
+         (cons row-name
+               (map (lambda (col-name)
+                      (if (string=? row-name col-name)
+                          "-"
+                          (numfmt-ratio (total-of row-name) (total-of col-name))))
+                    variant-names)))
+       variant-names))
+
+; ---- print both tables -------------------------------------------------------
+
+(display "measurements (seconds)\n")
+(display (bench-table->string measurement-headers measurement-rows measurement-aligns 1))
+(newline)
+(display "comparison matrix (row's total time / column's total time — e.g. the \"creme\" row's \"crystal\" column is how many times slower creme is than crystal)\n")
+(display (bench-table->string matrix-headers matrix-rows matrix-aligns 0))
 (newline)
 
 ; ---- optionally also write bench/bench.html --------------------------------
@@ -123,6 +159,11 @@
 (if (cli-flag? opts "html")
     (begin
       (write-html-report "bench/bench.html" "creme bench"
-                          (bench-table->html headers data-rows aligns 1))
+                          (string-append
+                           "<h2>measurements (seconds)</h2>\n"
+                           (bench-table->html measurement-headers measurement-rows measurement-aligns 1)
+                           "<h2>comparison matrix</h2>\n"
+                           "<p>row's total time / column's total time</p>\n"
+                           (bench-table->html matrix-headers matrix-rows matrix-aligns 0)))
       (display "wrote bench/bench.html")
       (newline)))

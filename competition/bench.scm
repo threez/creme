@@ -1,6 +1,9 @@
 ;; Benchmarks the scheme.cr demo-todo app (competition/scheme/demo-todo/app.scm)
 ;; against its Sinatra+ERB+Sequel+SQLite, Kemal+Granite+ECR, Racket web-server,
-;; Go Fiber+GORM+html-template, and Node Express+Drizzle+Eta twins using wrk.
+;; Go Fiber+GORM+html-template, Node Express+Drizzle+Eta, and C facil.io+
+;; mustache+SQLite3 twins using wrk -- plus cvm, the standalone C11
+;; prototype VM (../../cvm/), running that SAME app.scm source (compiled to
+;; .cvmc bytecode via `creme --emit-cvm`) instead of a hand-ported twin.
 ;; A scheme.cr port of bench.sh -- same
 ;; sequence, same wrk invocations, same cleanup patterns, just orchestrated
 ;; from creme instead of bash. Prints one line per step as it runs, then a
@@ -21,6 +24,8 @@
              (flag "racket-port" "--racket-port" "Racket server port" 'integer 4573)
              (flag "go-port" "--go-port" "Go server port" 'integer 4574)
              (flag "node-port" "--node-port" "Node server port" 'integer 4575)
+             (flag "c-port" "--c-port" "C server port" 'integer 4576)
+             (flag "cvm-port" "--cvm-port" "cvm (C11 prototype VM) server port" 'integer 4577)
              (flag "duration" "--duration" "wrk run duration" 'string "8s")
              (flag "threads" "--threads" "wrk thread count" 'integer 4)
              (flag "conns" "--conns" "wrk connection count" 'integer 32)
@@ -33,6 +38,8 @@
 (define racket-port (number->string (cli-get opts "racket-port")))
 (define go-port (number->string (cli-get opts "go-port")))
 (define node-port (number->string (cli-get opts "node-port")))
+(define c-port (number->string (cli-get opts "c-port")))
+(define cvm-port (number->string (cli-get opts "cvm-port")))
 (define duration (cli-get opts "duration"))
 (define threads (cli-get opts "threads"))
 (define profile? (cli-flag? opts "profile"))
@@ -314,6 +321,68 @@
                        'stdout "/tmp/bench-node.log" 'stderr "/tmp/bench-node.log"))
 (wait-for-port! node-port)
 (bench-app! "Node / Express+Drizzle+Eta+SQLite" node-port)
+(cleanup!)
+(sleep! 1)
+
+;; ---- C / facil.io+mustache+SQLite3 ------------------------------------------
+
+(step! (string-append "C / facil.io+mustache+SQLite3 -- starting on port " c-port))
+;; Same freshness check as the Crystal/Go sections above, one shell test since
+;; (creme file) has no mtime accessor of its own: rebuild only if bin/app is
+;; missing or older than main.c. `make` itself handles fetching the vendored
+;; facil.io source (competition/c/demo-todo/vendor/facil.io) on first build.
+(if (not (cdr (assoc "success" (shell-run "sh"
+                            (list "-c" (string-append
+                                        "[ -x competition/c/demo-todo/bin/app ] && "
+                                        "[ ! competition/c/demo-todo/main.c -nt "
+                                        "competition/c/demo-todo/bin/app ]"))))))
+    (shell-checked! "sh" (list "-c" "cd competition/c/demo-todo && make") "make"))
+(track! (process-spawn "./bin/app" '()
+                       'chdir "competition/c/demo-todo"
+                       'env (list (cons "PORT" c-port))
+                       'stdout "/tmp/bench-c.log" 'stderr "/tmp/bench-c.log"))
+(wait-for-port! c-port)
+(bench-app! "C / facil.io+mustache+SQLite3" c-port)
+(cleanup!)
+(sleep! 1)
+
+;; ---- cvm / standalone C11 prototype VM, running app.scm itself -------------
+;;
+;; Not a hand-ported twin like every other entry above -- this compiles and
+;; runs the exact same competition/scheme/demo-todo/app.scm source (and its
+;; full (creme surf)/(creme dao)/(creme html)/... library stack) through
+;; cvm/ (../../cvm/), a from-scratch C11 VM built for exactly this: see
+;; cvm/README.md.
+
+(step! (string-append "cvm / creme (C11 prototype VM) -- starting on port " cvm-port))
+;; cvm/Makefile's own mtime rules already no-op instantly when nothing
+;; changed (unlike shards/go's own build tools, which pay real startup cost
+;; even to discover there's nothing to do -- see the Crystal/Go sections'
+;; own freshness-check comments above), so it's called unconditionally
+;; rather than replicated as a shell test here.
+(shell-checked! "sh" (list "-c" "cd cvm && make") "cvm make")
+;; Re-emit app.scm's bytecode only if it's missing or older than app.scm --
+;; ALSO older than cvm/cvm itself or cvm_serializer.cr, unlike the other
+;; twins' plain source-vs-binary freshness check: a cached .cvmc's on-disk
+;; FORMAT (not just its content) can change independently of app.scm --
+;; e.g. the CVM1->CVM2 bump adding per-instruction source lines -- and a
+;; stale-but-still-newer-than-app.scm .cvmc from before such a bump fails
+;; to load with a cryptic "not a CVM2 bytecode file" instead of silently
+;; regenerating (see cvm/loader.c's own magic check).
+(if (not (cdr (assoc "success" (shell-run "sh"
+                            (list "-c" (string-append
+                                        "[ -f competition/scheme/demo-todo/app.cvmc ] && "
+                                        "[ ! competition/scheme/demo-todo/app.scm -nt "
+                                        "competition/scheme/demo-todo/app.cvmc ] && "
+                                        "[ ! cvm/cvm -nt competition/scheme/demo-todo/app.cvmc ] && "
+                                        "[ ! src/scheme/compile/cvm_serializer.cr -nt "
+                                        "competition/scheme/demo-todo/app.cvmc ]"))))))
+    (shell-checked! "sh" (list "-c" "./bin/creme --emit-cvm competition/scheme/demo-todo/app.scm competition/scheme/demo-todo/app.cvmc") "creme --emit-cvm"))
+(track! (process-spawn "./cvm/cvm" (list "competition/scheme/demo-todo/app.cvmc")
+                       'env (list (cons "PORT" cvm-port))
+                       'stdout "/tmp/bench-cvm.log" 'stderr "/tmp/bench-cvm.log"))
+(wait-for-port! cvm-port)
+(bench-app! "cvm / creme (C11 prototype VM)" cvm-port)
 (cleanup!)
 
 (print-results-table!)

@@ -125,9 +125,14 @@
 
     ;; (bench-document->html title body-html) -> a full HTML document string
     ;; wrapping the already-rendered body-html fragment with report-css.
+    ;; html-document->string's `body` is a NODE spliced directly into its own
+    ;; quasiquoted document tree (`(body ,body)`), not a port-writer thunk —
+    ;; `(raw body-html)` embeds body-html's already-rendered markup verbatim,
+    ;; matching html-render's own `(raw ...)` grammar case (see
+    ;; modules/creme/html.sld). A bare lambda here used to reach html-render
+    ;; as if it were a child node and fail with "invalid node".
     (define (bench-document->html title body-html)
-      (html-document->string title report-css
-                              (lambda (port) (write-string body-html port))))
+      (html-document->string title report-css (list 'raw body-html)))
 
     ;; (write-html-report path title body-html) -> writes a full HTML
     ;; document (see bench-document->html) to path.

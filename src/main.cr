@@ -96,6 +96,28 @@ def usage : Nil
                                  format (a future format, e.g. "html", could
                                  be added as another value here without
                                  changing this flag's shape)
+    creme --emit-cvm <file.scm> <out.cvmc>
+                                 Compile a script and serialize its bytecode
+                                 to <out.cvmc> for the standalone C11
+                                 prototype VM in cvm/ (see cvm/README.md) —
+                                 a narrow experiment, not a general target;
+                                 currently only bench/creme.scm is verified
+                                 to work with it.
+    creme --cvm <file.scm>
+                                 Shorthand for --emit-cvm to a throwaway
+                                 file followed by `cvm/cvm <that file>` —
+                                 compiles <file.scm> and runs it under the
+                                 standalone C prototype VM in one step,
+                                 cleaning up the intermediate .cvmc file
+                                 afterward. Must be run from the repo root
+                                 with cvm/cvm already built (`make -C cvm`),
+                                 matching bench/bench.scm's own convention
+                                 for locating it.
+    creme --profile --cvm <file.scm>
+                                 Same as --cvm above, but runs
+                                 `cvm/cvm --profile <that file>` (see
+                                 cvm/README.md's "Profiling" section)
+                                 instead of a plain run.
     creme --help | -h            Show this help
   USAGE
 end
@@ -131,6 +153,102 @@ def dump_bytecode(path : String, strict : Bool = false) : Nil
     Scheme::Disassembler.disassemble(chunk, "form #{i}")
     Scheme::VM.new(interp, interp.global).run(chunk)
   end
+end
+
+# Compiles `path` (same auto-import-base convention as dump_bytecode above,
+# so builtins fuse the same way a real run would) and serializes every
+# top-level Chunk to `out_path` via CVMSerializer — for `creme --emit-cvm`,
+# feeding the standalone C11 prototype VM in cvm/ (see cvm/README.md for what
+# it does and doesn't support; this flag exists only to feed it
+# bench/creme.scm, not as a general-purpose target). Pushes path's own
+# directory first, same as Scheme.run_file — bench/creme.scm's own
+# `(include "workloads.scm")` resolves relative to wherever the script
+# lives, not the process's CWD, so this must match run_file's convention
+# rather than dump_bytecode's (which doesn't push one at all) for `creme
+# --emit-cvm bench/creme.scm ...` to work when invoked from the repo root.
+def emit_cvm(path : String, out_path : String) : Nil
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: true)
+  interp.push_load_dir(File.dirname(File.expand_path(path)))
+  begin
+    src = File.read(path)
+    forms = Scheme.forms_for(interp, src, path)
+    Scheme::CVMSerializer.emit(interp, forms, interp.global, out_path, path)
+  ensure
+    interp.pop_load_dir
+  end
+end
+
+# Handles `creme --emit-cvm <file.scm> <out.cvmc>` — split out of `main`
+# purely to keep that method's own top-level dispatch simple.
+def handle_emit_cvm(args : Array(String)) : Nil
+  unless args[1]? && args[2]?
+    STDERR.puts "Usage: creme --emit-cvm <file.scm> <out.cvmc>"
+    exit 1
+  end
+  begin
+    path = args[1]
+    out_path = args[2]
+    emit_cvm(path, out_path)
+  rescue ex : Scheme::SchemeError
+    STDERR.puts format_error(ex)
+    exit 1
+  rescue ex
+    STDERR.puts "Internal error: #{ex.message}"
+    exit 1
+  end
+end
+
+# Shared by `creme --cvm <file.scm>` and `creme --profile --cvm <file.scm>`:
+# emits <file.scm> to a throwaway .cvmc file, runs it via cvm/cvm (with
+# `cvm_args` — e.g. ["--profile"], or [] for a plain run — passed ahead of
+# the compiled file's own path), then cleans up the intermediate file.
+# Assumes the repo-root-relative "cvm/cvm" path, same convention
+# bench/bench.scm's own run-variant calls rely on for locating it.
+def run_via_cvm(path : String, cvm_args : Array(String)) : Nil
+  cvm_bin = "cvm/cvm"
+  unless File.exists?(cvm_bin)
+    STDERR.puts "creme: #{cvm_bin} not found — build it first (`make -C cvm`)"
+    exit 1
+  end
+
+  tmp_path = File.tempname("creme-cvm", ".cvmc")
+  exit_code = 1
+  begin
+    emit_cvm(path, tmp_path)
+    status = Process.run(cvm_bin, cvm_args + [tmp_path],
+      output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
+    exit_code = status.exit_code
+  rescue ex : Scheme::SchemeError
+    STDERR.puts format_error(ex)
+  rescue ex
+    STDERR.puts "Internal error: #{ex.message}"
+  ensure
+    File.delete(tmp_path) if File.exists?(tmp_path)
+  end
+  exit(exit_code)
+end
+
+# Handles `creme --cvm <file.scm>` — combines --emit-cvm (to a throwaway
+# file) with a plain `cvm/cvm <that file>` run, so running a script under the
+# C prototype VM doesn't need its own separate compile-then-run step. Split
+# out of `main` purely to keep that method's own top-level dispatch simple.
+def handle_cvm(args : Array(String)) : Nil
+  unless path = args[1]?
+    STDERR.puts "Usage: creme --cvm <file.scm>"
+    exit 1
+  end
+  run_via_cvm(path, [] of String)
+end
+
+# Handles `creme --profile --cvm <file.scm>` — same as --cvm above, but runs
+# cvm/cvm with --profile (see cvm/README.md's "Profiling" section). Split out
+# of `main` purely to keep that method's own top-level dispatch simple.
+def handle_profile_cvm(args : Array(String)) : Nil
+  unless path = args[2]?
+    STDERR.puts "Usage: creme --profile --cvm <file.scm>"
+    exit 1
+  end
+  run_via_cvm(path, ["--profile"])
 end
 
 # Handles `creme -S | --dump-bytecode [--strict] <file.scm>` — split out of
@@ -290,8 +408,16 @@ def main : Nil
     usage
   when "--dump-bytecode", "-S"
     handle_dump_bytecode(args)
+  when "--emit-cvm"
+    handle_emit_cvm(args)
+  when "--cvm"
+    handle_cvm(args)
   when "--profile"
-    handle_profile(args)
+    if args[1]? == "--cvm"
+      handle_profile_cvm(args)
+    else
+      handle_profile(args)
+    end
   else
     run_script(args[0])
   end

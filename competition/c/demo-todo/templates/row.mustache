@@ -1,0 +1,9 @@
+        <li class="{{#done}}done{{/done}}{{^done}}pending{{/done}}">
+          <form method="post" action="/todos/{{id}}/complete" class="toggle">
+            <button type="submit">{{#done}}Undo{{/done}}{{^done}}Done{{/done}}</button>
+          </form>
+          <span class="title">{{title}}</span>
+          <form method="post" action="/todos/{{id}}/delete" class="delete">
+            <button type="submit">Delete</button>
+          </form>
+        </li>

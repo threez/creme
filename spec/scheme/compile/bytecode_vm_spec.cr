@@ -183,6 +183,58 @@ describe "BytecodeCompiler + VM" do
     end
   end
 
+  # compile_app's tail-call optimization (compile_tail_call_args_in_place):
+  # a tail call whose arguments are all leaf_node? compiles them directly
+  # into registers 0..n-1 instead of a floating anchor, so a pass-through
+  # argument needs no Move at all. Each case below pins down a specific
+  # hazard the implementation has to get right.
+  describe "tail-call argument register reuse" do
+    it "passes an accumulator through unchanged across many iterations" do
+      # `acc` is a bare pass-through (no Move needed under the
+      # optimization) — many iterations so a corrupted register would show.
+      w("(let loop ((i 0) (acc 'ok)) (if (= i 1000) acc (loop (+ i 1) acc)))").should eq("ok")
+    end
+
+    it "handles a register swap between two accumulators" do
+      # Forces the hazard/scratch path: writing the new `a` directly would
+      # clobber the value the new `b` still needs to read.
+      w("(let loop ((n 5) (a 1) (b 2)) (if (= n 0) (list a b) (loop (- n 1) b a)))")
+        .should eq("(2 1)")
+    end
+
+    it "preserves left-to-right evaluation order for tail-call arguments" do
+      w("(define log '())" \
+        "(define (tag! x) (set! log (cons x log)) x)" \
+        "(let loop ((i 0) (a 0) (b 0))" \
+        "  (if (= i 2) (reverse log) (loop (+ i 1) (tag! 'first) (tag! 'second))))")
+        .should eq("(first second first second)")
+    end
+
+    it "falls back safely when an argument creates a closure over the loop's own state" do
+      # `acc` at the time of the CURRENT iteration must be captured by each
+      # closure — an unsafe direct-write would corrupt earlier closures'
+      # captured value before they ever run.
+      w("(define (make-adders n)" \
+        "  (let loop ((i 0) (acc '()))" \
+        "    (if (= i n) acc (loop (+ i 1) (cons (lambda (x) (+ x i)) acc)))))" \
+        "(map (lambda (f) (f 100)) (make-adders 3))").should eq("(102 101 100)")
+    end
+
+    it "relocates a :local callee whose own register coincides with an argument target" do
+      # `f` (the callee) lives in the very register argument 0 would
+      # otherwise target directly — the callee's value must be read before
+      # that register gets overwritten.
+      w("((lambda (f) (f 100)) (lambda (x) (+ x 1)))").should eq("101")
+    end
+
+    it "does not corrupt an earlier closure's still-open upvalue into a target register" do
+      # `b` is captured by `f`'s own closure (created before the tail call)
+      # as an open upvalue into the very register argument 1 would
+      # otherwise target directly.
+      w("(let ((b 41)) (let ((f (lambda (x) (+ b x)))) (f 1)))").should eq("42")
+    end
+  end
+
   describe "cond" do
     it "picks the first matching clause, supports else/=>/empty-body" do
       w("(cond ((= 1 2) 'a) ((= 1 1) 'b) (else 'c))").should eq("b")

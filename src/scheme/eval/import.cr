@@ -280,5 +280,59 @@ module Scheme
         @libraries_loading.delete(name)
       end
     end
+
+    # Re-parses `name`'s .sld source (if it resolves to one via
+    # @library_search_path — returns nil for a Crystal-native (creme ...)
+    # library with no .sld file of its own, e.g. mux/sql/string/format) and
+    # returns just the flat list of body forms its declarations expand to,
+    # WITHOUT executing or registering anything. Used only by
+    # CVMSerializer.emit (src/scheme/compile/cvm_serializer.cr): the C VM
+    # prototype in cvm/ has no way to run arbitrary library source the way
+    # the ordinary import path does (see this file's own header comment on
+    # each library getting its own Env populated by evaluating its
+    # begin/include bodies against it) — it can only execute bytecode, so a
+    # file-based library's real body forms need to be compiled a SECOND
+    # time (the first, real compile+run already happened via the ordinary
+    # `import` path, which discards the form list once done). Mirrors
+    # process_library_declarations's own declaration walk but collects
+    # instead of compiling+running.
+    def library_body_forms_for_cvm(name : Array(String)) : Array(SchemeValue)?
+      relative = File.join(name) + ".sld"
+      path = @library_search_path.each do |dir|
+        candidate = File.join(dir, relative)
+        break candidate if File.exists?(candidate)
+      end
+      return nil unless path.is_a?(String)
+      resolved = File.realpath(path)
+
+      forms = Reader.read_all(File.read(resolved), resolved)
+      return nil unless forms.size == 1
+      form = forms[0]
+      return nil unless form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && head.name == "define-library"
+      parts = Scheme.list_to_a(form.cdr)
+      return nil if parts.empty?
+      collect_library_body_forms_for_cvm(parts[1..], relative)
+    end
+
+    private def collect_library_body_forms_for_cvm(declarations : Array(SchemeValue), relative : String) : Array(SchemeValue)
+      body = [] of SchemeValue
+      declarations.each do |decl|
+        next unless decl.is_a?(Cons)
+        tag = decl.car
+        next unless tag.is_a?(SchemeSym)
+        args = Scheme.list_to_a(decl.cdr)
+        case tag.name
+        when "begin"
+          body.concat(args)
+        when "include", "include-ci"
+          raise SchemeRuntimeError.new("cvm: #{relative}: include/include-ci inside a define-library isn't supported by --emit-cvm yet")
+        when "cond-expand"
+          body.concat(collect_library_body_forms_for_cvm(matched_cond_expand_declarations(args), relative))
+        else
+          # export/import contribute no body forms of their own.
+        end
+      end
+      body
+    end
   end
 end
