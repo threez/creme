@@ -58,6 +58,11 @@ describe "bootstrap-compiler module" do
       "(define (sum-vec v) (let loop ((i 0) (acc 0)) (if (= i (vector-length v)) acc (loop (+ i 1) (+ acc (vector-ref v i)))))) (sum-vec (vector 1 2 3 4 5))",
       "(begin (define x 1) (define y 2) (+ x y))",
       %((define-record-type <point> (make-point x y) point? (x point-x set-point-x!) (y point-y)) (define p (make-point 3 4)) (set-point-x! p 10) (list (point? p) (point? 5) (point-x p) (point-y p))),
+      # A top-level record is a genuine SchemeRecord now, not a tagged
+      # vector -- vector?/write on it must match native evaluation exactly
+      # (previously bootstrap wrongly answered vector? #t and printed a
+      # #(...) vector literal instead of a #<point ...> record).
+      %((define-record-type <pt2> (make-pt2 x y) pt2? (x pt2-x) (y pt2-y)) (define q (make-pt2 1 2)) (list (vector? q) (pt2? q) q)),
       "(define (counter) (let ((n 0)) (lambda () (set! n (+ n 1)) n))) (define c (counter)) (list (c) (c) (c))",
       "(define x 1) (set! x (+ x 41)) x",
       "(define (classify n) (case n ((1 2 3) 'small) ((4 5 6) 'medium) (else 'large))) (list (classify 2) (classify 5) (classify 99))",

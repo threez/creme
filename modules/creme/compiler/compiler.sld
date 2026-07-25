@@ -30,8 +30,12 @@
 ;; compile-expr!'s literal check),
 ;; quasiquote (expanded to cons/append/list->vector calls entirely at
 ;; compile time -- see qq-expand; genuine nested-depth tracking, see its
-;; own doc comment), define-record-type (desugared into ordinary defines
-;; over a tagged vector -- see compile-define-record-type!), let-values/
+;; own doc comment), define-record-type (a genuine SchemeRecordType/
+;; SchemeRecord at the top level, via the same Op::HelperForm Crystal's
+;; own compiler emits -- see compile-define-record-type!; an INTERNAL
+;; define-record-type is hoisted like any other internal define, but is
+;; still desugared into ordinary defines over a tagged vector, see
+;; record-type->define-forms's own doc comment for why), let-values/
 ;; let*-values/define-values, guard, parameterize, delay/delay-force
 ;; (both back the same MakePromise op; force itself needs no compiler
 ;; support, see compile-delay!), case-lambda, define-syntax/syntax-rules
@@ -2124,17 +2128,24 @@
           ((eq? (car l) x) i)
           (else (loop (cdr l) (+ i 1))))))
 
-    ;; Shared by compile-define-record-type! (top level) and the internal-
-    ;; define hoisting expansion below (hoist-internal-defines/expand-
-    ;; definition-form) -- both need the SAME desugaring, so it's built
-    ;; once here rather than risking the two drifting apart. A record is
-    ;; just a vector tagged with the type name symbol at index 0, fields at
-    ;; 1.. in the order their (field accessor [mutator]) specs appear in
-    ;; the form (NOT necessarily the constructor's own parameter order,
-    ;; which R7RS allows to be any subset/order of the declared fields).
-    ;; Returns a list of ordinary (define ...) forms; the caller decides
-    ;; how to compile each (compile-define! directly at top level, or
-    ;; folded into a letrec* binding list when hoisted).
+    ;; Used ONLY by the internal-define hoisting expansion below (hoist-
+    ;; internal-defines/expand-definition-form) for an INTERNAL (non-top-
+    ;; level) define-record-type -- top-level define-record-type instead
+    ;; produces a genuine record now (see compile-define-record-type!
+    ;; below), but a record introduced this way still needs to become a
+    ;; letrec* BINDING (a simple name/init-expr pair), which a real
+    ;; SchemeRecordType/SchemeRecord's own runtime construction has no
+    ;; equivalent for in this compiler's letrec* machinery -- so this is a
+    ;; real, narrower remaining gap: an internal define-record-type's
+    ;; "record" is still just a vector tagged with the type name symbol at
+    ;; index 0, fields at 1.. in the order their (field accessor
+    ;; [mutator]) specs appear in the form (NOT necessarily the
+    ;; constructor's own parameter order, which R7RS allows to be any
+    ;; subset/order of the declared fields) -- vector? on it wrongly
+    ;; returns #t, and it won't equal?/display like a top-level record of
+    ;; the same shape would. Returns a list of ordinary (define ...)
+    ;; forms, folded into the enclosing letrec* the same as any other
+    ;; internal define.
     (define (record-type->define-forms expr)
       (let* ((tag (cadr expr))
              (ctor-spec (caddr expr))
@@ -2169,16 +2180,30 @@
               field-specs)))))
 
     ;; Top level only -- internal define-record-type is expanded away
-    ;; before it ever reaches here, see hoist-internal-defines/expand-
+    ;; before it ever reaches here into record-type->define-forms's
+    ;; tagged-vector desugaring above, see hoist-internal-defines/expand-
     ;; definition-form; this guard is a safety net for the rare non-body
     ;; position (e.g. inside an expression-level begin) that also isn't
     ;; hoisted, matching plain (define ...)'s own compile-define! guard.
+    ;;
+    ;; Emits Op::HelperForm (kind 2), the SAME opcode Crystal's own
+    ;; bytecode_compiler.cr emits for a top-level define-record-type
+    ;; (compile_helper_form's DefineRecordType branch, HelperForm::
+    ;; DefineRecordType -> kind 2) -- the raw form is stored as a chunk
+    ;; constant and handed to Interpreter#eval_define_record_type at run
+    ;; time (src/scheme/eval/record.cr), which defines a genuine
+    ;; SchemeRecordType/SchemeRecord directly into the global env: real
+    ;; record identity (vector? is #f, equal?/display match a type/field
+    ;; shape rather than a vector's), identical to what Crystal's own
+    ;; compiler produces for the same source -- no bespoke vector-based
+    ;; desugaring needed for this, the common, case at all.
     (define (compile-define-record-type! fc expr dest tail?)
       (if (fcomp-parent fc)
           (error "bootstrap compiler: internal define-record-type is not yet supported" expr)
-          (begin
-            (for-each (lambda (d) (compile-define! fc d 0 #f)) (record-type->define-forms expr))
-            (if tail? (compile-literal-datum! fc '() dest #t)))))
+          (let* ((ch (fcomp-chunk fc))
+                 (form-idx (chunk-add-const! ch expr)))
+            (chunk-emit! ch 'HelperForm dest form-idx 2 0)
+            (if tail? (chunk-emit! ch 'Return dest 0 0 0)))))
 
     (define (compile-program forms)
       (let* ((ch (make-chunk "program"))
