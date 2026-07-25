@@ -34,22 +34,17 @@ require "../../../../spec_helper"
 #     this is also why spec/scheme/modules/creme/compiler/reader_spec.cr's
 #     own "every file in the repo" sweep currently fails the same way.
 #
-# A REAL finding, kept excluded rather than fixed here (out of scope for
-# this differential pass, and architecturally deep -- see its own comment
-# above the exclusion below):
-#   - 26-import-generated-library.scm: this compiler's compile-source-to-
-#     bytes compiles an ENTIRE program up front, before any of it runs --
-#     so a later top-level (import ...)'s compile-time-eager real import
-#     (compile-import!) can't see a file an EARLIER ordinary form (here,
-#     file-write) only writes at RUN time, since that form hasn't executed
-#     yet at the point the LATER import is being compiled. Native Crystal
-#     doesn't have this problem because run_source "analyzes, compiles,
-#     and runs one form at a time" (its own doc comment) -- by the time it
-#     reaches the (import (greeter)) form, the preceding file-write form
-#     has already actually run. Fixing this in the self-hosted compiler
-#     would mean moving from whole-program batch compilation to Crystal's
-#     own per-form interleaved compile+run loop, a substantial, separate
-#     architectural change.
+# 26-import-generated-library.scm is NOT excluded (a real finding this
+# sweep DID catch and fix): compile-source-to-bytes compiles an entire
+# program up front, so compile-import!'s eager compile-time import! (only
+# there so a LATER macro use can see an import's exports already, see its
+# own doc comment) used to abort the whole compile when a library
+# genuinely doesn't exist yet at compile time -- as with this example,
+# which writes its own library file with an EARLIER ordinary form
+# (file-write) before importing it. Now guarded/swallowed there, relying
+# on the runtime import! call already unconditionally emitted into the
+# compiled program to do the real work once its turn comes, in the
+# correct (post-file-write) order.
 EXCLUDED = [
   "24-tui-try-scheme.scm",
   "27-http-json-fetch.scm",
@@ -65,7 +60,6 @@ EXCLUDED = [
   "14-process-build-pipeline.scm",
   "38-memoized-fib.scm",
   "demo2.scm",
-  "26-import-generated-library.scm",
 ]
 
 private def load_toolchain(interp : Scheme::Interpreter) : Nil

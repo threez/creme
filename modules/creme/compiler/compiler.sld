@@ -2145,12 +2145,33 @@
           '()
           (append (import-set-alias-defines (car specs)) (alias-defines-for-specs (cdr specs)))))
 
+    ;; The eager compile-time import! + ensure-libraries-loaded! calls
+    ;; below exist ONLY so a LATER top-level form's macro use (via
+    ;; target-env-macro-expand) can already see this import's exports --
+    ;; this compiler compiles a whole program in one pass before any of
+    ;; it runs (see compile-source-to-bytes), so without this, an import
+    ;; textually followed by a macro use from it would never resolve. But
+    ;; that means a program which WRITES a library file at run time (an
+    ;; earlier ordinary form, e.g. file-write) and then imports it can
+    ;; never satisfy this eager check -- the file genuinely doesn't exist
+    ;; yet at COMPILE time, since the form that creates it hasn't RUN yet.
+    ;; Rather than aborting the whole compile over that (a real bug this
+    ;; project's own Phase C differential sweep against 26-import-
+    ;; generated-library.scm found), swallow the failure here: the
+    ;; runtime call to the SAME two procedures, already unconditionally
+    ;; emitted below into the compiled program itself, still runs the
+    ;; real import at the CORRECT time (after every earlier form has
+    ;; actually executed, exactly like native Crystal's own per-form
+    ;; analyze-compile-run loop achieves for free) -- this just means an
+    ;; import of a not-yet-existing library can't ALSO satisfy a later
+    ;; macro use in the same program (an edge case rare enough, and
+    ;; already unusual enough -- generating a LIBRARY that exports a
+    ;; MACRO at run time and using it in the same program -- to accept).
     (define (compile-import! fc expr dest tail?)
       (if (fcomp-parent fc)
           (error "bootstrap compiler: import is only supported at the top level" expr)
           (begin
-            (import! (cdr expr))
-            (ensure-libraries-loaded! (cdr expr))
+            (guard (e (#t #f)) (import! (cdr expr)) (ensure-libraries-loaded! (cdr expr)))
             (compile-expr! fc
               (cons 'begin
                     (append

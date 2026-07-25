@@ -389,6 +389,45 @@ describe "bootstrap-compiler module" do
     end
   end
 
+  # compile-source-to-bytes compiles a WHOLE program up front, before any
+  # of it runs -- so compile-import!'s eager compile-time import! (there
+  # only to make an import's exports visible to a LATER macro use) used to
+  # raise and abort the entire compile when a library genuinely doesn't
+  # exist yet at compile time, as here: an earlier ordinary form writes
+  # the library file this later (import ...) then loads. That eager call
+  # is now guarded/swallowed; the runtime import! call already
+  # unconditionally emitted into the compiled program does the real work
+  # once its turn comes, in the correct (post-file-write) order -- exactly
+  # like examples/26-import-generated-library.scm, which this mirrors.
+  it "imports a library file written by an earlier form in the same program" do
+    src = <<-SCM
+    (import (creme file))
+    (file-write "./modules/compiler-spec-generated.sld"
+      "(define-library (compiler-spec-generated)
+         (export greet)
+         (import (scheme base))
+         (begin (define (greet name) (string-append \\\"hi \\\" name))))")
+    (import (compiler-spec-generated))
+    (define result (greet "Ada"))
+    (delete-file "./modules/compiler-spec-generated.sld")
+    result
+    SCM
+
+    # Needs its own library_search_path on BOTH sides (unlike check()'s
+    # shared native_eval helper, which has none) so the generated library
+    # under ./modules is actually resolvable -- same reasoning as the dao/
+    # sxql tests above.
+    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Scheme.run_source(native, src).write_string
+
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    load_toolchain(interp)
+    interp.global.define("generated-library-test-source", Scheme::SchemeStr.new(src))
+    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes generated-library-test-source))").write_string
+
+    bootstrap_result.should eq(native_result)
+  end
+
   it "properly tail-calls a named-let loop over 200000 iterations without overflowing" do
     interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
