@@ -1,4 +1,4 @@
-.PHONY: all clean fmt fmtcheck lint fix docs spec bench version tag
+.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec bench version tag
 
 UNAME_M != uname -m
 NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
@@ -18,6 +18,20 @@ lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext
 
 spec: $(NEON_OBJ)
 	crystal spec -v
+
+# Run-only: assumes bin/creme is already built (shards build --release
+# --no-debug). Runs every *_spec.scm under spec/creme/ -- (creme spec)-
+# based tests, written and run entirely in Scheme (see modules/creme/
+# spec.sld) -- through bin/creme, failing the whole target if any one
+# file's own process exits non-zero (each file calls (spec-summary!) as
+# its last form, which itself does that per-file exit).
+creme-spec:
+	@status=0; \
+	for f in spec/creme/*_spec.scm; do \
+		echo "== $$f =="; \
+		./bin/creme "$$f" || status=1; \
+	done; \
+	exit $$status
 
 # Run-only: assumes bin/creme is already built (shards build --release
 # --no-debug) and, for the native-Crystal comparison column, bin/bench_cr is
