@@ -202,6 +202,110 @@ compiles needs every one of these to genuinely exist as an ordinary
 global procedure too (`cvm/builtins.c`). Semantics mirror the fused ops'
 own bounds checks exactly.
 
+**Running `spec/creme`'s own test suite under compiler mode.** This
+project's Scheme-native test framework (`(creme spec)`, `modules/creme/
+spec.sld`) and its `spec/creme/*_spec.scm` files can run directly under
+`cvm`:
+
+```sh
+make creme-spec-cvm    # rebuilds compiler-run.cvmc, then runs every spec file
+./cvm/cvm spec/creme/vm_spec.scm    # or one file at a time
+```
+
+Getting there needed two more fixes beyond ordinary builtin gaps (`write`,
+`write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum`,
+`string->number`'s radix arg, `+inf.0`/`-inf.0`/`+nan.0` in `write`'s own
+float formatting — see "Native builtins" below):
+
+- A target script that imports the compiler toolchain itself (`(creme
+  compiler compiler)`/`(creme bytecode)`/etc. — exactly what every
+  `spec/creme` file does, transitively, via `(creme compiler spec-
+  helper)`) used to corrupt in-progress compilation: `compiler-run.scm`
+  already bundles those libraries natively at BUILD time, but the self-
+  hosted compiler's own library loader (`ensure-libraries-loaded!`,
+  `compiler.sld`) had no way to know that, so it re-read and re-ran their
+  source a SECOND time at cvm boot, re-executing `(define-record-type
+  <chunk> ...)`/`<fcomp> ...)` and corrupting any chunk/fcomp object the
+  outer, still-compiling target script already held from the original
+  generation ("record accessor: expected a `<chunk>` record"). Fixed by
+  exporting `mark-self-hosted-library-loaded!` and having `compiler-run.
+  scm` pre-seed it for every library it itself already imports natively.
+- `eval`/`open-input-string`/`read`/`eof-object` don't exist as cvm-
+  native C builtins at all (see "Native builtins" above) — `compiler-
+  run.scm` defines all four itself, in Scheme, reusing the self-hosted
+  reader/compiler already loaded there (`eval` compiles+runs one form via
+  `compile-program`/`load-chunk-bytes`; `open-input-string` parses a
+  whole string upfront via `read-program`, and `read` pops one form off
+  at a time) rather than adding a second parser/evaluator in C. Under
+  cvm specifically there's no independent second evaluator to compare
+  against anyway — this compiler is the only one cvm has any notion of.
+
+**`call/cc`/`dynamic-wind`/`with-exception-handler`/`raise-continuable`**
+are also real cvm features now, added specifically to get `spec/creme/
+vm_spec.scm`'s own "dynamic-wind, call/cc, with-exception-handler" cases
+passing under `cvm`:
+
+- `call/cc`/`call-with-current-continuation` (`cvm/builtins.c`) is
+  ESCAPE-ONLY (a one-shot, upward continuation, not a general
+  re-enterable one — see `value.h`'s own `Continuation` doc comment):
+  `setjmp` captures the point at call time; invoking the resulting
+  `T_CONTINUATION` value later (`dispatch_call`/`cvm_apply` both
+  recognize it directly, same as `T_PARAMETER`) drains any pending
+  `dynamic-wind`/`parameterize` actions down to that point (see below)
+  and `longjmp`s back, regardless of how deep the intervening C call
+  stack got (nested `cvm_apply`s, e.g. a nested `for-each` callback) —
+  the exact same technique `guard`'s own `GuardHandler` already used.
+- `dynamic-wind` (`cvm/builtins.c`) generalizes the SAME unwind-stack
+  mechanism `parameterize`'s `Op::PARAMPUSH`/`Op::PARAMPOP` already used
+  (`vm.h`'s `UnwindAction`/`UnwindKind`) rather than adding a second,
+  parallel mechanism: an `UNWIND_DYNAMIC_WIND` action calls its own
+  `after` thunk, triggered either by normal return or by a `guard`
+  handler (or a captured continuation) draining the stack past it.
+- `with-exception-handler`/`raise-continuable` need no new C at all —
+  both are plain Scheme, defined in `cvm/compiler-run.scm` atop
+  `dynamic-wind`: a mutable handler-stack list, pushed/popped around
+  `with-exception-handler`'s own thunk (via `dynamic-wind`, so an
+  exception unwinding past it still restores the stack correctly), with
+  `raise-continuable` popping the current handler before calling it (so
+  a handler that itself raises sees the next-outer one, not itself) and
+  restoring it before returning the handler's own result — an ordinary,
+  non-escaping return, no continuation involved at all.
+
+**`define-syntax`'s own runtime visibility** is also fixed: `Op::
+HelperForm`'s kind 3 (`cvm/vm.c`) now binds a real `T_MACRO` value the
+same way kind 4 (`defmacro`) already did, and `bi_expand_if_macro`
+(`cvm/bootstrap.c`) picks the right bridge — `defmacro-expand-form` or
+the new `define-syntax-expand-form` (`compiler.sld`, built on the self-
+hosted compiler's own `sr-make-transformer`, its real `syntax-rules`
+pattern matcher) — by checking the wrapped form's own head symbol. `cvm`
+still never expands a `syntax-rules` use directly in C; it bridges out
+to Scheme for that, same as it always did for `defmacro`.
+
+Two categories of `spec/creme` cases still don't pass under `cvm` — each
+documented in its own file's header comment:
+
+- **No complex/rational number support at all** (`compiler_numeric_
+  tower_spec.scm`, 7 cases in `reader_literals_spec.scm`) — a genuine
+  numeric tower (bignum/rational/complex arithmetic, reader/writer
+  support, touching every existing `+`/`-`/`*`/`/`/comparison builtin) is
+  a deep, deliberate scope limitation of this prototype VM (see this
+  file's own header comment: "doubles only"), not something this test
+  suite is trying to add.
+- **`import!` called as a bare procedure with only/except/prefix/rename
+  filters** (one case in `bootstrap_spec.scm`) — cvm's own `import!`
+  (`cvm/bootstrap.c`) is a permanent no-op at the procedure level; only
+  the compile-time `(import ...)` special form gets real filtering
+  (`compile-import!`'s own alias generation, `compiler.sld`). Bridging
+  `import!` itself out to that same alias-generation logic was tried and
+  reverted — `compile-import!`'s own runtime-emitted payload calls
+  `import!` BEFORE `ensure-libraries-loaded!` in the same sequence, so a
+  bridge triggered directly from `import!` fired too early, before the
+  target library's own exports were even defined yet. A real fix needs a
+  different hook point; left as a known, narrow gap.
+
+Neither is a regression, and neither is something this test suite is
+trying to fix beyond what's documented above.
+
 ## Profiling
 
 `cvm --profile <file.cvmc>` runs the program under two independent samplers
@@ -371,12 +475,12 @@ across seven files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
-| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)` | 155 | predicates, `car`/`cdr`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number`/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=`, `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?` |
+| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 171 | predicates, `car`/`cdr`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=`, `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above) |
 | `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via vendored facil.io |
 | `sql.c` | `(creme sql)` | 6 | `sql-open`, `sql-execute`, `sql-query`, `sql-scalar` — real SQLite via the C API |
-| `hashtable.c` | `(creme hash-table)` (partial) | 6 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!` — no `hash-table-keys`/`values`/`walk` yet |
+| `hashtable.c` | `(creme hash-table)` (partial) | 6 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!` — no `hash-table-keys`/`values`/`walk` yet; `hash-table-ref`'s own default arg may be a plain value OR a thunk (only applied if it's actually callable), matching native's own contract |
 | `strings.c` | `(creme string)` + `(creme format)` | 16 | `string-upcase`/`downcase`/`trim`/`split`/`join`/`replace`/`pad`/etc., `format` |
-| `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) | 5 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path` |
+| `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) + `(creme file)` (partial) | 8 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path`, `file-read` (same function as `read-whole-file`, registered under both names), `file-write`, `delete-file` |
 | `regex.c` | `(creme regex)` (very narrow — see "REPL" above) | 2 | `regexp`, `regexp-matches?` |
 
 `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` didn't used to be builtins here — a
@@ -387,13 +491,31 @@ that fusion (see "REPL" above), so they're real global procedures now
 too — a 3+-arg or non-fused call to them works either way.
 
 Every other `(scheme ...)` library (`file`, `process-context` beyond
-`get-environment-variable`, `time`, `complex`, `inexact`, `lazy`, `read`,
-`eval`, `repl`, `r5rs`, `case-lambda`, `cxr`) and every other `(creme ...)`
-FFI library (`bigdecimal`, `math`, `json`, `file`, `time`,
-`random`, `digest`, `env`, `process`, `tui`, `rfc8439`, `http`,
-`prof-native`, `prof-vm`, `introspection`, `actor`, `raft`, `treelist`,
-`csv`, `jose`, `reader`) has **no** cvm-native counterpart at all — a
-script that calls into one won't resolve at cvm load/run time.
+`get-environment-variable`/`exit`, `time`, `complex`, `inexact`, `repl`,
+`r5rs`, `case-lambda`, `cxr`) and every other `(creme ...)` FFI library
+(`bigdecimal`, `json`, `time`, `random`, `digest`, `env`, `process`,
+`tui`, `rfc8439`, `http`, `prof-native`, `prof-vm`, `actor`, `raft`,
+`treelist`, `csv`, `jose`) has **no** cvm-native counterpart at all — a
+script that calls into one won't resolve at cvm load/run time. `(scheme
+complex)` in particular has NO counterpart of any kind (no `T_COMPLEX`
+value tag exists — see "Value/type model" below), a deep, deliberate
+scope limitation: `spec/creme/compiler_numeric_tower_spec.scm` and 7
+cases in `spec/creme/reader_literals_spec.scm` document this as a known,
+accepted gap rather than something cvm's own spec suite tries to work
+around.
+
+Three more are *partially* covered, each only as far as this project's
+own `spec/creme` test suite needed: `(creme math)` (just `flonum->bits`/
+`bits->flonum`, not the rest of that FFI), `(creme introspection)` (just
+`gensym`, not `macro?`/the rest), `(creme file)` (just `file-read`/
+`file-write`/`delete-file`, not `file-exists?`/`file-append`/`file-lines`/
+`file-size`/`current-directory`). `(scheme read)`'s `read`/
+`open-input-string`/`eof-object` and `(scheme eval)`'s `eval` also have
+no NATIVE (C) counterpart in this table at all, but ARE available when
+running under cvm's own "compiler mode" (see below) -- `cvm/compiler-
+run.scm` defines all four itself, in Scheme, reusing the self-hosted
+reader/compiler already loaded there rather than adding a second parser/
+evaluator in C (see that file's own comments on both).
 
 ### `.sld` pure-Scheme libraries: transparent, not special-cased
 

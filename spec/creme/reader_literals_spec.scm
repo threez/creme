@@ -24,6 +24,13 @@
 ;; Run with:
 ;;   ./bin/creme spec/creme/reader_literals_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/reader_literals_spec.scm
+;;   ./cvm/cvm spec/creme/reader_literals_spec.scm
+;; All cases pass under all three EXCEPT the 7 complex-number cases in
+;; "numbers" (1+2i, 1-2i, -4i, +i, -i, 3+i, 1.5+2.5i) under `cvm/cvm`
+;; specifically -- cvm has no complex-number support at all (a deep,
+;; pre-existing, deliberate scope limitation of that prototype VM; see
+;; compiler_numeric_tower_spec.scm's own header comment for the same gap
+;; affecting a compiler-level case).
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)

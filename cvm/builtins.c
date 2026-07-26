@@ -233,14 +233,38 @@ static Value bi_current_second(VM *vm, Value *args, int nargs) {
   return v_float((double)ts.tv_sec + (double)ts.tv_nsec / 1e9);
 }
 
+/* (creme math)'s flonum->bits/bits->flonum -- an exact IEEE754 bit-level
+ * reinterpret (not a numeric conversion), memcpy'd rather than a union/
+ * pointer cast to stay strict-aliasing-safe. Needed by (creme bytecode)'s
+ * own write-float64! (SCB1 chunk serialization), so ANY chunk containing
+ * a float constant needs this -- not a test-specific gap, a foundational
+ * one that surfaced the first time a spec/creme test file with a float
+ * literal ran under cvm's compiler mode. */
+static Value bi_flonum_to_bits(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_FLOAT) cvm_abort("flonum->bits: expected a float");
+  int64_t bits;
+  double f = args[0].as.f;
+  memcpy(&bits, &f, sizeof(bits));
+  return v_int(bits);
+}
+static Value bi_bits_to_flonum(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("bits->flonum: expected an exact integer");
+  double f;
+  int64_t bits = args[0].as.i;
+  memcpy(&f, &bits, sizeof(f));
+  return v_float(f);
+}
+
 /* Mirrors SchemeFloat#to_display (values.cr): whole floats print as "N.0",
  * everything else via a round-trip-safe %.17g — not byte-identical to
  * Crystal's shortest-round-trip formatter, but this bench only ever
  * displays timings, never string-compares them. */
 /* `display` convention throughout (strings/chars print their raw content,
- * not a re-readable `write`-style quoted/escaped form) — this prototype has
- * no separate (scheme write) `write` builtin, only `display`, matching what
- * bench/creme.scm and the demo-todo app both actually call. */
+ * not a re-readable `write`-style quoted/escaped form) — `write` (below,
+ * write_value) reuses this for every tag except strings/chars/pairs/
+ * vectors/bytevectors, which it quotes itself. */
 static void print_value(FILE *out, Value v) {
   switch (v.tag) {
   case T_INT:
@@ -248,6 +272,16 @@ static void print_value(FILE *out, Value v) {
     break;
   case T_FLOAT: {
     double f = v.as.f;
+    /* R7RS's own external representation for these three, checked before
+     * the whole-number/%.17g cases below -- C's own printf-family renders
+     * them as bare "inf"/"-inf"/"nan" (via %.17g), not valid Scheme
+     * syntax at all, which (creme compiler reader)'s self-compile test
+     * surfaced: reader.sld's own inf-nan-literals table, re-serialized
+     * through this printer as part of the self-hosting compile, came
+     * back as the bare symbol `inf` -- "unbound variable: inf" the
+     * first time that reconstituted text was ever re-read. */
+    if (isnan(f)) { fputs("+nan.0", out); break; }
+    if (isinf(f)) { fputs(f > 0 ? "+inf.0" : "-inf.0", out); break; }
     if (fabs(f) < 1e15 && f == (double)(int64_t)f) {
       fprintf(out, "%lld.0", (long long)f);
     } else {
@@ -418,6 +452,138 @@ static Value bi_write_string(VM *vm, Value *args, int nargs) {
   port_buf_grow(p, args[0].as.str.len);
   memcpy(p->buf + p->len, args[0].as.str.chars, (size_t)args[0].as.str.len);
   p->len += args[0].as.str.len;
+  return v_nil();
+}
+
+/* (write-char char [port]) -- port defaults to stdout, same convention
+ * as write/write-string. Codepoints are stored/produced byte-wise in
+ * this prototype (see string-ref's own comment), so a single byte
+ * append/fputc mirrors that scope exactly. */
+static Value bi_write_char(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("write-char: expected a char");
+  if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("write-char: expected a port");
+  Port *p = (nargs >= 2) ? args[1].as.port : &stdout_port_sentinel;
+  char c = (char)args[0].as.i;
+  if (p == &stdout_port_sentinel) {
+    fputc((int)(unsigned char)c, stdout);
+    return v_nil();
+  }
+  port_buf_grow(p, 1);
+  p->buf[p->len] = c;
+  p->len += 1;
+  return v_nil();
+}
+
+/* (scheme write)'s `write`, absent from this prototype until now (see
+ * print_value's own header comment on why only `display` existed) --
+ * needed by (creme spec)/(creme compiler spec-helper)'s write-to-string,
+ * used throughout the spec/creme test suite. Only strings/chars/pairs/vectors/
+ * bytevectors need write's own quoted/re-readable form; every other tag
+ * (numbers, symbols, booleans, nil, records, procedures, ...) prints
+ * identically under write and display in this project's own scope, so
+ * those fall through to print_value unchanged. */
+static void write_string_literal(FILE *out, const char *chars, int len) {
+  fputc('"', out);
+  for (int i = 0; i < len; i++) {
+    unsigned char c = (unsigned char)chars[i];
+    switch (c) {
+    case '"': fputs("\\\"", out); break;
+    case '\\': fputs("\\\\", out); break;
+    case '\n': fputs("\\n", out); break;
+    case '\t': fputs("\\t", out); break;
+    case '\r': fputs("\\r", out); break;
+    default: fputc(c, out); break;
+    }
+  }
+  fputc('"', out);
+}
+
+static void write_char_literal(FILE *out, int64_t codepoint) {
+  fputs("#\\", out);
+  switch (codepoint) {
+  case ' ': fputs("space", out); break;
+  case '\n': fputs("newline", out); break;
+  case '\t': fputs("tab", out); break;
+  case '\r': fputs("return", out); break;
+  case 0: fputs("null", out); break;
+  default: fputc((int)codepoint, out); break;
+  }
+}
+
+static void write_value(FILE *out, Value v) {
+  switch (v.tag) {
+  case T_STR:
+    write_string_literal(out, v.as.str.chars, v.as.str.len);
+    break;
+  case T_CHAR:
+    write_char_literal(out, v.as.i);
+    break;
+  case T_PAIR: {
+    fputc('(', out);
+    Value cur = v;
+    int first = 1;
+    while (cur.tag == T_PAIR) {
+      if (!first) fputc(' ', out);
+      first = 0;
+      write_value(out, cur.as.pair->car);
+      cur = cur.as.pair->cdr;
+    }
+    if (cur.tag != T_NIL) {
+      fputs(" . ", out);
+      write_value(out, cur);
+    }
+    fputc(')', out);
+    break;
+  }
+  case T_VECTOR: {
+    fputs("#(", out);
+    for (int i = 0; i < v.as.vec->len; i++) {
+      if (i) fputc(' ', out);
+      write_value(out, v.as.vec->items[i]);
+    }
+    fputc(')', out);
+    break;
+  }
+  case T_BYTEVECTOR: {
+    fputs("#u8(", out);
+    for (int i = 0; i < v.as.bv->len; i++) {
+      if (i) fputc(' ', out);
+      fprintf(out, "%d", (int)v.as.bv->bytes[i]);
+    }
+    fputc(')', out);
+    break;
+  }
+  default:
+    print_value(out, v);
+    break;
+  }
+}
+
+/* (write obj [port]) -- port defaults to stdout, same convention
+ * display/write-string already use. Renders through an in-memory stream
+ * first (open_memstream, the same trick bi_error/bi_raise already use
+ * below) so the SAME write_value traversal works for both sinks (a real
+ * FILE* for stdout, a Port's own byte buffer otherwise) without a
+ * second, buffer-specific traversal. */
+static Value bi_write(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("write: expected an argument");
+  if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("write: expected a port");
+  char *buf = NULL;
+  size_t size = 0;
+  FILE *ms = open_memstream(&buf, &size);
+  write_value(ms, args[0]);
+  fclose(ms);
+  Port *p = (nargs >= 2) ? args[1].as.port : &stdout_port_sentinel;
+  if (p == &stdout_port_sentinel) {
+    fwrite(buf, 1, size, stdout);
+  } else {
+    port_buf_grow(p, (int)size);
+    memcpy(p->buf + p->len, buf, size);
+    p->len += (int)size;
+  }
+  free(buf);
   return v_nil();
 }
 
@@ -631,7 +797,7 @@ static Value bi_char_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1
  * pred are real Builtin SUBCLASSES there), but NOT SchemeParameter
  * (T_PARAMETER) -- a parameter is callable via apply's generic dispatch
  * without being procedure?-true. */
-static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("procedure?: expected an argument"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_CASE_CLOSURE || args[0].tag == T_RECORD_CALLABLE || args[0].tag == T_BUILTIN); }
+static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("procedure?: expected an argument"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_CASE_CLOSURE || args[0].tag == T_RECORD_CALLABLE || args[0].tag == T_BUILTIN || args[0].tag == T_CONTINUATION); }
 static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("number?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT); }
 static Value bi_real_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); } /* no complex tower */
 static Value bi_complex_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); } /* every number cvm has IS real, and every real is complex -- no genuinely-complex-but-not-real value exists here */
@@ -891,6 +1057,60 @@ static Value bi_memq(VM *vm, Value *args, int nargs) {
     cur = cur.as.pair->cdr;
   }
   return v_bool(0);
+}
+
+/* (dynamic-wind before thunk after) -- reuses the SAME unwind_stack
+ * mechanism parameterize's own Op::PARAMPUSH/PARAMPOP already use (see
+ * vm.h's own UnwindAction/UnwindKind doc comment), generalized to also
+ * support "call this after-thunk" alongside "restore these parameters".
+ * Pushing our own UnwindAction BEFORE calling thunk means an error
+ * raised (anywhere, however deep, including through further nested
+ * cvm_apply calls) that unwinds past this dynamic-wind via an outer
+ * guard handler will run `after` during that handler's own unwind-stack
+ * drain (OP_PUSHHANDLER's resume branch) -- exactly like a pending
+ * parameterize restoration -- even though this C function's own call
+ * frame never returns normally in that case (longjmp bypasses it
+ * entirely). On the ordinary, no-exception path, thunk returns normally
+ * here and we pop + run our own action directly. */
+static Value bi_dynamic_wind(VM *vm, Value *args, int nargs) {
+  if (nargs != 3) cvm_abort("dynamic-wind: expected (before thunk after)");
+  Value before = args[0], thunk = args[1], after = args[2];
+  cvm_apply(vm, before, NULL, 0);
+  if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("cvm: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+  UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
+  ua->kind = UNWIND_DYNAMIC_WIND;
+  ua->after = after;
+  Value result = cvm_apply(vm, thunk, NULL, 0);
+  /* Ordinary, no-exception return: pop our own action and run `after`
+   * directly here (NOT via vm.c's own run_unwind_action, static/private
+   * to that file -- this is the exact same one-line effect for the
+   * DYNAMIC_WIND case). The guard-unwind path (vm.c) still handles the
+   * exceptional case via that same UnwindAction, unaffected by this. */
+  vm->n_unwind--;
+  cvm_apply(vm, after, NULL, 0);
+  return result;
+}
+
+/* (call/cc proc) / (call-with-current-continuation proc) -- an ESCAPE-
+ * ONLY (one-shot, upward) continuation: captures the current point via
+ * setjmp, wraps it in a T_CONTINUATION Value, and calls `proc` with it
+ * as the sole argument. If `proc` returns normally (never invokes the
+ * continuation), call/cc itself returns that value, same as an ordinary
+ * call. If the continuation IS invoked (immediately, or arbitrarily
+ * deep -- through further nested cvm_apply calls, e.g. a for-each
+ * callback), dispatch_call/cvm_apply's own T_CONTINUATION case (vm.c)
+ * unwinds pending dynamic-wind/parameterize actions and longjmps
+ * straight back to the setjmp call site below, which returns k->result
+ * instead. See value.h's own Continuation doc comment for why this is
+ * NOT a general re-enterable continuation. */
+static Value bi_call_cc(VM *vm, Value *args, int nargs) {
+  if (nargs != 1) cvm_abort("call/cc: expected a procedure");
+  Continuation *k = GC_MALLOC(sizeof(Continuation));
+  k->depth = vm->depth;
+  k->unwind_mark = vm->n_unwind;
+  if (setjmp(k->buf) != 0) return k->result;
+  Value kval = v_continuation(k);
+  return cvm_apply(vm, args[0], &kval, 1);
 }
 
 /* ---- higher-order procedures (cvm_apply, vm.c, is the reentrant "call a
@@ -1153,18 +1373,33 @@ static Value bi_string_eq(VM *vm, Value *args, int nargs) {
   }
   return v_bool(1);
 }
+/* Optional 2nd arg: an explicit radix (2/8/10/16), needed by (creme
+ * compiler reader)'s own #b/#o/#x-prefixed literal parsing -- previously
+ * silently ignored here (always base 10), so a hex/octal/binary literal
+ * whose digits aren't ALSO valid decimal digits (e.g. "1A" for #x1A)
+ * failed to parse under cvm specifically (reader.sld delegates the
+ * actual digit-parsing to this builtin). Floats only ever make sense in
+ * base 10 (R7RS has no hex/octal/binary float syntax), so strtod is only
+ * tried there. */
 static Value bi_string_to_number(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->number: expected a string");
+  int radix = 10;
+  if (nargs >= 2) {
+    if (args[1].tag != T_INT) cvm_abort("string->number: expected an integer radix");
+    radix = (int)args[1].as.i;
+  }
   int len = args[0].as.str.len;
   char *buf = malloc((size_t)len + 1);
   memcpy(buf, args[0].as.str.chars, (size_t)len);
   buf[len] = 0;
   char *endptr;
-  long long iv = strtoll(buf, &endptr, 10);
+  long long iv = strtoll(buf, &endptr, radix);
   if (endptr != buf && *endptr == 0) { free(buf); return v_int(iv); }
-  double dv = strtod(buf, &endptr);
-  if (endptr != buf && *endptr == 0) { free(buf); return v_float(dv); }
+  if (radix == 10) {
+    double dv = strtod(buf, &endptr);
+    if (endptr != buf && *endptr == 0) { free(buf); return v_float(dv); }
+  }
   free(buf);
   return v_bool(0);
 }
@@ -1191,6 +1426,29 @@ static Value bi_number_to_string(VM *vm, Value *args, int nargs) {
 }
 static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->symbol: expected a string"); return v_sym(copy_bytes(args[0].as.str.chars, args[0].as.str.len), args[0].as.str.len); }
 static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) cvm_abort("symbol->string: expected a symbol"); return v_str(copy_bytes(args[0].as.str.chars, args[0].as.str.len), args[0].as.str.len); }
+
+/* (creme introspection)'s gensym -- a distinct symbol each call
+ * ("prefix__N", N a process-wide counter), needed by defmacro-based
+ * capture-avoidance idioms (e.g. modules/creme/compiler/compiler.sld's
+ * own swap!-with-gensym pattern, exercised directly by spec/creme/
+ * macro_spec.scm). Mirrors src/scheme/modules/scheme/base/misc.cr's own
+ * gensym exactly (prefix defaults to "g" with no argument). */
+static int64_t g_gensym_counter = 0;
+static Value bi_gensym(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  const char *prefix_chars = "g";
+  int prefix_len = 1;
+  if (nargs >= 1) {
+    if (args[0].tag != T_STR && args[0].tag != T_SYM) cvm_abort("gensym: expected a string or symbol prefix");
+    prefix_chars = args[0].as.str.chars;
+    prefix_len = args[0].as.str.len;
+  }
+  g_gensym_counter++;
+  int cap = prefix_len + 32;
+  char *buf = GC_MALLOC((size_t)cap);
+  int n = snprintf(buf, (size_t)cap, "%.*s__%lld", prefix_len, prefix_chars, (long long)g_gensym_counter);
+  return v_sym(buf, n);
+}
 static Value bi_char_to_integer(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char->integer: expected a char"); return v_int(args[0].as.i); }
 static Value bi_integer_to_char(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) cvm_abort("integer->char: expected an integer"); return v_char(args[0].as.i); }
 static Value bi_char_eq(VM *vm, Value *args, int nargs) {
@@ -1419,18 +1677,44 @@ static Value bi_get_environment_variable(VM *vm, Value *args, int nargs) {
   return v_str(copy, len);
 }
 
+/* (exit [code]) -- code defaults to 0, clamped to 0-255 like native's own
+ * (process_context.cr). Unlike native (which raises a SchemeExit that
+ * unwinds through any pending dynamic-wind after-thunks before main.cr
+ * turns it into a real process exit), this calls the raw C exit()
+ * directly -- no dynamic-wind unwinding. Needed by (creme spec)'s
+ * spec-summary!, always the LAST form a spec/creme test file runs, so
+ * no pending dynamic-wind is realistically in scope at that point;
+ * acceptable for this prototype VM's own established scope (see this
+ * file's other comments on what's simplified here vs. native). */
+static Value bi_exit(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  int64_t code = 0;
+  if (nargs >= 1) {
+    if (args[0].tag != T_INT) cvm_abort("exit: expected an integer");
+    code = args[0].as.i;
+  }
+  if (code < 0) code = 0;
+  if (code > 255) code = 255;
+  exit((int)code);
+}
+
 void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "make-vector", bi_make_vector);
   cvm_register_builtin(vm, "current-second", bi_current_second);
+  cvm_register_builtin(vm, "flonum->bits", bi_flonum_to_bits);
+  cvm_register_builtin(vm, "bits->flonum", bi_bits_to_flonum);
   cvm_register_builtin(vm, "display", bi_display);
   cvm_register_builtin(vm, "newline", bi_newline);
   cvm_register_builtin(vm, "open-output-string", bi_open_output_string);
   cvm_register_builtin(vm, "get-output-string", bi_get_output_string);
   cvm_register_builtin(vm, "string-length", bi_string_length);
   cvm_register_builtin(vm, "write-string", bi_write_string);
+  cvm_register_builtin(vm, "write-char", bi_write_char);
+  cvm_register_builtin(vm, "write", bi_write);
   cvm_register_builtin(vm, "reverse", bi_reverse);
   cvm_register_builtin(vm, "length", bi_length);
   cvm_register_builtin(vm, "current-output-port", bi_current_output_port);
+  cvm_register_builtin(vm, "exit", bi_exit);
 
   cvm_register_builtin(vm, "not", bi_not);
   cvm_register_builtin(vm, "pair?", bi_pair_p);
@@ -1528,6 +1812,9 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "filter", bi_filter);
   cvm_register_builtin(vm, "values", bi_values);
   cvm_register_builtin(vm, "call-with-values", bi_call_with_values);
+  cvm_register_builtin(vm, "dynamic-wind", bi_dynamic_wind);
+  cvm_register_builtin(vm, "call/cc", bi_call_cc);
+  cvm_register_builtin(vm, "call-with-current-continuation", bi_call_cc);
 
   cvm_register_builtin(vm, "string-append", bi_string_append);
   cvm_register_builtin(vm, "substring", bi_substring);
@@ -1541,6 +1828,7 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "number->string", bi_number_to_string);
   cvm_register_builtin(vm, "string->symbol", bi_string_to_symbol);
   cvm_register_builtin(vm, "symbol->string", bi_symbol_to_string);
+  cvm_register_builtin(vm, "gensym", bi_gensym);
   cvm_register_builtin(vm, "char->integer", bi_char_to_integer);
   cvm_register_builtin(vm, "integer->char", bi_integer_to_char);
   cvm_register_builtin(vm, "char=?", bi_char_eq);

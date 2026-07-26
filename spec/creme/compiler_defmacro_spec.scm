@@ -13,9 +13,10 @@
 ;; redefinition" cases) -- unrelated to defmacro specifically, but small
 ;; enough to share this file rather than gain a fourth one of its own.
 ;;
-;; Run with:
+;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/compiler_defmacro_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/compiler_defmacro_spec.scm
+;;   ./cvm/cvm spec/creme/compiler_defmacro_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

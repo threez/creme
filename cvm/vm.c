@@ -279,12 +279,40 @@ static void close_upvalues(Frame *f) {
   f->n_opened = 0;
 }
 
-/* Restores every parameter an UnwindAction is tracking to its saved
- * (pre-parameterize) value -- run on ParamPop (normal exit) or by a
- * guard handler draining the unwind stack down past it (see
- * OP_PUSHHANDLER's own resume branch). */
-static void run_unwind_action(UnwindAction *a) {
+/* Restores every parameter a PARAMS UnwindAction is tracking to its saved
+ * (pre-parameterize) value, or calls a DYNAMIC_WIND action's own `after`
+ * thunk -- run on ParamPop/dynamic-wind's own normal exit, or by a guard
+ * handler draining the unwind stack down past it (see OP_PUSHHANDLER's
+ * own resume branch). */
+static void run_unwind_action(VM *vm, UnwindAction *a) {
+  if (a->kind == UNWIND_DYNAMIC_WIND) {
+    cvm_apply(vm, a->after, NULL, 0);
+    return;
+  }
   for (int i = 0; i < a->n; i++) a->params[i]->value = a->saved[i];
+}
+
+/* Invokes a captured call/cc continuation: closes every upvalue opened
+ * by a frame being unwound past (same reasoning as OP_PUSHHANDLER's own
+ * resume branch -- their stack slots are about to be reused/overwritten,
+ * so any closure that captured one as an upvalue needs its OWN copy
+ * first), drains pending dynamic-wind/parameterize actions down to the
+ * continuation's own saved mark (running each -- so escaping past a
+ * dynamic-wind's thunk via a captured continuation still runs its
+ * `after`), restores vm->depth to what it was AT CAPTURE time, stashes
+ * `arg` where the corresponding setjmp will read it back from, then
+ * longjmps there. Called from both dispatch_call and cvm_apply's own
+ * "callee is a continuation" case -- the two places a Value can be
+ * invoked as a procedure at all. */
+static _Noreturn void invoke_continuation(VM *vm, Continuation *k, Value arg) {
+  for (int i = k->depth; i < vm->depth; i++) close_upvalues(&vm->frames[i]);
+  while (vm->n_unwind > k->unwind_mark) {
+    vm->n_unwind--;
+    run_unwind_action(vm, &vm->unwind_stack[vm->n_unwind]);
+  }
+  vm->depth = k->depth;
+  k->result = arg;
+  longjmp(k->buf, 1);
 }
 
 static Closure *make_closure(VM *vm, Frame *frame, int proto_idx) {
@@ -748,6 +776,11 @@ static int dispatch_call(VM *vm, Frame *frame, Instruction *ins, Value callee, i
     return 0;
   }
 
+  if (callee.tag == T_CONTINUATION) {
+    if (nargs != 1) cvm_abort("continuation: expected exactly 1 argument, got %d", nargs);
+    invoke_continuation(vm, callee.as.continuation, vm->stack[arg_base]); /* never returns */
+  }
+
   if (callee.tag == T_PARAMETER) {
     if (nargs != 0) cvm_abort("parameter: expected 0 arguments, got %d", nargs);
     Value result = callee.as.parameter->value;
@@ -1054,19 +1087,22 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
      * never actually appears as a compiled top-level form (only a
      * library's OWN body forms get flattened into the chunk, never the
      * define-library wrapper itself), so it's also unreachable-in-
-     * practice as a no-op. c=3 (define-syntax) stays compile-time-only —
-     * expanding a syntax-rules use needs real pattern matching, which
-     * this VM doesn't implement (see bootstrap.c's bi_expand_if_macro for
-     * that narrower, still-open gap). c=4 (defmacro) DOES need real work
-     * now: binds a genuine T_MACRO value (see value.h's own doc comment)
-     * under the macro's name, so a defmacro EXPORTED from a library
-     * compiled straight to bytecode (e.g. sxql-select! from (creme
-     * sxql), Crystal-native-precompiled into this image) is recognizable
-     * as a macro by expand-if-macro when the self-hosted compiler runs
-     * reentrant under cvm and later compiles a USE of it — matching what
-     * Crystal's own eval_defmacro does (env.define(name, mac)) for
-     * exactly the same reason. c=2 (top-level define-record-type) is the
-     * pre-existing real-work case below. */
+     * practice as a no-op. c=3 (define-syntax) and c=4 (defmacro) both
+     * bind a genuine T_MACRO value (see value.h's own doc comment) under
+     * the macro's name, so one EXPORTED from a library compiled straight
+     * to bytecode (e.g. sxql-select! from (creme sxql), Crystal-native-
+     * precompiled into this image) is recognizable as a macro by
+     * expand-if-macro when the self-hosted compiler runs reentrant under
+     * cvm and later compiles a USE of it — matching what Crystal's own
+     * eval_define_syntax/eval_defmacro does (env.define(name, mac)) for
+     * exactly the same reason. This VM itself still never expands a
+     * syntax-rules use directly (no pattern-matching machinery here) --
+     * bi_expand_if_macro (bootstrap.c) bridges BOTH kinds out to the
+     * already-loaded self-hosted compiler's own Scheme-level expanders
+     * (defmacro-expand-form / define-syntax-expand-form, compiler.sld),
+     * which do the real work; this opcode's only job is making the raw
+     * form reachable by name at all. c=2 (top-level define-record-type)
+     * is the pre-existing real-work case below. */
     if (ins->c == 2) {
       Value form = frame->chunk->consts[ins->b];
       RecordBindings rb = build_record_bindings(form);
@@ -1080,19 +1116,20 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
        * (not the type descriptor) -- record_type_names.cr's `names[0]`/
        * rb.names[0] is exactly that symbol. */
       stack[base + ins->a] = rb.names[0];
-    } else if (ins->c == 4) {
+    } else if (ins->c == 3 || ins->c == 4) {
       Value form = frame->chunk->consts[ins->b];
-      if (form.tag != T_PAIR) cvm_abort("defmacro: malformed form");
-      Value parts = form.as.pair->cdr; /* drop the leading `defmacro` symbol */
-      if (parts.tag != T_PAIR) cvm_abort("defmacro: malformed form");
+      const char *kind = ins->c == 3 ? "define-syntax" : "defmacro";
+      if (form.tag != T_PAIR) cvm_abort("%s: malformed form", kind);
+      Value parts = form.as.pair->cdr; /* drop the leading define-syntax/defmacro symbol */
+      if (parts.tag != T_PAIR) cvm_abort("%s: malformed form", kind);
       Value name = parts.as.pair->car;
-      if (name.tag != T_SYM) cvm_abort("defmacro: name must be a symbol");
+      if (name.tag != T_SYM) cvm_abort("%s: name must be a symbol", kind);
       int slot = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
       vm->globals[slot].value = v_macro(form.as.pair);
       vm->globals[slot].bound = 1;
-      /* eval_defmacro returns the macro's own name symbol (interpreter.cr),
-       * same convention record-type-definition's own HelperForm result
-       * above already follows. */
+      /* eval_define_syntax/eval_defmacro both return the macro's own name
+       * symbol (interpreter.cr), same convention record-type-definition's
+       * own HelperForm result above already follows. */
       stack[base + ins->a] = name;
     } else {
       stack[base + ins->a] = v_nil();
@@ -1614,6 +1651,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     }
     if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("cvm: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
     UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
+    ua->kind = UNWIND_PARAMS;
     ua->params = params;
     ua->n = n;
     ua->saved = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
@@ -1625,7 +1663,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   }
   CASE(OP_PARAMPOP)
     vm->n_unwind--;
-    run_unwind_action(&vm->unwind_stack[vm->n_unwind]);
+    run_unwind_action(vm, &vm->unwind_stack[vm->n_unwind]);
     NEXT();
   /* PushHandler's own CASE body is entered twice in spirit (though only
    * ever compiled/executed as ONE C code path): once normally, right
@@ -1653,7 +1691,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       for (int i = h->depth; i < vm->depth; i++) close_upvalues(&vm->frames[i]);
       while (vm->n_unwind > h->unwind_mark) {
         vm->n_unwind--;
-        run_unwind_action(&vm->unwind_stack[vm->n_unwind]);
+        run_unwind_action(vm, &vm->unwind_stack[vm->n_unwind]);
       }
       vm->depth = h->depth;
       frame = &vm->frames[vm->depth - 1];
@@ -1755,6 +1793,10 @@ Value cvm_apply(VM *vm, Value fn, Value *args, int nargs) {
   if (fn.tag == T_PARAMETER) {
     if (nargs != 0) cvm_abort("parameter: expected 0 arguments, got %d", nargs);
     return fn.as.parameter->value;
+  }
+  if (fn.tag == T_CONTINUATION) {
+    if (nargs != 1) cvm_abort("continuation: expected exactly 1 argument, got %d", nargs);
+    invoke_continuation(vm, fn.as.continuation, args[0]); /* never returns */
   }
   if (fn.tag == T_CASE_CLOSURE) {
     CaseClosure *cc = fn.as.case_closure;

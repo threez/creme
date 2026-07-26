@@ -11,6 +11,7 @@
 #ifndef CVM_VALUE_H
 #define CVM_VALUE_H
 
+#include <setjmp.h>
 #include <stdint.h>
 
 typedef enum {
@@ -89,6 +90,16 @@ typedef enum {
              * reentrant from C via cvm_apply. define-syntax (syntax-rules)
              * macros aren't covered by this -- see bootstrap.c's
              * bi_expand_if_macro for why that's a narrower, separate gap. */
+  T_CONTINUATION, /* call/cc's own captured escape point -- ESCAPE-ONLY
+             * (a one-shot, upward/non-reentrant continuation): invoking
+             * one (dispatch_call/cvm_apply recognize this tag directly,
+             * same as T_PARAMETER/T_RECORD_CALLABLE) longjmps straight
+             * back to call/cc's own setjmp call site, unwinding any
+             * pending dynamic-wind/parameterize actions along the way
+             * (see vm.c's Continuation doc comment) -- NOT a real,
+             * re-enterable continuation (no stack copying/CPS here, a
+             * deliberate prototype-scope cut; invoking one again after
+             * its own call/cc has already returned is undefined). */
 } Tag;
 
 /* RecordCallable kinds -- mirrors the real interpreter's split between an
@@ -125,6 +136,7 @@ typedef struct RecordType RecordType;
 typedef struct SchemeRecord SchemeRecord;
 typedef struct RecordCallable RecordCallable;
 typedef struct Parameter Parameter;
+typedef struct Continuation Continuation;
 typedef struct Upvalue Upvalue;
 typedef struct VM VM;
 
@@ -152,6 +164,7 @@ struct Value {
     SchemeRecord *record;
     RecordCallable *record_callable;
     Parameter *parameter;
+    Continuation *continuation;
     BuiltinFn builtin;
     struct {
       void *ptr;
@@ -245,6 +258,25 @@ struct Parameter {
   Value value;
   Value converter;
   int has_converter;
+};
+
+/* call/cc's own captured escape point -- mirrors GuardHandler (vm.h)
+ * almost exactly (same depth/jmp_buf-resume shape), since "escape all
+ * the way back out to here" is the same operation either way; the only
+ * real difference is call/cc's own jmp_buf lives in a GC-visible,
+ * independently-allocated Value a program can pass around/store/call
+ * later (bound by no particular lexical scope), where a GuardHandler is
+ * always vm-internal and short-lived (installed/torn down by one
+ * OP_PUSHHANDLER/OP_POPHANDLER pair). `depth`/`unwind_mark` are captured
+ * at call/cc's OWN call time (mirrors GuardHandler's own `depth`);
+ * `result` is set right before longjmp and read back right after the
+ * corresponding setjmp returns nonzero -- there's no other way to carry
+ * a rich Value through a raw C longjmp. */
+struct Continuation {
+  jmp_buf buf;
+  int depth;
+  int unwind_mark;
+  Value result;
 };
 
 static inline Value v_nil(void) {
@@ -385,6 +417,13 @@ static inline Value v_parameter(Parameter *p) {
   Value v;
   v.tag = T_PARAMETER;
   v.as.parameter = p;
+  return v;
+}
+
+static inline Value v_continuation(Continuation *k) {
+  Value v;
+  v.tag = T_CONTINUATION;
+  v.as.continuation = k;
   return v;
 }
 

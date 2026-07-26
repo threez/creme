@@ -133,16 +133,26 @@ typedef struct {
   int resume_ip;
 } GuardHandler;
 
-/* One pending `parameterize` restoration -- mirrors vm.cr's own
- * UnwindAction/ParamRestoreAction: on ParamPop (normal exit) OR on an
- * error unwinding past this parameterize (a guard handler above it
- * draining the unwind stack down to its own saved mark), every one of
- * these `n` parameters gets its pre-parameterize value put back, in one
- * shot. */
+/* One pending `parameterize` restoration OR `dynamic-wind` after-thunk --
+ * mirrors vm.cr's own UnwindAction/ParamRestoreAction for the parameterize
+ * case; the dynamic-wind case is this project's own addition, added
+ * alongside it since both need EXACTLY the same "run this when either
+ * ParamPop happens normally OR a guard handler drains the unwind stack
+ * down past this entry" trigger (see run_unwind_action). On ParamPop
+ * (normal exit) OR on an error unwinding past this action (a guard
+ * handler above it draining the unwind stack down to its own saved
+ * mark), a PARAMS action puts every one of its `n` parameters' pre-
+ * parameterize value back in one shot; a DYNAMIC_WIND action calls its
+ * own `after` thunk with zero arguments. */
+typedef enum { UNWIND_PARAMS, UNWIND_DYNAMIC_WIND } UnwindKind;
 typedef struct {
+  UnwindKind kind;
+  /* UNWIND_PARAMS */
   Parameter **params;
   Value *saved;
   int n;
+  /* UNWIND_DYNAMIC_WIND */
+  Value after;
 } UnwindAction;
 
 /* Registers and call frames are fixed-capacity, allocated once, and never

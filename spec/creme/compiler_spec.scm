@@ -28,10 +28,12 @@
 ;;                                  one case that intentionally does NOT
 ;;                                  match native evaluation
 ;;
-;; Run with:
+;; Run with (all 117 cases pass under all three):
 ;;   ./bin/creme spec/creme/compiler_spec.scm            (native Crystal VM)
 ;;   ./bin/creme --self-hosted spec/creme/compiler_spec.scm
-;; (not yet `--cvm` -- see (creme spec)'s own header comment on why.)
+;;   ./cvm/cvm spec/creme/compiler_spec.scm               (standalone C11 VM)
+;; (cvm previously had no call/cc/dynamic-wind at all; see spec/creme/
+;; vm_spec.scm's own header comment for where those were added.)
 ;; ===========================================================================
 
 ;; The full toolchain import list below is still needed here even though
@@ -177,9 +179,14 @@
         '((define f (case-lambda ((a) (list 'one a)) ((a b) (list 'two a b)) ((a b . rest) (list 'many a b rest))))
           (list (f 1) (f 1 2) (f 1 2 3 4))))))
 
+  ;; Rationals/complex numbers are covered by spec/creme/
+  ;; compiler_numeric_tower_spec.scm, split out specifically because cvm
+  ;; has no rational/complex support at all (see that file's own header
+  ;; comment) -- keeping that one case in THIS file would abort compiling
+  ;; the entire rest of it under `cvm` (compile-program compiles a whole
+  ;; script as one upfront chunk, so one unparseable literal anywhere
+  ;; blocks everything else in the same file).
   (describe "numeric and bytevector literals"
-    (it "rationals, negative rationals, a complex, and a bytevector literal"
-      (should-match-native? '((quote (1/2 -3/4 1+2i #u8(1 2 3))))))
     (it "flonums and division"
       (should-match-native? '((list 3.14 -2.5 1e10 (/ 1.0 3))))))
 

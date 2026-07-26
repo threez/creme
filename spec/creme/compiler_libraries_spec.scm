@@ -9,9 +9,16 @@
 ;; native? approach (source is a quoted list of forms here, not a string
 ;; -- see spec-helper's own header comment on why either works).
 ;;
-;; Run with:
+;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/compiler_libraries_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/compiler_libraries_spec.scm
+;;   ./cvm/cvm spec/creme/compiler_libraries_spec.scm
+;; (cvm's Op::HelperForm now binds a runtime value for kind 3/define-
+;; syntax too, not just kind 4/defmacro -- see modules/creme/compiler/
+;; compiler.sld's own define-syntax-expand-form and cvm/vm.c's Op::
+;; HelperForm comment -- so "honors a prefix import-set filter against a
+;; pure-Scheme library" (which aliases (creme extra)'s own `times`, a
+;; top-level define-syntax) now passes there too.)
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

@@ -19,9 +19,17 @@
 ;; near-duplicates of cases already in compiler_spec.scm's own "records"/
 ;; "define-syntax" sections.
 ;;
-;; Run with:
+;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/vm_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/vm_spec.scm
+;;   ./cvm/cvm spec/creme/vm_spec.scm
+;; cvm previously had no call/cc/dynamic-wind/with-exception-handler at
+;; all; all three are now real cvm builtins (cvm/builtins.c/vm.c/vm.h --
+;; call/cc is an escape-only, one-shot continuation via setjmp/longjmp,
+;; reusing the same unwind-stack mechanism parameterize already used;
+;; dynamic-wind generalizes that same mechanism; with-exception-handler/
+;; raise-continuable are pure Scheme atop dynamic-wind, defined in
+;; cvm/compiler-run.scm -- see each one's own comment for the full story).
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

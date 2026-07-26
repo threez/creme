@@ -15,22 +15,45 @@
 ;; case across every other spec/creme/*.scm file.
 ;;
 ;; Run with:
-;;   ./bin/creme spec/creme/bootstrap_spec.scm
-;; --self-hosted also passes every case here EXCEPT "import! copies a
-;; library's bindings into the global env" (its own comment explains
-;; why -- a harmless --self-hosted-only environment artifact, not a bug).
+;;   ./bin/creme spec/creme/bootstrap_spec.scm                    (all 5 pass)
+;;   ./bin/creme --self-hosted spec/creme/bootstrap_spec.scm       (4 of 5)
+;;   ./cvm/cvm spec/creme/bootstrap_spec.scm                       (3 of 5)
+;; --self-hosted fails only "import! copies a library's bindings into the
+;; global env" (see its own comment -- a harmless environment artifact,
+;; not a bug). `cvm/cvm` passes that same case's own sibling ("expand-
+;; if-macro detects and expands a define-syntax-defined global" -- see
+;; this file's own comment on my-swap! below, now fixed) but still fails:
+;;   - "import! copies a library's bindings into the global env" -- same
+;;     environment-artifact reasoning as --self-hosted (cvm/compiler-run.
+;;     scm's own toolchain also transitively imports (creme regex)).
+;;   - "import! applies only/except/prefix import-set filters" -- cvm's
+;;     own import! (cvm/bootstrap.c) is a PERMANENT no-op at the
+;;     PROCEDURE level. Bridging this out to compiler.sld's own alias-
+;;     generation logic (the same pattern expand-if-macro's own bridging
+;;     below uses) was tried and reverted: compile-import!'s own runtime-
+;;     emitted payload calls `import!` BEFORE `ensure-libraries-loaded!`
+;;     in the same sequence, so a bridge triggered directly from import!
+;;     itself fires too early -- before the target library's own exports
+;;     are even defined -- raising "unbound variable" for names compile-
+;;     import!'s own LATER, correctly-ordered alias-defines-for-specs
+;;     forms resolve fine on their own. A real fix needs a different hook
+;;     point than import! itself; left as a known gap rather than risking
+;;     that regression (confirmed: it broke compiler_libraries_spec.scm's
+;;     own prefix-import case, which does NOT call import! directly and
+;;     was completely unaffected by this bug until then).
 ;; ===========================================================================
 
 ;; Deliberately NOT (import (creme regex)) here -- the first two cases
 ;; check that regexp-matches?/rx-regexp are genuinely unbound before
 ;; import! brings them in dynamically at runtime; a static top-level
-;; import of (creme regex) would make that check meaningless. Under
-;; --self-hosted specifically, the FIRST case's own initial check still
-;; fails regardless: its own bootstrap toolchain (SELF_HOSTED_TOOLCHAIN_
-;; IMPORT, src/main.cr) already transitively imports (creme regex) for
-;; the compiler's own use, so regexp-matches? is bound before this
-;; script even starts -- an environment difference between how a plain
-;; run and --self-hosted bootstrap themselves, not a compiler bug.
+;; import of (creme regex) would make that check meaningless. The FIRST
+;; case's own initial check fails regardless under BOTH --self-hosted
+;; and cvm/cvm: each has its own bootstrap toolchain (SELF_HOSTED_
+;; TOOLCHAIN_IMPORT in src/main.cr for --self-hosted; cvm/compiler-run.
+;; scm's own top-level import clause for cvm) that already transitively
+;; imports (creme regex) for the compiler's own use, so regexp-matches?
+;; is bound before this script even starts -- an environment difference
+;; between how each of these bootstraps itself, not a compiler bug.
 (import (scheme base) (scheme write) (scheme process-context)
         (creme bootstrap) (creme spec))
 
@@ -63,6 +86,18 @@
 ;; toplevel?, compiler.sld) -- an INTERNAL one must NOT get a permanent
 ;; runtime global binding, or it would leak past its own lexical scope
 ;; the same way compile-scoped-body!'s own earlier fix was needed for.
+;;
+;; Under cvm/cvm specifically, this ALSO now works for both defmacro AND
+;; define-syntax: cvm's OWN VM (cvm/vm.c's Op::HelperForm) binds a real
+;; T_MACRO value for kind 3 (define-syntax) the same way it already did
+;; for kind 4 (defmacro), and bi_expand_if_macro (cvm/bootstrap.c) picks
+;; the right bridge (defmacro-expand-form vs. the new define-syntax-
+;; expand-form, compiler.sld -- built on the self-hosted compiler's own
+;; sr-make-transformer, its real syntax-rules pattern matcher, already
+;; loaded for exactly this purpose) by checking the wrapped form's own
+;; head symbol. cvm's C VM still never expands a syntax-rules use
+;; DIRECTLY (no pattern-matching machinery in C) -- it bridges out to
+;; Scheme for that, same as it always did for defmacro.
 (defmacro my-list2 args (cons 'list args))
 (define-syntax my-swap! (syntax-rules () ((_ a b) (let ((tmp a)) (set! a b) (set! b tmp)))))
 

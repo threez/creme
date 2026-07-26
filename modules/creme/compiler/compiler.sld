@@ -89,7 +89,8 @@
 ;; ===========================================================================
 
 (define-library (creme compiler compiler)
-  (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form)
+  (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form
+          define-syntax-expand-form mark-self-hosted-library-loaded!)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
           (creme bytecode) (creme bootstrap) (creme compiler reader))
   (begin
@@ -566,6 +567,24 @@
                (fixed-bindings (map (lambda (p a) (list p (list 'quote a))) fixed fixed-args))
                (rest-binding (if rest (list (list rest (list 'quote rest-args))) '())))
           (run-compiled-forms! (list (cons 'let (cons (append fixed-bindings rest-binding) body)))))))
+
+    ;; defmacro-expand-form's own sibling for a TOP-LEVEL define-syntax
+    ;; exported to bytecode -- same reason/same two call sites (a LOCAL,
+    ;; same-compile-session use via macro-table, and cvm's bootstrap.c
+    ;; bi_expand_if_macro for one reentrant-compiled under cvm), just
+    ;; syntax-rules' own real pattern-matching semantics (sr-make-
+    ;; transformer, already used by compile-define-syntax! below to
+    ;; register a LOCAL macro-table entry) instead of defmacro's
+    ;; positional-binding ones -- the two transformer models are NOT
+    ;; interchangeable (a define-syntax form's own body, `(syntax-rules
+    ;; (literals...) (pattern template) ...)`, has nothing in common with
+    ;; a defmacro's `(formals) body...`), so bridging a define-syntax-
+    ;; exported macro through defmacro-expand-form would silently
+    ;; misparse it. `raw-form` here is `(define-syntax name (syntax-rules
+    ;; ...))` -- (caddr raw-form) is that whole `(syntax-rules ...)` form.
+    (define (define-syntax-expand-form raw-form call-form)
+      (let ((sr-form (caddr raw-form)))
+        ((sr-make-transformer (cadr sr-form) (cddr sr-form)) call-form)))
 
     ;; Validates expr's own (defmacro name formals body...) shape EAGERLY,
     ;; at compile time -- matching where native's own build_macro
@@ -2130,11 +2149,47 @@
     ;; ---------------------------------------------------------------------
 
     ;; Process-wide (like macro-table): library names (each a list like
-    ;; (creme dao)) this process has already attempted to self-host-load,
-    ;; whether or not a .sld file actually existed for it -- marked BEFORE
-    ;; recursing into that library's own imports, so a circular import
-    ;; can't loop forever (mirrors import.cr's own @libraries_loading
-    ;; guard, just accepting silently rather than raising).
+    ;; (creme dao)) this process has already self-host-LOADED (a .sld file
+    ;; genuinely existed and its body ran) -- marked before recursing into
+    ;; that library's own imports, so a circular import can't loop forever
+    ;; (mirrors import.cr's own @libraries_loading guard, just accepting
+    ;; silently rather than raising). Deliberately NOT marked for a
+    ;; library with no .sld file found (see ensure-library-loaded! below):
+    ;; marking unconditionally here used to permanently "poison" a
+    ;; library name the first time it was ever seen, even when that
+    ;; attempt found nothing -- fatal specifically for a library a
+    ;; program GENERATES at run time (e.g. via file-write) and then
+    ;; imports: compile-program's own eager, compile-time-only import
+    ;; attempt (compile-import!'s own doc comment) necessarily finds
+    ;; nothing (the file doesn't exist until an EARLIER form actually
+    ;; RUNS), and marking it loaded anyway made the LATER, correctly-
+    ;; timed runtime attempt skip loading it for real. Harmless under
+    ;; native Crystal (whose own real import! -- unlike cvm's permanent
+    ;; no-op -- already does the genuine work independently, making this
+    ;; tracking redundant there), but a real, silent failure under cvm,
+    ;; where this self-hosted loader is the ONLY mechanism -- confirmed
+    ;; by tracing spec/creme/compiler_libraries_spec.scm's own "imports a
+    ;; library file written by an earlier form" case failing under `cvm`
+    ;; only, never under `--self-hosted`.
+    ;;
+    ;; mark-self-hosted-library-loaded! is EXPORTED (unlike the other two
+    ;; names here) specifically so cvm/compiler-run.scm can pre-seed this
+    ;; state for every file-based library IT ITSELF already bundles
+    ;; natively (via --emit-cvm, which never touches this tracking at
+    ;; all -- it's Crystal's own import machinery, not this self-hosted
+    ;; loader). Without that, a target script reentrant-compiled under
+    ;; cvm that ALSO imports e.g. (creme compiler compiler)/(creme
+    ;; bytecode) -- exactly what every spec/creme/*.scm file does via
+    ;; (creme compiler spec-helper) -- would have ensure-library-loaded!
+    ;; re-read and re-run those libraries' own source a second time,
+    ;; re-executing their define-record-type forms (bytecode.sld's
+    ;; <chunk>, this file's own <fcomp>) and creating a NOMINALLY NEW
+    ;; record type each time -- corrupting any chunk/fcomp object the
+    ;; OUTER, still-in-progress compile-program call (compiling the
+    ;; target script itself) was already holding from the ORIGINAL,
+    ;; pre-baked generation. Confirmed empirically: this is exactly what
+    ;; produced "record accessor: expected a <chunk> record" before this
+    ;; export existed.
     (define self-hosted-loaded-libraries '())
     (define (self-hosted-library-loaded? name) (member name self-hosted-loaded-libraries equal?))
     (define (mark-self-hosted-library-loaded! name)
@@ -2283,10 +2338,15 @@
     ;; order, by this same for-each.
     (define (ensure-library-loaded! name)
       (if (not (self-hosted-library-loaded? name))
-          (begin
-            (mark-self-hosted-library-loaded! name)
-            (let ((src (try-read-whole-file (library-name->path name))))
-              (if src
+          (let ((src (try-read-whole-file (library-name->path name))))
+            (if src
+                (begin
+                  ;; Marked here, AFTER confirming real source exists but
+                  ;; BEFORE recursing into ITS OWN imports below -- still
+                  ;; prevents infinite recursion on a genuine circular
+                  ;; import, without poisoning a name whose file didn't
+                  ;; exist yet (see this variable's own doc comment above).
+                  (mark-self-hosted-library-loaded! name)
                   (let* ((forms (read-program src))
                          (lib-form (car forms))
                          (clauses (cddr lib-form)))
@@ -2296,8 +2356,8 @@
                           ((eq? (car clause) 'import) (ensure-libraries-loaded! (cdr clause)))
                           ((eq? (car clause) 'begin) (run-compiled-forms! (cdr clause)))
                           (else #f)))
-                      clauses))
-                  #f)))))
+                      clauses)))
+                #f))))
 
     ;; (import spec ...) -- top level only, same restriction the real
     ;; compiler enforces. Desugars into an ordinary call to (creme

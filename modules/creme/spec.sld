@@ -62,14 +62,21 @@
 ;; are used, which "visible because this library exports it and the spec
 ;; file imports this library" satisfies for free.
 ;;
-;; A caveat shared with every other `define-syntax` library in this project:
-;; cvm's own reentrant self-hosted-compiler bridge (cvm/bootstrap.c) only
-;; expands `defmacro`-defined macros exported from an already-compiled
-;; library, not `syntax-rules` ones (a real, documented, still-open gap --
-;; see that file's own header comment) -- so a spec file using `describe`/
-;; `it` runs fine via a plain `./bin/creme some_spec.scm` or `./bin/creme
-;; --self-hosted some_spec.scm`, but not yet via `./bin/creme --cvm
-;; some_spec.scm`.
+;; `describe`/`it` also work fine reentrant under `cvm/cvm` (cvm's own
+;; standalone C11 VM, running the self-hosted compiler directly -- see
+;; cvm/compiler-run.scm): a spec file's own `(import (creme spec))`
+;; triggers the self-hosted compiler's own library loader (ensure-
+;; libraries-loaded!, compiler.sld) to read+reentrant-compile THIS
+;; library's source, registering describe/it into that SAME compile
+;; session's own macro-table -- entirely a Scheme-level, compile-time
+;; mechanism, independent of cvm's separate (and narrower) expand-if-
+;; macro Crystal-bridge (cvm/bootstrap.c, which only recognizes a
+;; `defmacro`-defined macro exported from an ALREADY-compiled bytecode
+;; library, e.g. sxql-select! precompiled into an image -- a different,
+;; narrower scenario this project's own spec files don't hit). So run
+;; with `./cvm/cvm some_spec.scm` directly (not `./bin/creme --cvm
+;; some_spec.scm`, which is unrelated -- native-compile-then-run-on-cvm,
+;; never touching the self-hosted compiler at all).
 ;;
 ;; Not auto-imported anywhere -- every script that wants any of this must
 ;; (import (creme spec)) explicitly, same as any other file-based library.
