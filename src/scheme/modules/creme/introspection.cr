@@ -42,6 +42,18 @@ module Scheme::Builtins::Introspection
     raise SchemeRuntimeError.new("record-fields: expected a record instance, got #{v.write_string}") unless v.is_a?(SchemeRecord)
     Scheme.a_to_list(v.fields)
   end
+
+  # Whether STDOUT is attached to an actual terminal (as opposed to a pipe
+  # or a redirected file) -- so a script (e.g. (creme spec)'s runner) can
+  # decide whether ANSI color codes would help or would just corrupt piped/
+  # redirected output with escape sequences. No args: always asks about
+  # this process's own STDOUT specifically, not an arbitrary port -- there's
+  # no general notion of "the underlying fd" for a Scheme string/output
+  # port here, so this deliberately isn't `port-tty?` taking a port arg.
+  @[Scheme::SchemeFn("stdout-tty?", min: 0, max: 0)]
+  def stdout_tty_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    SchemeBool.of(STDOUT.tty?)
+  end
 end
 
 module Scheme

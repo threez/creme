@@ -10,6 +10,12 @@
 ;; binary -- see modules/creme/extra.sld's own header comment for the same
 ;; rationale: every export here is expressible in plain R7RS.
 ;;
+;; [PASS]/[FAIL] and the final summary line are colored green/red when
+;; STDOUT is an actual terminal (stdout-tty?, (creme introspection)) and
+;; NO_COLOR (https://no-color.org) isn't set -- piping/redirecting output
+;; (CI logs, `| tee`, a file) automatically gets plain, escape-code-free
+;; text, no flag needed either way.
+;;
 ;;   (describe "description" body ...)  -> runs body (an implicit begin),
 ;;                                         printed at the current nesting
 ;;                                         depth. `describe` blocks nest
@@ -86,8 +92,22 @@
   (export describe it
           should-equal? should-eqv? should-be-true? should-be-false? should-raise?
           spec-describe! spec-it! spec-summary!)
-  (import (scheme base) (scheme write) (scheme process-context))
+  (import (scheme base) (scheme write) (scheme process-context) (creme introspection))
   (begin
+    ;; ANSI color, only when it'll actually help: STDOUT must be a real
+    ;; terminal (stdout-tty?, (creme introspection) -- native Crystal's
+    ;; STDOUT.tty? and cvm's isatty(STDOUT_FILENO), kept in sync so this
+    ;; behaves the same under bin/creme, --self-hosted, and cvm/cvm), and
+    ;; NO_COLOR (https://no-color.org) must be unset -- its mere presence,
+    ;; any value, opts out, same convention as most other CLI tools. Not
+    ;; re-checked per describe!/it! call: computed once at library-load
+    ;; time, since neither of these can change mid-run.
+    (define spec-use-color? (and (stdout-tty?) (not (get-environment-variable "NO_COLOR"))))
+
+    (define (spec-colorize code text)
+      (if spec-use-color?
+          (string-append "\x1b;[" code "m" text "\x1b;[0m")
+          text))
     ;; A distinct condition type for should-*?'s own failures, so
     ;; spec-condition-message below can show a clean, purpose-written
     ;; message for those while still handling an ordinary (error ...)/
@@ -175,20 +195,21 @@
       (guard (e (#t
                  (set! spec-failed (+ spec-failed 1))
                  (set! spec-failures (cons (cons (spec-full-name name) (spec-condition-message e)) spec-failures))
-                 (display (spec-indent)) (display "[FAIL] ") (display name) (newline)))
+                 (display (spec-indent)) (display (spec-colorize "31" "[FAIL]")) (display " ") (display name) (newline)))
         (thunk)
-        (display (spec-indent)) (display "[PASS] ") (display name) (newline)))
+        (display (spec-indent)) (display (spec-colorize "32" "[PASS]")) (display " ") (display name) (newline)))
 
     (define (spec-summary!)
       (newline)
-      (display spec-total) (display " examples, ") (display spec-failed) (display " failures")
+      (display (spec-colorize (if (> spec-failed 0) "31" "32")
+                 (string-append (number->string spec-total) " examples, " (number->string spec-failed) " failures")))
       (newline)
       (if (> spec-failed 0)
           (begin
             (newline)
             (for-each
               (lambda (f)
-                (display "  ") (display (car f)) (display ":") (newline)
+                (display "  ") (display (spec-colorize "31" (car f))) (display ":") (newline)
                 (display "    ") (display (cdr f)) (newline))
               (reverse spec-failures))
             (exit 1))

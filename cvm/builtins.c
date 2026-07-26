@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <gc.h>
 
@@ -1832,6 +1833,15 @@ static Value bi_get_environment_variable(VM *vm, Value *args, int nargs) {
   return v_str(copy, len);
 }
 
+/* Whether STDOUT is an actual terminal, not a pipe/redirected file -- see
+ * src/scheme/modules/creme/introspection.cr's own stdout_tty_p for the same
+ * builtin natively; kept in sync so (creme spec)'s color decision behaves
+ * identically under bin/creme, --self-hosted, and cvm/cvm. */
+static Value bi_stdout_tty(VM *vm, Value *args, int nargs) {
+  (void)vm; (void)args; (void)nargs;
+  return v_bool(isatty(STDOUT_FILENO));
+}
+
 /* (exit [code]) -- code defaults to 0, clamped to 0-255 like native's own
  * (process_context.cr). Unlike native (which raises a SchemeExit that
  * unwinds through any pending dynamic-wind after-thunks before main.cr
@@ -2043,4 +2053,5 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "current-time", bi_current_time);
   cvm_register_builtin(vm, "time-difference", bi_time_difference);
   cvm_register_builtin(vm, "get-environment-variable", bi_get_environment_variable);
+  cvm_register_builtin(vm, "stdout-tty?", bi_stdout_tty);
 }
