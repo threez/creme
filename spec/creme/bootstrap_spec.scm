@@ -16,18 +16,21 @@
 ;;
 ;; Run with:
 ;;   ./bin/creme spec/creme/bootstrap_spec.scm
-;; (not `--self-hosted` -- three of these five cases document real,
-;; specifically self-hosted-only divergences; see each one's own comment.)
+;; --self-hosted also passes every case here EXCEPT "import! copies a
+;; library's bindings into the global env" (its own comment explains
+;; why -- a harmless --self-hosted-only environment artifact, not a bug).
 ;; ===========================================================================
 
 ;; Deliberately NOT (import (creme regex)) here -- the first two cases
 ;; check that regexp-matches?/rx-regexp are genuinely unbound before
 ;; import! brings them in dynamically at runtime; a static top-level
-;; import of (creme regex) would make that check meaningless. (Under
-;; --self-hosted specifically, this check is moot regardless: its own
-;; bootstrap toolchain -- SELF_HOSTED_TOOLCHAIN_IMPORT, src/main.cr --
-;; already transitively imports (creme regex) for the compiler's own
-;; use, so regexp-matches? is bound before this script even starts.)
+;; import of (creme regex) would make that check meaningless. Under
+;; --self-hosted specifically, the FIRST case's own initial check still
+;; fails regardless: its own bootstrap toolchain (SELF_HOSTED_TOOLCHAIN_
+;; IMPORT, src/main.cr) already transitively imports (creme regex) for
+;; the compiler's own use, so regexp-matches? is bound before this
+;; script even starts -- an environment difference between how a plain
+;; run and --self-hosted bootstrap themselves, not a compiler bug.
 (import (scheme base) (scheme write) (scheme process-context)
         (creme bootstrap) (creme spec))
 
@@ -46,20 +49,20 @@
 ;; block made expand-if-macro see nothing (#f) even under native
 ;; evaluation, for exactly this reason.
 ;;
-;; A further, genuinely self-hosted-only gap this also surfaces: under
-;; native Crystal compilation, EVEN a top-level defmacro/define-syntax
-;; registers a real runtime value in the global env (bytecode_compiler.cr
-;; emits Op::HelperForm kind 4 for Defmacro, and eval_defmacro/analyze_
-;; define_syntax both call env.define) -- but the self-hosted compiler's
-;; own compile-defmacro!/compile-define-syntax! (compiler.sld) ONLY ever
-;; register into their own compile-time-only macro-table, emitting no
-;; bytecode that would define an equivalent runtime value. So the two
-;; expand-if-macro cases below only pass under plain `./bin/creme`, not
-;; `--self-hosted` -- a real, currently-undocumented difference from
-;; native this port surfaced, left as a known follow-up rather than
-;; fixed here (unlike the 5 defmacro/case gaps macro_spec.scm's own port
-;; found and fixed, this one needs real new bytecode-emission work, not
-;; a small logic fix).
+;; This also originally surfaced a genuinely self-hosted-only gap (now
+;; fixed, modules/creme/compiler/compiler.sld): under native Crystal
+;; compilation, EVEN a top-level defmacro/define-syntax registers a real
+;; runtime value in the global env (bytecode_compiler.cr emits
+;; Op::HelperForm kind 3/4 for DefineSyntax/Defmacro, run at bytecode-
+;; execution time via eval_define_syntax/eval_defmacro) -- but the self-
+;; hosted compiler's own compile-defmacro!/compile-define-syntax! used to
+;; ONLY EVER register into their own compile-time-only macro-table,
+;; emitting no bytecode that would define an equivalent runtime value.
+;; Fixed by having both ALSO emit the same Op::HelperForm kind 3/4 the
+;; native compiler does, but ONLY at the true top level (fcomp-at-
+;; toplevel?, compiler.sld) -- an INTERNAL one must NOT get a permanent
+;; runtime global binding, or it would leak past its own lexical scope
+;; the same way compile-scoped-body!'s own earlier fix was needed for.
 (defmacro my-list2 args (cons 'list args))
 (define-syntax my-swap! (syntax-rules () ((_ a b) (let ((tmp a)) (set! a b) (set! b tmp)))))
 

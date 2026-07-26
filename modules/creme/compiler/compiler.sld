@@ -198,6 +198,21 @@
     (define (fcomp-push-scope! fc)
       (fcomp-scopes-set! fc (cons (make-scope-frame (fcomp-next-reg fc)) (fcomp-scopes fc))))
 
+    ;; #t only at the TRUE top level of a whole program -- not inside any
+    ;; closure (fcomp-parent) AND not inside any lexical scope at all, not
+    ;; even a plain (let () ...) with no closure of its own (make-fcomp
+    ;; always seeds one base scope-frame, so "no scope" is (cdr (fcomp-
+    ;; scopes fc)) being empty, one frame short of fcomp-scopes itself
+    ;; being null -- fcomp-scopes is NEVER actually null). Mirrors
+    ;; bytecode_compiler.cr's own at_toplevel check (fc.scope.nil? &&
+    ;; fc.is_toplevel?) exactly -- used by compile-defmacro!/compile-
+    ;; define-syntax! to decide whether a HelperForm-emitting runtime
+    ;; global registration is correct here (only at true top level) or
+    ;; would incorrectly leak an internal, let-scoped macro's binding
+    ;; past its own lexical scope.
+    (define (fcomp-at-toplevel? fc)
+      (and (not (fcomp-parent fc)) (null? (cdr (fcomp-scopes fc)))))
+
     ;; Scope-exit reclaim: restores next-reg to this scope's saved-next-reg
     ;; (NOT respecting persistent-high-water -- the whole scope, persistent
     ;; locals included, is genuinely gone), floored at fcomp-captured-floor
@@ -450,13 +465,38 @@
 
     ;; define-syntax's own "value" is unspecified, same convention as
     ;; define/set!: nothing reads a non-tail define-syntax's dest.
+    ;;
+    ;; A TOP-LEVEL define-syntax also emits Op::HelperForm (kind 3), the
+    ;; SAME opcode/kind Crystal's own bytecode_compiler.cr emits for one
+    ;; (compile_helper_form's DefineSyntax branch) -- at run time this
+    ;; calls Interpreter#eval_define_syntax (vm.cr's exec_helper_form),
+    ;; which defines a genuine runtime SchemeSyntaxRules value into the
+    ;; global env, exactly like Crystal's own compiler produces. Without
+    ;; this, macro-register! alone only ever affected THIS compile
+    ;; session's own macro-table (needed so a LATER top-level form in the
+    ;; same compile-program call can still use the macro), leaving no
+    ;; runtime-visible binding at all -- so expand-if-macro (used by
+    ;; cvm's bootstrap bridge, or any later, separate program/eval call)
+    ;; could never detect a self-hosted-compiled top-level macro, unlike
+    ;; a natively-compiled one. An INTERNAL (non-top-level) define-syntax
+    ;; does NOT get this -- matching native's own at_toplevel check
+    ;; (compile_helper_form): its scoping is already fully handled by
+    ;; macro-table's own save/restore (compile-scoped-body!), and giving
+    ;; it a permanent runtime global binding would leak it past its own
+    ;; lexical scope, the same misbehavior compile-scoped-body!'s own
+    ;; fix was for.
     (define (compile-define-syntax! fc expr dest tail?)
       (let* ((name (cadr expr))
              (sr-form (caddr expr)))
         (if (not (eq? (car sr-form) 'syntax-rules))
             (error "bootstrap compiler: only (syntax-rules ...) transformers are supported in define-syntax" expr)
             (macro-register! name (sr-make-transformer (cadr sr-form) (cddr sr-form))))
-        (if tail? (compile-literal-datum! fc '() dest #t))))
+        (if (fcomp-at-toplevel? fc)
+            (let* ((ch (fcomp-chunk fc))
+                   (form-idx (chunk-add-const! ch expr)))
+              (chunk-emit! ch 'HelperForm dest form-idx 3 0)
+              (if tail? (chunk-emit! ch 'Return dest 0 0 0)))
+            (if tail? (compile-literal-datum! fc '() dest #t)))))
 
     ;; (defmacro name (formals...) body...) -- this interpreter's own
     ;; non-hygienic macro form (see e.g. modules/creme/dao.sld's
@@ -540,6 +580,12 @@
     ;; -- found by porting spec/scheme/compile/macro_spec.cr's own
     ;; "malformed input" cases, none of which ever call the macro they
     ;; define.
+    ;;
+    ;; A TOP-LEVEL defmacro also emits Op::HelperForm (kind 4) -- see
+    ;; compile-define-syntax!'s own comment on the identical case there
+    ;; (same runtime mechanism, same at-toplevel-only rule, same reason:
+    ;; without it, expand-if-macro could never detect a self-hosted-
+    ;; compiled top-level defmacro, only a natively-compiled one).
     (define (compile-defmacro! fc expr dest tail?)
       (if (not (pair? (cdr expr))) (error "bootstrap compiler: defmacro: malformed" expr))
       (let ((name (cadr expr)))
@@ -548,7 +594,12 @@
         (if (null? (cdddr expr)) (error "bootstrap compiler: defmacro: macro body is empty" expr))
         (parse-formals (caddr expr)) ; raises "bad formals" for a malformed formal-parameter spec
         (macro-register! name (lambda (form) (defmacro-expand-form expr form)))
-        (if tail? (compile-literal-datum! fc '() dest #t))))
+        (if (fcomp-at-toplevel? fc)
+            (let* ((ch (fcomp-chunk fc))
+                   (form-idx (chunk-add-const! ch expr)))
+              (chunk-emit! ch 'HelperForm dest form-idx 4 0)
+              (if tail? (chunk-emit! ch 'Return dest 0 0 0)))
+            (if tail? (compile-literal-datum! fc '() dest #t)))))
 
     ;; let-syntax/letrec-syntax -- treated identically (macro-table lookup
     ;; is global regardless of registration order, so there's no observable
