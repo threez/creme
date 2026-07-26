@@ -25,38 +25,19 @@
 ;; (not yet `--cvm` -- see (creme spec)'s own header comment on why.)
 ;; ===========================================================================
 
-(import (scheme base) (scheme write) (scheme read) (scheme process-context) (scheme eval)
+;; The full toolchain import list below is still needed here even though
+;; (creme compiler spec-helper) already imports all of it FOR ITSELF:
+;; native-eval's `(eval form)` call always runs `form` against THIS
+;; SCRIPT's own shared global table (Crystal's `eval` builtin ignores its
+;; caller's own lexical env for the 1-arg case -- see src/scheme/modules/
+;; scheme/eval.cr), which is populated only by imports THIS FILE makes
+;; directly, not by a library it imports importing them for its own
+;; private use. Every should-match-native? test source below that uses
+;; e.g. `write`, `force`, `eval`, or a (creme regex) call needs that name
+;; already bound here for exactly that reason.
+(import (scheme base) (scheme write) (scheme process-context) (scheme eval)
         (scheme lazy) (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
-        (creme compiler reader) (creme compiler compiler) (creme spec))
-
-;; Reads every top-level form out of `src` and evaluates them in order,
-;; returning the LAST form's value -- same "whole program, last value"
-;; contract compile-source-to-bytes's own compiled chunk has, so this is
-;; a fair comparison against bootstrap-eval below.
-(define (native-eval src)
-  (let ((in (open-input-string src)))
-    (let loop ((result (if #f #f)))
-      (let ((form (read in)))
-        (if (eof-object? form)
-            result
-            (loop (eval form)))))))
-
-(define (bootstrap-eval src)
-  (load-chunk-bytes (compile-source-to-bytes src)))
-
-(define (write-to-string v)
-  (let ((port (open-output-string)))
-    (write v port)
-    (get-output-string port)))
-
-;; Compares the self-hosted compiler's own output against plain native
-;; evaluation of the SAME source, via each side's printed representation
-;; (write-to-string) rather than `equal?` directly -- matches compiler_
-;; spec.cr's own `.write_string` comparison, robust to values (like
-;; records) that `equal?` doesn't necessarily consider interchangeable
-;; even when they should print identically for this test's purposes.
-(define (should-match-native? src)
-  (should-equal? (write-to-string (bootstrap-eval src)) (write-to-string (native-eval src))))
+        (creme compiler reader) (creme compiler compiler) (creme spec) (creme compiler spec-helper))
 
 (describe "self-hosted compiler matches native evaluation"
 

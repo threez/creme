@@ -16,28 +16,12 @@
 ;;   ./bin/creme --self-hosted spec/creme/compiler_defmacro_spec.scm
 ;; ===========================================================================
 
-(import (scheme base) (scheme write) (scheme read) (scheme process-context) (scheme eval)
+;; See compiler_spec.scm's own comment on why the full toolchain import
+;; list is still needed here even though (creme compiler spec-helper)
+;; already imports all of it for itself.
+(import (scheme base) (scheme write) (scheme process-context) (scheme eval)
         (scheme lazy) (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
-        (creme compiler reader) (creme compiler compiler) (creme spec))
-
-(define (native-eval src)
-  (let ((in (open-input-string src)))
-    (let loop ((result (if #f #f)))
-      (let ((form (read in)))
-        (if (eof-object? form)
-            result
-            (loop (eval form)))))))
-
-(define (bootstrap-eval src)
-  (load-chunk-bytes (compile-source-to-bytes src)))
-
-(define (write-to-string v)
-  (let ((port (open-output-string)))
-    (write v port)
-    (get-output-string port)))
-
-(define (should-match-native? src)
-  (should-equal? (write-to-string (bootstrap-eval src)) (write-to-string (native-eval src))))
+        (creme compiler reader) (creme compiler compiler) (creme spec) (creme compiler spec-helper))
 
 (describe "a local defmacro (not define-syntax/syntax-rules) matches native evaluation"
   (it "my-swap! swaps two variables via a synthesized temporary name"

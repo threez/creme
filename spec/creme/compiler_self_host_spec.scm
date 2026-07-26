@@ -13,52 +13,13 @@
 ;;   ./bin/creme --self-hosted spec/creme/compiler_self_host_spec.scm
 ;; ===========================================================================
 
-(import (scheme base) (scheme write) (scheme read) (scheme process-context) (scheme eval)
+;; See compiler_spec.scm's own comment on why the full toolchain import
+;; list is still needed here even though (creme compiler spec-helper)
+;; already imports all of it for itself.
+(import (scheme base) (scheme write) (scheme process-context) (scheme eval)
         (scheme lazy) (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
-        (creme compiler reader) (creme compiler compiler) (creme file) (creme string) (creme spec))
-
-(define (write-to-string v)
-  (let ((port (open-output-string)))
-    (write v port)
-    (get-output-string port)))
-
-(define (native-eval src)
-  (let ((in (open-input-string src)))
-    (let loop ((result (if #f #f)))
-      (let ((form (read in)))
-        (if (eof-object? form)
-            result
-            (loop (eval form)))))))
-
-;; Every top-level form in `src`, read by the NATIVE (Crystal) reader --
-;; used as the "native" side of the read-program self-compile test below,
-;; since `read` (scheme read) always goes through the native reader
-;; regardless of which compiler is active.
-(define (read-all-native src)
-  (let ((in (open-input-string src)))
-    (let loop ((acc '()))
-      (let ((form (read in)))
-        (if (eof-object? form)
-            (reverse acc)
-            (loop (cons form acc)))))))
-
-;; Extracts the (begin form1 form2 ...) clause's own forms out of a
-;; (define-library (creme name) (export ...) (import ...) (begin ...))
-;; file, re-printed as source text (one form per line) -- the self-compile
-;; tests below need these AS SOURCE TEXT, since compile-source-to-bytes
-;; compiles a flat sequence of top-level forms, not a define-library
-;; wrapper.
-(define (find-begin-clause clauses)
-  (cond
-    ((null? clauses) (error "find-begin-clause: no (begin ...) clause found"))
-    ((and (pair? (car clauses)) (eq? (caar clauses) 'begin)) (car clauses))
-    (else (find-begin-clause (cdr clauses)))))
-
-(define (library-body-source path)
-  (let* ((top (read (open-input-string (file-read path))))
-         (clauses (cddr top)) ; drop 'define-library and the (creme name) library-name clause
-         (begin-clause (find-begin-clause clauses)))
-    (string-join (map write-to-string (cdr begin-clause)) "\n")))
+        (creme compiler reader) (creme compiler compiler) (creme file) (creme string)
+        (creme spec) (creme compiler spec-helper))
 
 ;; The critical new safety case: a closure capturing a let-bound local,
 ;; called AFTER several more sibling scopes have run and popped -- must
