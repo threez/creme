@@ -91,7 +91,7 @@
 (define-library (creme spec)
   (export describe it
           should-equal? should-eqv? should-be-true? should-be-false? should-raise?
-          spec-describe! spec-it! spec-summary!)
+          spec-describe! spec-it! spec-summary! spec-record-external-result!)
   (import (scheme base) (scheme write) (scheme process-context) (creme introspection))
   (begin
     ;; ANSI color, only when it'll actually help: STDOUT must be a real
@@ -198,6 +198,26 @@
                  (display (spec-indent)) (display (spec-colorize "31" "[FAIL]")) (display " ") (display name) (newline)))
         (thunk)
         (display (spec-indent)) (display (spec-colorize "32" "[PASS]")) (display " ") (display name) (newline)))
+
+    ;; Folds another spec FILE's own already-reported "N examples, M
+    ;; failures" counts into this process's own totals -- (creme spec-
+    ;; runner)'s run-spec-file! calls this once per external file it
+    ;; spawns as its own subprocess (see that library's own header
+    ;; comment for why a subprocess, not just loading the file's forms
+    ;; into this same process). Deliberately just two integers in, not a
+    ;; whole condition/thunk -- this library itself takes on no new
+    ;; dependency (no (creme process)/(creme string) import here) so
+    ;; every EXISTING spec file that merely imports (creme spec) for
+    ;; describe/it, including every one already passing under cvm, is
+    ;; completely unaffected; only (creme spec-runner) needs those.
+    (define (spec-record-external-result! name n failed)
+      (set! spec-total (+ spec-total n))
+      (set! spec-failed (+ spec-failed failed))
+      (if (> failed 0)
+          (set! spec-failures
+            (cons (cons name (string-append (number->string failed) " of " (number->string n)
+                               " examples failed in this externally-run file -- see its own output above"))
+                  spec-failures))))
 
     (define (spec-summary!)
       (newline)

@@ -20,35 +20,29 @@ spec: $(NEON_OBJ)
 	crystal spec -v
 
 # Run-only: assumes bin/creme is already built (shards build --release
-# --no-debug). Runs every *_spec.scm under spec/creme/ -- (creme spec)-
-# based tests, written and run entirely in Scheme (see modules/creme/
-# spec.sld) -- through bin/creme, failing the whole target if any one
-# file's own process exits non-zero (each file calls (spec-summary!) as
-# its last form, which itself does that per-file exit). Then also runs
-# creme-spec-cvm (cvm's own standalone C11 VM, see that target's own
-# comment) unconditionally, not as a prerequisite (`creme-spec:
-# creme-spec-cvm` would let a failure in one skip the other's own
-# result) -- so this one target covers both backends this project
-# actually ships (see cvm/README.md's own framing) in a single command,
-# and one backend's failure never hides the other's.
+# --no-debug). Runs spec/creme/main_spec.scm -- (creme spec)-based tests,
+# written and run entirely in Scheme (see modules/creme/spec.sld), one
+# per bin/creme subprocess (see modules/creme/spec-runner.sld's own
+# header comment for why each spec file needs its own fresh global
+# table, not one shared interpreter) -- which itself loops over every
+# spec/creme/*_spec.scm file and reports ONE combined "N examples, M
+# failures" total, propagating failure if any file failed.
 creme-spec:
-	@status=0; \
-	for f in spec/creme/*_spec.scm; do \
-		echo "== $$f =="; \
-		./bin/creme "$$f" || status=1; \
-	done; \
-	$(MAKE) creme-spec-cvm || status=1; \
-	exit $$status
+	./bin/creme spec/creme/main_spec.scm
 
 # Run-only: assumes bin/creme and cvm/cvm are already built (`make -C
 # cvm`). Rebuilds cvm/compiler-run.cvmc fresh (the precompiled self-
 # hosted-compiler image cvm's own "compiler mode" needs -- see cvm/
 # compiler-run.scm's own header comment) since a stale one would silently
-# run against old compiler/builtin behavior, then runs every *_spec.scm
-# under spec/creme/ through `./cvm/cvm` directly -- cvm reentrant-
+# run against old compiler/builtin behavior, then runs spec/creme/
+# main_spec.scm --cvm, which spawns `./cvm/cvm <file>` (cvm reentrant-
 # compiling+running each file with the SELF-HOSTED compiler, entirely
-# inside cvm, no native Crystal process involved at run time (NOT `./
-# bin/creme --cvm`, an unrelated native-compile-then-run-on-cvm path).
+# inside cvm, no native Crystal process involved at run time -- NOT `./
+# bin/creme --cvm`, an unrelated native-compile-then-run-on-cvm path) for
+# every spec/creme/*_spec.scm file except reader_native_spec.scm (see
+# that file's own header comment: (creme reader)'s lex-tokens/tokens->
+# forms are native-Crystal-only, no cvm equivalent at all), and reports
+# ONE combined total the same way creme-spec does.
 #
 # Every file now passes in full, including compiler_numeric_tower_spec.
 # scm (cvm/value.h's T_RATIONAL, GMP-backed, and T_COMPLEX -- see cvm/
@@ -62,13 +56,6 @@ creme-spec:
 # environment-artifact case -- explained in that file's own header
 # comment, NOT a regression.
 #
-# reader_native_spec.scm is deliberately excluded -- see its own header
-# comment: (creme reader)'s lex-tokens/tokens->forms are native-Crystal-
-# only, with no pure-Scheme .sld fallback and no cvm C equivalent at all
-# (unlike the numeric-tower case above, this isn't something a future fix
-# could realistically close -- it's exposing native Crystal's own lexer/
-# reader internals directly).
-#
 # This target still propagates failure (so a REGRESSION -- a NEW failure
 # beyond today's known baseline -- doesn't go unnoticed), but a nonzero
 # exit here isn't automatically a problem; check which specific case
@@ -76,15 +63,7 @@ creme-spec:
 # something broke.
 creme-spec-cvm:
 	./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc
-	@status=0; \
-	for f in spec/creme/*_spec.scm; do \
-		case "$$f" in \
-			*reader_native_spec.scm) continue ;; \
-		esac; \
-		echo "== $$f =="; \
-		./cvm/cvm "$$f" || status=1; \
-	done; \
-	exit $$status
+	./bin/creme spec/creme/main_spec.scm --cvm
 
 # Run-only: assumes bin/creme is already built (shards build --release
 # --no-debug) and, for the native-Crystal comparison column, bin/bench_cr is
