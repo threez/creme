@@ -519,6 +519,77 @@ static Value bi_vector_length(VM *vm, Value *args, int nargs) {
   return v_int(args[0].as.vec->len);
 }
 
+/* Shared by vector-copy/-copy!/-fill! below for their optional (start end)
+ * args -- mirrors src/scheme/modules/scheme/base/vectors.cr's own
+ * seq_range_args (defaults: start 0, end len). */
+static void vector_range_args(int len, Value *args, int nargs, int start_idx, int *first, int *last) {
+  *first = (nargs > start_idx && args[start_idx].tag == T_INT) ? (int)args[start_idx].as.i : 0;
+  *last = (nargs > start_idx + 1 && args[start_idx + 1].tag == T_INT) ? (int)args[start_idx + 1].as.i : len;
+  if (*first < 0 || *last > len || *first > *last) cvm_abort("vector: start/end out of range");
+}
+
+static Value bi_vector_copy(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_VECTOR) cvm_abort("vector-copy: expected a vector");
+  Vector *src = args[0].as.vec;
+  int first, last;
+  vector_range_args(src->len, args, nargs, 1, &first, &last);
+  int n = last - first;
+  Vector *vec = GC_MALLOC(sizeof(Vector));
+  vec->len = n;
+  vec->items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
+  for (int i = 0; i < n; i++) vec->items[i] = src->items[first + i];
+  return v_vector(vec);
+}
+
+static Value bi_vector_copy_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 3 || args[0].tag != T_VECTOR || args[1].tag != T_INT || args[2].tag != T_VECTOR)
+    cvm_abort("vector-copy!: expected (to at from ...)");
+  Vector *to = args[0].as.vec;
+  int at = (int)args[1].as.i;
+  Vector *from = args[2].as.vec;
+  int first, last;
+  vector_range_args(from->len, args, nargs, 3, &first, &last);
+  int n = last - first;
+  if (at < 0 || at + n > to->len) cvm_abort("vector-copy!: destination range out of bounds");
+  if (to == from && at > first) {
+    for (int i = n - 1; i >= 0; i--) to->items[at + i] = from->items[first + i];
+  } else {
+    for (int i = 0; i < n; i++) to->items[at + i] = from->items[first + i];
+  }
+  return v_nil();
+}
+
+static Value bi_vector_fill(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2 || args[0].tag != T_VECTOR) cvm_abort("vector-fill!: expected a vector and a fill value");
+  Vector *vec = args[0].as.vec;
+  Value fill = args[1];
+  int first, last;
+  vector_range_args(vec->len, args, nargs, 2, &first, &last);
+  for (int i = first; i < last; i++) vec->items[i] = fill;
+  return v_nil();
+}
+
+static Value bi_vector_append(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  int total = 0;
+  for (int i = 0; i < nargs; i++) {
+    if (args[i].tag != T_VECTOR) cvm_abort("vector-append: expected a vector");
+    total += args[i].as.vec->len;
+  }
+  Vector *vec = GC_MALLOC(sizeof(Vector));
+  vec->len = total;
+  vec->items = GC_MALLOC(sizeof(Value) * (size_t)(total ? total : 1));
+  int pos = 0;
+  for (int i = 0; i < nargs; i++) {
+    Vector *src = args[i].as.vec;
+    for (int j = 0; j < src->len; j++) vec->items[pos++] = src->items[j];
+  }
+  return v_vector(vec);
+}
+
 static Value bi_string_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_INT) cvm_abort("string-ref: expected (string index)");
@@ -882,6 +953,43 @@ static Value bi_for_each(VM *vm, Value *args, int nargs) {
     cvm_apply(vm, args[0], items, n_lists);
   }
   free(cursors);
+  free(items);
+  return v_nil();
+}
+static Value bi_vector_map(VM *vm, Value *args, int nargs) {
+  if (nargs < 2) cvm_abort("vector-map: expected a procedure and at least one vector");
+  int n_vecs = nargs - 1;
+  int minlen = -1;
+  for (int i = 0; i < n_vecs; i++) {
+    if (args[1 + i].tag != T_VECTOR) cvm_abort("vector-map: expected a vector");
+    int len = args[1 + i].as.vec->len;
+    if (minlen < 0 || len < minlen) minlen = len;
+  }
+  Vector *result = GC_MALLOC(sizeof(Vector));
+  result->len = minlen;
+  result->items = GC_MALLOC(sizeof(Value) * (size_t)(minlen ? minlen : 1));
+  Value *items = malloc(sizeof(Value) * (size_t)n_vecs);
+  for (int i = 0; i < minlen; i++) {
+    for (int j = 0; j < n_vecs; j++) items[j] = args[1 + j].as.vec->items[i];
+    result->items[i] = cvm_apply(vm, args[0], items, n_vecs);
+  }
+  free(items);
+  return v_vector(result);
+}
+static Value bi_vector_for_each(VM *vm, Value *args, int nargs) {
+  if (nargs < 2) cvm_abort("vector-for-each: expected a procedure and at least one vector");
+  int n_vecs = nargs - 1;
+  int minlen = -1;
+  for (int i = 0; i < n_vecs; i++) {
+    if (args[1 + i].tag != T_VECTOR) cvm_abort("vector-for-each: expected a vector");
+    int len = args[1 + i].as.vec->len;
+    if (minlen < 0 || len < minlen) minlen = len;
+  }
+  Value *items = malloc(sizeof(Value) * (size_t)n_vecs);
+  for (int i = 0; i < minlen; i++) {
+    for (int j = 0; j < n_vecs; j++) items[j] = args[1 + j].as.vec->items[i];
+    cvm_apply(vm, args[0], items, n_vecs);
+  }
   free(items);
   return v_nil();
 }
@@ -1446,6 +1554,12 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "vector", bi_vector);
   cvm_register_builtin(vm, "vector->list", bi_vector_to_list);
   cvm_register_builtin(vm, "list->vector", bi_list_to_vector);
+  cvm_register_builtin(vm, "vector-map", bi_vector_map);
+  cvm_register_builtin(vm, "vector-for-each", bi_vector_for_each);
+  cvm_register_builtin(vm, "vector-copy", bi_vector_copy);
+  cvm_register_builtin(vm, "vector-copy!", bi_vector_copy_bang);
+  cvm_register_builtin(vm, "vector-fill!", bi_vector_fill);
+  cvm_register_builtin(vm, "vector-append", bi_vector_append);
 
   cvm_register_builtin(vm, "make-bytevector", bi_make_bytevector);
   cvm_register_builtin(vm, "bytevector", bi_bytevector);

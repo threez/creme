@@ -134,13 +134,24 @@ static Value bi_hash_table_contains_p(VM *vm, Value *args, int nargs) {
   return v_bool(hash_table_lookup(ht, args[1], &unused));
 }
 
+/* default may be a thunk (0-arg procedure, called lazily) or, for callers
+ * that don't want laziness, an ordinary value -- a non-procedure default
+ * simply isn't applied. Mirrors src/scheme/modules/creme/hash_table.cr's
+ * own hash_table_ref/hash_table_default contract exactly -- (creme dao)'s
+ * dao-ref-keyword relies on passing a plain #f default here (not a thunk),
+ * so unconditionally cvm_apply-ing args[2] (this function's prior behavior)
+ * broke with "attempt to apply a non-procedure value" the moment cvm ran
+ * any script built on (creme dao). */
 static Value bi_hash_table_ref(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("hash-table-ref: expected (table key [default-thunk])");
+  if (nargs < 2) cvm_abort("hash-table-ref: expected (table key [default])");
   CvmHashTable *ht = as_hash_table(args[0], "hash-table-ref");
   Value result;
   if (hash_table_lookup(ht, args[1], &result)) return result;
-  if (nargs >= 3) return cvm_apply(vm, args[2], NULL, 0);
-  cvm_abort("hash-table-ref: key not found and no default thunk given");
+  if (nargs >= 3) {
+    Value def = args[2];
+    return (def.tag == T_CLOSURE || def.tag == T_BUILTIN) ? cvm_apply(vm, def, NULL, 0) : def;
+  }
+  cvm_abort("hash-table-ref: key not found and no default given");
 }
 
 static Value bi_hash_table_delete(VM *vm, Value *args, int nargs) {

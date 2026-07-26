@@ -246,4 +246,97 @@ describe "main.cr (CLI)" do
       File.delete(file.path)
     end
   end
+
+  # cvm/cvm (the standalone C11 prototype VM) is a separate, optionally-built
+  # binary -- same "best effort" treatment bench/bench.scm and run_via_cvm
+  # (src/main.cr) already give it, since a fresh checkout on a machine
+  # without a working C toolchain/GC dev package for it shouldn't fail the
+  # whole Crystal spec suite. `make -C cvm` here only actually rebuilds
+  # anything the first time cvm/cvm doesn't exist yet or its sources
+  # changed; a no-op run (the common case in CI, where it's already built)
+  # is instant.
+  describe "--cvm (standalone C11 prototype VM)" do
+    cvm_bin = "cvm/cvm"
+    Process.run("make", ["-C", "cvm"], output: Process::Redirect::Close, error: Process::Redirect::Close)
+    cvm_available = File.exists?(cvm_bin)
+
+    unless cvm_available
+      puts "  (cvm/cvm could not be built in this environment -- skipping cvm-specific regression tests)"
+    end
+
+    if cvm_available
+      # Regression test for a real bug: cvm/hashtable.c's hash-table-ref
+      # unconditionally cvm_apply'd its third argument as a thunk, but this
+      # project's own hash-table-ref contract (src/scheme/modules/creme/
+      # hash_table.cr) allows a plain, non-procedure default too -- (creme
+      # dao)'s dao-ref-keyword relies on exactly that (a plain #f default),
+      # so any DAO-based script (e.g. competition/scheme/demo-todo/app.scm)
+      # crashed under cvm with "attempt to apply a non-procedure value" the
+      # moment it read back a bool column. See cvm/hashtable.c's
+      # bi_hash_table_ref for the fix.
+      it "hash-table-ref accepts a plain (non-procedure) default, not just a thunk" do
+        file = File.tempfile("main_spec_cvm_hashtable", ".scm") do |io|
+          io.print(<<-SCHEME)
+            (import (scheme base) (scheme write) (creme hash-table))
+            (define h (make-hash-table))
+            (display (hash-table-ref h 'missing #f))
+            (newline)
+            (hash-table-set! h 'k 42)
+            (display (hash-table-ref h 'k #f))
+            (newline)
+            (display (hash-table-ref h 'missing2 (lambda () 'computed)))
+            (newline)
+            SCHEME
+        end
+        begin
+          out, err, status = run_cli(["--cvm", file.path])
+          status.success?.should be_true
+          out.should eq("#f\n42\ncomputed\n")
+          # A plain --cvm run always writes one stray "\n" to stderr
+          # regardless of the script (a pre-existing cvm quirk, unrelated
+          # to this test) -- so only check no actual error text appears.
+          err.strip.should eq("")
+        ensure
+          File.delete(file.path)
+        end
+      end
+
+      # Regression test: cvm/builtins.c was missing several R7RS vector
+      # procedures ((creme html)/(creme css), among others, call these) --
+      # vector-map, vector-for-each, vector-copy, vector-copy!,
+      # vector-fill!, vector-append. Calling any of them aborted with
+      # "unbound variable" before this fix.
+      it "has the previously-missing R7RS vector procedures (vector-map/-for-each/-copy/-copy!/-fill!/-append)" do
+        file = File.tempfile("main_spec_cvm_vectors", ".scm") do |io|
+          io.print(<<-SCHEME)
+            (import (scheme base) (scheme write))
+            (define v (vector 1 2 3))
+            (vector-for-each (lambda (x) (display x)) v)
+            (newline)
+            (display (vector-map (lambda (x) (* x 2)) v))
+            (newline)
+            (define c (vector-copy v 1))
+            (display c)
+            (newline)
+            (vector-fill! c 9)
+            (display c)
+            (newline)
+            (display (vector-append v c))
+            (newline)
+            (vector-copy! v 0 c)
+            (display v)
+            (newline)
+            SCHEME
+        end
+        begin
+          out, err, status = run_cli(["--cvm", file.path])
+          status.success?.should be_true
+          out.should eq("123\n#(2 4 6)\n#(2 3)\n#(9 9)\n#(1 2 3 9 9)\n#(9 9 3)\n")
+          err.strip.should eq("")
+        ensure
+          File.delete(file.path)
+        end
+      end
+    end
+  end
 end
