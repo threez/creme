@@ -499,7 +499,7 @@ call whose callback raises partway through.
 
 cvm has no runtime library/import machinery (see "Deliberate cuts" below)
 — it hand-registers a flat, ungrouped set of global builtins in C, spread
-across seven files:
+across eight files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
@@ -510,6 +510,7 @@ across seven files:
 | `strings.c` | `(creme string)` + `(creme format)` | 16 | `string-upcase`/`downcase`/`trim`/`split`/`join`/`replace`/`pad`/etc., `format` |
 | `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) + `(creme file)` (partial) | 8 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path`, `file-read` (same function as `read-whole-file`, registered under both names), `file-write`, `delete-file` |
 | `regex.c` | `(creme regex)` (very narrow — see "REPL" above) | 2 | `regexp`, `regexp-matches?` |
+| `process.c` | `(creme process)` (narrow — just `process-run`) | 1 | `process-run` — real POSIX fork/pipe/execvp/waitpid, matching native Crystal's exact `(cmd args) -> (stdout stderr exit-code success?)` contract; exists so spec/creme/main_spec.scm (the one entry point for running every spec/creme spec file and reporting one combined total) spawns each spec file as its own genuinely separate OS process the same way whether it's driven natively or reentrantly under `./cvm/cvm spec/creme/main_spec.scm` itself |
 
 `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` didn't used to be builtins here — a
 program the real analyzer compiles never needs them as such (its
@@ -521,13 +522,15 @@ too — a 3+-arg or non-fused call to them works either way.
 Every other `(scheme ...)` library (`file`, `process-context` beyond
 `get-environment-variable`/`exit`, `time`, `inexact`, `repl`, `r5rs`,
 `case-lambda`, `cxr`) and every other `(creme ...)` FFI library
-(`bigdecimal`, `json`, `time`, `random`, `digest`, `env`, `process`,
-`tui`, `rfc8439`, `http`, `prof-native`, `prof-vm`, `actor`, `raft`,
+(`bigdecimal`, `json`, `time`, `random`, `digest`, `env`, `tui`,
+`rfc8439`, `http`, `prof-native`, `prof-vm`, `actor`, `raft`,
 `treelist`, `csv`, `jose`) has **no** cvm-native counterpart at all — a
-script that calls into one won't resolve at cvm load/run time. `(scheme
-complex)` USED to be entirely unsupported (no `T_COMPLEX` value tag) but
-now has real support — see "Value/type model" below and this section's
-own `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/
+script that calls into one won't resolve at cvm load/run time. (`(creme
+process)` is now a partial exception — just `process-run`, see
+`process.c`'s own row above.) `(scheme complex)` USED to be entirely
+unsupported (no `T_COMPLEX` value tag) but now has real support — see
+"Value/type model" below and this section's own `make-rectangular`/
+`make-polar`/`real-part`/`imag-part`/`magnitude`/
 `angle` entry in `builtins.c`'s row above (its complete native surface,
 not a subset).
 
@@ -704,6 +707,8 @@ above) — Scheme-level calls never become real C stack frames.
 - `bootstrap.c`/`bootstrap.h` — `load-chunk-bytes`/`import!`/
   `expand-if-macro`, see "REPL" above.
 - `regex.c`/`regex.h` — `regexp`/`regexp-matches?` via PCRE2, see "REPL" above.
+- `process.c`/`process.h` — `(creme process)`'s `process-run`, via POSIX
+  fork/pipe/execvp/waitpid — see "Native builtins and library coverage" above.
 - `repl.scm` — the REPL driver script, precompiled into `repl.cvmc`.
 - `compiler-run.scm` — the compiler-mode driver script (see "Compiler
   mode" above), precompiled into `compiler-run.cvmc`.

@@ -27,13 +27,18 @@
 ;; up by hand.
 ;;
 ;; A separate library from (creme spec) itself specifically so (creme
-;; spec)'s own dependency footprint doesn't grow: (creme process)/(creme
-;; string) are both native-Crystal-only (no .sld, no cvm C equivalent),
-;; and (creme spec) is imported by EVERY spec/creme/*.scm file, including
-;; every one already passing under cvm's self-hosted loader today. Only
-;; spec/creme/main_spec.scm (which itself only ever runs natively --
-;; spawning subprocesses is a native OS capability, not something cvm's
-;; standalone C VM does) needs this library at all.
+;; spec)'s own dependency footprint doesn't grow: (creme string) is
+;; native-Crystal-only (no .sld, no cvm C equivalent), and (creme spec)
+;; is imported by EVERY spec/creme/*.scm file, including every one
+;; already passing under cvm's self-hosted loader today. Only spec/
+;; creme/main_spec.scm needs this library at all.
+;;
+;; (creme process)'s process-run itself now works under all three
+;; backends: cvm's own cvm/process.c backs it with plain POSIX fork/
+;; pipe/execvp/waitpid, matching native Crystal's exact contract -- so
+;; `./cvm/cvm spec/creme/main_spec.scm` spawns real `./cvm/cvm <file>`
+;; subprocesses the same way `./bin/creme spec/creme/main_spec.scm
+;; --cvm` does, no different code path needed here for that case.
 ;; ===========================================================================
 
 (define-library (creme spec-runner)

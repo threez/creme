@@ -7,30 +7,37 @@
 ;; behavior, which is exactly why each needs its own fresh global table)
 ;; and how the aggregation itself works.
 ;;
-;; This file itself only ever runs NATIVELY (`./bin/creme spec/creme/
-;; main_spec.scm`, optionally `--self-hosted`) -- spawning subprocesses
-;; ((creme process)'s process-run, via (creme spec-runner)) is a native
-;; OS capability, not something cvm's standalone C VM has any notion of.
-;; It can still drive a run of every spec file AGAINST cvm, though: pass
-;; --cvm and it spawns `./cvm/cvm <file>` for each one instead of `./bin/
-;; creme <file>` -- cvm itself never runs this file, it's just the
-;; child command this file's own subprocesses happen to invoke.
+;; Runs under all three backends:
+;;   ./bin/creme spec/creme/main_spec.scm                 (native bin/creme; spawns bin/creme per file)
+;;   ./bin/creme spec/creme/main_spec.scm --self-hosted    (native VM, self-hosted compiler; spawns bin/creme --self-hosted per file)
+;;   ./bin/creme spec/creme/main_spec.scm --cvm            (spawns ./cvm/cvm per file)
+;;   ./cvm/cvm spec/creme/main_spec.scm                    (cvm itself; ALSO spawns ./cvm/cvm per file)
+;; The last two land on the same runner -- cvm's own process-run (cvm/
+;; process.c, POSIX fork/pipe/execvp/waitpid, matching src/scheme/
+;; modules/creme/process.cr's contract exactly) means it makes no
+;; difference whether THIS file is itself being driven natively or
+;; reentrantly under cvm: either way, each spec file still gets spawned
+;; as its own genuinely separate OS process. cvm-under-cvm is detected
+;; via cvm-target-path (cvm/bootstrap.c) being bound -- a marker that
+;; only ever exists in a cvm compiler-mode process, checked via a guard+
+;; eval probe (never calling it, just asking whether it's bound) so this
+;; doesn't have to touch (command-line) at all when running that way
+;; (cvm has no argv-passing mechanism into compiler mode beyond the
+;; target path, so there'd be nothing to parse there anyway).
+;;
+;; (cvm/compiler-run.cvmc must already be built fresh before either cvm
+;; path -- see the Makefile's own creme-spec-cvm target.)
 ;;
 ;; NOT itself named to match spec/creme/*_spec.scm's own usual naming --
 ;; deliberately doesn't end in "_spec.scm" the way every file it RUNS
 ;; does, so a future directory-glob-based loop (if one's ever
 ;; reintroduced) can't accidentally pick this file up and have it spawn
 ;; itself.
-;;
-;; Run with:
-;;   ./bin/creme spec/creme/main_spec.scm                 (native bin/creme)
-;;   ./bin/creme spec/creme/main_spec.scm --self-hosted    (native VM, self-hosted compiler)
-;;   ./bin/creme spec/creme/main_spec.scm --cvm            (cvm's standalone C11 VM)
-;; (cvm/compiler-run.cvmc must already be built fresh for --cvm -- see
-;; the Makefile's own creme-spec-cvm target.)
 ;; ===========================================================================
 
-(import (scheme base) (scheme write) (scheme process-context) (creme spec) (creme spec-runner))
+(import (scheme base) (scheme write) (scheme process-context) (scheme eval) (creme spec) (creme spec-runner))
+
+(define (bound? name) (guard (e (#t #f)) (eval name) #t))
 
 (define spec-files
   '("spec/creme/bootstrap_spec.scm"
@@ -52,15 +59,16 @@
 ;; that file's own header comment. Skipped only when the runner targets cvm.
 (define cvm-excluded '("spec/creme/reader_native_spec.scm"))
 
-(define args (cdr (command-line)))
-
 (define runner
-  (cond
-    ((member "--cvm" args) '("./cvm/cvm"))
-    ((member "--self-hosted" args) '("./bin/creme" "--self-hosted"))
-    (else '("./bin/creme"))))
+  (if (bound? 'cvm-target-path)
+      '("./cvm/cvm")
+      (let ((args (cdr (command-line))))
+        (cond
+          ((member "--cvm" args) '("./cvm/cvm"))
+          ((member "--self-hosted" args) '("./bin/creme" "--self-hosted"))
+          (else '("./bin/creme"))))))
 
-(define exclude (if (member "--cvm" args) cvm-excluded '()))
+(define exclude (if (equal? runner '("./cvm/cvm")) cvm-excluded '()))
 
 (for-each
   (lambda (f) (if (not (member f exclude)) (run-spec-file! runner f)))

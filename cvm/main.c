@@ -23,6 +23,7 @@
 #include "hashtable.h"
 #include "mux.h"
 #include "profiler.h"
+#include "process.h"
 #include "regex.h"
 #include "sql.h"
 #include "strings.h"
@@ -117,6 +118,7 @@ int main(int argc, char **argv) {
   cvm_register_string_builtins(vm);
   cvm_register_bootstrap_builtins(vm);
   cvm_register_regex_builtins(vm);
+  cvm_register_process_builtins(vm);
 
   /* Compiler mode: `path` isn't a compiled SCB1 binary at all -- it's the
    * plain Scheme source cvm should compile-and-run, entirely via the
