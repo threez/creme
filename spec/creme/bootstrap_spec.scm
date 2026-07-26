@@ -27,20 +27,34 @@
 ;;     environment-artifact reasoning as --self-hosted (cvm/compiler-run.
 ;;     scm's own toolchain also transitively imports (creme regex)).
 ;;   - "import! applies only/except/prefix import-set filters" -- cvm's
-;;     own import! (cvm/bootstrap.c) is a PERMANENT no-op at the
-;;     PROCEDURE level. Bridging this out to compiler.sld's own alias-
-;;     generation logic (the same pattern expand-if-macro's own bridging
-;;     below uses) was tried and reverted: compile-import!'s own runtime-
-;;     emitted payload calls `import!` BEFORE `ensure-libraries-loaded!`
-;;     in the same sequence, so a bridge triggered directly from import!
-;;     itself fires too early -- before the target library's own exports
-;;     are even defined -- raising "unbound variable" for names compile-
-;;     import!'s own LATER, correctly-ordered alias-defines-for-specs
-;;     forms resolve fine on their own. A real fix needs a different hook
-;;     point than import! itself; left as a known gap rather than risking
-;;     that regression (confirmed: it broke compiler_libraries_spec.scm's
-;;     own prefix-import case, which does NOT call import! directly and
-;;     was completely unaffected by this bug until then).
+;;     own import! (cvm/bootstrap.c, bi_import_bang) now DOES bridge out
+;;     to compiler.sld's own alias-generation logic (import!-apply-
+;;     aliases!, built on the existing alias-defines-for-specs) for a
+;;     bare runtime call, same pattern as expand-if-macro's own bridging
+;;     below -- an earlier attempt at this broke compiler_libraries_spec.
+;;     scm's prefix-import case, because compile-import!'s own runtime-
+;;     emitted payload used to call `import!` BEFORE `ensure-libraries-
+;;     loaded!`, so a bridge triggered from THAT SAME emitted call fired
+;;     too early, before a pure-Scheme library's own exports existed as
+;;     real globals yet; fixed by reordering compile-import!'s own
+;;     emitted sequence (and its eager compile-time counterpart) to run
+;;     ensure-libraries-loaded! first (see that function's own comment).
+;;     That reordering is verified correct (compiler_libraries_spec.scm
+;;     still passes; a standalone prefix-import of an already-loaded
+;;     pure-Scheme library works fine bare-called too) -- but THIS
+;;     specific case still fails, for a DIFFERENT, deeper reason: it
+;;     targets `(creme regex)`, a NATIVE (Crystal/cvm-builtin) library
+;;     with no .sld file on disk at all. import-set-alias-defines's own
+;;     prefix/rename branches need a library's export alist to know what
+;;     name(s) to alias (library-export-alist, compiler.sld) -- and that
+;;     helper can only read a real .sld source file; for a native
+;;     library it returns #f, so no aliases get generated regardless of
+;;     ordering. Fixing THIS would need Crystal to expose a native
+;;     library's own export list to Scheme (it already tracks one
+;;     internally, SchemeLibrary#exports, eval/library.cr) plus an
+;;     equivalent for cvm (which has no per-library grouping of its own
+;;     flat global table at all today) -- a materially bigger, separate
+;;     feature, not attempted here.
 ;; ===========================================================================
 
 ;; Deliberately NOT (import (creme regex)) here -- the first two cases

@@ -90,7 +90,7 @@
 
 (define-library (creme compiler compiler)
   (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form
-          define-syntax-expand-form mark-self-hosted-library-loaded!)
+          define-syntax-expand-form mark-self-hosted-library-loaded! import!-apply-aliases!)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
           (creme bytecode) (creme bootstrap) (creme compiler reader))
   (begin
@@ -2396,7 +2396,27 @@
           '()
           (append (import-set-alias-defines (car specs)) (alias-defines-for-specs (cdr specs)))))
 
-    ;; The eager compile-time import! + ensure-libraries-loaded! calls
+    ;; Runtime counterpart of alias-defines-for-specs above, for `import!`
+    ;; called as a BARE PROCEDURE (e.g. `(import! '((prefix (creme regex)
+    ;; rx:)))` directly in a test, not through the `(import ...)` special
+    ;; form compile-import! below handles) -- cvm/bootstrap.c's bi_import_
+    ;; bang bridges here (same pattern as expand-if-macro bridging to
+    ;; defmacro-expand-form/define-syntax-expand-form) since cvm's own
+    ;; import! has no compiler context of its own to emit bytecode from.
+    ;; Reuses alias-defines-for-specs' pure computation of the `(define
+    ;; new old)` forms needed, then genuinely executes each one via `eval`
+    ;; (this library's own top-level (import (scheme eval)) makes that
+    ;; resolve; under cvm, whatever global `eval` compiler-run.scm itself
+    ;; defines) -- safe to do here specifically because bi_import_bang is
+    ;; ONLY ever reached for a bare runtime call, never for the special-
+    ;; form path below (compile-import! never emits a call to THIS
+    ;; procedure), so there's no risk of the ordering bug that caused this
+    ;; same idea to be reverted before compile-import!'s own emission
+    ;; order was fixed (see that function's own comment).
+    (define (import!-apply-aliases! import-sets)
+      (for-each eval (alias-defines-for-specs import-sets)))
+
+    ;; The eager compile-time ensure-libraries-loaded! + import! calls
     ;; below exist ONLY so a LATER top-level form's macro use (via
     ;; target-env-macro-expand) can already see this import's exports --
     ;; this compiler compiles a whole program in one pass before any of
@@ -2418,17 +2438,31 @@
     ;; macro use in the same program (an edge case rare enough, and
     ;; already unusual enough -- generating a LIBRARY that exports a
     ;; MACRO at run time and using it in the same program -- to accept).
+    ;;
+    ;; ensure-libraries-loaded! now runs BEFORE import! (both here and in
+    ;; the emitted runtime sequence below) -- ordering that USED to not
+    ;; matter (native Crystal's own import! is fully independent of this
+    ;; self-hosted loader), but does now that cvm's own import! (bi_
+    ;; import_bang, cvm/bootstrap.c) bridges to import!-apply-aliases!
+    ;; above: a pure-Scheme library's exports (e.g. (creme extra)'s
+    ;; `filter`, aliased via a prefix import-set) must already be real
+    ;; globals -- which only ensure-libraries-loaded! (not import!, a
+    ;; permanent no-op at cvm's OWN runtime level) establishes -- before
+    ;; the alias-generation bridge tries to resolve them. Getting this
+    ;; backwards previously broke compiler_libraries_spec.scm's prefix-
+    ;; import case ("unbound variable: any") when this bridge was first
+    ;; attempted; this reordering is the fix that makes it safe.
     (define (compile-import! fc expr dest tail?)
       (if (fcomp-parent fc)
           (error "bootstrap compiler: import is only supported at the top level" expr)
           (begin
-            (guard (e (#t #f)) (import! (cdr expr)) (ensure-libraries-loaded! (cdr expr)))
+            (guard (e (#t #f)) (ensure-libraries-loaded! (cdr expr)) (import! (cdr expr)))
             (compile-expr! fc
               (cons 'begin
                     (append
                       (list
-                        (list 'import! (list 'quote (cdr expr)))
-                        (list 'ensure-libraries-loaded! (list 'quote (cdr expr))))
+                        (list 'ensure-libraries-loaded! (list 'quote (cdr expr)))
+                        (list 'import! (list 'quote (cdr expr))))
                       (alias-defines-for-specs (cdr expr))))
               dest tail?))))
 

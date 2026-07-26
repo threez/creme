@@ -52,34 +52,45 @@ static Value bi_load_chunk_bytes(VM *vm, Value *args, int nargs) {
   return cvm_run_loaded_chunk(vm, chunk);
 }
 
-/* A no-op, not an error. cvm's global table is already unconditionally
- * flat -- no per-import filtering/prefixing/renaming applies at cvm's
- * runtime level regardless of backend, so "importing" a library whose
- * bindings are already in vm->globals (which is everything reachable at
- * all, since cvm has no dynamic library-loading machinery of its own) has
- * nothing left to do. A real dynamic import of a library NOT already
- * baked into the running image isn't supported -- code that tries will
- * simply hit "unbound variable" on first use of a name that was never
- * registered, same as it would without this builtin existing at all.
+/* cvm's global table is already unconditionally flat -- no per-import
+ * filtering/prefixing/renaming applies at cvm's own runtime level
+ * regardless of backend, so "importing" a library whose bindings are
+ * already in vm->globals has nothing to do at THIS layer. But only/
+ * except/prefix/rename filters DO introduce genuinely new alias names
+ * (e.g. a prefix import-set's `rx:regexp-matches?`), which cvm has no
+ * compiler of its own to synthesize -- so, same pattern as expand-if-
+ * macro bridging to compiler.sld's defmacro-expand-form/define-syntax-
+ * expand-form, this bridges out to that same self-hosted compiler's
+ * import!-apply-aliases! (compiler.sld), built on its existing alias-
+ * defines-for-specs, now genuinely EXECUTING each computed `(define new
+ * old)` form via `eval` instead of just returning it as data for a
+ * compile pass to emit bytecode from.
  *
- * only/except/prefix/rename filters DO introduce genuinely new names
- * (tried bridging this out to compiler.sld's own alias-generation logic,
- * matching expand-if-macro's own defmacro-expand-form/define-syntax-
- * expand-form bridging pattern -- reverted: compile-import!'s own
- * runtime-emitted payload already calls import! BEFORE ensure-libraries-
- * loaded! in the same sequence, so a bridge triggered directly from
- * import! itself ran too early, before the target library's own exports
- * were even defined yet, raising "unbound variable" for names compile-
- * import!'s own LATER, correctly-ordered alias-defines-for-specs forms
- * would have resolved fine. A real fix needs a different hook point --
- * left for follow-up rather than risking that regression here). Calling
- * `import!` directly with filters (as opposed to a compiled `(import
- * ...)` form, which already handles this correctly at compile time) has
- * no effect under cvm today. */
+ * This bridge is safe specifically because it's ONLY ever reached for a
+ * bare runtime call to `import!` as an ordinary procedure (e.g. directly
+ * in a test) -- compile-import! (compiler.sld), which handles the actual
+ * `(import ...)` special form, never emits a call to import!-apply-
+ * aliases! itself, so there's no re-entrant risk of the alias bridge
+ * firing before the target library's exports exist. An EARLIER attempt
+ * at this (see git history) bridged import! itself unconditionally and
+ * broke a previously-passing prefix-import case, because compile-
+ * import!'s own emitted runtime sequence used to call import! BEFORE
+ * ensure-libraries-loaded! -- fixed by reordering that sequence (see
+ * compile-import!'s own comment) so a pure-Scheme library's real exports
+ * are already loaded as globals by the time THIS bridge (triggered from
+ * that same emitted import! call) would ever run.
+ *
+ * If import!-apply-aliases! isn't loaded (i.e. (creme compiler compiler)
+ * itself isn't part of this program -- never true for cvm's own
+ * compiler-mode driver, which always bundles the whole toolchain, but
+ * cheap to guard for anyway), this quietly falls back to the original
+ * no-op rather than aborting. */
 static Value bi_import_bang(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  (void)args;
-  (void)nargs;
+  if (nargs != 1) cvm_abort("import!: expected 1 argument");
+  const char *bridge_name = "import!-apply-aliases!";
+  int bridge_slot = cvm_global_intern(vm, bridge_name, (int)strlen(bridge_name));
+  if (!vm->globals[bridge_slot].bound) return v_nil();
+  cvm_apply(vm, vm->globals[bridge_slot].value, args, 1);
   return v_nil();
 }
 

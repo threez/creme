@@ -87,12 +87,18 @@ was a way to load-and-run a freshly-computed bytevector of those bytes
 of the same name), backed by `loader.c`'s in-memory `cvm_load_from_bytes`
 and `vm.c`'s reentrant `cvm_run_loaded_chunk`.
 
-`cvm/bootstrap.c` also provides `import!` (a no-op — cvm's global table
-is already unconditionally flat, so "importing" anything already baked
-into the running image, which is everything reachable at all, has
-nothing left to do) and `expand-if-macro`. The self-hosted compiler's own
-`compile-import!`/`compile-form!` call both of these unconditionally, so
-both need to exist for it to run at all, REPL or not.
+`cvm/bootstrap.c` also provides `import!` and `expand-if-macro`. cvm's
+global table is already unconditionally flat, so "importing" anything
+already baked into the running image (which is everything reachable at
+all) has nothing left to do at cvm's own runtime level — but only/
+except/prefix/rename import-set filters DO introduce genuinely new
+alias names, which `import!` handles by bridging out to the self-hosted
+compiler's own alias-generation logic (`import!-apply-aliases!`,
+`compiler.sld`) when called as a bare procedure (see "Known gaps" below
+for the one case this still can't cover). The self-hosted compiler's own
+`compile-import!`/`compile-form!` call both `import!` and
+`expand-if-macro` unconditionally, so both need to exist for it to run
+at all, REPL or not.
 
 `expand-if-macro` recognizes a **`defmacro`** exported from a library
 compiled straight to bytecode (Crystal-native ahead of time via
@@ -293,17 +299,26 @@ still not arbitrary-precision).
 One category of `spec/creme` case still doesn't pass under `cvm` —
 documented in its own file's header comment:
 
-- **`import!` called as a bare procedure with only/except/prefix/rename
-  filters** (one case in `bootstrap_spec.scm`) — cvm's own `import!`
-  (`cvm/bootstrap.c`) is a permanent no-op at the procedure level; only
-  the compile-time `(import ...)` special form gets real filtering
-  (`compile-import!`'s own alias generation, `compiler.sld`). Bridging
-  `import!` itself out to that same alias-generation logic was tried and
-  reverted — `compile-import!`'s own runtime-emitted payload calls
-  `import!` BEFORE `ensure-libraries-loaded!` in the same sequence, so a
-  bridge triggered directly from `import!` fired too early, before the
-  target library's own exports were even defined yet. A real fix needs a
-  different hook point; left as a known, narrow gap.
+- **`import!` applying an only/except/prefix/rename filter against a
+  NATIVE library** (one case in `bootstrap_spec.scm`, using `(creme
+  regex)`) — `import!` (`cvm/bootstrap.c`'s `bi_import_bang`) now bridges
+  a bare procedure call out to the self-hosted compiler's own alias-
+  generation logic (`import!-apply-aliases!`, `compiler.sld`, built on
+  the existing `alias-defines-for-specs`) — an earlier attempt at this
+  bridge was reverted because `compile-import!`'s own runtime-emitted
+  payload used to call `import!` BEFORE `ensure-libraries-loaded!`,
+  firing the bridge too early; fixed by reordering that emitted sequence
+  (and its eager compile-time counterpart) to run `ensure-libraries-
+  loaded!` first. That fix is verified correct for a pure-Scheme library
+  (e.g. `(creme extra)`) — but this ONE case still fails, for a
+  different, deeper reason: `library-export-alist` (the helper `prefix`/
+  `rename` aliasing needs to learn what a library exports) can only read
+  a real `.sld` source file, and `(creme regex)` is a native (Crystal/
+  cvm-builtin) library with none. A real fix would need Crystal to
+  expose a native library's own export list to Scheme (it already
+  tracks one internally, `SchemeLibrary#exports`) plus an equivalent for
+  cvm (which has no per-library grouping of its flat global table at all
+  today) — a materially bigger, separate feature, not attempted here.
 
 Not a regression, and not something this test suite is trying to fix
 beyond what's documented above.
