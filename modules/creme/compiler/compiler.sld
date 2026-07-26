@@ -271,6 +271,8 @@
         ((null? formals) (cons '() #f))
         ((symbol? formals) (cons '() formals))
         ((pair? formals)
+         (if (not (symbol? (car formals)))
+             (error "bootstrap compiler: bad formal parameter" (car formals)))
          (let ((rest (parse-formals (cdr formals))))
            (cons (cons (car formals) (car rest)) (cdr rest))))
         (else (error "bootstrap compiler: bad formals" formals))))
@@ -507,14 +509,44 @@
              (body (cdddr macro-def-form))
              (args (cdr call-form))
              (n (length fixed))
-             (fixed-args (sr-list-take args n))
-             (rest-args (sr-list-drop args n))
-             (fixed-bindings (map (lambda (p a) (list p (list 'quote a))) fixed fixed-args))
-             (rest-binding (if rest (list (list rest (list 'quote rest-args))) '())))
-        (run-compiled-forms! (list (cons 'let (cons (append fixed-bindings rest-binding) body))))))
+             (n-args (length args)))
+        ;; Explicit arity check -- too few args used to crash inside
+        ;; sr-list-take itself (car of an already-exhausted list), an
+        ;; incidental but still-raising error; too many args (with no
+        ;; rest param to absorb them) used to silently succeed, dropping
+        ;; the extras with no error at all -- found by porting spec/
+        ;; scheme/compile/macro_spec.cr's own "shadows a special form"
+        ;; case: (defmacro if (a) a) (if #t 1 2) expanded with `a` bound
+        ;; only to #t, silently discarding the 2 extra call args, instead
+        ;; of raising like native's own build_macro/bind_params does.
+        (if (< n-args n) (error "bootstrap compiler: macro call: too few arguments" call-form))
+        (if (and (not rest) (> n-args n)) (error "bootstrap compiler: macro call: too many arguments" call-form))
+        (let* ((fixed-args (sr-list-take args n))
+               (rest-args (sr-list-drop args n))
+               (fixed-bindings (map (lambda (p a) (list p (list 'quote a))) fixed fixed-args))
+               (rest-binding (if rest (list (list rest (list 'quote rest-args))) '())))
+          (run-compiled-forms! (list (cons 'let (cons (append fixed-bindings rest-binding) body)))))))
 
+    ;; Validates expr's own (defmacro name formals body...) shape EAGERLY,
+    ;; at compile time -- matching where native's own build_macro
+    ;; (interpreter.cr, called from eval_defmacro) raises: at the
+    ;; defmacro FORM's own eval time, unconditionally (its analyze-time
+    ;; call, analyze_defmacro, silently swallows the same errors so they
+    ;; surface only once, at eval). Without this, every one of these
+    ;; malformed shapes silently registered a transformer anyway
+    ;; (macro-register! never inspected expr itself) that would only
+    ;; raise a confusing, unrelated internal error (e.g. "caddr: expected
+    ;; pair, got ()") the first time the macro was actually USED, if ever
+    ;; -- found by porting spec/scheme/compile/macro_spec.cr's own
+    ;; "malformed input" cases, none of which ever call the macro they
+    ;; define.
     (define (compile-defmacro! fc expr dest tail?)
+      (if (not (pair? (cdr expr))) (error "bootstrap compiler: defmacro: malformed" expr))
       (let ((name (cadr expr)))
+        (if (not (symbol? name)) (error "bootstrap compiler: defmacro: macro name must be a symbol" expr))
+        (if (not (pair? (cddr expr))) (error "bootstrap compiler: defmacro: malformed" expr))
+        (if (null? (cdddr expr)) (error "bootstrap compiler: defmacro: macro body is empty" expr))
+        (parse-formals (caddr expr)) ; raises "bad formals" for a malformed formal-parameter spec
         (macro-register! name (lambda (form) (defmacro-expand-form expr form)))
         (if tail? (compile-literal-datum! fc '() dest #t))))
 
@@ -559,9 +591,26 @@
         ((pair? expr) (compile-form! fc expr dest tail?))
         (else (error "bootstrap compiler: cannot compile expression" expr))))
 
+    ;; R7RS: syntactic keywords are lexically scoped bindings, so a local
+    ;; macro (defmacro/define-syntax/let-syntax) named after a special
+    ;; form -- e.g. (defmacro if (a) a) -- shadows it, exactly like any
+    ;; other identifier. macro-lookup (a cheap assq over this compile
+    ;; session's own, typically tiny, macro-table) is checked FIRST, here,
+    ;; before any fixed special-form dispatch below, to make that possible
+    ;; -- mirroring native's own priority order exactly (analyzer.cr's
+    ;; analyze_cons checks @analyzing_macros.lookup, the local-macro
+    ;; table, BEFORE env.get?'s SchemeSpecialForm marker check). The
+    ;; expensive Crystal-bridge fallback (target-env-macro-expand, for a
+    ;; macro exported from an already-compiled bytecode library) stays a
+    ;; LOW-priority fallback below, unlike this: shadowing a special form
+    ;; via a precompiled bytecode macro is vanishingly rare, and checking
+    ;; it first would run an expensive bridge call for every ordinary
+    ;; special-form use in the program, not just macro-table's cheap
+    ;; local lookup.
     (define (compile-form! fc expr dest tail?)
       (let ((head (car expr)))
         (cond
+          ((macro-lookup head) => (lambda (transformer) (compile-expr! fc (transformer expr) dest tail?)))
           ((eq? head 'quote) (compile-literal-datum! fc (cadr expr) dest tail?))
           ((eq? head 'if) (compile-if! fc expr dest tail?))
           ((eq? head 'lambda) (compile-lambda! fc (cadr expr) (cddr expr) dest tail? "lambda"))
@@ -592,7 +641,6 @@
           ((eq? head 'defmacro) (compile-defmacro! fc expr dest tail?))
           ((eq? head 'import) (compile-import! fc expr dest tail?))
           ((or (eq? head 'let-syntax) (eq? head 'letrec-syntax)) (compile-let-syntax! fc (cadr expr) (cddr expr) dest tail?))
-          ((macro-lookup head) => (lambda (transformer) (compile-expr! fc (transformer expr) dest tail?)))
           ((target-env-macro-expand expr) => (lambda (expanded) (compile-expr! fc expanded dest tail?)))
           (else (compile-app! fc expr dest tail?)))))
 
@@ -708,8 +756,26 @@
             (list (cons 'letrec* (cons (map define-form->letrec-binding defines)
                                         (if (null? rest) (list (list 'quote '())) rest)))))))
 
+    ;; Saves/restores macro-table around the body -- same snapshot/restore
+    ;; compile-let-syntax! already uses (see its own header comment for
+    ;; the accepted simplification this shares), extended here to EVERY
+    ;; scope-introducing body, not just let-syntax/letrec-syntax: a plain
+    ;; internal defmacro/define-syntax (registered via compile-defmacro!/
+    ;; compile-define-syntax!, both unconditional macro-register! calls
+    ;; with no scoping of their own) would otherwise leak into macro-table
+    ;; permanently, visible even after this body's own lexical scope
+    ;; exits -- found by porting spec/scheme/compile/macro_spec.cr's own
+    ;; "supports local, nested macro definitions scoped to their let"
+    ;; case: a (let () (defmacro m (x) x) (m 5)) followed by a LATER,
+    ;; separate (m 5) call should raise unbound-variable, matching
+    ;; native's own parent-chained @analyzing_macros (analyzer.cr), which
+    ;; pushes/pops a child scope around every body for exactly this
+    ;; reason (analyze_defmacro registers into whatever @analyzing_macros
+    ;; is current, same as define-syntax).
     (define (compile-scoped-body! fc forms dest tail?)
-      (compile-body! fc (hoist-internal-defines forms) dest tail?))
+      (let ((saved macro-table))
+        (compile-body! fc (hoist-internal-defines forms) dest tail?)
+        (set! macro-table saved)))
 
     ;; Fused compare-and-branch: when `test-expr` is itself a call to one of
     ;; the 6 comparison/eq? primitives (not shadowed/redefined -- same gate
