@@ -94,8 +94,9 @@ all) has nothing left to do at cvm's own runtime level — but only/
 except/prefix/rename import-set filters DO introduce genuinely new
 alias names, which `import!` handles by bridging out to the self-hosted
 compiler's own alias-generation logic (`import!-apply-aliases!`,
-`compiler.sld`) when called as a bare procedure (see "Known gaps" below
-for the one case this still can't cover). The self-hosted compiler's own
+`compiler.sld`) when called as a bare procedure (see "Compiler mode"
+below for the fixes this needed and the one case it's still narrower
+than native Crystal on). The self-hosted compiler's own
 `compile-import!`/`compile-form!` call both `import!` and
 `expand-if-macro` unconditionally, so both need to exist for it to run
 at all, REPL or not.
@@ -296,32 +297,42 @@ too — see "Value/type model"'s `T_RATIONAL`/`T_COMPLEX` entries below for
 what was added and exactly what's still NOT covered (plain fixnums are
 still not arbitrary-precision).
 
-One category of `spec/creme` case still doesn't pass under `cvm` —
-documented in its own file's header comment:
+`import!` applying an only/except/prefix/rename filter now works under
+`cvm` too, including against a NATIVE library (`bootstrap_spec.scm`'s own
+`(creme regex)` case) — `import!` (`cvm/bootstrap.c`'s `bi_import_bang`)
+bridges a bare procedure call out to the self-hosted compiler's own
+alias-generation logic (`import!-apply-aliases!`, `compiler.sld`, built
+on the existing `alias-defines-for-specs`). This took two fixes:
 
-- **`import!` applying an only/except/prefix/rename filter against a
-  NATIVE library** (one case in `bootstrap_spec.scm`, using `(creme
-  regex)`) — `import!` (`cvm/bootstrap.c`'s `bi_import_bang`) now bridges
-  a bare procedure call out to the self-hosted compiler's own alias-
-  generation logic (`import!-apply-aliases!`, `compiler.sld`, built on
-  the existing `alias-defines-for-specs`) — an earlier attempt at this
-  bridge was reverted because `compile-import!`'s own runtime-emitted
-  payload used to call `import!` BEFORE `ensure-libraries-loaded!`,
-  firing the bridge too early; fixed by reordering that emitted sequence
-  (and its eager compile-time counterpart) to run `ensure-libraries-
-  loaded!` first. That fix is verified correct for a pure-Scheme library
-  (e.g. `(creme extra)`) — but this ONE case still fails, for a
-  different, deeper reason: `library-export-alist` (the helper `prefix`/
-  `rename` aliasing needs to learn what a library exports) can only read
-  a real `.sld` source file, and `(creme regex)` is a native (Crystal/
-  cvm-builtin) library with none. A real fix would need Crystal to
-  expose a native library's own export list to Scheme (it already
-  tracks one internally, `SchemeLibrary#exports`) plus an equivalent for
-  cvm (which has no per-library grouping of its flat global table at all
-  today) — a materially bigger, separate feature, not attempted here.
+1. `compile-import!`'s own runtime-emitted payload used to call `import!`
+   BEFORE `ensure-libraries-loaded!`, firing a naively-bridged version of
+   this too early — before a pure-Scheme library's own exports existed as
+   real globals yet (an earlier attempt at exactly this bridge hit this
+   and broke `compiler_libraries_spec.scm`'s prefix-import case, so it was
+   reverted at the time). Fixed by reordering that emitted sequence (and
+   its eager compile-time counterpart) to run `ensure-libraries-loaded!`
+   first.
+2. `library-export-alist` (the helper `prefix`/`rename` aliasing needs to
+   learn what a library exports) used to only ever read a real `.sld`
+   source file — no help for `(creme regex)`, a native (Crystal/cvm-
+   builtin) library with none. Fixed by adding a `library-exports`
+   builtin: native Crystal already tracks every registered library's own
+   exports internally regardless of whether it's file- or Crystal-based
+   (`SchemeLibrary#exports`, `eval/library.cr`), now exposed to Scheme via
+   `(creme introspection)`; cvm has its own, much narrower
+   `library-exports` (`cvm/bootstrap.c`) — a small hardcoded table
+   covering just the native libraries this project's own spec suite
+   actually needs aliased this way (today: `(creme regex)`), since cvm has
+   no per-library grouping of its own flat global table to draw such a
+   list from automatically.
 
-Not a regression, and not something this test suite is trying to fix
-beyond what's documented above.
+One case remains — `bootstrap_spec.scm`'s "import! copies a library's
+bindings into the global env" — a harmless environment artifact under
+both `--self-hosted` and `cvm`, not a bug: each of these two bootstraps
+already transitively imports `(creme regex)` for its own compiler's use,
+so the test's own initial "is it genuinely unbound?" check is moot there
+(see that file's own header comment). Not something this test suite is
+trying to fix.
 
 ## Profiling
 

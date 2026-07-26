@@ -94,6 +94,57 @@ static Value bi_import_bang(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 
+static int sym_is(Value v, const char *s) {
+  size_t len = strlen(s);
+  return v.tag == T_SYM && (size_t)v.as.str.len == len && memcmp(v.as.str.chars, s, len) == 0;
+}
+
+/* cvm has no per-library grouping of its own flat global table at all --
+ * every builtin from every conceptual "library" (regex.c, sql.c, ...) is
+ * just registered into the same vm->globals via cvm_register_builtin, with
+ * no record of which C file/module it came from. This is a small, hand-
+ * maintained table of the (external . internal) export pairs (always the
+ * same name on both sides here -- cvm's own native registration never
+ * renames) for libraries this project's own spec/creme test suite actually
+ * exercises via an only/except/prefix/rename import-set against a NATIVE
+ * library (today: just (creme regex), for bootstrap_spec.scm's own
+ * "import! applies ... filters" case) -- deliberately NOT a general
+ * mechanism mirroring every native library's real export surface (native
+ * Crystal's own SchemeLibrary#exports, exposed the same way via (creme
+ * introspection)'s library-exports, already covers that properly; cvm has
+ * no equivalent runtime bookkeeping to draw the same table from
+ * automatically). Extend this if a future spec needs another native
+ * library aliased under cvm specifically. `name` is the quoted library
+ * name (e.g. '(creme regex)) -- returns #f for anything not in this table,
+ * same contract as native's own library-exports when the library isn't
+ * registered. */
+static Value bi_library_exports(VM *vm, Value *args, int nargs) {
+  if (nargs != 1) cvm_abort("library-exports: expected 1 argument");
+  Value name = args[0];
+  if (name.tag != T_PAIR) return v_bool(0);
+  Value first = name.as.pair->car;
+  Value rest = name.as.pair->cdr;
+  if (!sym_is(first, "creme") || rest.tag != T_PAIR) return v_bool(0);
+  Value second = rest.as.pair->car;
+  if (rest.as.pair->cdr.tag != T_NIL) return v_bool(0);
+
+  static const char *regex_exports[] = {"regexp", "regexp-matches?"};
+  const char **exports = NULL;
+  int n_exports = 0;
+  if (sym_is(second, "regex")) {
+    exports = regex_exports;
+    n_exports = (int)(sizeof(regex_exports) / sizeof(regex_exports[0]));
+  }
+  if (!exports) return v_bool(0);
+
+  Value result = v_nil();
+  for (int i = n_exports - 1; i >= 0; i--) {
+    Value sym = v_sym(exports[i], (int)strlen(exports[i]));
+    result = cvm_cons(vm, cvm_cons(vm, sym, sym), result);
+  }
+  return result;
+}
+
 /* `args[0]` is the whole call form under consideration (e.g. `(sxql-
  * select! conn fields ...)`), same contract as the real interpreter's own
  * expand-if-macro (see modules/creme/compiler/compiler.sld's target-env-
@@ -211,6 +262,7 @@ static Value bi_cvm_target_path(VM *vm, Value *args, int nargs) {
 void cvm_register_bootstrap_builtins(VM *vm) {
   cvm_register_builtin(vm, "load-chunk-bytes", bi_load_chunk_bytes);
   cvm_register_builtin(vm, "import!", bi_import_bang);
+  cvm_register_builtin(vm, "library-exports", bi_library_exports);
   cvm_register_builtin(vm, "expand-if-macro", bi_expand_if_macro);
   cvm_register_builtin(vm, "read-whole-file", bi_read_whole_file);
   cvm_register_builtin(vm, "cvm-target-path", bi_cvm_target_path);

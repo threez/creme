@@ -92,7 +92,7 @@
   (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form
           define-syntax-expand-form mark-self-hosted-library-loaded! import!-apply-aliases!)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
-          (creme bytecode) (creme bootstrap) (creme compiler reader))
+          (creme bytecode) (creme bootstrap) (creme introspection) (creme compiler reader))
   (begin
 
     ;; ---------------------------------------------------------------------
@@ -2209,14 +2209,26 @@
     ;; internal under a different external name) -- used by
     ;; apply-import-set-aliases! below to resolve prefix/rename against
     ;; the names the library ACTUALLY declares exported, not just
-    ;; whatever it happens to `define` internally. #f for a library with
-    ;; no .sld file on disk (ordinary Crystal/cvm-native, no export list
-    ;; this Scheme-level code can see -- same restriction as everywhere
-    ;; else in this section).
+    ;; whatever it happens to `define` internally.
+    ;;
+    ;; For a library with no .sld file on disk (ordinary Crystal/cvm-
+    ;; native), falls back to library-exports ((creme introspection)) --
+    ;; native Crystal already tracks every registered library's own
+    ;; exports internally (SchemeLibrary#exports) regardless of whether
+    ;; it came from a .sld file or a Crystal-native installer, so this
+    ;; fallback covers a native library too, PROVIDED it's already been
+    ;; imported/registered by the time this runs (an as-yet-unimported
+    ;; native library has no exports to report any more than an
+    ;; unimported file-based one would -- same restriction, just a
+    ;; different reason). cvm has its own, much narrower library-exports
+    ;; (cvm/bootstrap.c) -- a small hardcoded table, since cvm has no
+    ;; per-library grouping of its own flat global table the way native
+    ;; Crystal's SchemeLibrary does; see that file's own comment for
+    ;; which libraries it actually covers.
     (define (library-export-alist name)
       (let ((src (try-read-whole-file (library-name->path name))))
         (if (not src)
-            #f
+            (guard (e (#t #f)) (library-exports name))
             (let* ((forms (read-program src))
                    (lib-form (car forms))
                    (clauses (cddr lib-form)))

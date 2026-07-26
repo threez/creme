@@ -55,6 +55,19 @@ module Scheme
       @libraries.keys.map { |name| SchemeLibrary.library_name_string(name) }
     end
 
+    # An already-registered library's own export alist (external name ->
+    # internal name), or nil if that library hasn't been imported/
+    # registered yet. Exposed to Scheme via (creme introspection)'s
+    # library-exports builtin -- the self-hosted compiler's own alias-
+    # generation logic (compiler.sld's library-export-alist) normally
+    # learns a library's exports by reading its .sld source directly, which
+    # only works for a FILE-based library; this is the fallback for a
+    # NATIVE (Crystal-builtin) one, which has no .sld file to read but
+    # already tracks its own exports right here regardless.
+    def library_exports(name : Array(String)) : Hash(String, String)?
+      @libraries[name]?.try(&.exports)
+    end
+
     # Used by Scheme.run_file so a relative path inside a top-level script
     # (e.g. a future relative-path library form) resolves against the
     # script's own directory rather than the process's CWD. @load_dirs is

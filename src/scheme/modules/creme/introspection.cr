@@ -54,6 +54,26 @@ module Scheme::Builtins::Introspection
   def stdout_tty_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeBool.of(STDOUT.tty?)
   end
+
+  # An already-registered library's own export alist -- a list of (external
+  # . internal) symbol pairs, or #f if that library isn't registered/
+  # imported yet -- taking a quoted library name the same shape define-
+  # library/import use, e.g. '(creme regex). Exists so modules/creme/
+  # compiler/compiler.sld's own library-export-alist (which normally reads
+  # a library's exports straight out of its .sld source file) has a
+  # fallback for a NATIVE (Crystal-builtin) library, which has no .sld file
+  # to read but is already tracked internally regardless (Interpreter#
+  # library_exports, backed by each SchemeLibrary's own #exports).
+  @[Scheme::SchemeFn("library-exports", min: 1, max: 1)]
+  def library_exports(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    parts = Scheme.list_to_a(args[0]).map do |part|
+      raise SchemeRuntimeError.new("library-exports: expected a list of symbols") unless part.is_a?(SchemeSym)
+      part.name
+    end
+    exports = interp.library_exports(parts)
+    return FALSE.as(SchemeValue) unless exports
+    Scheme.a_to_list(exports.map { |external, internal| Cons.new(SchemeSym.new(external), SchemeSym.new(internal)).as(SchemeValue) })
+  end
 end
 
 module Scheme

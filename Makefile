@@ -46,13 +46,14 @@ creme-spec:
 # Every file now passes in full, including compiler_numeric_tower_spec.
 # scm (cvm/value.h's T_RATIONAL, GMP-backed, and T_COMPLEX -- see cvm/
 # README.md's "numeric tower" note for exactly what this does and
-# doesn't cover) and reader_literals_spec.scm's own 7 complex-number
-# cases, EXCEPT bootstrap_spec.scm (2 cases: one harmless environment
-# artifact, one narrow gap where import!'s only/except/prefix filters
-# can't alias a NATIVE library's exports -- cvm/bootstrap.c's import!
-# bridge works fine for pure-Scheme libraries now, see that file's own
-# comment) -- explained in that file's own header comment, NOT a
-# regression.
+# doesn't cover), reader_literals_spec.scm's own 7 complex-number cases,
+# and bootstrap_spec.scm's "import! applies only/except/prefix import-
+# set filters" case (cvm/bootstrap.c's import! bridge, plus a small
+# hardcoded library-exports table so it can alias a NATIVE library's
+# exports too, not just a pure-Scheme one -- see that file's own
+# comment), EXCEPT bootstrap_spec.scm's one remaining, harmless
+# environment-artifact case -- explained in that file's own header
+# comment, NOT a regression.
 # This target still propagates failure (so a REGRESSION -- a NEW failure
 # beyond today's known baseline -- doesn't go unnoticed), but a nonzero
 # exit here isn't automatically a problem; check which specific case
