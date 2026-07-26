@@ -911,9 +911,12 @@
     ;; vector of the clause's own datums, same op + same const shape
     ;; bytecode_compiler.cr's own compile_case_clauses emits) + TestFalse,
     ;; the same jump shape as an ordinary cond clause; the else clause (if
-    ;; present) is unconditional at the end; a => clause calls its proc on
-    ;; the KEY's own value (key-reg), per R7RS, exactly like compile-cond!'s
-    ;; own => handling calls it on the test's value.
+    ;; present) is unconditional at the end; a => clause (on an ordinary
+    ;; clause OR the else clause -- R7RS allows both, and native's own
+    ;; compile_case_result handles the arrow uniformly regardless of
+    ;; clause.els?) calls its proc on the KEY's own value (key-reg), per
+    ;; R7RS, exactly like compile-cond!'s own => handling calls it on the
+    ;; test's value.
     ;;
     ;; Only the LINEAR path -- Crystal's own >=8-hashable-datum
     ;; Op::CaseDispatch hash-table fast path (compile_case_hash_dispatch)
@@ -935,7 +938,9 @@
                  (body (cdr clause))
                  (ch (fcomp-chunk fc)))
             (if (eq? test 'else)
-                (compile-scoped-body! fc body dest tail?)
+                (if (and (pair? body) (eq? (car body) '=>))
+                    (compile-arrow-call! fc (cadr body) key-reg dest tail?)
+                    (compile-scoped-body! fc body dest tail?))
                 (let* ((mark (fcomp-next-reg fc))
                        (match-reg (fcomp-alloc-reg! fc))
                        (datums-const (chunk-add-const! ch (list->vector test))))
