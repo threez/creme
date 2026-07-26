@@ -54,6 +54,14 @@ creme-spec:
 # comment), EXCEPT bootstrap_spec.scm's one remaining, harmless
 # environment-artifact case -- explained in that file's own header
 # comment, NOT a regression.
+#
+# reader_native_spec.scm is deliberately excluded -- see its own header
+# comment: (creme reader)'s lex-tokens/tokens->forms are native-Crystal-
+# only, with no pure-Scheme .sld fallback and no cvm C equivalent at all
+# (unlike the numeric-tower case above, this isn't something a future fix
+# could realistically close -- it's exposing native Crystal's own lexer/
+# reader internals directly).
+#
 # This target still propagates failure (so a REGRESSION -- a NEW failure
 # beyond today's known baseline -- doesn't go unnoticed), but a nonzero
 # exit here isn't automatically a problem; check which specific case
@@ -63,6 +71,9 @@ creme-spec-cvm:
 	./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc
 	@status=0; \
 	for f in spec/creme/*_spec.scm; do \
+		case "$$f" in \
+			*reader_native_spec.scm) continue ;; \
+		esac; \
 		echo "== $$f =="; \
 		./cvm/cvm "$$f" || status=1; \
 	done; \
