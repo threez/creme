@@ -6,7 +6,8 @@
 ;; the SAME program, and rejecting a non-top-level import -- see modules/
 ;; creme/spec.sld's own header comment for the framework this uses, and
 ;; compiler_spec.scm's own header comment for the general should-match-
-;; native? approach.
+;; native? approach (source is a quoted list of forms here, not a string
+;; -- see spec-helper's own header comment on why either works).
 ;;
 ;; Run with:
 ;;   ./bin/creme spec/creme/compiler_libraries_spec.scm
@@ -32,17 +33,39 @@
 (describe "pure-Scheme file-based libraries"
   (it "loads a defmacro-exporting library (creme dao) via the self-hosted loader"
     (should-match-native?
-      "(import (scheme base) (creme sql) (creme dao)) (define conn (sql-open \":memory:\")) (define-dao todo conn (id integer primary-key auto-increment) (title text not-null) (done bool not-null (default #f))) (todo-create! 'title \"hello\" 'done #f) (define result (todo-all)) (sql-close conn) result"))
+      '((import (scheme base) (creme sql) (creme dao))
+        (define conn (sql-open ":memory:"))
+        (define-dao todo conn
+          (id integer primary-key auto-increment)
+          (title text not-null)
+          (done bool not-null (default #f)))
+        (todo-create! 'title "hello" 'done #f)
+        (define result (todo-all))
+        (sql-close conn)
+        result)))
 
   (it "expands an imported defmacro (sxql-select!) from (creme sxql)"
     (should-match-native?
-      "(import (creme sql) (creme sxql)) (define conn (sql-open \":memory:\")) (sql-execute conn \"CREATE TABLE sale (region TEXT, amount REAL)\") (sql-execute conn \"INSERT INTO sale (region, amount) VALUES ('north', 120.0)\") (sql-execute conn \"INSERT INTO sale (region, amount) VALUES ('north', 80.0)\") (sql-execute conn \"INSERT INTO sale (region, amount) VALUES ('south', 45.0)\") (define result (map (lambda (row) (cdr (assoc ':amount row))) (sxql-select! conn (:amount) (from :sale) (where (:= :region \"north\")) (order-by (:desc :amount))))) (sql-close conn) result"))
+      '((import (creme sql) (creme sxql))
+        (define conn (sql-open ":memory:"))
+        (sql-execute conn "CREATE TABLE sale (region TEXT, amount REAL)")
+        (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('north', 120.0)")
+        (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('north', 80.0)")
+        (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('south', 45.0)")
+        (define result
+          (map (lambda (row) (cdr (assoc ':amount row)))
+               (sxql-select! conn (:amount)
+                 (from :sale)
+                 (where (:= :region "north"))
+                 (order-by (:desc :amount)))))
+        (sql-close conn)
+        result)))
 
   (it "honors a prefix import-set filter against a pure-Scheme library"
-    (should-match-native? "(import (prefix (creme extra) extra:)) (extra:filter odd? '(1 2 3 4 5))"))
+    (should-match-native? '((import (prefix (creme extra) extra:)) (extra:filter odd? '(1 2 3 4 5)))))
 
   (it "honors a rename import-set filter against a pure-Scheme library"
-    (should-match-native? "(import (rename (creme extra) (filter my-filter))) (my-filter odd? '(1 2 3 4 5))"))
+    (should-match-native? '((import (rename (creme extra) (filter my-filter))) (my-filter odd? '(1 2 3 4 5)))))
 
   ;; compile-source-to-bytes compiles a WHOLE program up front, before any
   ;; of it runs -- so compile-import!'s eager compile-time import! (there
@@ -57,12 +80,18 @@
   ;; which this mirrors.
   (it "imports a library file written by an earlier form in the same program"
     (should-match-native?
-      "(import (creme file)) (file-write \"./modules/compiler-spec-generated.sld\" \"(define-library (compiler-spec-generated) (export greet) (import (scheme base)) (begin (define (greet name) (string-append \\\"hi \\\" name))))\") (import (compiler-spec-generated)) (define result (greet \"Ada\")) (delete-file \"./modules/compiler-spec-generated.sld\") result"))
+      '((import (creme file))
+        (file-write "./modules/compiler-spec-generated.sld"
+          "(define-library (compiler-spec-generated) (export greet) (import (scheme base)) (begin (define (greet name) (string-append \"hi \" name))))")
+        (import (compiler-spec-generated))
+        (define result (greet "Ada"))
+        (delete-file "./modules/compiler-spec-generated.sld")
+        result)))
 
   (it "compiles a self-recursive named-let loop over 200000 iterations without overflowing"
-    (should-match-native? "(let loop ((i 0) (acc 0)) (if (= i 200000) acc (loop (+ i 1) (+ acc i))))"))
+    (should-match-native? '((let loop ((i 0) (acc 0)) (if (= i 200000) acc (loop (+ i 1) (+ acc i)))))))
 
   (it "rejects a non-top-level import"
-    (should-raise? (lambda () (compile-source-to-bytes "(define (f) (import (creme regex)) 1) (f)")))))
+    (should-raise? (lambda () (compile-program '((define (f) (import (creme regex)) 1) (f)))))))
 
 (spec-summary!)

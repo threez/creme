@@ -4,7 +4,9 @@
 ;; -- see modules/creme/spec.sld's own header comment for the framework
 ;; this uses, and compiler_spec.scm's own header comment for the general
 ;; approach (should-match-native? compares the self-hosted compiler's
-;; output against plain native evaluation of the same source).
+;; output against plain native evaluation of the same source; source is
+;; a quoted list of forms here, not a string -- see spec-helper's own
+;; header comment on why either works).
 ;;
 ;; Also covers fusion suppression after a fusable primitive is redefined
 ;; (compiler_spec.cr's own "suppresses fusion after a top-level/set!
@@ -25,11 +27,17 @@
 
 (describe "a local defmacro (not define-syntax/syntax-rules) matches native evaluation"
   (it "my-swap! swaps two variables via a synthesized temporary name"
-    (should-match-native? "(defmacro my-swap! (a b) (list 'let (list (list 'tmp a)) (list 'set! a b) (list 'set! b 'tmp))) (define x 1) (define y 2) (my-swap! x y) (list x y)"))
+    (should-match-native?
+      '((defmacro my-swap! (a b) (list 'let (list (list 'tmp a)) (list 'set! a b) (list 'set! b 'tmp)))
+        (define x 1) (define y 2) (my-swap! x y) (list x y))))
   (it "my-list-of ignores its first argument and lists the rest"
-    (should-match-native? "(defmacro my-list-of (n . items) (cons 'list items)) (my-list-of 3 1 2 3)"))
+    (should-match-native?
+      '((defmacro my-list-of (n . items) (cons 'list items))
+        (my-list-of 3 1 2 3))))
   (it "my-when expands into an if with a begin body"
-    (should-match-native? "(defmacro my-when (test . body) (list 'if test (cons 'begin body))) (list (my-when (> 2 1) 'yes) (my-when (> 1 2) 'yes))")))
+    (should-match-native?
+      '((defmacro my-when (test . body) (list 'if test (cons 'begin body)))
+        (list (my-when (> 2 1) 'yes) (my-when (> 1 2) 'yes))))))
 
 ;; NOTE: unlike compiler_spec.cr's own check() (which gives native_eval a
 ;; BRAND NEW Scheme::Interpreter -- fresh global table -- on every single
@@ -54,10 +62,14 @@
 ;; mutate the shared global `+`/`car` for the rest of this process.
 (describe "primitive-fusion suppression after redefinition"
   (it "a top-level redefinition of + suppresses fusion for later calls"
-    (should-equal? (write-to-string (bootstrap-eval "(define (my-plus a b) (list 'sum a b)) (define + my-plus) (+ 1 2)"))
-                   "(sum 1 2)"))
+    (should-equal?
+      (write-to-string
+        (bootstrap-eval-forms '((define (my-plus a b) (list 'sum a b)) (define + my-plus) (+ 1 2))))
+      "(sum 1 2)"))
   (it "a set!-redefinition of car suppresses fusion for later calls"
-    (should-equal? (write-to-string (bootstrap-eval "(define orig-car car) (set! car (lambda (p) (list 'wrapped (orig-car p)))) (car (cons 1 2))"))
-                   "(wrapped 1)")))
+    (should-equal?
+      (write-to-string
+        (bootstrap-eval-forms '((define orig-car car) (set! car (lambda (p) (list 'wrapped (orig-car p)))) (car (cons 1 2)))))
+      "(wrapped 1)")))
 
 (spec-summary!)

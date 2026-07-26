@@ -23,7 +23,18 @@
 ;;                                 consider interchangeable even when they
 ;;                                 print identically) -- this is the one
 ;;                                 call most spec/creme/compiler_*.scm
-;;                                 cases make.
+;;                                 cases make. `src` is either a STRING
+;;                                 (read+compiled via compile-source-to-
+;;                                 bytes, exercising the reader too) or a
+;;                                 quoted LIST OF FORMS (compiled directly
+;;                                 via compile-program, skipping the
+;;                                 reader) -- pass whichever a given case
+;;                                 reads more naturally; a list needs no
+;;                                 `\"`-escaping for embedded strings and
+;;                                 allows ordinary multi-line formatting,
+;;                                 a string is occasionally more direct
+;;                                 for source built up dynamically (e.g.
+;;                                 via string-append).
 ;;   (read-all-native src)     -> every top-level form in src, read by the
 ;;                                 native reader -- the "native" side for
 ;;                                 a test that checks the self-hosted
@@ -64,8 +75,9 @@
 
 (define-library (creme compiler spec-helper)
   (export bootstrap-eval native-eval write-to-string should-match-native?
+          bootstrap-eval-forms native-eval-forms
           read-all-native library-body-source
-          compile-source-to-bytes load-chunk-bytes read-program)
+          compile-source-to-bytes load-chunk-bytes read-program compile-program chunk->bytes)
   (import (scheme base) (scheme write) (scheme read) (scheme eval) (scheme lazy)
           (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
           (creme compiler reader) (creme compiler compiler)
@@ -87,8 +99,19 @@
     (define (bootstrap-eval src)
       (load-chunk-bytes (compile-source-to-bytes src)))
 
+    (define (native-eval-forms forms)
+      (let loop ((fs forms) (result (if #f #f)))
+        (if (null? fs)
+            result
+            (loop (cdr fs) (eval (car fs))))))
+
+    (define (bootstrap-eval-forms forms)
+      (load-chunk-bytes (chunk->bytes (compile-program forms))))
+
     (define (should-match-native? src)
-      (should-equal? (write-to-string (bootstrap-eval src)) (write-to-string (native-eval src))))
+      (if (string? src)
+          (should-equal? (write-to-string (bootstrap-eval src)) (write-to-string (native-eval src)))
+          (should-equal? (write-to-string (bootstrap-eval-forms src)) (write-to-string (native-eval-forms src)))))
 
     (define (read-all-native src)
       (let ((in (open-input-string src)))
