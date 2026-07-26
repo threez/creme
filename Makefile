@@ -1,4 +1,4 @@
-.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-cvm scheme-spec bench version tag
+.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-cvm bench version tag
 
 UNAME_M != uname -m
 NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
@@ -24,13 +24,20 @@ spec: $(NEON_OBJ)
 # based tests, written and run entirely in Scheme (see modules/creme/
 # spec.sld) -- through bin/creme, failing the whole target if any one
 # file's own process exits non-zero (each file calls (spec-summary!) as
-# its last form, which itself does that per-file exit).
+# its last form, which itself does that per-file exit). Then also runs
+# creme-spec-cvm (cvm's own standalone C11 VM, see that target's own
+# comment) unconditionally, not as a prerequisite (`creme-spec:
+# creme-spec-cvm` would let a failure in one skip the other's own
+# result) -- so this one target covers both backends this project
+# actually ships (see cvm/README.md's own framing) in a single command,
+# and one backend's failure never hides the other's.
 creme-spec:
 	@status=0; \
 	for f in spec/creme/*_spec.scm; do \
 		echo "== $$f =="; \
 		./bin/creme "$$f" || status=1; \
 	done; \
+	$(MAKE) creme-spec-cvm || status=1; \
 	exit $$status
 
 # Run-only: assumes bin/creme and cvm/cvm are already built (`make -C
@@ -77,24 +84,6 @@ creme-spec-cvm:
 		echo "== $$f =="; \
 		./cvm/cvm "$$f" || status=1; \
 	done; \
-	exit $$status
-
-# Run-only: runs spec/creme's own suite under BOTH backends this project
-# actually ships (native Crystal, via creme-spec, and cvm's standalone C11
-# VM, via creme-spec-cvm) in one command -- convenient for a full check
-# before committing, without needing to remember/type both target names
-# separately. Deliberately NOT --self-hosted (native Crystal compiler +
-# self-hosted Scheme compiler + native Crystal VM) -- that's a third,
-# useful-for-debugging-the-compiler-itself combination, not one of this
-# project's two actual "ways to run a program" (see cvm/README.md's own
-# framing), so it stays a manual sweep rather than a Makefile target. Runs
-# both unconditionally (not `creme-spec creme-spec-cvm` as prerequisites,
-# which would let a `creme-spec` failure skip `creme-spec-cvm` entirely) so
-# one backend's failure never hides the other's own result.
-scheme-spec:
-	@status=0; \
-	$(MAKE) creme-spec || status=1; \
-	$(MAKE) creme-spec-cvm || status=1; \
 	exit $$status
 
 # Run-only: assumes bin/creme is already built (shards build --release
