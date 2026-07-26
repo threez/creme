@@ -104,14 +104,16 @@ static Value resolve_builtin_const(VM *vm, const char *name, int len) {
 /* General recursive datum reader (mirrors ChunkSerializer's write_datum) —
  * used both for an ordinary chunk const and for a QQ_CONST template node's
  * own literal-fragment payload (e.g. the `(b c)` in `` `(a (b c) ,d) ``).
- * TAG_RATIONAL/TAG_COMPLEX parse-and-skip their bytes correctly (so later
- * constants/sections stay aligned) but store a v_nil() placeholder — cvm
- * has no rational/complex value kind yet (tracked as follow-up work);
- * arithmetic on one of these would need to exist before that placeholder
- * could ever legitimately reach an opcode handler anyway. TAG_BLOB builds a
- * real Bytevector (see value.h). Pairs/vectors/bytevectors built here are
- * GC_MALLOC'd like every other heap value, even though `vm` itself isn't
- * needed for those cases (only TAG_BUILTIN's by-name lookup needs it). */
+ * TAG_RATIONAL/TAG_COMPLEX build real T_RATIONAL/T_COMPLEX Values (see
+ * value.h) via the same make_rational_from_mpq/make_complex construction
+ * path vm.c's own arithmetic uses — modules/creme/bytecode.sld's
+ * write-datum! always emits a rational's numerator/denominator already
+ * reduced to lowest terms as plain i64s (SchemeRational/T_RATIONAL's own
+ * invariant), so this never needs GMP's bignum path itself, just wrapping
+ * them back into an mpq_t. TAG_BLOB builds a real Bytevector (see
+ * value.h). Pairs/vectors/bytevectors built here are GC_MALLOC'd like
+ * every other heap value, even though `vm` itself isn't needed for those
+ * cases (only TAG_BUILTIN's by-name lookup needs it). */
 static Value read_datum(Reader *r, VM *vm) {
   unsigned char tag = read_u8(r);
   switch (tag) {
@@ -119,14 +121,21 @@ static Value read_datum(Reader *r, VM *vm) {
     return v_int(read_i64(r));
   case TAG_FLOAT:
     return v_float(read_f64(r));
-  case TAG_RATIONAL:
-    (void)read_i64(r); /* numerator */
-    (void)read_i64(r); /* denominator */
-    return v_nil();
-  case TAG_COMPLEX:
-    (void)read_datum(r, vm); /* real */
-    (void)read_datum(r, vm); /* imag */
-    return v_nil();
+  case TAG_RATIONAL: {
+    int64_t num = read_i64(r);
+    int64_t den = read_i64(r);
+    mpq_t q;
+    mpq_init(q);
+    mpq_set_si(q, (long)num, (unsigned long)den);
+    Value result = make_rational_from_mpq(q);
+    mpq_clear(q);
+    return result;
+  }
+  case TAG_COMPLEX: {
+    Value real = read_datum(r, vm);
+    Value imag = read_datum(r, vm);
+    return make_complex(real, imag);
+  }
   case TAG_SYM: {
     int len = read_i32(r);
     char *s = read_bytes(r, len);

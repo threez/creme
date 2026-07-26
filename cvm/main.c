@@ -56,6 +56,29 @@ static int is_scb1_file(const char *path) {
   return n == 4 && memcmp(magic, "SCB1", 4) == 0;
 }
 
+/* Redirects GMP's own allocator (used by T_RATIONAL's mpq_t, value.h) to
+ * Boehm GC -- without this, an mpq_t's internal limb buffers would be
+ * malloc'd/realloc'd/freed entirely outside the collector's view: not
+ * scanned (harmless, they hold no pointers) but never reclaimed either
+ * once their owning Rational wrapper becomes unreachable, a slow leak for
+ * any long-running program doing rational arithmetic. `free_func` is
+ * deliberately a no-op: Boehm GC reclaims unreachable GC_MALLOC'd memory
+ * on its own, so there's nothing for an explicit free to do (and GMP's own
+ * free calls happen at points -- e.g. mpq_clear -- where the memory may
+ * still be referenced by a Value the collector can see, so actually
+ * freeing it here would be unsafe). Must run before ANY mpq_init anywhere
+ * in the process (GMP has no per-instance allocator, only this one
+ * process-wide setting), so this is the very first thing after GC_INIT(). */
+static void *gmp_gc_alloc(size_t size) { return GC_MALLOC(size); }
+static void *gmp_gc_realloc(void *ptr, size_t old_size, size_t new_size) {
+  (void)old_size;
+  return GC_REALLOC(ptr, new_size);
+}
+static void gmp_gc_free(void *ptr, size_t size) {
+  (void)ptr;
+  (void)size;
+}
+
 int main(int argc, char **argv) {
   int profile = 0;
   const char *path = NULL;
@@ -75,6 +98,7 @@ int main(int argc, char **argv) {
   }
 
   GC_INIT();
+  mp_set_memory_functions(gmp_gc_alloc, gmp_gc_realloc, gmp_gc_free);
   /* GC_MALLOC, not calloc -- so the collector's mark phase can find and
    * scan `stack`/`frames` itself (see vm.h's own VM struct doc comment for
    * why a plain malloc'd VM would make everything reachable only through a

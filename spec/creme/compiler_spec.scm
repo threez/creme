@@ -180,12 +180,11 @@
           (list (f 1) (f 1 2) (f 1 2 3 4))))))
 
   ;; Rationals/complex numbers are covered by spec/creme/
-  ;; compiler_numeric_tower_spec.scm, split out specifically because cvm
-  ;; has no rational/complex support at all (see that file's own header
-  ;; comment) -- keeping that one case in THIS file would abort compiling
-  ;; the entire rest of it under `cvm` (compile-program compiles a whole
-  ;; script as one upfront chunk, so one unparseable literal anywhere
-  ;; blocks everything else in the same file).
+  ;; compiler_numeric_tower_spec.scm (kept in its own file even now that
+  ;; cvm supports both, per that file's own header comment -- a future,
+  ;; still-unsupported literal would have the same whole-file-aborts-
+  ;; under-cvm failure mode, since compile-program compiles a whole
+  ;; script as one upfront chunk).
   (describe "numeric and bytevector literals"
     (it "flonums and division"
       (should-match-native? '((list 3.14 -2.5 1e10 (/ 1.0 3))))))

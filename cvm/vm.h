@@ -264,11 +264,23 @@ double as_double(Value v, const char *who);
 Value num_add(Value x, Value y);
 Value num_sub(Value x, Value y);
 Value num_mul(Value x, Value y);
+Value num_div(Value x, Value y);
 int num_lt(Value x, Value y);
 int num_le(Value x, Value y);
 int num_gt(Value x, Value y);
 int num_ge(Value x, Value y);
 int num_eq(Value x, Value y);
+/* Canonicalizes `q` (lowest terms, positive denominator) and collapses to
+ * a plain T_INT when the denominator is 1 -- the ONE construction path
+ * every T_RATIONAL Value goes through (see value.h's Rational doc
+ * comment). Aborts if the collapsed integer doesn't fit an int64_t (this
+ * prototype has no bignum T_INT to fall back to). Does NOT take ownership
+ * of/clear `q` -- callers still own their own local mpq_t. */
+Value make_rational_from_mpq(mpq_t q);
+/* Collapses to `real` when `imag` is an exact (T_INT) zero, mirroring
+ * SchemeComplex.make exactly (a T_RATIONAL is never itself zero, see
+ * value.h) -- otherwise wraps both in a fresh T_COMPLEX. */
+Value make_complex(Value real, Value imag);
 void cvm_set_current_vm(VM *vm);
 Value cvm_make_condition(VM *vm, const char *msg, size_t msglen, Value irritants);
 int cvm_is_condition(VM *vm, Value v);

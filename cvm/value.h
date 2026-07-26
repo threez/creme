@@ -1,18 +1,26 @@
 /* Value model for the cvm prototype — see cvm/README.md for full scope.
  *
- * Deliberately NOT what a general Scheme VM would need: fixnums (int64_t) +
- * doubles only (no bignum/rational/complex — this bench never overflows
- * int64), plain-tagged struct (not NaN-boxed) for debuggability. Every heap
- * object (pairs, vectors, closures, upvalues, output-string ports, the
- * program's own Chunk tree) is allocated via Boehm GC (GC_MALLOC/
- * GC_REALLOC — the same collector Crystal itself uses) rather than a
- * custom allocator, so a long-running program (an HTTP server, not just a
- * one-shot benchmark) doesn't grow unbounded. */
+ * Deliberately NOT what a general Scheme VM would need: fixnums are plain
+ * int64_t (no bignum promotion — an overflowing add/sub/mul still aborts,
+ * see vm.c's num_add/num_sub/num_mul), plain-tagged struct (not NaN-boxed) for
+ * debuggability. Rationals (T_RATIONAL, below) ARE arbitrary-precision,
+ * backed by GMP's mpq_t — a narrower addition than a full numeric tower,
+ * added specifically because spec/creme's own reader/compiler literal
+ * tests need real exact rationals and complex numbers to exist at all (see
+ * cvm/README.md's "numeric tower" note for exactly what this does and
+ * doesn't cover — plain T_INT is still fixnum-only). Every heap object
+ * (pairs, vectors, closures, upvalues, output-string ports, the program's
+ * own Chunk tree, T_RATIONAL/T_COMPLEX's own wrapper structs) is allocated
+ * via Boehm GC (GC_MALLOC/GC_REALLOC — the same collector Crystal itself
+ * uses) rather than a custom allocator, so a long-running program (an HTTP
+ * server, not just a one-shot benchmark) doesn't grow unbounded. */
 #ifndef CVM_VALUE_H
 #define CVM_VALUE_H
 
 #include <setjmp.h>
 #include <stdint.h>
+
+#include <gmp.h>
 
 typedef enum {
   T_NIL,
@@ -100,6 +108,17 @@ typedef enum {
              * re-enterable continuation (no stack copying/CPS here, a
              * deliberate prototype-scope cut; invoking one again after
              * its own call/cc has already returned is undefined). */
+  T_RATIONAL, /* an exact rational in lowest terms, arbitrary-precision
+             * numerator/denominator via GMP's mpq_t (Rational, below) --
+             * NEVER an integer or zero (vm.c's make_rational_from_mpq
+             * collapses den==1 to a plain T_INT before a T_RATIONAL Value
+             * is ever constructed, mirroring SchemeRational.make exactly,
+             * see rational.cr). */
+  T_COMPLEX,  /* real+imaginary, each itself a T_INT/T_RATIONAL/T_FLOAT
+             * Value (Complex, below) -- NEVER a nested T_COMPLEX, and NEVER
+             * constructed with an exact-zero imaginary part (vm.c's
+             * make_complex collapses that case back to the bare real
+             * Value), mirroring SchemeComplex.make exactly (complex.cr). */
 } Tag;
 
 /* RecordCallable kinds -- mirrors the real interpreter's split between an
@@ -137,6 +156,8 @@ typedef struct SchemeRecord SchemeRecord;
 typedef struct RecordCallable RecordCallable;
 typedef struct Parameter Parameter;
 typedef struct Continuation Continuation;
+typedef struct Rational Rational;
+typedef struct Complex Complex;
 typedef struct Upvalue Upvalue;
 typedef struct VM VM;
 
@@ -165,6 +186,8 @@ struct Value {
     RecordCallable *record_callable;
     Parameter *parameter;
     Continuation *continuation;
+    Rational *rational;
+    Complex *cplx;
     BuiltinFn builtin;
     struct {
       void *ptr;
@@ -277,6 +300,32 @@ struct Continuation {
   int depth;
   int unwind_mark;
   Value result;
+};
+
+/* An arbitrary-precision exact rational, backed by GMP's mpq_t -- unlike
+ * every other numeric tag here (T_INT is a plain machine int64_t, never
+ * promoted to a bignum on overflow), a rational's OWN numerator/
+ * denominator are arbitrary precision. Always canonicalized (mpq_
+ * canonicalize: lowest terms, positive denominator) and never denominator
+ * 1 -- see vm.c's make_rational_from_mpq for the single construction path
+ * that upholds this. GMP's own allocator is redirected to GC_MALLOC/
+ * GC_REALLOC (with a no-op free -- Boehm GC reclaims unreachable memory on
+ * its own) at process start (main.c's mp_set_memory_functions call), so an
+ * mpq_t's internal limbs are reclaimed the same way as every other heap
+ * value here, never leaked. */
+struct Rational {
+  mpq_t q;
+};
+
+/* R7RS complex -- just two real components, mirrors SchemeComplex exactly
+ * (complex.cr): real/imag are each a T_INT/T_RATIONAL/T_FLOAT Value, never
+ * a nested T_COMPLEX. Only ever constructed via vm.c's make_complex, which
+ * collapses to the bare real Value when imag is an exact zero (matching
+ * SchemeComplex.make's own collapse rule) -- so a genuine T_COMPLEX Value
+ * always has a non-exact-zero imaginary part. */
+struct Complex {
+  Value real;
+  Value imag;
 };
 
 static inline Value v_nil(void) {
@@ -424,6 +473,25 @@ static inline Value v_continuation(Continuation *k) {
   Value v;
   v.tag = T_CONTINUATION;
   v.as.continuation = k;
+  return v;
+}
+
+/* Raw wrap only -- no reduce-to-lowest-terms/collapse-to-int logic here
+ * (that's vm.c's make_rational_from_mpq's job); callers elsewhere should
+ * always go through that, not construct a T_RATIONAL directly. */
+static inline Value v_rational(Rational *r) {
+  Value v;
+  v.tag = T_RATIONAL;
+  v.as.rational = r;
+  return v;
+}
+
+/* Raw wrap only -- no exact-zero-imaginary collapse here (that's vm.c's
+ * make_complex's job); callers elsewhere should always go through that. */
+static inline Value v_complex(Complex *c) {
+  Value v;
+  v.tag = T_COMPLEX;
+  v.as.cplx = c;
   return v;
 }
 

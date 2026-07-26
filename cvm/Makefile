@@ -29,17 +29,24 @@ GC_LIBS := $(shell pkg-config --libs bdw-gc 2>/dev/null || echo -lgc)
 PCRE2_CFLAGS := $(shell pkg-config --cflags libpcre2-8 2>/dev/null)
 PCRE2_LIBS := $(shell pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8)
 
+# GMP -- backs T_RATIONAL's arbitrary-precision mpq_t (value.h); see
+# builtins.c's num_add/num_div/etc. and main.c's mp_set_memory_functions
+# call (redirects GMP's own allocator to GC_MALLOC/GC_REALLOC so an mpq_t's
+# limbs are reclaimed by the same Boehm GC as everything else here).
+GMP_CFLAGS := $(shell pkg-config --cflags gmp 2>/dev/null)
+GMP_LIBS := $(shell pkg-config --libs gmp 2>/dev/null || echo -lgmp)
+
 # -g -fno-omit-frame-pointer: not for debugging per se, but so --profile's
 # SIGPROF sampler (backtrace(3)/dladdr(3) in profiler.c) gets meaningful
 # symbol names/unwinding instead of a wall of bare addresses.
 CFLAGS ?= -std=c11 -O2 -g -fno-omit-frame-pointer -Wall -Wextra -Wno-missing-field-initializers \
           -I$(FIO_LIB) -I$(FIO_LIB)/fiobj -I$(FIO_LIB)/http -I$(FIO_LIB)/http/parsers \
-          $(GC_CFLAGS) $(PCRE2_CFLAGS)
+          $(GC_CFLAGS) $(PCRE2_CFLAGS) $(GMP_CFLAGS)
 # -rdynamic: exports the executable's own (non-imported) symbols into its
 # dynamic symbol table so dladdr(3) can resolve them on Linux/glibc — a no-op
 # on Darwin, where dladdr already sees the main binary's local symbol table.
 LDFLAGS ?= -rdynamic
-LDLIBS := -lm -lpthread -lsqlite3 $(GC_LIBS) $(PCRE2_LIBS)
+LDLIBS := -lm -lpthread -lsqlite3 $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS)
 
 SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c
 OBJS = $(SRCS:.c=.o)

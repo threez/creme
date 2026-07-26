@@ -124,15 +124,103 @@ void cvm_register_builtin(VM *vm, const char *name, BuiltinFn fn) {
   vm->globals[slot].bound = 1;
 }
 
-/* ---- numeric fallback: fixnum-or-double promotion, mirroring
- * Interpreter#num_add/num_sub's role in vm.cr's Add/Sub arms, minus the
- * bignum/rational/complex tower (this bench never needs it — see
- * cvm/README.md's "numeric tower" note). ---- */
+/* ---- numeric fallback: fixnum-or-double-or-rational-or-complex promotion,
+ * mirroring Interpreter#num_add/num_sub/divide's own rank-based promotion
+ * (builtin_helpers.cr's num_rank/num_binop3: int < rational < float, with
+ * complex checked first and short-circuiting to a component-wise op on
+ * both sides promoted to complex) -- see value.h's own header comment on
+ * what's still NOT here (T_INT itself never becomes a bignum on
+ * overflow). ---- */
 double as_double(Value v, const char *who) {
   if (v.tag == T_INT) return (double)v.as.i;
   if (v.tag == T_FLOAT) return v.as.f;
-  cvm_abort("%s: not a number", who);
+  if (v.tag == T_RATIONAL) return mpq_get_d(v.as.rational->q);
+  cvm_abort("%s: not a real number", who);
   return 0.0; /* unreachable */
+}
+
+/* Fills `out` with an exact mpq_t representation of `v` -- T_INT as n/1,
+ * T_RATIONAL as itself. Aborts for anything else (float/complex): every
+ * call site here already checked both operands are exact (T_INT/
+ * T_RATIONAL) before reaching this, so hitting the abort would mean a
+ * dispatch bug upstream, not a normal user-facing error path. */
+static void value_to_mpq(Value v, mpq_t out) {
+  if (v.tag == T_INT) {
+    mpq_set_si(out, (long)v.as.i, 1);
+  } else if (v.tag == T_RATIONAL) {
+    mpq_set(out, v.as.rational->q);
+  } else {
+    cvm_abort("cvm: value_to_mpq called on a non-exact value (internal dispatch bug)");
+  }
+}
+
+Value make_rational_from_mpq(mpq_t q) {
+  mpq_canonicalize(q);
+  if (mpz_cmp_ui(mpq_denref(q), 1) == 0) {
+    /* mpz_fits_slong_p/mpz_get_si operate on C `long` -- on this project's
+     * only target (Linux/LP64, see cvm/Makefile), that's 64 bits, matching
+     * T_INT's own int64_t exactly. */
+    if (!mpz_fits_slong_p(mpq_numref(q))) {
+      cvm_abort("cvm: rational collapsed to an integer too large for this prototype's fixnum-only int type (bignum ints not implemented)");
+    }
+    return v_int((int64_t)mpz_get_si(mpq_numref(q)));
+  }
+  Rational *r = GC_MALLOC(sizeof(Rational));
+  mpq_init(r->q);
+  mpq_set(r->q, q);
+  return v_rational(r);
+}
+
+Value make_complex(Value real, Value imag) {
+  if (imag.tag == T_INT && imag.as.i == 0) return real;
+  Complex *c = GC_MALLOC(sizeof(Complex));
+  c->real = real;
+  c->imag = imag;
+  return v_complex(c);
+}
+
+/* Wraps a bare real Value as a zero-imaginary complex WITHOUT the
+ * exact-zero collapse make_complex does -- mirrors to_complex/
+ * SchemeComplex.wrap (builtin_helpers.cr/complex.cr) exactly: used only to
+ * promote one side of a mixed real/complex op so both sides can go
+ * through the same component-wise complex_add/sub/mul/div, which then
+ * calls make_complex (WITH collapse) on the final result. */
+static Value to_complex_value(Value v) {
+  if (v.tag == T_COMPLEX) return v;
+  Complex *c = GC_MALLOC(sizeof(Complex));
+  c->real = v;
+  c->imag = v_int(0);
+  return v_complex(c);
+}
+
+static Value complex_add(Value a, Value b) {
+  Complex *ca = a.as.cplx, *cb = b.as.cplx;
+  return make_complex(num_add(ca->real, cb->real), num_add(ca->imag, cb->imag));
+}
+
+static Value complex_sub(Value a, Value b) {
+  Complex *ca = a.as.cplx, *cb = b.as.cplx;
+  return make_complex(num_sub(ca->real, cb->real), num_sub(ca->imag, cb->imag));
+}
+
+static Value complex_mul(Value a, Value b) {
+  Complex *ca = a.as.cplx, *cb = b.as.cplx;
+  Value real = num_sub(num_mul(ca->real, cb->real), num_mul(ca->imag, cb->imag));
+  Value imag = num_add(num_mul(ca->real, cb->imag), num_mul(ca->imag, cb->real));
+  return make_complex(real, imag);
+}
+
+/* ALWAYS produces a float-valued result, even for two exact-only complex
+ * operands -- mirrors complex_div (builtin_helpers.cr) exactly, a real,
+ * slightly-inconsistent-with-the-rest-of-the-tower quirk of the native
+ * implementation this replicates rather than "fixes". */
+static Value complex_div(Value a, Value b) {
+  Complex *ca = a.as.cplx, *cb = b.as.cplx;
+  double ar = as_double(ca->real, "/"), ai = as_double(ca->imag, "/");
+  double br = as_double(cb->real, "/"), bi = as_double(cb->imag, "/");
+  double denom = br * br + bi * bi;
+  if (denom == 0.0) cvm_abort("/: division by zero");
+  return make_complex(v_float((ar * br + ai * bi) / denom), v_float((ai * br - ar * bi) / denom));
 }
 
 Value num_add(Value x, Value y) {
@@ -142,6 +230,22 @@ Value num_add(Value x, Value y) {
       cvm_abort("+: integer overflow (bignum fallback not implemented in this prototype)");
     }
     return v_int(r);
+  }
+  if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_add(to_complex_value(x), to_complex_value(y));
+  if (x.tag == T_FLOAT || y.tag == T_FLOAT) return v_float(as_double(x, "+") + as_double(y, "+"));
+  if (x.tag == T_RATIONAL || y.tag == T_RATIONAL) {
+    mpq_t qx, qy, qr;
+    mpq_init(qx);
+    mpq_init(qy);
+    mpq_init(qr);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    mpq_add(qr, qx, qy);
+    Value result = make_rational_from_mpq(qr);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    mpq_clear(qr);
+    return result;
   }
   return v_float(as_double(x, "+") + as_double(y, "+"));
 }
@@ -154,6 +258,22 @@ Value num_sub(Value x, Value y) {
     }
     return v_int(r);
   }
+  if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_sub(to_complex_value(x), to_complex_value(y));
+  if (x.tag == T_FLOAT || y.tag == T_FLOAT) return v_float(as_double(x, "-") - as_double(y, "-"));
+  if (x.tag == T_RATIONAL || y.tag == T_RATIONAL) {
+    mpq_t qx, qy, qr;
+    mpq_init(qx);
+    mpq_init(qy);
+    mpq_init(qr);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    mpq_sub(qr, qx, qy);
+    Value result = make_rational_from_mpq(qr);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    mpq_clear(qr);
+    return result;
+  }
   return v_float(as_double(x, "-") - as_double(y, "-"));
 }
 
@@ -165,31 +285,141 @@ Value num_mul(Value x, Value y) {
     }
     return v_int(r);
   }
+  if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_mul(to_complex_value(x), to_complex_value(y));
+  if (x.tag == T_FLOAT || y.tag == T_FLOAT) return v_float(as_double(x, "*") * as_double(y, "*"));
+  if (x.tag == T_RATIONAL || y.tag == T_RATIONAL) {
+    mpq_t qx, qy, qr;
+    mpq_init(qx);
+    mpq_init(qy);
+    mpq_init(qr);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    mpq_mul(qr, qx, qy);
+    Value result = make_rational_from_mpq(qr);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    mpq_clear(qr);
+    return result;
+  }
   return v_float(as_double(x, "*") * as_double(y, "*"));
 }
 
+/* Unlike add/sub/mul, `/` is not fused into its own dedicated bytecode op (see
+ * bi_slash's own header comment in builtins.c on why it's always an
+ * ordinary CallGlobal) -- this is still exposed the same way as num_add/
+ * num_sub/num_mul (declared in vm.h) so bi_slash can fold nargs>2 calls
+ * through it exactly like bi_plus/bi_minus/bi_star already do. */
+Value num_div(Value x, Value y) {
+  if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_div(to_complex_value(x), to_complex_value(y));
+  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+    mpq_t qx, qy, qr;
+    mpq_init(qx);
+    mpq_init(qy);
+    mpq_init(qr);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    if (mpq_sgn(qy) == 0) cvm_abort("/: division by zero");
+    mpq_div(qr, qx, qy);
+    Value result = make_rational_from_mpq(qr);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    mpq_clear(qr);
+    return result;
+  }
+  double dx = as_double(x, "/"), dy = as_double(y, "/");
+  if (dy == 0.0) cvm_abort("/: division by zero");
+  return v_float(dx / dy);
+}
+
+/* Comparisons only ever operate on REAL numbers (R7RS: `<`/`<=`/`>`/`>=`
+ * aren't even defined for complex) -- as_double already aborts on
+ * T_COMPLEX with a clear message, so no explicit complex case is needed
+ * here, matching native's own as_f64-based fallback. */
 int num_lt(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i < y.as.i;
+  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+    mpq_t qx, qy;
+    mpq_init(qx);
+    mpq_init(qy);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    int c = mpq_cmp(qx, qy);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    return c < 0;
+  }
   return as_double(x, "<") < as_double(y, "<");
 }
 
 int num_le(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i <= y.as.i;
+  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+    mpq_t qx, qy;
+    mpq_init(qx);
+    mpq_init(qy);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    int c = mpq_cmp(qx, qy);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    return c <= 0;
+  }
   return as_double(x, "<=") <= as_double(y, "<=");
 }
 
 int num_gt(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i > y.as.i;
+  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+    mpq_t qx, qy;
+    mpq_init(qx);
+    mpq_init(qy);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    int c = mpq_cmp(qx, qy);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    return c > 0;
+  }
   return as_double(x, ">") > as_double(y, ">");
 }
 
 int num_ge(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i >= y.as.i;
+  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+    mpq_t qx, qy;
+    mpq_init(qx);
+    mpq_init(qy);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    int c = mpq_cmp(qx, qy);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    return c >= 0;
+  }
   return as_double(x, ">=") >= as_double(y, ">=");
 }
 
+/* `=` DOES accept complex operands (R7RS) -- checked before the exact/
+ * float real-number paths below, comparing real/imag component-wise
+ * (recursing into num_eq itself, same promotion rules either component
+ * might still need). */
 int num_eq(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i == y.as.i;
+  if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) {
+    Value cx = to_complex_value(x), cy = to_complex_value(y);
+    return num_eq(cx.as.cplx->real, cy.as.cplx->real) && num_eq(cx.as.cplx->imag, cy.as.cplx->imag);
+  }
+  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+    mpq_t qx, qy;
+    mpq_init(qx);
+    mpq_init(qy);
+    value_to_mpq(x, qx);
+    value_to_mpq(y, qy);
+    int eq = mpq_equal(qx, qy);
+    mpq_clear(qx);
+    mpq_clear(qy);
+    return eq;
+  }
   return as_double(x, "=") == as_double(y, "=");
 }
 
@@ -248,6 +478,10 @@ int cvm_eqv(Value a, Value b) {
     return a.as.builtin == b.as.builtin;
   case T_BOX:
     return a.as.box.ptr == b.as.box.ptr;
+  case T_RATIONAL:
+    return mpq_equal(a.as.rational->q, b.as.rational->q);
+  case T_COMPLEX:
+    return cvm_eqv(a.as.cplx->real, b.as.cplx->real) && cvm_eqv(a.as.cplx->imag, b.as.cplx->imag);
   default:
     return 0;
   }

@@ -23,7 +23,9 @@ genuine long-running HTTP CRUD app using SQLite, a real HTTP server, and
 several pure-Scheme libraries, end to end (see "Compatibility with `creme`"
 below for exactly what's covered and the value-model/numeric-tower/
 continuation gaps that remain). It is still not a general Scheme runtime —
-no continuations, no bignum/rational/complex — but the right framing today
+call/cc is escape-only (no multi-shot/re-entrant continuations), and plain
+fixnums are still `int64_t` with no bignum promotion on overflow (only
+rationals, via GMP, are arbitrary-precision) — but the right framing today
 is "a second backend implementing the language's control-flow surface
 faithfully," not "a benchmark-only prototype."
 
@@ -135,13 +137,14 @@ the REPL feature itself:
   straight into an `Add`/`Sub`/etc. op), but the self-hosted compiler
   does no such fusion; anything it compiles calls these as ordinary
   global procedures. Reuse `vm.c`'s own `num_add`/`num_sub`/`num_lt`/…
-  so the semantics (int/float promotion, overflow aborts) are identical
-  to the fused fast-path ops. Also added along the way: `quotient`/
-  `remainder`/`modulo` (needed by `(creme bytecode)`'s own integer
-  encoding), `complex?` (needed by `(creme bytecode)`'s datum-type
-  dispatch — always true for any number cvm has, since there's no
-  genuinely-complex-but-not-real value here), and `string-for-each`
-  (needed by `(creme bytecode)`'s own string-writing helper).
+  so the semantics (int/float/rational/complex promotion, overflow
+  aborts) are identical to the fused fast-path ops. Also added along the
+  way: `quotient`/`remainder`/`modulo` (needed by `(creme bytecode)`'s own
+  integer encoding), `complex?`/`rational?`/`numerator`/`denominator`
+  (needed by `(creme bytecode)`'s own datum-type dispatch when
+  serializing a rational/complex constant — see "numeric tower" below),
+  and `string-for-each` (needed by `(creme bytecode)`'s own string-writing
+  helper).
 
 **Scope (v1)**: one top-level form per line — no multi-line input. A
 paren-balance-based line-accumulation loop is a natural follow-up, not
@@ -281,16 +284,15 @@ pattern matcher) — by checking the wrapped form's own head symbol. `cvm`
 still never expands a `syntax-rules` use directly in C; it bridges out
 to Scheme for that, same as it always did for `defmacro`.
 
-Two categories of `spec/creme` cases still don't pass under `cvm` — each
+Rationals and complex numbers (`compiler_numeric_tower_spec.scm`, the 7
+complex-number cases in `reader_literals_spec.scm`) now work under `cvm`
+too — see "Value/type model"'s `T_RATIONAL`/`T_COMPLEX` entries below for
+what was added and exactly what's still NOT covered (plain fixnums are
+still not arbitrary-precision).
+
+One category of `spec/creme` case still doesn't pass under `cvm` —
 documented in its own file's header comment:
 
-- **No complex/rational number support at all** (`compiler_numeric_
-  tower_spec.scm`, 7 cases in `reader_literals_spec.scm`) — a genuine
-  numeric tower (bignum/rational/complex arithmetic, reader/writer
-  support, touching every existing `+`/`-`/`*`/`/`/comparison builtin) is
-  a deep, deliberate scope limitation of this prototype VM (see this
-  file's own header comment: "doubles only"), not something this test
-  suite is trying to add.
 - **`import!` called as a bare procedure with only/except/prefix/rename
   filters** (one case in `bootstrap_spec.scm`) — cvm's own `import!`
   (`cvm/bootstrap.c`) is a permanent no-op at the procedure level; only
@@ -303,8 +305,8 @@ documented in its own file's header comment:
   target library's own exports were even defined yet. A real fix needs a
   different hook point; left as a known, narrow gap.
 
-Neither is a regression, and neither is something this test suite is
-trying to fix beyond what's documented above.
+Not a regression, and not something this test suite is trying to fix
+beyond what's documented above.
 
 ## Profiling
 
@@ -475,7 +477,7 @@ across seven files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
-| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 171 | predicates, `car`/`cdr`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=`, `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above) |
+| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 180 | predicates, `car`/`cdr`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below) |
 | `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via vendored facil.io |
 | `sql.c` | `(creme sql)` | 6 | `sql-open`, `sql-execute`, `sql-query`, `sql-scalar` — real SQLite via the C API |
 | `hashtable.c` | `(creme hash-table)` (partial) | 6 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!` — no `hash-table-keys`/`values`/`walk` yet; `hash-table-ref`'s own default arg may be a plain value OR a thunk (only applied if it's actually callable), matching native's own contract |
@@ -491,18 +493,17 @@ that fusion (see "REPL" above), so they're real global procedures now
 too — a 3+-arg or non-fused call to them works either way.
 
 Every other `(scheme ...)` library (`file`, `process-context` beyond
-`get-environment-variable`/`exit`, `time`, `complex`, `inexact`, `repl`,
-`r5rs`, `case-lambda`, `cxr`) and every other `(creme ...)` FFI library
+`get-environment-variable`/`exit`, `time`, `inexact`, `repl`, `r5rs`,
+`case-lambda`, `cxr`) and every other `(creme ...)` FFI library
 (`bigdecimal`, `json`, `time`, `random`, `digest`, `env`, `process`,
 `tui`, `rfc8439`, `http`, `prof-native`, `prof-vm`, `actor`, `raft`,
 `treelist`, `csv`, `jose`) has **no** cvm-native counterpart at all — a
 script that calls into one won't resolve at cvm load/run time. `(scheme
-complex)` in particular has NO counterpart of any kind (no `T_COMPLEX`
-value tag exists — see "Value/type model" below), a deep, deliberate
-scope limitation: `spec/creme/compiler_numeric_tower_spec.scm` and 7
-cases in `spec/creme/reader_literals_spec.scm` document this as a known,
-accepted gap rather than something cvm's own spec suite tries to work
-around.
+complex)` USED to be entirely unsupported (no `T_COMPLEX` value tag) but
+now has real support — see "Value/type model" below and this section's
+own `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/
+`angle` entry in `builtins.c`'s row above (its complete native surface,
+not a subset).
 
 Three more are *partially* covered, each only as far as this project's
 own `spec/creme` test suite needed: `(creme math)` (just `flonum->bits`/
@@ -543,8 +544,18 @@ counterpart.
 
 Per `value.h`'s own header comment — deliberate, not accidental:
 
-- **Numbers**: fixnum (`int64_t`) + IEEE double only. No bignum, rational,
-  or complex; arithmetic overflow **aborts** rather than promoting.
+- **Numbers**: fixnum (`int64_t`) + IEEE double + exact rational
+  (`T_RATIONAL`, arbitrary-precision via GMP's `mpq_t`) + complex
+  (`T_COMPLEX`, a real/imag pair, each itself int/rational/float). Plain
+  fixnums are STILL fixed-width — arithmetic overflow on a `T_INT` still
+  **aborts** rather than promoting to a bignum; only `T_RATIONAL`'s own
+  numerator/denominator are arbitrary-precision. `+`/`-`/`*`/`/`/comparisons
+  promote across this tower the same way the real interpreter does (int <
+  rational < float rank, complex checked first and promoting both sides) —
+  see `vm.c`'s `num_add`/`num_div`/etc. and "numeric tower" above for what
+  motivated this and exactly what's still NOT covered (a bignum `T_INT`;
+  `floor`/`ceiling`/`round`/`truncate` of a rational; `abs`/`zero?`/
+  `positive?`/`negative?` of a complex value).
 - **Representation**: a plain tagged `struct Value`, not NaN-boxed —
   chosen for debuggability over compactness.
 - **Types present**: `T_NIL`, `T_BOOL`, `T_INT`, `T_FLOAT`, `T_SYM`
@@ -587,11 +598,15 @@ Per `value.h`'s own header comment — deliberate, not accidental:
   `SchemeParameter` exactly; calling it with 0 args returns its current
   value, same `dispatch_call`/`cvm_apply` recognition pattern as
   `T_RECORD_CALLABLE`, though `procedure?` deliberately excludes it,
-  matching the real interpreter's own narrower definition).
-- **Not present at all**: continuations, any port beyond output-string,
+  matching the real interpreter's own narrower definition), `T_CONTINUATION`
+  (`call/cc`'s escape-only captured jump point — see "Compiler mode"
+  above), and `T_RATIONAL`/`T_COMPLEX` (the numeric tower additions
+  described just above).
+- **Not present at all**: multi-shot/re-entrant continuations (only
+  escape-only `T_CONTINUATION`, above), any port beyond output-string,
   first-class environments, and — unrelated to the value model itself,
-  but worth naming here too — no bignum/rational/complex (fixnum + double
-  only; see "Deliberate cuts" below).
+  but worth naming here too — no bignum promotion for plain `T_INT`
+  fixnums (see "Deliberate cuts" below).
 - **GC**: every heap allocation (pairs, vectors, closures, upvalues,
   output-string port buffers, hash tables, the program's own `Chunk` tree)
   goes through Boehm GC (`GC_MALLOC`/`GC_REALLOC` — the same collector

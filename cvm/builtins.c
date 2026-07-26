@@ -131,26 +131,19 @@ static Value bi_star(VM *vm, Value *args, int nargs) {
   return acc;
 }
 
-/* No rational tower here (see cvm/README.md's "Value/type model"), so an
- * unevenly-divided integer division falls back to a float, matching this
- * prototype's existing "int+float only" scope everywhere else -- only
- * returns an exact int back when every operand was an int AND the
- * mathematical result happens to be a whole number. */
+/* Exact/exact division produces a real, arbitrary-precision-reduced
+ * T_RATIONAL now (see vm.c's num_div/make_rational_from_mpq) -- an
+ * unevenly-divided int/int no longer silently falls back to a float the
+ * way this prototype used to (before T_RATIONAL existed). Folds through
+ * num_div exactly like bi_plus/bi_minus/bi_star already fold through
+ * num_add/num_sub/num_mul. */
 static Value bi_slash(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("/: expected at least 1 argument");
-  Value first = nargs == 1 ? v_int(1) : args[0];
-  int start = nargs == 1 ? 0 : 1;
-  double acc = as_double(first, "/");
-  int all_int = first.tag == T_INT;
-  for (int i = start; i < nargs; i++) {
-    double d = as_double(args[i], "/");
-    if (d == 0.0) cvm_abort("/: division by zero");
-    acc /= d;
-    if (args[i].tag != T_INT) all_int = 0;
-  }
-  if (all_int && acc == floor(acc) && fabs(acc) < 9.2e18) return v_int((int64_t)acc);
-  return v_float(acc);
+  if (nargs == 1) return num_div(v_int(1), args[0]);
+  Value acc = args[0];
+  for (int i = 1; i < nargs; i++) acc = num_div(acc, args[i]);
+  return acc;
 }
 
 static Value bi_num_lt(VM *vm, Value *args, int nargs) {
@@ -381,6 +374,35 @@ static void print_value(FILE *out, Value v) {
   case T_BOX:
     fputs("#<native-object>", out);
     break;
+  case T_RATIONAL:
+    mpz_out_str(out, 10, mpq_numref(v.as.rational->q));
+    fputc('/', out);
+    mpz_out_str(out, 10, mpq_denref(v.as.rational->q));
+    break;
+  case T_COMPLEX: {
+    /* Mirrors SchemeComplex#to_display/to_write exactly (complex.cr,
+     * identical logic for both): always print the real part, then a
+     * literal '+' UNLESS the imaginary part's own printed text starts
+     * with '-' (naturally covers negative ints/rationals/floats and the
+     * special "-inf.0"/"-nan.0" spellings), then the imaginary part,
+     * then 'i'. NO elision -- a zero real part still prints (e.g.
+     * "0-4i", never "-4i") and an imaginary coefficient of exactly 1
+     * still prints its magnitude ("3+1i", never "3+i") -- this
+     * deliberately matches native's own gap, not a nicer R7RS-idiomatic
+     * form; see this project's reader_literals_spec.scm for confirming
+     * cases. */
+    print_value(out, v.as.cplx->real);
+    char *buf = NULL;
+    size_t size = 0;
+    FILE *ms = open_memstream(&buf, &size);
+    print_value(ms, v.as.cplx->imag);
+    fclose(ms);
+    if (size == 0 || buf[0] != '-') fputc('+', out);
+    fwrite(buf, 1, size, out);
+    free(buf);
+    fputc('i', out);
+    break;
+  }
   default:
     cvm_abort("display: unsupported value type in this prototype");
   }
@@ -798,29 +820,89 @@ static Value bi_char_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1
  * (T_PARAMETER) -- a parameter is callable via apply's generic dispatch
  * without being procedure?-true. */
 static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("procedure?: expected an argument"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_CASE_CLOSURE || args[0].tag == T_RECORD_CALLABLE || args[0].tag == T_BUILTIN || args[0].tag == T_CONTINUATION); }
-static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("number?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT); }
-static Value bi_real_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); } /* no complex tower */
-static Value bi_complex_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); } /* every number cvm has IS real, and every real is complex -- no genuinely-complex-but-not-real value exists here */
+static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("number?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL || args[0].tag == T_COMPLEX); }
+/* real? is every number EXCEPT a genuine T_COMPLEX -- mirrors real?
+ * (predicates.cr) exactly: number?(v) && !v.is_a?(SchemeComplex). */
+static Value bi_real_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("real?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL); }
+/* complex? is literally an alias for number? -- every number is complex
+ * per R7RS (mirrors complex.cr's own complex_p exactly, "true for any
+ * number, real or complex"). */
+static Value bi_complex_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); }
 static Value bi_integer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("integer?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(1);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f == floor(args[0].as.f));
+  /* T_RATIONAL is never whole by construction (make_rational_from_mpq
+   * collapses den==1 to T_INT before a T_RATIONAL Value ever exists), so
+   * always false here -- mirrors integer? (predicates.cr) exactly. */
   return v_bool(0);
 }
-static Value bi_exact_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("exact?: expected an argument"); return v_bool(args[0].tag == T_INT); }
+/* exact? is int/rational, matching Scheme.exact? exactly (helpers.cr);
+ * complex is neither exact? nor inexact? here, same gap native itself
+ * has (see complex.cr's own header comment on this not being special-
+ * cased) -- not something this port is trying to fix. */
+static Value bi_exact_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("exact?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_RATIONAL); }
 static Value bi_inexact_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("inexact?: expected an argument"); return v_bool(args[0].tag == T_FLOAT); }
 static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("exact-integer?: expected an argument"); return v_bool(args[0].tag == T_INT); }
+/* rational? is exact (int/rational) OR a finite float -- mirrors
+ * rational? (predicates.cr) exactly. Needed by modules/creme/bytecode.
+ * sld's own write-datum! (SCB1 chunk serialization) to detect a rational
+ * constant, so this isn't just a nicety -- without it, compiling any
+ * chunk containing a rational constant aborts with "unbound variable:
+ * rational?" under cvm specifically (the self-hosted compiler's own
+ * compile-time-constant path always goes through this). */
+static Value bi_rational_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("rational?: expected an argument");
+  if (args[0].tag == T_INT || args[0].tag == T_RATIONAL) return v_bool(1);
+  if (args[0].tag == T_FLOAT) return v_bool(isfinite(args[0].as.f));
+  return v_bool(0);
+}
+/* numerator/denominator -- int/rational only (matches native's own int/
+ * rational cases exactly); a float argument would need native's own
+ * round-trip-through-to_exact conversion, not needed by anything in this
+ * project's own cvm test surface (write-datum! above only ever calls
+ * these on a value it already confirmed is exact AND rational AND NOT an
+ * integer, i.e. always a genuine T_RATIONAL) -- left unimplemented rather
+ * than half-built. */
+static Value bi_numerator(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("numerator: expected an argument");
+  if (args[0].tag == T_INT) return args[0];
+  if (args[0].tag == T_RATIONAL) {
+    if (!mpz_fits_slong_p(mpq_numref(args[0].as.rational->q))) cvm_abort("numerator: too large for this prototype's fixnum-only int type");
+    return v_int((int64_t)mpz_get_si(mpq_numref(args[0].as.rational->q)));
+  }
+  cvm_abort("numerator: expected an exact rational or integer");
+}
+static Value bi_denominator(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("denominator: expected an argument");
+  if (args[0].tag == T_INT) return v_int(1);
+  if (args[0].tag == T_RATIONAL) {
+    if (!mpz_fits_slong_p(mpq_denref(args[0].as.rational->q))) cvm_abort("denominator: too large for this prototype's fixnum-only int type");
+    return v_int((int64_t)mpz_get_si(mpq_denref(args[0].as.rational->q)));
+  }
+  cvm_abort("denominator: expected an exact rational or integer");
+}
 static Value bi_eq_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("eq?: expected two arguments"); return v_bool(cvm_eqv(args[0], args[1])); }
 static Value bi_eqv_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("eqv?: expected two arguments"); return v_bool(cvm_eqv(args[0], args[1])); }
 static Value bi_equal_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("equal?: expected two arguments"); return v_bool(cvm_equal(args[0], args[1])); }
 
 /* ---- numeric predicates / conversions ---- */
+/* zero?/positive?/negative?/abs all extend to T_RATIONAL below (mpq_sgn/
+ * a fresh mpq_t with its numerator negated) -- floor/ceiling/round/
+ * truncate of a rational, and abs/zero?/positive?/negative? of a complex,
+ * are NOT implemented (a deliberate, narrower cut than native's own
+ * surface -- not exercised by any spec/creme test, and not needed for
+ * this project's own reader/compiler literal round-trip goal). */
 static Value bi_zero_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("zero?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i == 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f == 0.0);
+  if (args[0].tag == T_RATIONAL) return v_bool(0); /* never zero, see value.h */
   cvm_abort("zero?: not a number");
 }
 static Value bi_positive_p(VM *vm, Value *args, int nargs) {
@@ -828,6 +910,7 @@ static Value bi_positive_p(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("positive?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i > 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f > 0.0);
+  if (args[0].tag == T_RATIONAL) return v_bool(mpq_sgn(args[0].as.rational->q) > 0);
   cvm_abort("positive?: not a number");
 }
 static Value bi_negative_p(VM *vm, Value *args, int nargs) {
@@ -835,6 +918,7 @@ static Value bi_negative_p(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("negative?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i < 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f < 0.0);
+  if (args[0].tag == T_RATIONAL) return v_bool(mpq_sgn(args[0].as.rational->q) < 0);
   cvm_abort("negative?: not a number");
 }
 static Value bi_odd_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) cvm_abort("odd?: expected an integer"); return v_bool(args[0].as.i % 2 != 0); }
@@ -844,6 +928,15 @@ static Value bi_abs(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("abs: expected an argument");
   if (args[0].tag == T_INT) return v_int(args[0].as.i < 0 ? -args[0].as.i : args[0].as.i);
   if (args[0].tag == T_FLOAT) return v_float(fabs(args[0].as.f));
+  if (args[0].tag == T_RATIONAL) {
+    if (mpq_sgn(args[0].as.rational->q) >= 0) return args[0];
+    mpq_t q;
+    mpq_init(q);
+    mpq_neg(q, args[0].as.rational->q);
+    Value result = make_rational_from_mpq(q);
+    mpq_clear(q);
+    return result;
+  }
   cvm_abort("abs: not a number");
 }
 static Value bi_min(VM *vm, Value *args, int nargs) {
@@ -891,7 +984,11 @@ static Value bi_truncate(VM *vm, Value *args, int nargs) {
 static Value bi_exact(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("exact: expected an argument");
-  if (args[0].tag == T_INT) return args[0];
+  if (args[0].tag == T_INT || args[0].tag == T_RATIONAL) return args[0];
+  /* Truncates rather than finding the float's own exact rational value
+   * (native's to_exact does the latter via BigRational -- see
+   * builtin_helpers.cr) -- a pre-existing simplification of this
+   * prototype's inexact->exact, unchanged/not in scope here. */
   if (args[0].tag == T_FLOAT) return v_int((int64_t)args[0].as.f);
   cvm_abort("exact: not a number");
 }
@@ -900,7 +997,65 @@ static Value bi_inexact(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("inexact: expected an argument");
   if (args[0].tag == T_FLOAT) return args[0];
   if (args[0].tag == T_INT) return v_float((double)args[0].as.i);
+  if (args[0].tag == T_RATIONAL) return v_float(mpq_get_d(args[0].as.rational->q));
   cvm_abort("inexact: not a number");
+}
+
+/* ---- (scheme complex) -- mirrors src/scheme/modules/scheme/complex.cr's
+ * own small surface exactly (make-rectangular/make-polar/real-part/
+ * imag-part/magnitude/angle); complex?/number? are above, alongside the
+ * other predicates. This IS the complete native surface, not a subset --
+ * nothing was left out here. ---- */
+static int is_real_component(Value v) { return v.tag == T_INT || v.tag == T_FLOAT || v.tag == T_RATIONAL; }
+
+static Value bi_make_rectangular(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || !is_real_component(args[0]) || !is_real_component(args[1])) {
+    cvm_abort("make-rectangular: expected two real numbers");
+  }
+  return make_complex(args[0], args[1]);
+}
+
+static Value bi_make_polar(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2) cvm_abort("make-polar: expected (magnitude angle)");
+  double mag = as_double(args[0], "make-polar"), ang = as_double(args[1], "make-polar");
+  return make_complex(v_float(mag * cos(ang)), v_float(mag * sin(ang)));
+}
+
+static Value bi_real_part(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 1) cvm_abort("real-part: expected an argument");
+  if (args[0].tag == T_COMPLEX) return args[0].as.cplx->real;
+  if (!is_real_component(args[0])) cvm_abort("real-part: not a number");
+  return args[0];
+}
+
+static Value bi_imag_part(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 1) cvm_abort("imag-part: expected an argument");
+  if (args[0].tag == T_COMPLEX) return args[0].as.cplx->imag;
+  if (!is_real_component(args[0])) cvm_abort("imag-part: not a number");
+  return v_int(0);
+}
+
+static Value bi_magnitude(VM *vm, Value *args, int nargs) {
+  if (nargs != 1) cvm_abort("magnitude: expected an argument");
+  if (args[0].tag == T_COMPLEX) {
+    double re = as_double(args[0].as.cplx->real, "magnitude"), im = as_double(args[0].as.cplx->imag, "magnitude");
+    return v_float(sqrt(re * re + im * im));
+  }
+  return bi_abs(vm, args, nargs);
+}
+
+static Value bi_angle(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 1) cvm_abort("angle: expected an argument");
+  if (args[0].tag == T_COMPLEX) {
+    return v_float(atan2(as_double(args[0].as.cplx->imag, "angle"), as_double(args[0].as.cplx->real, "angle")));
+  }
+  if (!is_real_component(args[0])) cvm_abort("angle: not a number");
+  return v_float(as_double(args[0], "angle") < 0 ? M_PI : 0.0);
 }
 
 /* ---- pairs / lists ---- */
@@ -1740,6 +1895,9 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "exact?", bi_exact_p);
   cvm_register_builtin(vm, "inexact?", bi_inexact_p);
   cvm_register_builtin(vm, "exact-integer?", bi_exact_integer_p);
+  cvm_register_builtin(vm, "rational?", bi_rational_p);
+  cvm_register_builtin(vm, "numerator", bi_numerator);
+  cvm_register_builtin(vm, "denominator", bi_denominator);
   cvm_register_builtin(vm, "eq?", bi_eq_p);
   cvm_register_builtin(vm, "eqv?", bi_eqv_p);
   cvm_register_builtin(vm, "equal?", bi_equal_p);
@@ -1760,6 +1918,12 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "inexact", bi_inexact);
   cvm_register_builtin(vm, "exact->inexact", bi_inexact);
   cvm_register_builtin(vm, "inexact->exact", bi_exact);
+  cvm_register_builtin(vm, "make-rectangular", bi_make_rectangular);
+  cvm_register_builtin(vm, "make-polar", bi_make_polar);
+  cvm_register_builtin(vm, "real-part", bi_real_part);
+  cvm_register_builtin(vm, "imag-part", bi_imag_part);
+  cvm_register_builtin(vm, "magnitude", bi_magnitude);
+  cvm_register_builtin(vm, "angle", bi_angle);
 
   cvm_register_builtin(vm, "car", bi_car);
   cvm_register_builtin(vm, "cdr", bi_cdr);

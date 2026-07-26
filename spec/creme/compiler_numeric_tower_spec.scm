@@ -5,21 +5,23 @@
 ;; uses, and compiler_spec.scm's own header comment for the general
 ;; should-match-native? approach.
 ;;
-;; Split into its own file specifically because cvm (the standalone C11
-;; VM, see cvm/README.md) has NO rational/bignum/complex number support
-;; at all -- a deep, pre-existing, deliberate scope limitation of that
-;; "prototype" VM (cvm/value.h's own header comment: "doubles only (no
-;; bignum/rational/complex...)"), not something this project's spec/
-;; creme test suite is trying to fix. Since compile-program compiles a
-;; whole script as ONE chunk upfront, a single unparseable/unrepresentable
-;; literal ANYWHERE in a file aborts compiling the ENTIRE file under cvm
-;; -- keeping this case inside compiler_spec.scm would have blocked all
-;; 117 OTHER, unrelated cases in that file from ever running under `cvm`.
+;; Originally split into its own file because cvm (the standalone C11 VM,
+;; see cvm/README.md) had NO rational/complex number support at all, and
+;; compile-program compiles a whole script as ONE chunk upfront -- a
+;; single unparseable/unrepresentable literal ANYWHERE in a file used to
+;; abort compiling the ENTIRE file under cvm, so keeping this case inside
+;; compiler_spec.scm would have blocked all 117 OTHER, unrelated cases in
+;; that file from ever running there. cvm now has real T_RATIONAL (GMP-
+;; backed, arbitrary-precision) and T_COMPLEX support (cvm/value.h), so
+;; this case runs (and passes) under `cvm/cvm` too -- kept in its own file
+;; regardless, both for git-blame/history clarity and because a future,
+;; still-unsupported numeric literal would have the exact same whole-
+;; file-aborts-under-cvm failure mode this file was split out to avoid.
 ;;
-;; Run with:
+;; Run with (all three pass):
 ;;   ./bin/creme spec/creme/compiler_numeric_tower_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/compiler_numeric_tower_spec.scm
-;; (not `cvm/cvm` -- see this file's own header comment above for why.)
+;;   ./cvm/cvm spec/creme/compiler_numeric_tower_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import
