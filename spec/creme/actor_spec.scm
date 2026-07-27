@@ -36,7 +36,7 @@
 ;;   ./cvm/cvm spec/creme/actor_spec.scm
 ;; ===========================================================================
 
-(import (scheme base) (scheme write) (creme actor) (creme spec))
+(import (scheme base) (scheme cxr) (scheme write) (creme actor) (creme spec))
 
 ;; Used by the Phase 4 "record round-trips over a real tcp: socket" case
 ;; below -- a message decoded off the wire is only reconstructed as a

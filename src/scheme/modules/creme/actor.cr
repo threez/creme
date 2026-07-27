@@ -136,8 +136,25 @@ module Scheme
   class ActorRefData
     getter id : String
     getter address : ActorAddress?
+    # The ActorSystem `id` is actually registered in -- ONLY meaningful
+    # when local? (address.nil?). `local?` only means "same OS process",
+    # not "the same ActorSystem as whoever is about to look this ref up"
+    # -- an actor can call start-node itself, switching its OWN current
+    # system, while still holding (or being handed, e.g. a reply-to ref
+    # built via `self` before the switch) a ref minted in a DIFFERENT
+    # ActorSystem. send!/monitor used to resolve a local? ref's id
+    # against `ensure_system` -- the CALLING actor's own current system
+    # -- instead of wherever the id actually lives, which raised a
+    # spurious "no such local actor" (silently swallowed by spawn's own
+    # rescue) the moment the two diverged, hanging the sender's own
+    # receive! forever waiting for a reply that could never arrive. This
+    # field lets send!/monitor resolve against the ref's OWN system
+    # instead, falling back to the caller's ensure_system only if it's
+    # nil (defensive; every ref this library itself constructs always
+    # sets it).
+    getter system : ActorSystem?
 
-    def initialize(@id : String, @address : ActorAddress? = nil)
+    def initialize(@id : String, @address : ActorAddress? = nil, @system : ActorSystem? = nil)
     end
 
     def local? : Bool
@@ -234,6 +251,16 @@ module Scheme
 
     def register_context(ctx : ActorContext) : Nil
       @mutex.synchronize { @contexts[ctx.id] = ctx }
+    end
+
+    # Unregisters `id` from THIS system's own registry without touching
+    # its monitors/names -- used by start-node when an actor that
+    # already has a context (every spawned actor does, registered into
+    # whichever system its own spawn call happened in) switches to a
+    # brand new system: the context itself must move too, or nothing
+    # else can ever find it there again (see start_node's own comment).
+    def forget_context(id : String) : Nil
+      @mutex.synchronize { @contexts.delete(id) }
     end
 
     def register_name(name : String, id : String) : Nil
@@ -345,7 +372,7 @@ module Scheme::Builtins::ActorLibrary
         notify_down(system, id, reason)
       end
     end
-    make_ref(id)
+    make_ref(id, system: system)
   end
 
   @[Scheme::SchemeFn("send!", min: 2, max: 2)]
@@ -359,7 +386,8 @@ module Scheme::Builtins::ActorLibrary
     when SchemeBox
       ref = actor_ref_arg(target, "send!")
       if ref.local?
-        raise SchemeRuntimeError.new("send!: no such local actor '#{ref.id}'") unless system.deliver_local(ref.id, msg)
+        target_system = ref.system || system
+        raise SchemeRuntimeError.new("send!: no such local actor '#{ref.id}'") unless target_system.deliver_local(ref.id, msg)
       else
         send_remote(system, ref, msg)
       end
@@ -376,7 +404,7 @@ module Scheme::Builtins::ActorLibrary
 
   @[Scheme::SchemeFn("self", min: 0, max: 0)]
   def self_ref(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    make_ref(ensure_context.id)
+    make_ref(ensure_context.id, system: ensure_system)
   end
 
   @[Scheme::SchemeFn("monitor", min: 1, max: 1)]
@@ -385,7 +413,7 @@ module Scheme::Builtins::ActorLibrary
     watcher = ensure_context
     target = actor_ref_arg(args[0], "monitor")
     raise SchemeRuntimeError.new("monitor: cannot monitor a remote actor reference") unless target.local?
-    system.add_monitor(target.id, watcher.id)
+    (target.system || system).add_monitor(target.id, watcher.id)
     NIL.as(SchemeValue)
   end
 
@@ -403,7 +431,7 @@ module Scheme::Builtins::ActorLibrary
   def whereis(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     system = ensure_system
     id = system.resolve_name(name_arg(args[0], "whereis"))
-    id ? make_ref(id) : FALSE.as(SchemeValue)
+    id ? make_ref(id, system: system) : FALSE.as(SchemeValue)
   end
 
   @[Scheme::SchemeFn("actor-ref-id", min: 1, max: 1)]
@@ -462,7 +490,27 @@ module Scheme::Builtins::ActorLibrary
       else
         start_tcp_node(system, args) # legacy untagged (host port cookie) == 'tcp
       end
+    # Reassigning actor_system alone only changes which system FUTURE
+    # ensure_system/ensure_context calls land in -- it does nothing for
+    # a context that already exists (every spawned actor has one,
+    # registered into whichever system was current at spawn time,
+    # before this actor's own thunk -- and this start-node call -- ever
+    # ran). Without migrating it too, this actor's own id stays findable
+    # only in the OLD system: any OTHER actor holding a ref to this one
+    # minted AFTER this switch (e.g. a `(self)` reply-to address, which
+    # now correctly carries `system` as ActorRefData's own field) would
+    # have send!/monitor resolve against the NEW system's registry and
+    # find nothing there, raising "no such local actor" -- silently
+    # swallowed by spawn's own rescue, hanging the sender's own
+    # receive! forever. Moving the context is the other half of the
+    # same fix that gave ActorRefData a system field in the first
+    # place.
+    old_system = current_interp.actor_system
     current_interp.actor_system = system
+    if ctx = current_interp.actor_context
+      old_system.try(&.forget_context(ctx.id))
+      system.register_context(ctx)
+    end
     SchemeBox.new("actor-node", system, "#<actor-node:#{display}>")
   end
 
@@ -508,11 +556,15 @@ module Scheme::Builtins::ActorLibrary
   # depending which transport `node` was started with. Meant to replace
   # manually string-appending a URI (e.g. examples/34-actor-ping-pong.scm
   # used to build "tcp://ping-server@127.0.0.1:<port>" by hand); the result
-  # is exactly what remote-ref expects.
+  # is exactly what remote-ref expects. `id` may be a registered name
+  # (symbol/string, e.g. 'ping-server) OR an actor-ref directly (its own
+  # .id is used) — the latter accepted for symmetry with cvm's own
+  # node-address (cvm/actor.c), which supports both forms.
   @[Scheme::SchemeFn("node-address", min: 2, max: 2)]
   def node_address(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     system = node_arg(args[0], "node-address")
-    id = name_arg(args[1], "node-address")
+    id_arg = args[1]
+    id = (id_arg.is_a?(SchemeBox) && id_arg.tag == "actor-ref") ? id_arg.get(ActorRefData).id : name_arg(id_arg, "node-address")
     SchemeStr.new(node_address_uri(system, id, "node-address"))
   end
 
@@ -588,8 +640,8 @@ module Scheme::Builtins::ActorLibrary
     ctx
   end
 
-  private def make_ref(id : String, address : ActorAddress? = nil) : SchemeValue
-    data = ActorRefData.new(id, address)
+  private def make_ref(id : String, address : ActorAddress? = nil, system : ActorSystem? = nil) : SchemeValue
+    data = ActorRefData.new(id, address, system)
     SchemeBox.new("actor-ref", data, "#<actor:#{data.uri_or_id}>")
   end
 
@@ -638,7 +690,7 @@ module Scheme::Builtins::ActorLibrary
   private def notify_down(system : ActorSystem, id : String, reason : SchemeValue) : Nil
     watchers = system.terminated(id)
     return if watchers.empty?
-    down = SchemeRecord.new(DOWN_TYPE, [make_ref(id), reason])
+    down = SchemeRecord.new(DOWN_TYPE, [make_ref(id, system: system), reason])
     watchers.each { |watcher_id| system.deliver_local(watcher_id, down) }
   end
 
