@@ -499,7 +499,7 @@ call whose callback raises partway through.
 
 cvm has no runtime library/import machinery (see "Deliberate cuts" below)
 — it hand-registers a flat, ungrouped set of global builtins in C, spread
-across eight files:
+across these files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
@@ -511,6 +511,11 @@ across eight files:
 | `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) + `(creme file)` (partial) | 8 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path`, `file-read` (same function as `read-whole-file`, registered under both names), `file-write`, `delete-file` |
 | `regex.c` | `(creme regex)` (very narrow — see "REPL" above) | 2 | `regexp`, `regexp-matches?` |
 | `process.c` | `(creme process)` (narrow — just `process-run`) | 1 | `process-run` — real POSIX fork/pipe/execvp/waitpid, matching native Crystal's exact `(cmd args) -> (stdout stderr exit-code success?)` contract; exists so spec/creme/main_spec.scm (the one entry point for running every spec/creme spec file and reporting one combined total) spawns each spec file as its own genuinely separate OS process the same way whether it's driven natively or reentrantly under `./cvm/cvm spec/creme/main_spec.scm` itself |
+| `digest.c` | `(creme digest)` | 5 | `digest-md5`/`-sha1`/`-sha256` (hex digest strings, via OpenSSL's `EVP_Digest` — reuses the `-lcrypto` link already added for `(creme actor)`'s own HMAC handshake), `base64-encode`/`-decode` (a small hand-rolled codec — OpenSSL's own `EVP_EncodeBlock`/`DecodeBlock` don't raise cleanly on invalid input the way native's own `Base64.decode_string` does) |
+| `json.c` | `(creme json)` | 2 | `json-read`/`json-write` — a small hand-rolled recursive-descent JSON parser/writer; matches native's own conventions exactly (array → vector, object → alist of `(string . value)` pairs usable with `assoc`/`cdr`/`car`, an empty object conflates with JSON null) |
+| `csv.c` | `(creme csv)` | 8 | `csv-read`/`-write`/`-read-headers`/`-write-headers` (bulk) and `csv-reader-open`/`-read!`/`-writer-open`/`-row!` (streaming, over a Port) — a self-contained RFC4180-ish parser/writer, not a port of native's own chunked-IO-optimized implementation |
+| `treelist.c` | `(creme treelist)` | — | a full RRB (Relaxed Radix Balanced) tree, matching native's own structure-sharing behavior, not just an array-backed stand-in |
+| `actor.c` | `(creme actor)` | — | real OS-thread actors, multiple `'local` nodes, and real `'tcp`/`'unix` distribution with an HMAC-SHA256 handshake — see the fuller description just below this table, and `actor.c`'s own header comment |
 
 `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` didn't used to be builtins here — a
 program the real analyzer compiles never needs them as such (its
@@ -519,15 +524,36 @@ names straight into a fused op), but the self-hosted compiler doesn't do
 that fusion (see "REPL" above), so they're real global procedures now
 too — a 3+-arg or non-fused call to them works either way.
 
+`(scheme inexact)`, `(scheme case-lambda)`, `(scheme repl)`, and
+`(scheme r5rs)` all turn out to ALREADY work fully under cvm — with no
+new C code at all — once actually checked (they were previously
+mis-listed below as unported): `(scheme inexact)`'s entire surface
+(`sin`/`cos`/`tan`/`asin`/`acos`/`atan`/`exp`/`log`/`sqrt`/`nan?`/
+`infinite?`/`finite?`) is already in `builtins.c`'s own table above;
+`case-lambda` is a compiler-recognized special form, and cvm's own
+`T_CASE_CLOSURE`/`CaseClosure` dispatch already handles it (see
+`spec/creme/vm_spec.scm`'s own case-lambda case); `(scheme repl)`'s
+`interaction-environment` and `(scheme r5rs)`'s `null-environment`/
+`scheme-report-environment` are all trivial stubs defined directly in
+Scheme in `cvm/compiler-run.scm` (returning a placeholder symbol —
+cvm's flat, ahead-of-time-compiled global table has no real per-
+environment isolation to construct one against, and `eval` there
+already ignores its own environment argument for the same reason — see
+that file's own comments). `spec/creme/inexact_spec.scm` and
+`spec/creme/environments_spec.scm` both already cover this.
+`(creme random)` was similarly already fully ported straight into
+`builtins.c` (`random-real`/`-integer`/`-seed!`/`-choice`/`-shuffle`, a
+splitmix64 generator — deliberately NOT bit-for-bit compatible with
+Crystal's own PCG-based `Random`, see `spec/creme/random_spec.scm`'s own
+header comment) but had likewise been left off this list.
+
 Every other `(scheme ...)` library (`file`, `process-context` beyond
-`get-environment-variable`/`exit`, `time`, `inexact`, `repl`, `r5rs`,
-`case-lambda`, `cxr`) and every other `(creme ...)` FFI library
-(`bigdecimal`, `json`, `time`, `random`, `digest`, `tui`,
-`rfc8439`, `http`, `prof-native`, `prof-vm`, `raft`,
-`treelist`, `csv`, `jose`) has **no** cvm-native counterpart at all — a
-script that calls into one won't resolve at cvm load/run time. (`(creme
-process)` is now a partial exception — just `process-run`, see
-`process.c`'s own row above.)
+`get-environment-variable`/`exit`, `time`, `cxr`) and every other
+`(creme ...)` FFI library (`bigdecimal`, `time`, `tui`,
+`rfc8439`, `http`, `prof-native`, `prof-vm`, `raft`, `jose`) has **no**
+cvm-native counterpart at all — a script that calls into one won't
+resolve at cvm load/run time. (`(creme process)` is now a partial
+exception — just `process-run`, see `process.c`'s own row above.)
 
 `(creme actor)` (`actor.c`) is now a FULL port — real OS-thread actors
 (one pthread + one independent copied-globals VM per `spawn`, not a
