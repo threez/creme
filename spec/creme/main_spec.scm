@@ -41,6 +41,7 @@
 
 (define spec-files
   '("spec/creme/actor_spec.scm"
+    "spec/creme/bigdecimal_spec.scm"
     "spec/creme/bootstrap_spec.scm"
     "spec/creme/bytecode_spec.scm"
     "spec/creme/bytevectors_spec.scm"
@@ -53,8 +54,10 @@
     "spec/creme/compiler_spec.scm"
     "spec/creme/csv_spec.scm"
     "spec/creme/digest_spec.scm"
+    "spec/creme/file_extra_spec.scm"
     "spec/creme/file_ports_spec.scm"
     "spec/creme/hashtable_spec.scm"
+    "spec/creme/http_spec.scm"
     "spec/creme/inexact_spec.scm"
     "spec/creme/json_spec.scm"
     "spec/creme/macro_spec.scm"
@@ -76,6 +79,21 @@
 ;; that file's own header comment. Skipped only when the runner targets cvm.
 (define cvm-excluded '("spec/creme/reader_native_spec.scm"))
 
+;; The inverse case: http_spec.scm's own live-server cases spawn a real
+;; (creme mux) HTTP server on a (creme actor) thread and hit it with
+;; (creme http)'s client, within the SAME script -- this only works
+;; under cvm, whose mux-listen! blocks a spawned actor's own OS thread
+;; forever (see that file's own header comment), letting the main
+;; thread's requests run concurrently. Native's mux-listen! has
+;; different (Fiber-based) concurrency semantics that don't line up the
+;; same way in this exact shape -- and native's own (creme http) already
+;; has its own full, separate Crystal spec coverage
+;; (spec/scheme/modules/creme/http_spec.cr, a real HTTP::Server on its
+;; own Fiber) verifying the identical request/response contract, so
+;; nothing is left untested by skipping this file under native/self-
+;; hosted. Skipped only when the runner does NOT target cvm.
+(define native-excluded '("spec/creme/http_spec.scm"))
+
 (define runner
   (if (bound? 'cvm-target-path)
       '("./cvm/cvm")
@@ -85,7 +103,7 @@
           ((member "--self-hosted" args) '("./bin/creme" "--self-hosted"))
           (else '("./bin/creme"))))))
 
-(define exclude (if (equal? runner '("./cvm/cvm")) cvm-excluded '()))
+(define exclude (if (equal? runner '("./cvm/cvm")) cvm-excluded native-excluded))
 
 (for-each
   (lambda (f) (if (not (member f exclude)) (run-spec-file! runner f)))

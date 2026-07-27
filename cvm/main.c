@@ -20,10 +20,12 @@
 #include <string.h>
 
 #include "actor.h"
+#include "bigdecimal.h"
 #include "bootstrap.h"
 #include "csv.h"
 #include "digest.h"
 #include "hashtable.h"
+#include "http.h"
 #include "json.h"
 #include "mux.h"
 #include "profiler.h"
@@ -129,6 +131,8 @@ int main(int argc, char **argv) {
   cvm_register_actor_builtins(vm);
   cvm_register_digest_builtins(vm);
   cvm_register_json_builtins(vm);
+  cvm_register_bigdecimal_builtins(vm);
+  cvm_register_http_builtins(vm);
 
   /* Compiler mode: `path` isn't a compiled SCB1 binary at all -- it's the
    * plain Scheme source cvm should compile-and-run, entirely via the

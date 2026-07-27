@@ -151,6 +151,7 @@ enum {
   BOX_KIND_MUTABLE_TREELIST = 10,
   BOX_KIND_ACTOR_REF = 11,
   BOX_KIND_ACTOR_NODE = 12, /* actor.c Phase 3+: a start-node handle */
+  BOX_KIND_BIGDECIMAL = 13,
 };
 
 typedef struct Value Value;

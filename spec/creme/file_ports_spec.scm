@@ -14,11 +14,10 @@
 ;; Uses a fixed /tmp path rather than a freshly-generated temp directory
 ;; (unlike ch06_13_input_output_spec.cr's own Dir.mkdir_p/FileUtils.rm_rf) --
 ;; kept deliberately simple for a spec/creme file, since nothing here runs
-;; concurrently with itself. No delete-file cleanup: delete-file isn't
-;; part of this pass's cvm scope (out of scope per the project's own
-;; planning doc), so using it here would fail under cvm/cvm specifically,
-;; defeating the point of a should-match-native? case -- the probe files
-;; are just left behind in /tmp.
+;; concurrently with itself. Still no delete-file cleanup here (delete-file
+;; itself IS in cvm's scope now, see bootstrap.c) -- simply not needed:
+;; every probe path below is unique enough per-run and small enough to
+;; just leave behind in /tmp, matching this file's own existing style.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/file_ports_spec.scm

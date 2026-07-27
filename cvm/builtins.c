@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -765,20 +766,11 @@ static void print_value(FILE *out, Value v) {
   }
 }
 
-static Value bi_display(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  if (nargs < 1) cvm_abort("display: expected an argument");
-  print_value(stdout, args[0]);
-  return v_nil();
-}
-
-static Value bi_newline(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  (void)args;
-  (void)nargs;
-  fputc('\n', stdout);
-  return v_nil();
-}
+/* bi_display/bi_newline themselves are defined further down (after the
+ * current-output-port indirection/write_bytes_to_port helper they now
+ * both need — see that section's own comment for why). */
+static Value bi_display(VM *vm, Value *args, int nargs);
+static Value bi_newline(VM *vm, Value *args, int nargs);
 
 static Value bi_open_output_string(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -817,24 +809,85 @@ static Value bi_string_length(VM *vm, Value *args, int nargs) {
  * (PORT_KIND_STDOUT is enum value 0, so the zero-initialized static
  * struct already has the right kind; PORT_KIND_STDIN needs an explicit
  * initializer since it isn't the zero value). Neither is a genuine R7RS
- * parameter object (no (parameterize ((current-output-port ...)) ...)
- * support in this prototype) -- current-output-port/current-input-port
- * are plain 0-arg builtins that always return the same sentinel. */
+ * parameter object -- current-output-port/current-input-port are plain
+ * 0-arg builtins, but DO now return a genuinely redirectable pointer
+ * (see g_current_output_port/g_current_input_port just below), not
+ * always literally these two sentinels; the sentinels are just each
+ * pointer's own default value. */
 static Port stdout_port_sentinel;
 static Port stdin_port_sentinel = {.kind = PORT_KIND_STDIN};
+
+/* Mutable "current port" indirection -- thread-local since each actor
+ * gets its own VM/thread (see (creme actor)'s own per-actor-VM design),
+ * so with-input-from-file/with-output-to-file's redirection stays local
+ * to whichever thread called it rather than racing a sibling actor's
+ * own redirection. Every port-defaulting builtin below (display/write/
+ * write-char/newline/read-line/read-char/peek-char) resolves through
+ * one of these two pointers instead of the sentinel directly; only
+ * with-input-from-file/with-output-to-file ever reassign them, always
+ * saving and restoring around exactly one thunk call -- no general
+ * parameterize/dynamic-wind machinery, just what R7RS actually requires
+ * of these two procedures. */
+static _Thread_local Port *g_current_output_port = &stdout_port_sentinel;
+static _Thread_local Port *g_current_input_port = &stdin_port_sentinel;
 
 static Value bi_current_output_port(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
-  return v_port(&stdout_port_sentinel);
+  return v_port(g_current_output_port);
 }
 
 static Value bi_current_input_port(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
-  return v_port(&stdin_port_sentinel);
+  return v_port(g_current_input_port);
+}
+
+/* Shared by display/newline/write/write-char (write-string already had
+ * its own, now-redundant copy of this same dispatch inline -- left as
+ * is, narrow and unlikely to change). */
+static void write_bytes_to_port(Port *p, const char *bytes, size_t len, const char *who) {
+  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
+    fwrite(bytes, 1, len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
+    return;
+  }
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("%s: expected an output port", who);
+  port_buf_grow(p, (int)len);
+  memcpy(p->buf + p->len, bytes, len);
+  p->len += (int)len;
+}
+
+/* (display obj [port])/(newline [port]) -- port defaults to
+ * (current-output-port), i.e. g_current_output_port, same convention
+ * write/write-char/write-string already use. Renders through an
+ * in-memory stream first (open_memstream, the same trick bi_write/
+ * bi_error/bi_raise already use) so the same print_value traversal
+ * works for both sinks (a real FILE* for stdout/a file port, or a
+ * string port's own byte buffer) without a second, buffer-specific
+ * traversal. */
+static Value bi_display(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("display: expected an argument");
+  if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("display: expected a port");
+  Port *p = (nargs >= 2) ? args[1].as.port : g_current_output_port;
+  char *buf = NULL;
+  size_t size = 0;
+  FILE *ms = open_memstream(&buf, &size);
+  print_value(ms, args[0]);
+  fclose(ms);
+  write_bytes_to_port(p, buf, size, "display");
+  free(buf);
+  return v_nil();
+}
+
+static Value bi_newline(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs >= 1 && args[0].tag != T_PORT) cvm_abort("newline: expected a port");
+  Port *p = (nargs >= 1) ? args[0].as.port : g_current_output_port;
+  write_bytes_to_port(p, "\n", 1, "newline");
+  return v_nil();
 }
 
 static Value bi_write_string(VM *vm, Value *args, int nargs) {
@@ -860,16 +913,9 @@ static Value bi_write_char(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("write-char: expected a char");
   if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("write-char: expected a port");
-  Port *p = (nargs >= 2) ? args[1].as.port : &stdout_port_sentinel;
+  Port *p = (nargs >= 2) ? args[1].as.port : g_current_output_port;
   char c = (char)args[0].as.i;
-  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
-    fputc((int)(unsigned char)c, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
-    return v_nil();
-  }
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-char: expected an output port");
-  port_buf_grow(p, 1);
-  p->buf[p->len] = c;
-  p->len += 1;
+  write_bytes_to_port(p, &c, 1, "write-char");
   return v_nil();
 }
 
@@ -1006,11 +1052,210 @@ static Value bi_call_with_output_file(VM *vm, Value *args, int nargs) {
   return result;
 }
 
+/* open-binary-input-file/open-binary-output-file -- identical to open-
+ * input-file/open-output-file except for fopen's own "b" mode flag (a
+ * no-op on POSIX, kept for portability/clarity) and Port's `binary` flag
+ * (already used elsewhere to pick T_INT/T_BYTEVECTOR over T_CHAR/T_STR
+ * for read-u8/write-u8/etc. -- see value.h's own Port doc comment). */
+static Value bi_open_binary_input_file(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-binary-input-file: expected a string");
+  char *path = value_str_to_cstr(args[0]);
+  FILE *f = fopen(path, "rb");
+  if (!f) cvm_abort("open-binary-input-file: file not found: %s", path);
+  free(path);
+  Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_INPUT_FILE;
+  p->file = f;
+  p->binary = 1;
+  return v_port(p);
+}
+
+static Value bi_open_binary_output_file(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-binary-output-file: expected a string");
+  char *path = value_str_to_cstr(args[0]);
+  FILE *f = fopen(path, "wb");
+  if (!f) cvm_abort("open-binary-output-file: could not open: %s", path);
+  free(path);
+  Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_OUTPUT_FILE;
+  p->file = f;
+  p->binary = 1;
+  return v_port(p);
+}
+
+/* with-input-from-file/with-output-to-file -- redirect (current-input-
+ * port)/(current-output-port) to a freshly opened file for the extent
+ * of one thunk call, restoring the previous port (and closing the file)
+ * afterward EVEN IF the thunk escapes via an error/guard/call-cc -- same
+ * guarantee dynamic-wind gives its own `after` thunk, and built on
+ * exactly the same mechanism (vm->unwind_stack's UNWIND_DYNAMIC_WIND
+ * action, see bi_dynamic_wind's own comment for the full explanation of
+ * why pushing this BEFORE calling the thunk is what makes an escaping
+ * error still run it). The one wrinkle: UNWIND_DYNAMIC_WIND's `after` is
+ * a first-class Scheme-callable Value, but a T_BUILTIN carries no
+ * captured closure state at all (see value.h) -- so instead of building
+ * one dynamically, restoring "whichever port this call redirected"
+ * always means "pop the top of this thread-local stack", which the two
+ * shared bi_restore_*_port builtins below do; the port-restore stack's
+ * own LIFO order always matches vm->unwind_stack's nesting exactly,
+ * since every with-input-from-file/with-output-to-file call pushes
+ * exactly one entry onto each in lockstep. */
+typedef struct {
+  Port *prev;
+  FILE *to_close;
+} PortRestoreFrame;
+
+#define PORT_RESTORE_CAP 64
+static _Thread_local PortRestoreFrame g_input_restore_stack[PORT_RESTORE_CAP];
+static _Thread_local int g_input_restore_depth = 0;
+static _Thread_local PortRestoreFrame g_output_restore_stack[PORT_RESTORE_CAP];
+static _Thread_local int g_output_restore_depth = 0;
+
+static Value bi_restore_input_port(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  if (g_input_restore_depth <= 0) cvm_abort("with-input-from-file: internal restore-stack underflow");
+  PortRestoreFrame f = g_input_restore_stack[--g_input_restore_depth];
+  fclose(f.to_close);
+  g_current_input_port = f.prev;
+  return v_nil();
+}
+
+static Value bi_restore_output_port(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  if (g_output_restore_depth <= 0) cvm_abort("with-output-to-file: internal restore-stack underflow");
+  PortRestoreFrame f = g_output_restore_stack[--g_output_restore_depth];
+  fclose(f.to_close);
+  g_current_output_port = f.prev;
+  return v_nil();
+}
+
+static Value bi_with_input_from_file(VM *vm, Value *args, int nargs) {
+  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("with-input-from-file: expected (string thunk)");
+  Value port_val = bi_open_input_file(vm, args, 1); /* aborts on a missing file, matching native */
+  Port *new_port = port_val.as.port;
+
+  if (g_input_restore_depth >= PORT_RESTORE_CAP) cvm_abort("with-input-from-file: nesting too deep (%d levels)", PORT_RESTORE_CAP);
+  g_input_restore_stack[g_input_restore_depth].prev = g_current_input_port;
+  g_input_restore_stack[g_input_restore_depth].to_close = new_port->file;
+  g_input_restore_depth++;
+  g_current_input_port = new_port;
+
+  if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("cvm: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+  UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
+  ua->kind = UNWIND_DYNAMIC_WIND;
+  ua->after = v_builtin(bi_restore_input_port);
+
+  Value result = cvm_apply(vm, args[1], NULL, 0);
+  vm->n_unwind--;
+  bi_restore_input_port(vm, NULL, 0);
+  return result;
+}
+
+static Value bi_with_output_to_file(VM *vm, Value *args, int nargs) {
+  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("with-output-to-file: expected (string thunk)");
+  Value port_val = bi_open_output_file(vm, args, 1);
+  Port *new_port = port_val.as.port;
+
+  if (g_output_restore_depth >= PORT_RESTORE_CAP) cvm_abort("with-output-to-file: nesting too deep (%d levels)", PORT_RESTORE_CAP);
+  g_output_restore_stack[g_output_restore_depth].prev = g_current_output_port;
+  g_output_restore_stack[g_output_restore_depth].to_close = new_port->file;
+  g_output_restore_depth++;
+  g_current_output_port = new_port;
+
+  if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("cvm: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+  UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
+  ua->kind = UNWIND_DYNAMIC_WIND;
+  ua->after = v_builtin(bi_restore_output_port);
+
+  Value result = cvm_apply(vm, args[1], NULL, 0);
+  vm->n_unwind--;
+  bi_restore_output_port(vm, NULL, 0);
+  return result;
+}
+
+/* ---- (creme file)'s FileExtra: whole-file conveniences beyond R7RS's
+ * (scheme file) contract -- file-append/file-lines/file-size/
+ * current-directory. (file-read/file-write/delete-file already live in
+ * bootstrap.c -- see that file's own header comment.) */
+static Value bi_file_append(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("file-append: expected (string string)");
+  char *path = value_str_to_cstr(args[0]);
+  FILE *f = fopen(path, "a");
+  if (!f) {
+    cvm_abort("file-append: could not open: %s", path);
+  }
+  free(path);
+  fwrite(args[1].as.str.chars, 1, (size_t)args[1].as.str.len, f);
+  fclose(f);
+  return v_nil();
+}
+
+static Value bi_file_lines(VM *vm, Value *args, int nargs) {
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("file-lines: expected a string");
+  char *path = value_str_to_cstr(args[0]);
+  FILE *f = fopen(path, "r");
+  if (!f) cvm_abort("file-lines: file not found: %s", path);
+  free(path);
+
+  Value lines = v_nil();
+  Value *collected = NULL;
+  int n = 0, cap = 0;
+  char *line = NULL;
+  size_t linecap = 0;
+  ssize_t got;
+  while ((got = getline(&line, &linecap, f)) >= 0) {
+    if (got > 0 && line[got - 1] == '\n') got--;
+    char *copy = GC_MALLOC((size_t)(got ? got : 1));
+    memcpy(copy, line, (size_t)got);
+    if (n >= cap) {
+      cap = cap ? cap * 2 : 16;
+      Value *nc = GC_MALLOC(sizeof(Value) * (size_t)cap);
+      if (collected) memcpy(nc, collected, sizeof(Value) * (size_t)n);
+      collected = nc;
+    }
+    collected[n++] = v_str(copy, (int)got);
+  }
+  free(line);
+  fclose(f);
+  for (int i = n - 1; i >= 0; i--) lines = cvm_cons(vm, collected[i], lines);
+  return lines;
+}
+
+static Value bi_file_size(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("file-size: expected a string");
+  char *path = value_str_to_cstr(args[0]);
+  struct stat st;
+  int rc = stat(path, &st);
+  if (rc != 0) cvm_abort("file-size: file not found: %s", path);
+  free(path);
+  return v_int((int64_t)st.st_size);
+}
+
+static Value bi_current_directory(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  char buf[4096];
+  if (!getcwd(buf, sizeof(buf))) cvm_abort("current-directory: getcwd failed");
+  int len = (int)strlen(buf);
+  char *copy = GC_MALLOC((size_t)(len ? len : 1));
+  memcpy(copy, buf, (size_t)len);
+  return v_str(copy, len);
+}
+
 /* Resolves the (optional, trailing) port argument for read-char/peek-char/
- * read-line -- defaults to current-input-port's stdin sentinel, mirroring
- * the native interpreter's own input_port_arg (base/io.cr). */
+ * read-line -- defaults to (current-input-port), mirroring the native
+ * interpreter's own input_port_arg (base/io.cr). */
 static Port *input_port_arg(Value *args, int nargs, int port_argidx, const char *who) {
-  Port *p = (nargs > port_argidx) ? (args[port_argidx].tag == T_PORT ? args[port_argidx].as.port : NULL) : &stdin_port_sentinel;
+  Port *p = (nargs > port_argidx) ? (args[port_argidx].tag == T_PORT ? args[port_argidx].as.port : NULL) : g_current_input_port;
   if (!p) cvm_abort("%s: expected a port", who);
   if (!port_is_input(p)) cvm_abort("%s: expected an input port", who);
   if (p->closed) cvm_abort("%s: port is closed", who);
@@ -1422,15 +1667,8 @@ static Value bi_write(VM *vm, Value *args, int nargs) {
   FILE *ms = open_memstream(&buf, &size);
   write_value(ms, args[0]);
   fclose(ms);
-  Port *p = (nargs >= 2) ? args[1].as.port : &stdout_port_sentinel;
-  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
-    fwrite(buf, 1, size, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
-  } else {
-    if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write: expected an output port");
-    port_buf_grow(p, (int)size);
-    memcpy(p->buf + p->len, buf, size);
-    p->len += (int)size;
-  }
+  Port *p = (nargs >= 2) ? args[1].as.port : g_current_output_port;
+  write_bytes_to_port(p, buf, size, "write");
   free(buf);
   return v_nil();
 }
@@ -3120,8 +3358,16 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "file-exists?", bi_file_exists_p);
   cvm_register_builtin(vm, "open-input-file", bi_open_input_file);
   cvm_register_builtin(vm, "open-output-file", bi_open_output_file);
+  cvm_register_builtin(vm, "open-binary-input-file", bi_open_binary_input_file);
+  cvm_register_builtin(vm, "open-binary-output-file", bi_open_binary_output_file);
   cvm_register_builtin(vm, "call-with-input-file", bi_call_with_input_file);
   cvm_register_builtin(vm, "call-with-output-file", bi_call_with_output_file);
+  cvm_register_builtin(vm, "with-input-from-file", bi_with_input_from_file);
+  cvm_register_builtin(vm, "with-output-to-file", bi_with_output_to_file);
+  cvm_register_builtin(vm, "file-append", bi_file_append);
+  cvm_register_builtin(vm, "file-lines", bi_file_lines);
+  cvm_register_builtin(vm, "file-size", bi_file_size);
+  cvm_register_builtin(vm, "current-directory", bi_current_directory);
   cvm_register_builtin(vm, "exit", bi_exit);
 
   cvm_register_builtin(vm, "not", bi_not);

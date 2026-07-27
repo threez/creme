@@ -503,16 +503,18 @@ across these files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
-| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 180 | predicates, `car`/`cdr`/`set-car!`/`set-cdr!`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `set-environment-variable!` (`(creme env)`'s own mutator, not just R7RS's read-only `get-environment-variable` — needed so a cvm-run process can pass a flag down to a subprocess it spawns via `process-run`, which inherits environ automatically), `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below) |
+| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 180 | predicates, `car`/`cdr`/`set-car!`/`set-cdr!`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `set-environment-variable!` (`(creme env)`'s own mutator, not just R7RS's read-only `get-environment-variable` — needed so a cvm-run process can pass a flag down to a subprocess it spawns via `process-run`, which inherits environ automatically), `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below), `open-input-file`/`open-output-file`/`open-binary-input-file`/`open-binary-output-file`/`call-with-input-file`/`call-with-output-file`/`with-input-from-file`/`with-output-to-file`/`file-exists?` (`(scheme file)`'s R7RS port surface, plus `(creme file)`'s own `file-append`/`file-lines`/`file-size`/`current-directory` — see this section's own note further down on the two `with-*` builtins specifically) |
 | `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via vendored facil.io |
 | `sql.c` | `(creme sql)` | 6 | `sql-open`, `sql-execute`, `sql-query`, `sql-scalar` — real SQLite via the C API |
 | `hashtable.c` | `(creme hash-table)` (partial) | 6 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!` — no `hash-table-keys`/`values`/`walk` yet; `hash-table-ref`'s own default arg may be a plain value OR a thunk (only applied if it's actually callable), matching native's own contract |
 | `strings.c` | `(creme string)` + `(creme format)` | 16 | `string-upcase`/`downcase`/`trim`/`split`/`join`/`replace`/`pad`/etc., `format` |
-| `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) + `(creme file)` (partial) | 8 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path`, `file-read` (same function as `read-whole-file`, registered under both names), `file-write`, `delete-file` |
+| `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) + a slice of `(scheme file)`/`(creme file)` | 8 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path`, `file-read` (same function as `read-whole-file`, registered under both names), `file-write`, `delete-file` — the rest of `(scheme file)`/`(creme file)` (now a full port) lives in `builtins.c`'s own row above |
 | `regex.c` | `(creme regex)` (very narrow — see "REPL" above) | 2 | `regexp`, `regexp-matches?` |
 | `process.c` | `(creme process)` (narrow — just `process-run`) | 1 | `process-run` — real POSIX fork/pipe/execvp/waitpid, matching native Crystal's exact `(cmd args) -> (stdout stderr exit-code success?)` contract; exists so spec/creme/main_spec.scm (the one entry point for running every spec/creme spec file and reporting one combined total) spawns each spec file as its own genuinely separate OS process the same way whether it's driven natively or reentrantly under `./cvm/cvm spec/creme/main_spec.scm` itself |
 | `digest.c` | `(creme digest)` | 5 | `digest-md5`/`-sha1`/`-sha256` (hex digest strings, via OpenSSL's `EVP_Digest` — reuses the `-lcrypto` link already added for `(creme actor)`'s own HMAC handshake), `base64-encode`/`-decode` (a small hand-rolled codec — OpenSSL's own `EVP_EncodeBlock`/`DecodeBlock` don't raise cleanly on invalid input the way native's own `Base64.decode_string` does) |
 | `json.c` | `(creme json)` | 2 | `json-read`/`json-write` — a small hand-rolled recursive-descent JSON parser/writer; matches native's own conventions exactly (array → vector, object → alist of `(string . value)` pairs usable with `assoc`/`cdr`/`car`, an empty object conflates with JSON null) |
+| `bigdecimal.c` | `(creme bigdecimal)` | 14 | `bigdecimal-add`/`-sub`/`-mul`/`-div`/`-neg`/`-compare`/`=?`/`<?`/`>?`/`-zero?`, `string->bigdecimal`/`integer->bigdecimal`/`bigdecimal->string`/`bigdecimal?` — a standalone boxed decimal type (like native, never hooked into the numeric tower), backed by an integer mantissa + a decimal scale on top of GMP's `mpz_t` (Java-`BigDecimal`-style, exact by construction — deliberately NOT GMP's own `mpf_t`, which is arbitrary-precision BINARY float, not exact base-10 decimal) |
+| `http.c` | `(creme http)` | 7 | `http-get`/`-head`/`-delete`/`-post`/`-put`/`-patch`/`-request` — a plain HTTP/1.1 CLIENT, raw `getaddrinfo`/`connect`/`read`/`write` (the same pattern `(creme actor)`'s own `dial()` uses); always sends `Connection: close` and drains the response until the peer closes the socket, decoding a chunked `Transfer-Encoding` body as a second pass if the server ever sends one. HTTPS/TLS is a deliberate scope cut — this project's own native spec suite for `(creme http)` never exercises it either, only plain `http://` |
 | `csv.c` | `(creme csv)` | 8 | `csv-read`/`-write`/`-read-headers`/`-write-headers` (bulk) and `csv-reader-open`/`-read!`/`-writer-open`/`-row!` (streaming, over a Port) — a self-contained RFC4180-ish parser/writer, not a port of native's own chunked-IO-optimized implementation |
 | `treelist.c` | `(creme treelist)` | — | a full RRB (Relaxed Radix Balanced) tree, matching native's own structure-sharing behavior, not just an array-backed stand-in |
 | `actor.c` | `(creme actor)` | — | real OS-thread actors, multiple `'local` nodes, and real `'tcp`/`'unix` distribution with an HMAC-SHA256 handshake — see the fuller description just below this table, and `actor.c`'s own header comment |
@@ -547,10 +549,10 @@ splitmix64 generator — deliberately NOT bit-for-bit compatible with
 Crystal's own PCG-based `Random`, see `spec/creme/random_spec.scm`'s own
 header comment) but had likewise been left off this list.
 
-Every other `(scheme ...)` library (`file`, `process-context` beyond
+Every other `(scheme ...)` library (`process-context` beyond
 `get-environment-variable`/`exit`, `time`, `cxr`) and every other
-`(creme ...)` FFI library (`bigdecimal`, `time`, `tui`,
-`rfc8439`, `http`, `prof-native`, `prof-vm`, `raft`, `jose`) has **no**
+`(creme ...)` FFI library (`time`, `tui`,
+`rfc8439`, `prof-native`, `prof-vm`, `raft`, `jose`) has **no**
 cvm-native counterpart at all — a script that calls into one won't
 resolve at cvm load/run time. (`(creme process)` is now a partial
 exception — just `process-run`, see `process.c`'s own row above.)
@@ -577,12 +579,25 @@ unsupported (no `T_COMPLEX` value tag) but now has real support — see
 `angle` entry in `builtins.c`'s row above (its complete native surface,
 not a subset).
 
-Three more are *partially* covered, each only as far as this project's
+Two more are *partially* covered, each only as far as this project's
 own `spec/creme` test suite needed: `(creme math)` (just `flonum->bits`/
-`bits->flonum`, not the rest of that FFI), `(creme introspection)` (just
-`gensym`, not `macro?`/the rest), `(creme file)` (just `file-read`/
-`file-write`/`delete-file`, not `file-exists?`/`file-append`/`file-lines`/
-`file-size`/`current-directory`). `(scheme read)`'s `read`/
+`bits->flonum`, not the rest of that FFI) and `(creme introspection)`
+(just `gensym`, not `macro?`/the rest). `(scheme file)`/`(creme file)`
+is now a FULL port, split across `bootstrap.c` (`file-read`/`file-write`/
+`delete-file`) and `builtins.c` (`file-exists?`/`open-input-file`/
+`open-output-file`/`open-binary-input-file`/`open-binary-output-file`/
+`call-with-input-file`/`call-with-output-file`/`with-input-from-file`/
+`with-output-to-file`/`file-append`/`file-lines`/`file-size`/
+`current-directory`) -- `with-input-from-file`/`with-output-to-file`
+needed a genuinely new piece first: `(current-input-port)`/`(current-
+output-port)` used to be hardcoded, non-redirectable sentinels (every
+port-defaulting builtin read straight through them); they're now a
+mutable per-thread indirection instead (`g_current_input_port`/
+`g_current_output_port`, `builtins.c`), and these two builtins reuse the
+SAME dynamic-wind unwind-stack mechanism `dynamic-wind` itself uses (see
+`bi_with_input_from_file`'s own comment) so the previous port is
+restored even if the redirected thunk escapes via an error. `(scheme
+read)`'s `read`/
 `open-input-string`/`eof-object` and `(scheme eval)`'s `eval` also have
 no NATIVE (C) counterpart in this table at all, but ARE available when
 running under cvm's own "compiler mode" (see below) -- `cvm/compiler-
