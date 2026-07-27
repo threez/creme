@@ -15,12 +15,6 @@
 ;; tradeoff, not a cvm-specific cut: an alist built from zero pairs IS
 ;; '(), not a special case).
 ;;
-;; NOTE: the "mutates an object entry in place with set-cdr!" case from
-;; the native Crystal spec (spec/scheme/modules/creme/json_spec.cr) is
-;; NOT ported here -- set-car!/set-cdr! aren't implemented in cvm at all
-;; yet, a separate, unrelated pre-existing gap in (scheme base) coverage,
-;; not something this file's own scope should paper over.
-;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/json_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/json_spec.scm
@@ -59,6 +53,12 @@
     (should-raise? (lambda () (json-read "{not json"))))
 
   (it "stringifies a char as a 1-character string"
-    (should-match-native? '((json-write #\a)))))
+    (should-match-native? '((json-write #\a))))
+
+  (it "mutates an object entry in place with set-cdr!"
+    (should-match-native?
+     '((let ((o (json-read "{\"x\":1}")))
+         (set-cdr! (assoc "x" o) 2)
+         (cdr (assoc "x" o)))))))
 
 (spec-summary!)

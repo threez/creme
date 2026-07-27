@@ -86,6 +86,15 @@
 
   (it "exact-integer-sqrt returns the integer root and remainder via values"
     (should-match-native? '((call-with-values (lambda () (exact-integer-sqrt 17)) list)))
-    (should-match-native? '((call-with-values (lambda () (exact-integer-sqrt 16)) list)))))
+    (should-match-native? '((call-with-values (lambda () (exact-integer-sqrt 16)) list))))
+
+  ;; set-car!/set-cdr! used to be entirely absent from cvm (an unbound
+  ;; variable) -- a genuine, unrelated gap noticed while porting (creme
+  ;; json), fixed alongside this case.
+  (it "set-car!/set-cdr! mutate the pair's fields in place"
+    (should-match-native? '((define x (list 'a 'b)) (set-car! x 'z) x))
+    (should-match-native? '((define y (cons 1 2)) (set-cdr! y 3) y))
+    (should-match-native?
+     '((define a (cons 1 (cons 2 '()))) (define b (cons (car a) (cdr a))) (set-car! b 9) (list a b)))))
 
 (spec-summary!)

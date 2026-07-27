@@ -1949,6 +1949,27 @@ static Value bi_angle(VM *vm, Value *args, int nargs) {
 static Value bi_car(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) cvm_abort("car: expected a pair"); return args[0].as.pair->car; }
 static Value bi_cdr(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) cvm_abort("cdr: expected a pair"); return args[0].as.pair->cdr; }
 
+/* set-car!/set-cdr! -- mutate a Pair's own field in place (Pair is a
+ * real, individually GC_MALLOC'd struct -- see value.h -- so this is
+ * just a direct field write, no copy-on-write or interning to worry
+ * about); return unspecified (v_nil()), matching native's own contract
+ * exactly. Like native, this does NOT detect/reject mutating a literal
+ * constant (R7RS documents that as an error, but neither implementation
+ * enforces it -- see cvm/README.md's own note on this, mirroring the
+ * Crystal-side spec suite's identical pending case). */
+static Value bi_set_car_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2 || args[0].tag != T_PAIR) cvm_abort("set-car!: expected a pair");
+  args[0].as.pair->car = args[1];
+  return v_nil();
+}
+static Value bi_set_cdr_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2 || args[0].tag != T_PAIR) cvm_abort("set-cdr!: expected a pair");
+  args[0].as.pair->cdr = args[1];
+  return v_nil();
+}
+
 /* (scheme cxr)'s full caar..cddddr family, as REAL global procedures --
  * cvm already handles a car/cdr/cadr/etc. CALL SITE via the fused Cxr op
  * (a program the real analyzer compiles never needs these as ordinary
@@ -3159,6 +3180,8 @@ void cvm_register_builtins(VM *vm) {
 
   cvm_register_builtin(vm, "car", bi_car);
   cvm_register_builtin(vm, "cdr", bi_cdr);
+  cvm_register_builtin(vm, "set-car!", bi_set_car_bang);
+  cvm_register_builtin(vm, "set-cdr!", bi_set_cdr_bang);
   cvm_register_builtin(vm, "caar", bi_caar);
   cvm_register_builtin(vm, "cadr", bi_cadr);
   cvm_register_builtin(vm, "cdar", bi_cdar);
