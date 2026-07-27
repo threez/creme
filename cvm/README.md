@@ -503,7 +503,7 @@ across eight files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
-| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 180 | predicates, `car`/`cdr`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below) |
+| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 180 | predicates, `car`/`cdr`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `set-environment-variable!` (`(creme env)`'s own mutator, not just R7RS's read-only `get-environment-variable` — needed so a cvm-run process can pass a flag down to a subprocess it spawns via `process-run`, which inherits environ automatically), `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below) |
 | `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via vendored facil.io |
 | `sql.c` | `(creme sql)` | 6 | `sql-open`, `sql-execute`, `sql-query`, `sql-scalar` — real SQLite via the C API |
 | `hashtable.c` | `(creme hash-table)` (partial) | 6 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!` — no `hash-table-keys`/`values`/`walk` yet; `hash-table-ref`'s own default arg may be a plain value OR a thunk (only applied if it's actually callable), matching native's own contract |
@@ -522,12 +522,29 @@ too — a 3+-arg or non-fused call to them works either way.
 Every other `(scheme ...)` library (`file`, `process-context` beyond
 `get-environment-variable`/`exit`, `time`, `inexact`, `repl`, `r5rs`,
 `case-lambda`, `cxr`) and every other `(creme ...)` FFI library
-(`bigdecimal`, `json`, `time`, `random`, `digest`, `env`, `tui`,
-`rfc8439`, `http`, `prof-native`, `prof-vm`, `actor`, `raft`,
+(`bigdecimal`, `json`, `time`, `random`, `digest`, `tui`,
+`rfc8439`, `http`, `prof-native`, `prof-vm`, `raft`,
 `treelist`, `csv`, `jose`) has **no** cvm-native counterpart at all — a
 script that calls into one won't resolve at cvm load/run time. (`(creme
 process)` is now a partial exception — just `process-run`, see
-`process.c`'s own row above.) `(scheme complex)` USED to be entirely
+`process.c`'s own row above.)
+
+`(creme actor)` (`actor.c`) is now a FULL port — real OS-thread actors
+(one pthread + one independent copied-globals VM per `spawn`, not a
+green-thread scheduler; see `actor.c`'s own header comment for why),
+`spawn`/`send!`/`receive!`/`self`/`monitor`/`register!`/`whereis`/
+`actor-ref-id`/`down?`/`down-ref`/`down-reason`, multiple independent
+`start-node 'local` "nodes" in one process, and real
+`start-node 'tcp`/`'unix` distribution with a byte-identical HMAC-SHA256
+handshake + `[type:u8][length:u32 BE][body]` frame format to native —
+the one deliberate deviation from native is the wire *payload* encoding,
+a minimal native datum reader/writer built for this (matching native's
+own `("@record" "<type>" field...)`/`"@ref:<uri>"` shape, not
+byte-identical text, since cvm has no native C-level Scheme reader to
+reuse) — cvm-to-cvm distribution works correctly, exact wire interop
+with a real native Crystal node is not a goal of this port. See
+`spec/creme/actor_spec.scm` for the full local/`'local`-node/TCP/Unix
+coverage. `(scheme complex)` USED to be entirely
 unsupported (no `T_COMPLEX` value tag) but now has real support — see
 "Value/type model" below and this section's own `make-rectangular`/
 `make-polar`/`real-part`/`imag-part`/`magnitude`/
@@ -653,6 +670,52 @@ are open (pointing directly into the stack) while their owning frame is
 live, and close (copy out) when it returns. This is why the native
 profiler mostly can't see per-Scheme-function detail (see "Profiling"
 above) — Scheme-level calls never become real C stack frames.
+
+## Known bugs (genuine defects, not deliberate cuts)
+
+- **NOT a cvm-specific bug, but affects every program cvm runs (cvm
+  always executes self-hosted-compiled bytecode) — found while porting
+  `(creme actor)`, worth recording here regardless:** a body with TWO
+  `define`s and a plain (non-`define`) expression between them can
+  evaluate the second `define`'s initializer BEFORE that intervening
+  expression runs, if the initializer's correctness depends on a side
+  effect that expression has on shared/global mutable state:
+  ```scheme
+  (define worker 42)
+  (register! worker)        ; sets some global registry
+  (define found (lookup))   ; should see register!'s effect -- doesn't
+  ```
+  `found` ends up holding whatever `(lookup)` would have returned
+  BEFORE `register!` ran. Reproduces with no shard/library dependency
+  at all (a bare top-level `set!`/global-variable pair) under `./bin/
+  creme --self-hosted` too, and does NOT reproduce under plain `./bin/
+  creme` (the native Crystal compiler) — meaning this is a bug in the
+  **self-hosted Scheme compiler itself**
+  (`modules/creme/compiler/compiler.sld`'s own body → `letrec*`-
+  equivalent transform), not in cvm's C dispatch loop; it just also
+  affects cvm since cvm always runs self-hosted-compiled bytecode. This
+  body shape is *permitted* here (see the "definition after expression"
+  pending case in the Crystal-side spec suite) and should still
+  evaluate everything in source order regardless — that in-order
+  guarantee is what's being violated, not the permissiveness itself.
+  **Also confirmed with only ONE `define`, not two**: a single
+  `(define worker (spawn ...))` placed right after a preceding
+  side-effecting expression (`(start-node ...)`, which reassigns the
+  calling actor's own current node) had its initializer's `spawn` run
+  BEFORE `start-node`'s reassignment took effect — the spawned actor
+  silently inherited the WRONG node, and every message sent to it via
+  its registered name vanished with no error (a misrouted message isn't
+  a error, just a `receive!` that blocks forever) — found and worked
+  around the same way while writing `actor_spec.scm`'s Phase 4 (TCP/
+  Unix transport) cases. So the trigger is any body-level `define`
+  following a preceding plain expression whose side effect the
+  `define`'s own initializer depends on — not specifically "two defines
+  with an expression between them". Workaround used throughout
+  `spec/creme/actor_spec.scm`: restructure as a `let*` (whose own
+  sequential-binding evaluation is NOT affected — confirmed by direct
+  testing) instead of a body-level `define` following a preceding
+  expression. Not yet root-caused further or fixed — out of scope for
+  the actor port itself.
 
 ## Deliberate cuts (not bugs — see comments at each site)
 

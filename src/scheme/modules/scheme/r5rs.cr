@@ -25,7 +25,9 @@ module Scheme::Builtins::R5rsLibrary
   # (scheme-report-environment version) — an environment containing the
   # R5RS-report bindings. This implementation doesn't maintain a
   # separate R5RS-vs-R7RS binding set, so, like null-environment, this
-  # wraps @base_env (the same bindings (scheme base) itself wraps).
+  # wraps @base_env — i.e. (builtin base)'s bindings, not any
+  # Scheme-defined additions layered on top by (scheme base) (see
+  # modules/scheme/base.cr's install_scheme_base_and_write_libraries).
   @[Scheme::SchemeFn("scheme-report-environment", min: 0, max: 1)]
   def scheme_report_environment(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeEnvironment.new(interp.base_env)

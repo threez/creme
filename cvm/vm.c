@@ -34,8 +34,17 @@
  * parameter, so this is how it reaches the current run's guard-handler
  * stack. Mirrors profiler.c's own g_profiled_vm (same rationale: a
  * fixed API a signal handler/utility function can't take extra
- * parameters through). */
-static VM *g_current_vm = NULL;
+ * parameters through).
+ *
+ * _Thread_local since (creme actor) (actor.c): every actor gets its own
+ * VM running on its own real OS thread (see cvm_new_child_vm below) --
+ * a single process-wide pointer would have two concurrently-running
+ * actors stomping on each other's "which VM does cvm_abort raise
+ * against" pointer, misdirecting errors to the wrong actor entirely.
+ * Each thread sets its own copy via cvm_set_current_vm at thread start
+ * (main.c for the main thread, actor.c's thread entry function for a
+ * spawned actor). */
+static _Thread_local VM *g_current_vm = NULL;
 
 void cvm_set_current_vm(VM *vm) {
   g_current_vm = vm;
@@ -99,6 +108,19 @@ _Noreturn void cvm_abort(const char *fmt, ...) {
     cvm_raise_condition(g_current_vm, cond);
   }
 
+  /* An uncaught abort inside a spawned actor's own VM (see actor.c's
+   * thread entry function, which setjmp's actor_unwind before running
+   * the actor's thunk) must only take THAT actor down, not the whole
+   * process -- unlike an uncaught abort on the main script's VM, which
+   * still exits below exactly as it always has. */
+  if (g_current_vm && g_current_vm->has_actor_unwind) {
+    size_t n = strlen(buf);
+    if (n >= sizeof(g_current_vm->abort_message)) n = sizeof(g_current_vm->abort_message) - 1;
+    memcpy(g_current_vm->abort_message, buf, n);
+    g_current_vm->abort_message[n] = '\0';
+    longjmp(g_current_vm->actor_unwind, 1);
+  }
+
   fputs(buf, stderr);
   fputc('\n', stderr);
   exit(1);
@@ -116,6 +138,56 @@ int cvm_global_intern(VM *vm, const char *name, int len) {
   vm->globals[slot].value = v_nil();
   vm->globals[slot].bound = 0;
   return slot;
+}
+
+/* (creme actor)'s own per-actor VM constructor: GC_MALLOC (zero-inits,
+ * same guarantee as main.c's own top-level VM allocation) a fresh VM,
+ * then copy `parent`'s ENTIRE globals array verbatim (same GlobalCell
+ * slots, same names at the same indices) -- every global name's slot was
+ * already assigned once during the single ahead-of-time whole-program
+ * compile, shared by every VM that ever runs this same bytecode, so
+ * copying the array preserves that layout exactly. A later `(define x
+ * ...)`/`(set! x ...)` inside the spawned actor's own thunk then only
+ * ever touches ITS copy's slot for x, leaving the parent's untouched --
+ * reproducing the observable half of native's own Interpreter#initialize
+ * (inherit_from:) isolation (a spawned actor's top-level definitions
+ * don't leak to its parent) without cvm's flat slot-table compilation
+ * model needing any deeper change. Known, deliberate narrower-than-
+ * native trade-off: a PARENT global added AFTER this child spawns won't
+ * appear in the child (no live parent-chain fallback the way native's
+ * Env parent pointer gives it) -- this only ever takes a snapshot at
+ * spawn time. */
+/* A shared, immutable, all-zero "root" chunk purely so a freshly built
+ * child VM's frame 0 has a non-NULL `chunk` to satisfy cvm_apply's own
+ * `caller->chunk->num_registers` read (see below) -- num_registers==0
+ * is exactly right, since this frame is never itself dispatched
+ * through (nothing ever advances its `ip` or returns "past" it); it
+ * only ever serves as the register-window base cvm_apply's own
+ * new_base arithmetic measures from. */
+static Chunk g_empty_root_chunk;
+
+/* cvm_run_chunk (the normal top-level entry point) sets up frame 0 by
+ * hand before ever calling cvm_dispatch; cvm_apply(vm, fn, ...) --
+ * actor.c's own way of starting a spawned actor's thunk -- assumes that
+ * SAME setup already happened (it reads vm->frames[vm->depth - 1]),
+ * which a bare GC_MALLOC'd VM (depth left at its zero-init default)
+ * does NOT have. Give every child VM the same minimal frame 0
+ * cvm_run_chunk would, so cvm_apply can be called on it directly. */
+VM *cvm_new_child_vm(VM *parent) {
+  VM *vm = GC_MALLOC(sizeof(VM));
+  memcpy(vm->globals, parent->globals, sizeof(GlobalCell) * (size_t)parent->n_globals);
+  vm->n_globals = parent->n_globals;
+
+  Frame *f0 = &vm->frames[0];
+  f0->chunk = &g_empty_root_chunk;
+  f0->base = 0;
+  f0->closure = NULL;
+  f0->ip = 0;
+  f0->return_reg = -1;
+  f0->n_opened = 0;
+  vm->depth = 1;
+
+  return vm;
 }
 
 void cvm_register_builtin(VM *vm, const char *name, BuiltinFn fn) {

@@ -19,7 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "actor.h"
 #include "bootstrap.h"
+#include "csv.h"
 #include "hashtable.h"
 #include "mux.h"
 #include "profiler.h"
@@ -27,6 +29,7 @@
 #include "regex.h"
 #include "sql.h"
 #include "strings.h"
+#include "treelist.h"
 #include "vm.h"
 
 /* Mean instructions between VM-level samples — matches the interval
@@ -119,6 +122,9 @@ int main(int argc, char **argv) {
   cvm_register_bootstrap_builtins(vm);
   cvm_register_regex_builtins(vm);
   cvm_register_process_builtins(vm);
+  cvm_register_csv_builtins(vm);
+  cvm_register_treelist_builtins(vm);
+  cvm_register_actor_builtins(vm);
 
   /* Compiler mode: `path` isn't a compiled SCB1 binary at all -- it's the
    * plain Scheme source cvm should compile-and-run, entirely via the

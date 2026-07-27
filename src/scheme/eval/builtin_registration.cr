@@ -48,15 +48,20 @@
 #   or combining more than one module. The block's own last expression is
 #   the Array(String) to export, same contract as the plain form.
 #
-# (scheme base)/(scheme write) are registered directly via
-# install_base_and_write_libraries (called separately from
-# Interpreter#initialize, before install_all_libraries) since their Env *is*
-# @base_env itself, not a fresh Env the way every register_library-declared
-# library gets. Their exports are still DERIVED from register_module return
-# values (the section installers' names for base, install_write's for write)
-# — the one residue is base.cr's SCHEME_BASE_NONFN, the handful of exports
-# that aren't annotated methods at all (syntactic keywords + the
-# current-*-port parameter objects), which no register_module could report.
+# (builtin base)/(builtin write) are registered directly via
+# install_builtin_libraries (called separately from Interpreter#initialize,
+# before install_all_libraries) since their Env *is* @base_env itself, not a
+# fresh Env the way every register_library-declared library gets. Their
+# exports are still DERIVED from register_module return values (the section
+# installers' names for base, install_write's for write) — the one residue
+# is base.cr's BUILTIN_BASE_NONFN, the handful of exports that aren't
+# annotated methods at all (syntactic keywords + the current-*-port
+# parameter objects), which no register_module could report.
+#
+# (scheme base)/(scheme write) are themselves ordinary libraries built on
+# top of (builtin base)/(builtin write) through the normal define-library
+# machinery (install_scheme_base_and_write_libraries, base.cr) — they get a
+# fresh Env like any other library, not @base_env.
 
 annotation Scheme::SchemeFn
 end

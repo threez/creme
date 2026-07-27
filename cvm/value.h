@@ -19,6 +19,7 @@
 
 #include <setjmp.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include <gmp.h>
 
@@ -133,13 +134,23 @@ enum {
   RC_MUTATOR = 4,
 };
 
-/* Box kinds — one per native module that wraps a foreign handle. */
+/* Box kinds — one per native module that wraps a foreign handle.
+ * BOX_KIND_EOF is the odd one out: no foreign handle at all, just a
+ * distinguishable singleton value for (eof-object)/(eof-object?) --
+ * `ptr` is unused/NULL for it, see bi_eof_object in builtins.c. */
 enum {
   BOX_KIND_HASHTABLE = 1,
   BOX_KIND_SQL = 2,
   BOX_KIND_MUX_ROUTER = 3,
   BOX_KIND_MUX_SERVER = 4,
   BOX_KIND_REGEX = 5,
+  BOX_KIND_EOF = 6,
+  BOX_KIND_CSV_READER = 7,
+  BOX_KIND_CSV_WRITER = 8,
+  BOX_KIND_TREELIST = 9,
+  BOX_KIND_MUTABLE_TREELIST = 10,
+  BOX_KIND_ACTOR_REF = 11,
+  BOX_KIND_ACTOR_NODE = 12, /* actor.c Phase 3+: a start-node handle */
 };
 
 typedef struct Value Value;
@@ -219,9 +230,50 @@ struct Promise {
   Value cached;
 };
 
+/* PORT_KIND_STDOUT/PORT_KIND_STDIN are the two process-stream singletons
+ * (see builtins.c's stdout_port_sentinel/stdin_port_sentinel) -- buf/len/
+ * cap/pos/file are unused for those, since they read/write straight
+ * through the literal `stdin`/`stdout` FILE* instead of a buffer or a
+ * `file` field of their own (see builtins.c's read/write helpers'
+ * kind-dispatch). PORT_KIND_OUTPUT_STRING uses buf/len/cap the same
+ * grow-on-demand way this struct always has (buf the backing storage,
+ * len the used prefix, cap the allocated size). PORT_KIND_INPUT_STRING
+ * uses buf/len as an immutable (copied-in-at-open-input-string-time)
+ * byte range plus `pos`, a forward-only read cursor into it -- cap is
+ * unused there. PORT_KIND_INPUT_FILE/PORT_KIND_OUTPUT_FILE use `file`
+ * (an fopen'd FILE*) instead of any of the above -- see
+ * bi_open_input_file/bi_open_output_file. */
+typedef enum {
+  PORT_KIND_STDOUT,
+  PORT_KIND_STDIN,
+  PORT_KIND_OUTPUT_STRING,
+  PORT_KIND_INPUT_STRING,
+  PORT_KIND_INPUT_FILE,
+  PORT_KIND_OUTPUT_FILE,
+} PortKind;
+
+/* `binary` distinguishes a bytevector-backed port (open-input-bytevector/
+ * open-output-bytevector) from an otherwise-identical string-backed one
+ * (open-input-string/open-output-string) -- mirrors native SchemePort's
+ * own `binary?` flag exactly (base/bytevectors.cr's own header comment:
+ * "distinguished only by the `binary` flag ... so read-u8/write-u8/
+ * read-bytevector/etc. know not to UTF-8-decode"). Since cvm's strings
+ * are already plain byte buffers with no real UTF-8 decoding at all, a
+ * binary port's buf/len/cap/pos mechanics are byte-for-byte identical to
+ * a textual one's -- `binary` only changes which builtins accept the
+ * port (binary-port?/textual-port?) and what Value tag read-u8/peek-u8/
+ * get-output-bytevector wrap the bytes in (T_INT/T_BYTEVECTOR) vs.
+ * read-char/peek-char/get-output-string's (T_CHAR/T_STR). Stdin/stdout/
+ * file ports are always textual here (`binary` stays 0) -- open-input-
+ * file/open-output-file have no binary variant in this prototype. */
 struct Port {
+  PortKind kind;
   char *buf;
   int len, cap;
+  int pos;
+  int closed;
+  int binary;
+  FILE *file;
 };
 
 struct MultiValues {

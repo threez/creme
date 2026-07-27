@@ -22,6 +22,10 @@
 
 typedef struct {
   FIOBJ hash;
+  Value *keys;   /* parallel to values, same indexing -- the ORIGINAL,
+                  * unconverted Scheme key, kept only so hash-table-keys/
+                  * hash-table->alist can recover it (value_to_fiobj's own
+                  * conversion is one-way, see this file's header comment) */
   Value *values;
   int n_values, cap_values;
 } CvmHashTable;
@@ -88,6 +92,7 @@ static Value bi_make_hash_table(VM *vm, Value *args, int nargs) {
   (void)nargs;
   CvmHashTable *ht = GC_MALLOC(sizeof(CvmHashTable));
   ht->hash = fiobj_hash_new();
+  ht->keys = NULL;
   ht->values = NULL;
   ht->n_values = 0;
   ht->cap_values = 0;
@@ -107,9 +112,11 @@ static Value bi_hash_table_set(VM *vm, Value *args, int nargs) {
   FIOBJ fkey = value_to_fiobj(args[1]);
   if (ht->n_values >= ht->cap_values) {
     ht->cap_values = ht->cap_values ? ht->cap_values * 2 : 8;
+    ht->keys = GC_REALLOC(ht->keys, sizeof(Value) * (size_t)ht->cap_values);
     ht->values = GC_REALLOC(ht->values, sizeof(Value) * (size_t)ht->cap_values);
   }
   int idx = ht->n_values++;
+  ht->keys[idx] = args[1];
   ht->values[idx] = args[2];
   fiobj_hash_set(ht->hash, fkey, fiobj_num_new(idx + 1)); /* +1: 0 would collide with FIOBJ_INVALID */
   fiobj_free(fkey);
@@ -154,6 +161,89 @@ static Value bi_hash_table_ref(VM *vm, Value *args, int nargs) {
   cvm_abort("hash-table-ref: key not found and no default given");
 }
 
+/* hash-table-keys/-values/->alist all need to enumerate only the table's
+ * LIVE entries (an overwritten or deleted key leaves its old `keys`/
+ * `values` slot orphaned -- see bi_hash_table_set/bi_hash_table_delete --
+ * with no compaction). Rather than re-deriving liveness by rescanning the
+ * arrays, iterate ht->hash itself via facil.io's own fiobj_each1: it
+ * already only visits entries still present in the FIOBJ hash (an
+ * overwrite retargets the key to a new idx, a delete removes it there
+ * entirely), so reading back `idx+1` from each visited value and
+ * indexing into keys[idx]/values[idx] naturally skips every dead slot,
+ * with no bookkeeping of our own. Order matches insertion order (facil.io
+ * Hash objects are documented as order-preserving). */
+typedef struct {
+  CvmHashTable *ht;
+  Value *out; /* collects either keys, values, or (key . value) pairs -- filled in by each call site's own task fn */
+  int n, cap;
+  VM *vm; /* only needed by the ->alist collector, to cons pairs as it goes */
+} HashCollectCtx;
+
+static void hash_collect_grow(HashCollectCtx *ctx) {
+  if (ctx->n >= ctx->cap) {
+    ctx->cap = ctx->cap ? ctx->cap * 2 : 8;
+    ctx->out = GC_REALLOC(ctx->out, sizeof(Value) * (size_t)ctx->cap);
+  }
+}
+
+static int collect_keys_task(FIOBJ obj, void *arg) {
+  HashCollectCtx *ctx = (HashCollectCtx *)arg;
+  int idx = (int)fiobj_obj2num(obj) - 1;
+  hash_collect_grow(ctx);
+  ctx->out[ctx->n++] = ctx->ht->keys[idx];
+  return 0;
+}
+
+static int collect_values_task(FIOBJ obj, void *arg) {
+  HashCollectCtx *ctx = (HashCollectCtx *)arg;
+  int idx = (int)fiobj_obj2num(obj) - 1;
+  hash_collect_grow(ctx);
+  ctx->out[ctx->n++] = ctx->ht->values[idx];
+  return 0;
+}
+
+static int collect_alist_task(FIOBJ obj, void *arg) {
+  HashCollectCtx *ctx = (HashCollectCtx *)arg;
+  int idx = (int)fiobj_obj2num(obj) - 1;
+  hash_collect_grow(ctx);
+  ctx->out[ctx->n++] = cvm_cons(ctx->vm, ctx->ht->keys[idx], ctx->ht->values[idx]);
+  return 0;
+}
+
+/* Builds a Scheme list from a freshly-collected Value buffer, in the same
+ * (reverse-cons-then-nothing-to-reverse) order bi_list/bi_vector_to_list
+ * above already use -- iterate the buffer back-to-front so the resulting
+ * list comes out in the buffer's own (insertion) order. */
+static Value values_to_list(VM *vm, Value *values, int n) {
+  Value r = v_nil();
+  for (int i = n - 1; i >= 0; i--) r = cvm_cons(vm, values[i], r);
+  return r;
+}
+
+static Value bi_hash_table_keys(VM *vm, Value *args, int nargs) {
+  if (nargs < 1) cvm_abort("hash-table-keys: expected a hash table");
+  CvmHashTable *ht = as_hash_table(args[0], "hash-table-keys");
+  HashCollectCtx ctx = {ht, NULL, 0, 0, vm};
+  fiobj_each1(ht->hash, 0, collect_keys_task, &ctx);
+  return values_to_list(vm, ctx.out, ctx.n);
+}
+
+static Value bi_hash_table_values(VM *vm, Value *args, int nargs) {
+  if (nargs < 1) cvm_abort("hash-table-values: expected a hash table");
+  CvmHashTable *ht = as_hash_table(args[0], "hash-table-values");
+  HashCollectCtx ctx = {ht, NULL, 0, 0, vm};
+  fiobj_each1(ht->hash, 0, collect_values_task, &ctx);
+  return values_to_list(vm, ctx.out, ctx.n);
+}
+
+static Value bi_hash_table_to_alist(VM *vm, Value *args, int nargs) {
+  if (nargs < 1) cvm_abort("hash-table->alist: expected a hash table");
+  CvmHashTable *ht = as_hash_table(args[0], "hash-table->alist");
+  HashCollectCtx ctx = {ht, NULL, 0, 0, vm};
+  fiobj_each1(ht->hash, 0, collect_alist_task, &ctx);
+  return values_to_list(vm, ctx.out, ctx.n);
+}
+
 static Value bi_hash_table_delete(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2) cvm_abort("hash-table-delete!: expected (table key)");
@@ -171,4 +261,7 @@ void cvm_register_hashtable_builtins(VM *vm) {
   cvm_register_builtin(vm, "hash-table-contains?", bi_hash_table_contains_p);
   cvm_register_builtin(vm, "hash-table-ref", bi_hash_table_ref);
   cvm_register_builtin(vm, "hash-table-delete!", bi_hash_table_delete);
+  cvm_register_builtin(vm, "hash-table-keys", bi_hash_table_keys);
+  cvm_register_builtin(vm, "hash-table-values", bi_hash_table_values);
+  cvm_register_builtin(vm, "hash-table->alist", bi_hash_table_to_alist);
 }

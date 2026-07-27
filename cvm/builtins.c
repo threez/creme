@@ -2,6 +2,7 @@
  * procedures — see cvm/README.md's "builtins actually called" list. Nothing
  * else is registered; calling any other name aborts with "unbound
  * variable" (see vm.c's OP_GETGLOBAL and CallGlobal arms). */
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,6 +70,91 @@ static Value bi_bytevector_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)nargs;
   return v_bool(args[0].tag == T_BYTEVECTOR);
+}
+
+/* Resolves an optional (start [end]) byte range against `len`, mirroring
+ * native's seq_range_args -- args[start_idx]/args[start_idx+1] if
+ * present, defaulting to the full range otherwise. Shared by
+ * bytevector-copy/read-bytevector!/write-bytevector below. */
+static void byte_range_args(Value *args, int nargs, int start_idx, int len, int *first, int *last) {
+  *first = (nargs > start_idx && args[start_idx].tag == T_INT) ? (int)args[start_idx].as.i : 0;
+  *last = (nargs > start_idx + 1 && args[start_idx + 1].tag == T_INT) ? (int)args[start_idx + 1].as.i : len;
+  if (*first < 0 || *last > len || *first > *last) cvm_abort("byte range out of bounds");
+}
+
+static Value bi_bytevector_copy(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("bytevector-copy: expected a bytevector");
+  Bytevector *src = args[0].as.bv;
+  int first, last;
+  byte_range_args(args, nargs, 1, src->len, &first, &last);
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->len = last - first;
+  bv->bytes = GC_MALLOC((size_t)(bv->len ? bv->len : 1));
+  memcpy(bv->bytes, src->bytes + first, (size_t)bv->len);
+  return v_bytevector(bv);
+}
+
+static Value bi_bytevector_copy_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 3 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT || args[2].tag != T_BYTEVECTOR)
+    cvm_abort("bytevector-copy!: expected (to at from [start [end]])");
+  Bytevector *to = args[0].as.bv;
+  int at = (int)args[1].as.i;
+  Bytevector *from = args[2].as.bv;
+  int first, last;
+  byte_range_args(args, nargs, 3, from->len, &first, &last);
+  int count = last - first;
+  if (at < 0 || at + count > to->len) cvm_abort("bytevector-copy!: destination too small");
+  memmove(to->bytes + at, from->bytes + first, (size_t)count);
+  return v_nil();
+}
+
+static Value bi_bytevector_append(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  int total = 0;
+  for (int i = 0; i < nargs; i++) {
+    if (args[i].tag != T_BYTEVECTOR) cvm_abort("bytevector-append: expected bytevectors");
+    total += args[i].as.bv->len;
+  }
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->len = total;
+  bv->bytes = GC_MALLOC((size_t)(total ? total : 1));
+  int offset = 0;
+  for (int i = 0; i < nargs; i++) {
+    memcpy(bv->bytes + offset, args[i].as.bv->bytes, (size_t)args[i].as.bv->len);
+    offset += args[i].as.bv->len;
+  }
+  return v_bytevector(bv);
+}
+
+/* Byte-for-byte reinterpretation, not real UTF-8 decoding/validation --
+ * matches this prototype's byte-wide char/string scope elsewhere (see
+ * bi_char_downcase's own "ASCII-only" comment); a genuinely invalid
+ * UTF-8 byte sequence isn't rejected the way native's utf8->string does. */
+static Value bi_utf8_to_string(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("utf8->string: expected a bytevector");
+  Bytevector *bv = args[0].as.bv;
+  int first, last;
+  byte_range_args(args, nargs, 1, bv->len, &first, &last);
+  int len = last - first;
+  char *copy = GC_MALLOC((size_t)(len ? len : 1));
+  memcpy(copy, bv->bytes + first, (size_t)len);
+  return v_str(copy, len);
+}
+
+static Value bi_string_to_utf8(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->utf8: expected a string");
+  int first, last;
+  byte_range_args(args, nargs, 1, args[0].as.str.len, &first, &last);
+  int len = last - first;
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->len = len;
+  bv->bytes = GC_MALLOC((size_t)(len ? len : 1));
+  memcpy(bv->bytes, args[0].as.str.chars + first, (size_t)len);
+  return v_bytevector(bv);
 }
 
 /* force: mirrors Interpreter#force's own memoization exactly (see
@@ -218,12 +304,138 @@ static Value bi_modulo(VM *vm, Value *args, int nargs) {
   return v_int(r);
 }
 
+/* floor-quotient: floor(a/b) -- truncate-toward-zero quotient/remainder
+ * (bi_quotient/bi_modulo above) adjusted down by one whenever the
+ * remainder's sign doesn't match the divisor's, same correction
+ * bi_modulo itself already applies to get a floor-toward-negative-
+ * infinity remainder. floor-remainder is exactly modulo (registered as
+ * a second name for the same function, matching how truncate-quotient/
+ * truncate-remainder register quotient/remainder under R7RS's explicit
+ * names below). */
+static Value bi_floor_quotient(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("floor-quotient: expected two integers");
+  int64_t a = args[0].as.i, b = args[1].as.i;
+  if (b == 0) cvm_abort("floor-quotient: division by zero");
+  int64_t q = a / b, r = a % b;
+  if (r != 0 && ((r < 0) != (b < 0))) q -= 1;
+  return v_int(q);
+}
+
+static Value make_values2(VM *vm, Value a, Value b) {
+  (void)vm;
+  MultiValues *mv = GC_MALLOC(sizeof(MultiValues));
+  mv->len = 2;
+  mv->items = GC_MALLOC(sizeof(Value) * 2);
+  mv->items[0] = a;
+  mv->items[1] = b;
+  return v_values(mv);
+}
+
+/* (truncate/ a b)/(floor/ a b): the two-values forms of quotient+
+ * remainder/floor-quotient+modulo -- mirrors native's own truncate_slash/
+ * floor_slash exactly (each just bundles its own quotient/remainder
+ * pair via `values`). */
+static Value bi_truncate_slash(VM *vm, Value *args, int nargs) {
+  return make_values2(vm, bi_quotient(vm, args, nargs), bi_remainder(vm, args, nargs));
+}
+
+static Value bi_floor_slash(VM *vm, Value *args, int nargs) {
+  return make_values2(vm, bi_floor_quotient(vm, args, nargs), bi_modulo(vm, args, nargs));
+}
+
+static int64_t i64_gcd(int64_t a, int64_t b) {
+  if (a < 0) a = -a;
+  if (b < 0) b = -b;
+  while (b != 0) {
+    int64_t t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+static Value bi_gcd(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  int64_t acc = 0;
+  for (int i = 0; i < nargs; i++) {
+    if (args[i].tag != T_INT) cvm_abort("gcd: expected an integer");
+    acc = i64_gcd(acc, args[i].as.i);
+  }
+  return v_int(acc);
+}
+
+static Value bi_lcm(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  int64_t acc = 1;
+  for (int i = 0; i < nargs; i++) {
+    if (args[i].tag != T_INT) cvm_abort("lcm: expected an integer");
+    int64_t v = args[i].as.i < 0 ? -args[i].as.i : args[i].as.i;
+    if (v == 0) { acc = 0; continue; }
+    int64_t g = i64_gcd(acc, v);
+    acc = (acc / g) * v;
+  }
+  return v_int(acc < 0 ? -acc : acc);
+}
+
+static int64_t i64_pow(int64_t base, int64_t exp) {
+  int64_t result = 1;
+  for (int64_t i = 0; i < exp; i++) result *= base;
+  return result;
+}
+
+/* (expt base exp): an exact-integer base with a non-negative exact-
+ * integer exponent stays an exact integer; a NEGATIVE exact-integer
+ * exponent produces an exact T_RATIONAL (1/base^|exp|, sign folded into
+ * the numerator since GMP's mpq_set_si takes an unsigned denominator) --
+ * matches native's own expt exactly ((expt 2 -1) is exact 1/2, not
+ * inexact 0.5). Everything else falls back to a float pow via as_double. */
+static Value bi_expt(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 2) cvm_abort("expt: expected two arguments");
+  Value base = args[0], ex = args[1];
+  if (base.tag == T_INT && ex.tag == T_INT) {
+    if (ex.as.i >= 0) return v_int(i64_pow(base.as.i, ex.as.i));
+    int64_t denom = i64_pow(base.as.i, -ex.as.i);
+    int64_t num = 1;
+    if (denom < 0) { denom = -denom; num = -1; }
+    mpq_t q;
+    mpq_init(q);
+    mpq_set_si(q, num, (unsigned long)denom);
+    mpq_canonicalize(q);
+    Value result = make_rational_from_mpq(q);
+    mpq_clear(q);
+    return result;
+  }
+  return v_float(pow(as_double(base, "expt"), as_double(ex, "expt")));
+}
+
+static Value bi_exact_integer_sqrt(VM *vm, Value *args, int nargs) {
+  if (nargs < 1 || args[0].tag != T_INT || args[0].as.i < 0) cvm_abort("exact-integer-sqrt: expected a non-negative integer");
+  int64_t n = args[0].as.i;
+  int64_t root = (int64_t)sqrt((double)n);
+  while (root > 0 && root * root > n) root--;
+  while ((root + 1) * (root + 1) <= n) root++;
+  int64_t rem = n - root * root;
+  return make_values2(vm, v_int(root), v_int(rem));
+}
+
+/* R7RS's (scheme time) current-second: wall-clock time (seconds since the
+ * epoch, fractional), usable for real dates/cross-process comparison --
+ * NOT the same contract as current-jiffy below (elapsed monotonic time
+ * since some arbitrary, per-process reference point). This used to read
+ * CLOCK_MONOTONIC (a bug: monotonic time since an arbitrary boot-relative
+ * point isn't a real date and isn't comparable across processes) -- fixed
+ * to CLOCK_REALTIME, matching the native Crystal interpreter's own
+ * current-second (Time.utc.to_unix_f). (creme bench)'s own use of
+ * current-second (modules/creme/bench.sld) only ever takes a DIFFERENCE
+ * of two calls, so this fix doesn't change its behavior at all. */
 static Value bi_current_second(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_REALTIME, &ts);
   return v_float((double)ts.tv_sec + (double)ts.tv_nsec / 1e9);
 }
 
@@ -249,6 +461,150 @@ static Value bi_bits_to_flonum(VM *vm, Value *args, int nargs) {
   int64_t bits = args[0].as.i;
   memcpy(&f, &bits, sizeof(f));
   return v_float(f);
+}
+
+/* ---- (scheme inexact)/(creme math): transcendentals -- thin libm
+ * wrappers over as_double (already used by abs/magnitude/etc., accepts
+ * T_INT/T_RATIONAL/T_FLOAT), same "always returns a float" contract as
+ * native's own Math.sin/cos/etc.-based implementation. */
+static Value bi_sin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("sin: expected an argument"); return v_float(sin(as_double(args[0], "sin"))); }
+static Value bi_cos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("cos: expected an argument"); return v_float(cos(as_double(args[0], "cos"))); }
+static Value bi_tan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("tan: expected an argument"); return v_float(tan(as_double(args[0], "tan"))); }
+static Value bi_asin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("asin: expected an argument"); return v_float(asin(as_double(args[0], "asin"))); }
+static Value bi_acos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("acos: expected an argument"); return v_float(acos(as_double(args[0], "acos"))); }
+static Value bi_atan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("atan: expected an argument"); return v_float(atan(as_double(args[0], "atan"))); }
+static Value bi_exp(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("exp: expected an argument"); return v_float(exp(as_double(args[0], "exp"))); }
+static Value bi_log2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("log2: expected an argument"); return v_float(log2(as_double(args[0], "log2"))); }
+static Value bi_log10(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("log10: expected an argument"); return v_float(log10(as_double(args[0], "log10"))); }
+static Value bi_atan2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("atan2: expected two arguments"); return v_float(atan2(as_double(args[0], "atan2"), as_double(args[1], "atan2"))); }
+static Value bi_pow(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("pow: expected two arguments"); return v_float(pow(as_double(args[0], "pow"), as_double(args[1], "pow"))); }
+static Value bi_hypot(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("hypot: expected two arguments"); return v_float(hypot(as_double(args[0], "hypot"), as_double(args[1], "hypot"))); }
+
+/* log's optional 2nd argument is an explicit base, computed as log(x)/
+ * log(base) -- matches native's own MathLibrary#log exactly. */
+static Value bi_log(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("log: expected an argument");
+  double x = log(as_double(args[0], "log"));
+  return nargs >= 2 ? v_float(x / log(as_double(args[1], "log"))) : v_float(x);
+}
+
+/* (scheme inexact)'s sqrt/nan?/infinite?/finite? -- sqrt has an exact
+ * perfect-square fast path ((sqrt 4) is exact 2, not inexact 2.0) ahead
+ * of the float fallback, and returns a T_COMPLEX for a negative real
+ * (the magnitude's square root goes on the imaginary axis, per R7RS),
+ * mirroring native's own sqrt (modules/scheme/inexact.cr) exactly. A
+ * genuinely T_COMPLEX argument aborts via as_double itself (same as
+ * native's own Scheme.as_f64) -- this prototype's sqrt doesn't support
+ * complex input either. */
+static Value bi_sqrt(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("sqrt: expected an argument");
+  Value v = args[0];
+  if (v.tag == T_INT && v.as.i >= 0) {
+    int64_t n = v.as.i;
+    int64_t root = (int64_t)sqrt((double)n);
+    while (root > 0 && root * root > n) root--;
+    while ((root + 1) * (root + 1) <= n) root++;
+    if (root * root == n) return v_int(root);
+    return v_float(sqrt((double)n));
+  }
+  double d = as_double(v, "sqrt");
+  if (d < 0) return make_complex(v_float(0.0), v_float(sqrt(-d)));
+  return v_float(sqrt(d));
+}
+
+static Value bi_nan_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("nan?: expected an argument");
+  return v_bool(args[0].tag == T_FLOAT && isnan(args[0].as.f));
+}
+
+static Value bi_infinite_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("infinite?: expected an argument");
+  return v_bool(args[0].tag == T_FLOAT && isinf(args[0].as.f));
+}
+
+static Value bi_finite_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("finite?: expected an argument");
+  return v_bool(args[0].tag != T_FLOAT || isfinite(args[0].as.f));
+}
+
+/* ---- (creme random): random-real/random-integer/random-seed!/
+ * random-choice/random-shuffle. A splitmix64 PRNG (a single, process-
+ * wide `rng_state`, not per-Interpreter the way native's own
+ * interp.random_rng is) -- deliberately NOT bit-for-bit compatible with
+ * Crystal's own Random (PCG-based), since nothing in this codebase
+ * observes cvm's random sequence against a real Crystal process (see
+ * spec/creme/random_spec.scm's own header comment on why its cases use
+ * should-be-true?/range checks, or a seed-then-draw pair evaluated
+ * wholly on ONE side at a time, rather than should-match-native? on a
+ * bare draw -- two draws from the same live, unreset stream on
+ * bootstrap-eval vs. native-eval would otherwise legitimately diverge). */
+static uint64_t rng_state = 0x2545f4914f6cdd1dULL;
+
+static uint64_t rng_next(void) {
+  uint64_t z = (rng_state += 0x9e3779b97f4a7c15ULL);
+  z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+  return z ^ (z >> 31);
+}
+
+static Value bi_random_real(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  return v_float((double)(rng_next() >> 11) * (1.0 / 9007199254740992.0)); /* 2^53 */
+}
+
+static Value bi_random_integer(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("random-integer: expected an integer");
+  int64_t n = args[0].as.i;
+  if (n <= 0) cvm_abort("random-integer: n must be positive");
+  return v_int((int64_t)(rng_next() % (uint64_t)n));
+}
+
+static Value bi_random_seed_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("random-seed!: expected an integer");
+  rng_state = (uint64_t)args[0].as.i;
+  return v_nil();
+}
+
+static Value bi_random_choice(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("random-choice: expects a list");
+  int n = 0;
+  Value cur = args[0];
+  while (cur.tag == T_PAIR) { n++; cur = cur.as.pair->cdr; }
+  if (n == 0) cvm_abort("random-choice: expects a non-empty list");
+  int idx = (int)(rng_next() % (uint64_t)n);
+  cur = args[0];
+  for (int i = 0; i < idx; i++) cur = cur.as.pair->cdr;
+  return cur.as.pair->car;
+}
+
+static Value bi_random_shuffle(VM *vm, Value *args, int nargs) {
+  if (nargs < 1) cvm_abort("random-shuffle: expects a list");
+  int n = 0;
+  Value cur = args[0];
+  while (cur.tag == T_PAIR) { n++; cur = cur.as.pair->cdr; }
+  Value *arr = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
+  cur = args[0];
+  for (int i = 0; i < n; i++) { arr[i] = cur.as.pair->car; cur = cur.as.pair->cdr; }
+  /* Fisher-Yates */
+  for (int i = n - 1; i > 0; i--) {
+    int j = (int)(rng_next() % (uint64_t)(i + 1));
+    Value tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  Value result = v_nil();
+  for (int i = n - 1; i >= 0; i--) result = cvm_cons(vm, arr[i], result);
+  return result;
 }
 
 /* Mirrors SchemeFloat#to_display (values.cr): whole floats print as "N.0",
@@ -373,7 +729,7 @@ static void print_value(FILE *out, Value v) {
     fputs("#<port>", out);
     break;
   case T_BOX:
-    fputs("#<native-object>", out);
+    fputs(v.as.box.kind == BOX_KIND_EOF ? "#<eof>" : "#<native-object>", out);
     break;
   case T_RATIONAL:
     mpz_out_str(out, 10, mpq_numref(v.as.rational->q));
@@ -429,6 +785,7 @@ static Value bi_open_output_string(VM *vm, Value *args, int nargs) {
   (void)args;
   (void)nargs;
   Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_OUTPUT_STRING;
   return v_port(p);
 }
 
@@ -436,6 +793,7 @@ static Value bi_get_output_string(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("get-output-string: expected a port");
   Port *p = args[0].as.port;
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("get-output-string: expected a string output port");
   /* Copies out (matches SchemeStr's own value-semantics — a fresh immutable
    * string each call), even though nothing in this bench mutates the port
    * afterward. GC_MALLOC'd like every other heap value here. */
@@ -450,12 +808,20 @@ static Value bi_string_length(VM *vm, Value *args, int nargs) {
   return v_int(args[0].as.str.len);
 }
 
-/* Sentinel Port identifying (current-output-port) — write-string/display
- * special-case it to write straight to stdout rather than buffering (there's
- * nothing to later get-output-string out of "the real terminal"). Identified
- * by pointer, not content (an ordinary output-string port also starts as an
- * all-zero Port). */
+/* Sentinel Ports identifying (current-output-port)/(current-input-port) --
+ * write-string/display/write-char/write special-case the output one to
+ * write straight to stdout rather than buffering (there's nothing to
+ * later get-output-string out of "the real terminal"); read-char/peek-
+ * char/read-line special-case the input one to read straight from stdin.
+ * Both rely on `kind` being PORT_KIND_STDOUT/PORT_KIND_STDIN respectively
+ * (PORT_KIND_STDOUT is enum value 0, so the zero-initialized static
+ * struct already has the right kind; PORT_KIND_STDIN needs an explicit
+ * initializer since it isn't the zero value). Neither is a genuine R7RS
+ * parameter object (no (parameterize ((current-output-port ...)) ...)
+ * support in this prototype) -- current-output-port/current-input-port
+ * are plain 0-arg builtins that always return the same sentinel. */
 static Port stdout_port_sentinel;
+static Port stdin_port_sentinel = {.kind = PORT_KIND_STDIN};
 
 static Value bi_current_output_port(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -464,14 +830,22 @@ static Value bi_current_output_port(VM *vm, Value *args, int nargs) {
   return v_port(&stdout_port_sentinel);
 }
 
+static Value bi_current_input_port(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  return v_port(&stdin_port_sentinel);
+}
+
 static Value bi_write_string(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_PORT) cvm_abort("write-string: expected (string port)");
   Port *p = args[1].as.port;
-  if (p == &stdout_port_sentinel) {
-    fwrite(args[0].as.str.chars, 1, (size_t)args[0].as.str.len, stdout);
+  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
+    fwrite(args[0].as.str.chars, 1, (size_t)args[0].as.str.len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
   }
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-string: expected an output port");
   port_buf_grow(p, args[0].as.str.len);
   memcpy(p->buf + p->len, args[0].as.str.chars, (size_t)args[0].as.str.len);
   p->len += args[0].as.str.len;
@@ -488,14 +862,464 @@ static Value bi_write_char(VM *vm, Value *args, int nargs) {
   if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("write-char: expected a port");
   Port *p = (nargs >= 2) ? args[1].as.port : &stdout_port_sentinel;
   char c = (char)args[0].as.i;
-  if (p == &stdout_port_sentinel) {
-    fputc((int)(unsigned char)c, stdout);
+  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
+    fputc((int)(unsigned char)c, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
   }
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-char: expected an output port");
   port_buf_grow(p, 1);
   p->buf[p->len] = c;
   p->len += 1;
   return v_nil();
+}
+
+/* ---- input ports: open-input-string, read-char/peek-char/read-line,
+ * eof-object[?], port?/input-port?/output-port?, close-port. File ports
+ * (open-input-file/open-output-file/call-with-*-file/file-exists?) reuse
+ * this same kind-tagged Port -- see the "file ports" section below. */
+
+static Value bi_open_input_string(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-input-string: expected a string");
+  Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_INPUT_STRING;
+  p->len = args[0].as.str.len;
+  p->buf = GC_MALLOC((size_t)(p->len ? p->len : 1));
+  memcpy(p->buf, args[0].as.str.chars, (size_t)p->len);
+  p->pos = 0;
+  return v_port(p);
+}
+
+static Value bi_port_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("port?: expected an argument");
+  return v_bool(args[0].tag == T_PORT);
+}
+
+static int port_is_input(Port *p) { return p->kind == PORT_KIND_INPUT_STRING || p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE; }
+static int port_is_output(Port *p) { return p->kind == PORT_KIND_OUTPUT_STRING || p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE; }
+
+static Value bi_input_port_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("input-port?: expected an argument");
+  return v_bool(args[0].tag == T_PORT && port_is_input(args[0].as.port));
+}
+
+static Value bi_output_port_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("output-port?: expected an argument");
+  return v_bool(args[0].tag == T_PORT && port_is_output(args[0].as.port));
+}
+
+static Value bi_eof_object(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  return v_box(NULL, BOX_KIND_EOF);
+}
+
+static Value bi_eof_object_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("eof-object?: expected an argument");
+  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_EOF);
+}
+
+static Value bi_close_port(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("close-port: expected a port");
+  Port *p = args[0].as.port;
+  if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
+  p->closed = 1;
+  return v_nil();
+}
+
+/* ---- file ports: open-input-file/open-output-file/call-with-input-file/
+ * call-with-output-file/file-exists?. Builds directly on the kind-tagged
+ * Port introduced above -- PORT_KIND_INPUT_FILE/PORT_KIND_OUTPUT_FILE use
+ * Port's `file` field (an fopen'd FILE*) instead of buf/len/cap/pos, and
+ * read-char/peek-char/read-line/write-string/write-char/write already
+ * have a matching kind branch reading/writing through `file` (see each
+ * function's own STDIN/STDOUT branch, extended alongside these). */
+static char *value_str_to_cstr(Value s) {
+  char *path = malloc((size_t)s.as.str.len + 1);
+  memcpy(path, s.as.str.chars, (size_t)s.as.str.len);
+  path[s.as.str.len] = '\0';
+  return path;
+}
+
+static Value bi_file_exists_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("file-exists?: expected a string");
+  char *path = value_str_to_cstr(args[0]);
+  int exists = access(path, F_OK) == 0;
+  free(path);
+  return v_bool(exists);
+}
+
+static Value bi_open_input_file(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-input-file: expected a string");
+  char *path = value_str_to_cstr(args[0]);
+  FILE *f = fopen(path, "r");
+  if (!f) cvm_abort("open-input-file: file not found: %s", path);
+  free(path);
+  Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_INPUT_FILE;
+  p->file = f;
+  return v_port(p);
+}
+
+static Value bi_open_output_file(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-output-file: expected a string");
+  char *path = value_str_to_cstr(args[0]);
+  FILE *f = fopen(path, "w");
+  if (!f) cvm_abort("open-output-file: could not open: %s", path);
+  free(path);
+  Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_OUTPUT_FILE;
+  p->file = f;
+  return v_port(p);
+}
+
+/* (call-with-input-file path proc)/(call-with-output-file path proc):
+ * open, apply proc to the port, close -- unconditionally, even if proc
+ * itself already closed it (bi_close_port/fclose are idempotent-safe
+ * here since `closed` is checked first). */
+static Value bi_call_with_input_file(VM *vm, Value *args, int nargs) {
+  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("call-with-input-file: expected (string proc)");
+  Value port_val = bi_open_input_file(vm, args, 1);
+  Value result = cvm_apply(vm, args[1], &port_val, 1);
+  Port *p = port_val.as.port;
+  if (!p->closed) fclose(p->file);
+  p->closed = 1;
+  return result;
+}
+
+static Value bi_call_with_output_file(VM *vm, Value *args, int nargs) {
+  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("call-with-output-file: expected (string proc)");
+  Value port_val = bi_open_output_file(vm, args, 1);
+  Value result = cvm_apply(vm, args[1], &port_val, 1);
+  Port *p = port_val.as.port;
+  if (!p->closed) fclose(p->file);
+  p->closed = 1;
+  return result;
+}
+
+/* Resolves the (optional, trailing) port argument for read-char/peek-char/
+ * read-line -- defaults to current-input-port's stdin sentinel, mirroring
+ * the native interpreter's own input_port_arg (base/io.cr). */
+static Port *input_port_arg(Value *args, int nargs, int port_argidx, const char *who) {
+  Port *p = (nargs > port_argidx) ? (args[port_argidx].tag == T_PORT ? args[port_argidx].as.port : NULL) : &stdin_port_sentinel;
+  if (!p) cvm_abort("%s: expected a port", who);
+  if (!port_is_input(p)) cvm_abort("%s: expected an input port", who);
+  if (p->closed) cvm_abort("%s: port is closed", who);
+  return p;
+}
+
+static Value bi_read_char(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Port *p = input_port_arg(args, nargs, 0, "read-char");
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    int c = fgetc(stream);
+    return c == EOF ? bi_eof_object(vm, NULL, 0) : v_char(c);
+  }
+  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  return v_char((unsigned char)p->buf[p->pos++]);
+}
+
+static Value bi_peek_char(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Port *p = input_port_arg(args, nargs, 0, "peek-char");
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    int c = fgetc(stream);
+    if (c == EOF) return bi_eof_object(vm, NULL, 0);
+    ungetc(c, stream);
+    return v_char(c);
+  }
+  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  return v_char((unsigned char)p->buf[p->pos]);
+}
+
+static Value bi_char_ready_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  /* This prototype's ports are either an already-fully-buffered string
+   * (always ready, or already at eof) or real blocking stdio (no
+   * non-blocking peek available without extra plumbing) -- always
+   * returning #t is R7RS-conformant (char-ready? may always return #t;
+   * the guarantee it gives is only that #f means a read WOULD block). */
+  return v_bool(1);
+}
+
+/* ---- bytevector ports: open-input-bytevector/open-output-bytevector/
+ * get-output-bytevector, binary-port?/textual-port?, input-port-open?/
+ * output-port-open?, read-u8/peek-u8/write-u8/read-bytevector[!]/
+ * write-bytevector, call-with-port. Reuses PORT_KIND_INPUT_STRING/
+ * PORT_KIND_OUTPUT_STRING's exact buf/len/cap/pos mechanics -- the only
+ * difference from a textual string port is the `binary` flag (see its
+ * own comment in value.h) and the Value tag these wrap bytes in
+ * (T_INT/T_BYTEVECTOR here vs. read-char/peek-char/get-output-string's
+ * T_CHAR/T_STR). */
+
+static Value bi_open_input_bytevector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("open-input-bytevector: expected a bytevector");
+  Bytevector *bv = args[0].as.bv;
+  Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_INPUT_STRING;
+  p->binary = 1;
+  p->len = bv->len;
+  p->buf = GC_MALLOC((size_t)(p->len ? p->len : 1));
+  memcpy(p->buf, bv->bytes, (size_t)p->len);
+  p->pos = 0;
+  return v_port(p);
+}
+
+static Value bi_open_output_bytevector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  (void)args;
+  (void)nargs;
+  Port *p = GC_MALLOC(sizeof(Port));
+  p->kind = PORT_KIND_OUTPUT_STRING;
+  p->binary = 1;
+  return v_port(p);
+}
+
+static Value bi_get_output_bytevector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("get-output-bytevector: expected a port");
+  Port *p = args[0].as.port;
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("get-output-bytevector: expected a bytevector output port");
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->len = p->len;
+  bv->bytes = GC_MALLOC((size_t)(p->len ? p->len : 1));
+  memcpy(bv->bytes, p->buf, (size_t)p->len);
+  return v_bytevector(bv);
+}
+
+static Value bi_binary_port_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("binary-port?: expected an argument");
+  return v_bool(args[0].tag == T_PORT && args[0].as.port->binary);
+}
+
+static Value bi_textual_port_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1) cvm_abort("textual-port?: expected an argument");
+  return v_bool(args[0].tag == T_PORT && !args[0].as.port->binary);
+}
+
+static Value bi_input_port_open_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("input-port-open?: expected a port");
+  Port *p = args[0].as.port;
+  return v_bool(port_is_input(p) && !p->closed);
+}
+
+static Value bi_output_port_open_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("output-port-open?: expected a port");
+  Port *p = args[0].as.port;
+  return v_bool(port_is_output(p) && !p->closed);
+}
+
+static Value bi_read_u8(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Port *p = input_port_arg(args, nargs, 0, "read-u8");
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    int c = fgetc(stream);
+    return c == EOF ? bi_eof_object(vm, NULL, 0) : v_int(c);
+  }
+  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  return v_int((unsigned char)p->buf[p->pos++]);
+}
+
+static Value bi_peek_u8(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Port *p = input_port_arg(args, nargs, 0, "peek-u8");
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    int c = fgetc(stream);
+    if (c == EOF) return bi_eof_object(vm, NULL, 0);
+    ungetc(c, stream);
+    return v_int(c);
+  }
+  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  return v_int((unsigned char)p->buf[p->pos]);
+}
+
+/* u8-ready? shares char-ready?'s own "always #t" reasoning exactly (see
+ * bi_char_ready_p's comment) -- registered as a second name for the same
+ * function rather than duplicated below. */
+
+static Value bi_write_u8(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("write-u8: expected a byte");
+  if (nargs < 2 || args[1].tag != T_PORT) cvm_abort("write-u8: expects a port");
+  Port *p = args[1].as.port;
+  char c = (char)args[0].as.i;
+  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
+    fputc((int)(unsigned char)c, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
+    return v_nil();
+  }
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-u8: expected an output port");
+  port_buf_grow(p, 1);
+  p->buf[p->len] = c;
+  p->len += 1;
+  return v_nil();
+}
+
+static Value bi_read_bytevector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("read-bytevector: expected a count");
+  int n = (int)args[0].as.i;
+  if (n < 0) cvm_abort("read-bytevector: count must be non-negative");
+  Port *p = input_port_arg(args, nargs, 1, "read-bytevector");
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->bytes = GC_MALLOC((size_t)(n ? n : 1));
+  int read = 0;
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    read = (int)fread(bv->bytes, 1, (size_t)n, stream);
+  } else {
+    int avail = p->len - p->pos;
+    read = (n < avail) ? n : avail;
+    if (read < 0) read = 0;
+    memcpy(bv->bytes, p->buf + p->pos, (size_t)read);
+    p->pos += read;
+  }
+  if (read == 0 && n > 0) return bi_eof_object(vm, NULL, 0);
+  bv->len = read;
+  return v_bytevector(bv);
+}
+
+static Value bi_read_bytevector_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("read-bytevector!: expected a bytevector");
+  Bytevector *bv = args[0].as.bv;
+  Port *p = input_port_arg(args, nargs, 1, "read-bytevector!");
+  int first, last;
+  byte_range_args(args, nargs, 2, bv->len, &first, &last);
+  int want = last - first;
+  int read = 0;
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    read = (int)fread(bv->bytes + first, 1, (size_t)want, stream);
+  } else {
+    int avail = p->len - p->pos;
+    read = (want < avail) ? want : avail;
+    if (read < 0) read = 0;
+    memcpy(bv->bytes + first, p->buf + p->pos, (size_t)read);
+    p->pos += read;
+  }
+  if (read == 0 && want > 0) return bi_eof_object(vm, NULL, 0);
+  return v_int(read);
+}
+
+static Value bi_write_bytevector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("write-bytevector: expected a bytevector");
+  if (nargs < 2 || args[1].tag != T_PORT) cvm_abort("write-bytevector: expects a port");
+  Bytevector *bv = args[0].as.bv;
+  Port *p = args[1].as.port;
+  int first, last;
+  byte_range_args(args, nargs, 2, bv->len, &first, &last);
+  int len = last - first;
+  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
+    fwrite(bv->bytes + first, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
+    return v_nil();
+  }
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-bytevector: expected an output port");
+  port_buf_grow(p, len);
+  memcpy(p->buf + p->len, bv->bytes + first, (size_t)len);
+  p->len += len;
+  return v_nil();
+}
+
+/* (call-with-port port proc): applies proc to port, closing it afterward
+ * regardless of how proc returns -- mirrors call-with-input-file/call-
+ * with-output-file's own unconditional-close pattern above, just for an
+ * already-open port instead of one this function opens itself. */
+static Value bi_call_with_port(VM *vm, Value *args, int nargs) {
+  if (nargs < 2 || args[0].tag != T_PORT) cvm_abort("call-with-port: expected (port proc)");
+  Port *p = args[0].as.port;
+  Value result = cvm_apply(vm, args[1], args, 1);
+  if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
+  p->closed = 1;
+  return result;
+}
+
+/* Shared kind-dispatched Port write, exposed via vm.h (cvm_port_write_bytes)
+ * for a module outside this file (csv.c's streaming writer) to reuse
+ * without duplicating the STDOUT/OUTPUT_FILE/OUTPUT_STRING dispatch
+ * bi_write_string/bi_write_char/bi_write already do inline. */
+void cvm_port_write_bytes(Port *p, const char *bytes, int len) {
+  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
+    fwrite(bytes, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
+    return;
+  }
+  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write: expected an output port");
+  port_buf_grow(p, len);
+  memcpy(p->buf + p->len, bytes, (size_t)len);
+  p->len += len;
+}
+
+/* Shared kind-dispatched Port read, exposed via vm.h (cvm_port_read_char/
+ * cvm_port_peek_char) for csv.c's streaming reader to reuse instead of
+ * duplicating read-char/peek-char's own STDIN/INPUT_FILE/INPUT_STRING
+ * dispatch. Returns -1 at EOF, else a byte 0-255 -- caller-side EOF
+ * checks stay simple ints rather than round-tripping through the
+ * BOX_KIND_EOF Value the Scheme-visible read-char/peek-char return. */
+int cvm_port_read_char(Port *p) {
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    int c = fgetc(stream);
+    return c == EOF ? -1 : c;
+  }
+  if (p->pos >= p->len) return -1;
+  return (unsigned char)p->buf[p->pos++];
+}
+
+int cvm_port_peek_char(Port *p) {
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    int c = fgetc(stream);
+    if (c == EOF) return -1;
+    ungetc(c, stream);
+    return c;
+  }
+  if (p->pos >= p->len) return -1;
+  return (unsigned char)p->buf[p->pos];
+}
+
+static Value bi_read_line(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  Port *p = input_port_arg(args, nargs, 0, "read-line");
+  if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
+    FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t got = getline(&line, &cap, stream);
+    if (got < 0) { free(line); return bi_eof_object(vm, NULL, 0); }
+    if (got > 0 && line[got - 1] == '\n') got--;
+    char *copy = GC_MALLOC((size_t)(got ? got : 1));
+    memcpy(copy, line, (size_t)got);
+    free(line);
+    return v_str(copy, (int)got);
+  }
+  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  int start = p->pos;
+  while (p->pos < p->len && p->buf[p->pos] != '\n') p->pos++;
+  int line_len = p->pos - start;
+  char *copy = GC_MALLOC((size_t)(line_len ? line_len : 1));
+  memcpy(copy, p->buf + start, (size_t)line_len);
+  if (p->pos < p->len) p->pos++; /* consume the newline itself */
+  return v_str(copy, line_len);
 }
 
 /* (scheme write)'s `write`, absent from this prototype until now (see
@@ -599,9 +1423,10 @@ static Value bi_write(VM *vm, Value *args, int nargs) {
   write_value(ms, args[0]);
   fclose(ms);
   Port *p = (nargs >= 2) ? args[1].as.port : &stdout_port_sentinel;
-  if (p == &stdout_port_sentinel) {
-    fwrite(buf, 1, size, stdout);
+  if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
+    fwrite(buf, 1, size, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
   } else {
+    if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write: expected an output port");
     port_buf_grow(p, (int)size);
     memcpy(p->buf + p->len, buf, size);
     p->len += (int)size;
@@ -637,8 +1462,11 @@ static Value bi_length(VM *vm, Value *args, int nargs) {
 
 /* ---- equal? ----
  * cvm_eqv (vm.c) already handles every scalar/identity-compared tag;
- * equal? only adds structural recursion for pairs/vectors. */
-static int cvm_equal(Value a, Value b) {
+ * equal? only adds structural recursion for pairs/vectors. Not static:
+ * exposed via vm.h so treelist.c's find_index (treelist-member?/
+ * treelist-index-of's default equality) can reuse it instead of
+ * duplicating the pair/vector recursion. */
+int cvm_equal(Value a, Value b) {
   if (a.tag != b.tag) return 0;
   switch (a.tag) {
   case T_PAIR:
@@ -894,10 +1722,15 @@ static Value bi_equal_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 
 /* ---- numeric predicates / conversions ---- */
 /* zero?/positive?/negative?/abs all extend to T_RATIONAL below (mpq_sgn/
  * a fresh mpq_t with its numerator negated) -- floor/ceiling/round/
- * truncate of a rational, and abs/zero?/positive?/negative? of a complex,
- * are NOT implemented (a deliberate, narrower cut than native's own
- * surface -- not exercised by any spec/creme test, and not needed for
- * this project's own reader/compiler literal round-trip goal). */
+ * truncate of a rational used to be cut here too; see bi_floor/
+ * bi_ceiling/bi_round/bi_truncate below for their own T_RATIONAL
+ * handling. abs/zero?/positive?/negative? of a T_COMPLEX deliberately
+ * stay unimplemented here, matching the native Crystal interpreter's own
+ * behavior exactly (src/scheme/modules/scheme/base/arithmetic.cr's abs
+ * and base/predicates.cr's zero?/positive?/negative? don't accept a
+ * complex value either -- (scheme complex)'s magnitude has its own
+ * separate complex-aware sqrt(re^2+im^2) logic instead) -- this is
+ * parity with native, not a remaining gap. */
 static Value bi_zero_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("zero?: expected an argument");
@@ -954,11 +1787,40 @@ static Value bi_max(VM *vm, Value *args, int nargs) {
   for (int i = 1; i < nargs; i++) if (num_gt(args[i], m)) m = args[i];
   return m;
 }
+/* floor/ceiling/truncate/round of a T_RATIONAL: GMP has no mpq_floor, so
+ * divide numerator by denominator directly via mpz_fdiv_q/mpz_cdiv_q/
+ * mpz_tdiv_q -- the denominator is always positive by construction (see
+ * value.h's canonical-form comment on Rational), so these floor-toward-
+ * negative-infinity/ceiling-toward-positive-infinity/truncate-toward-zero
+ * GMP primitives line up exactly with R7RS's own floor/ceiling/truncate.
+ * Result is always exact and integral, so always collapses to a T_INT. */
+static Value mpz_to_int_value(mpz_t z, const char *who) {
+  if (!mpz_fits_slong_p(z)) cvm_abort("%s: result too large for this prototype's fixnum-only int type", who);
+  return v_int((int64_t)mpz_get_si(z));
+}
+
 static Value bi_round(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("round: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(round(args[0].as.f));
+  if (args[0].tag == T_RATIONAL) {
+    mpq_t *q = &args[0].as.rational->q;
+    mpz_t floor_q, rem2, twice_rem;
+    mpz_inits(floor_q, rem2, twice_rem, NULL);
+    /* floor_q = floor(n/d), rem2 = n - floor_q*d (the remainder, always
+     * in [0, d) since mpz_fdiv_qr rounds toward -infinity). */
+    mpz_fdiv_qr(floor_q, rem2, mpq_numref(*q), mpq_denref(*q));
+    mpz_mul_2exp(twice_rem, rem2, 1); /* twice_rem = 2*rem2 */
+    int cmp = mpz_cmp(twice_rem, mpq_denref(*q));
+    /* Round-half-to-even: below the midpoint keeps floor_q; above it
+     * takes floor_q+1; exactly at it goes to whichever of the two is
+     * even (R7RS's own tie-breaking rule for `round`). */
+    if (cmp > 0 || (cmp == 0 && mpz_odd_p(floor_q))) mpz_add_ui(floor_q, floor_q, 1);
+    Value result = mpz_to_int_value(floor_q, "round");
+    mpz_clears(floor_q, rem2, twice_rem, NULL);
+    return result;
+  }
   cvm_abort("round: not a number");
 }
 static Value bi_floor(VM *vm, Value *args, int nargs) {
@@ -966,6 +1828,14 @@ static Value bi_floor(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("floor: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(floor(args[0].as.f));
+  if (args[0].tag == T_RATIONAL) {
+    mpz_t z;
+    mpz_init(z);
+    mpz_fdiv_q(z, mpq_numref(args[0].as.rational->q), mpq_denref(args[0].as.rational->q));
+    Value result = mpz_to_int_value(z, "floor");
+    mpz_clear(z);
+    return result;
+  }
   cvm_abort("floor: not a number");
 }
 static Value bi_ceiling(VM *vm, Value *args, int nargs) {
@@ -973,6 +1843,14 @@ static Value bi_ceiling(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("ceiling: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(ceil(args[0].as.f));
+  if (args[0].tag == T_RATIONAL) {
+    mpz_t z;
+    mpz_init(z);
+    mpz_cdiv_q(z, mpq_numref(args[0].as.rational->q), mpq_denref(args[0].as.rational->q));
+    Value result = mpz_to_int_value(z, "ceiling");
+    mpz_clear(z);
+    return result;
+  }
   cvm_abort("ceiling: not a number");
 }
 static Value bi_truncate(VM *vm, Value *args, int nargs) {
@@ -980,6 +1858,14 @@ static Value bi_truncate(VM *vm, Value *args, int nargs) {
   if (nargs < 1) cvm_abort("truncate: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(trunc(args[0].as.f));
+  if (args[0].tag == T_RATIONAL) {
+    mpz_t z;
+    mpz_init(z);
+    mpz_tdiv_q(z, mpq_numref(args[0].as.rational->q), mpq_denref(args[0].as.rational->q));
+    Value result = mpz_to_int_value(z, "truncate");
+    mpz_clear(z);
+    return result;
+  }
   cvm_abort("truncate: not a number");
 }
 static Value bi_exact(VM *vm, Value *args, int nargs) {
@@ -1529,6 +2415,137 @@ static Value bi_string_eq(VM *vm, Value *args, int nargs) {
   }
   return v_bool(1);
 }
+
+/* Byte-wise lexicographic compare of two T_STR values, length-aware (no
+ * nul-termination assumption) -- same shape as string_ci_pair_cmp
+ * (char.cr's own string-ci* comparisons) but without lowering either
+ * side first. */
+static int string_pair_cmp(Value a, Value b) {
+  int alen = a.as.str.len, blen = b.as.str.len;
+  int n = alen < blen ? alen : blen;
+  int c = n ? memcmp(a.as.str.chars, b.as.str.chars, (size_t)n) : 0;
+  if (c != 0) return c;
+  return alen == blen ? 0 : (alen < blen ? -1 : 1);
+}
+static Value string_chain(Value *args, int nargs, const char *who, int (*ok)(int)) {
+  if (nargs < 2) cvm_abort("%s: expected at least two strings", who);
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) cvm_abort("%s: expected strings", who);
+    if (!ok(string_pair_cmp(args[i - 1], args[i]))) return v_bool(0);
+  }
+  return v_bool(1);
+}
+/* Same shape as char.cr's own sci_lt/sci_gt/sci_le/sci_ge (defined later
+ * in this file, so not forward-visible here) -- a plain "is this memcmp-
+ * style result negative/positive/etc." predicate. */
+static int str_lt(int c) { return c < 0; }
+static int str_gt(int c) { return c > 0; }
+static int str_le(int c) { return c <= 0; }
+static int str_ge(int c) { return c >= 0; }
+static Value bi_string_lt(VM *vm, Value *args, int nargs) { (void)vm; return string_chain(args, nargs, "string<?", str_lt); }
+static Value bi_string_gt(VM *vm, Value *args, int nargs) { (void)vm; return string_chain(args, nargs, "string>?", str_gt); }
+static Value bi_string_le(VM *vm, Value *args, int nargs) { (void)vm; return string_chain(args, nargs, "string<=?", str_le); }
+static Value bi_string_ge(VM *vm, Value *args, int nargs) { (void)vm; return string_chain(args, nargs, "string>=?", str_ge); }
+
+static Value bi_symbol_eq(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2) cvm_abort("symbol=?: expected at least two symbols");
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_SYM || args[i].tag != T_SYM) cvm_abort("symbol=?: expected symbols");
+    if (args[i - 1].as.str.len != args[i].as.str.len ||
+        memcmp(args[i - 1].as.str.chars, args[i].as.str.chars, (size_t)args[i].as.str.len) != 0) {
+      return v_bool(0);
+    }
+  }
+  return v_bool(1);
+}
+
+static Value bi_boolean_eq(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2) cvm_abort("boolean=?: expected at least two booleans");
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_BOOL || args[i].tag != T_BOOL) cvm_abort("boolean=?: expected booleans");
+    if (args[i - 1].as.b != args[i].as.b) return v_bool(0);
+  }
+  return v_bool(1);
+}
+
+/* (string-map proc str1 str2 ...): applies proc across the Nth char of
+ * every string argument (stopping at the shortest one), building a new
+ * string from proc's own char results -- mirrors native's own
+ * string_map exactly (min length, one call per index). */
+static Value bi_string_map(VM *vm, Value *args, int nargs) {
+  if (nargs < 2) cvm_abort("string-map: expected (proc string ...)");
+  int nstrs = nargs - 1;
+  int minlen = -1;
+  for (int i = 1; i < nargs; i++) {
+    if (args[i].tag != T_STR) cvm_abort("string-map: expected a string");
+    if (minlen < 0 || args[i].as.str.len < minlen) minlen = args[i].as.str.len;
+  }
+  char *buf = GC_MALLOC((size_t)(minlen ? minlen : 1));
+  Value *call_args = GC_MALLOC(sizeof(Value) * (size_t)nstrs);
+  for (int i = 0; i < minlen; i++) {
+    for (int s = 0; s < nstrs; s++) call_args[s] = v_char((unsigned char)args[1 + s].as.str.chars[i]);
+    Value result = cvm_apply(vm, args[0], call_args, nstrs);
+    if (result.tag != T_CHAR) cvm_abort("string-map: expected the function to return a char");
+    buf[i] = (char)result.as.i;
+  }
+  return v_str(buf, minlen);
+}
+
+/* (string-copy! to at from [start [end]]): cvm strings are mutable byte
+ * buffers (see string-set!'s own in-place write) -- memmove (not
+ * memcpy) since `to` and `from` may be the SAME string with an
+ * overlapping range. */
+static Value bi_string_copy_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR)
+    cvm_abort("string-copy!: expected (to at from [start [end]])");
+  int at = (int)args[1].as.i;
+  int first, last;
+  byte_range_args(args, nargs, 3, args[2].as.str.len, &first, &last);
+  int count = last - first;
+  if (at < 0 || at + count > args[0].as.str.len) cvm_abort("string-copy!: destination range out of bounds");
+  memmove((char *)args[0].as.str.chars + at, args[2].as.str.chars + first, (size_t)count);
+  return v_nil();
+}
+
+static Value bi_string_fill_bang(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_CHAR) cvm_abort("string-fill!: expected (string char [start [end]])");
+  int first, last;
+  byte_range_args(args, nargs, 2, args[0].as.str.len, &first, &last);
+  memset((char *)args[0].as.str.chars + first, (int)(unsigned char)args[1].as.i, (size_t)(last - first));
+  return v_nil();
+}
+
+static Value bi_string_to_vector(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->vector: expected a string");
+  int first, last;
+  byte_range_args(args, nargs, 1, args[0].as.str.len, &first, &last);
+  int len = last - first;
+  Vector *vec = GC_MALLOC(sizeof(Vector));
+  vec->len = len;
+  vec->items = GC_MALLOC(sizeof(Value) * (size_t)(len ? len : 1));
+  for (int i = 0; i < len; i++) vec->items[i] = v_char((unsigned char)args[0].as.str.chars[first + i]);
+  return v_vector(vec);
+}
+
+static Value bi_vector_to_string(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_VECTOR) cvm_abort("vector->string: expected a vector");
+  Vector *vec = args[0].as.vec;
+  int first, last;
+  byte_range_args(args, nargs, 1, vec->len, &first, &last);
+  int len = last - first;
+  char *buf = GC_MALLOC((size_t)(len ? len : 1));
+  for (int i = 0; i < len; i++) {
+    if (vec->items[first + i].tag != T_CHAR) cvm_abort("vector->string: expected a vector of chars");
+    buf[i] = (char)vec->items[first + i].as.i;
+  }
+  return v_str(buf, len);
+}
 /* Optional 2nd arg: an explicit radix (2/8/10/16), needed by (creme
  * compiler reader)'s own #b/#o/#x-prefixed literal parsing -- previously
  * silently ignored here (always base 10), so a hex/octal/binary literal
@@ -1677,6 +2694,115 @@ static Value bi_char_upcase(VM *vm, Value *args, int nargs) {
   return v_char(c);
 }
 
+/* ---- (scheme char): classification, foldcase, case-insensitive
+ * comparisons -- ASCII-only, same scope as char-upcase/char-downcase
+ * above and strings.c's own string-upcase/string-downcase. */
+
+/* Native's char-foldcase is literally the same as char-downcase (its own
+ * comment: "correct for the ASCII/simple-Unicode range this interpreter
+ * otherwise handles") -- reuses bi_char_downcase's own logic rather than
+ * duplicating it. */
+static Value bi_char_foldcase(VM *vm, Value *args, int nargs) {
+  return bi_char_downcase(vm, args, nargs);
+}
+
+static Value bi_digit_value(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("digit-value: expected a char");
+  int64_t c = args[0].as.i;
+  return (c >= '0' && c <= '9') ? v_int(c - '0') : v_bool(0);
+}
+
+static Value bi_char_alphabetic_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-alphabetic?: expected a char");
+  return v_bool(isalpha((int)args[0].as.i) != 0);
+}
+
+static Value bi_char_numeric_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-numeric?: expected a char");
+  return v_bool(isdigit((int)args[0].as.i) != 0);
+}
+
+static Value bi_char_whitespace_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-whitespace?: expected a char");
+  return v_bool(isspace((int)args[0].as.i) != 0);
+}
+
+static Value bi_char_upper_case_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-upper-case?: expected a char");
+  return v_bool(isupper((int)args[0].as.i) != 0);
+}
+
+static Value bi_char_lower_case_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-lower-case?: expected a char");
+  return v_bool(islower((int)args[0].as.i) != 0);
+}
+
+static char cvm_ascii_lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c; }
+
+/* char-ci=?/</>/<=/>= chain comparisons -- lowers both sides of each
+ * adjacent pair before comparing, mirroring native's char_chain(...,
+ * case_insensitive: true). */
+static Value char_ci_chain(Value *args, int nargs, const char *who, int (*cmp)(char, char)) {
+  if (nargs < 2) cvm_abort("%s: expected at least two chars", who);
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("%s: expected chars", who);
+    char a = cvm_ascii_lower((char)args[i - 1].as.i), b = cvm_ascii_lower((char)args[i].as.i);
+    if (!cmp(a, b)) return v_bool(0);
+  }
+  return v_bool(1);
+}
+static int ci_eq(char a, char b) { return a == b; }
+static int ci_lt(char a, char b) { return a < b; }
+static int ci_gt(char a, char b) { return a > b; }
+static int ci_le(char a, char b) { return a <= b; }
+static int ci_ge(char a, char b) { return a >= b; }
+
+static Value bi_char_ci_eq(VM *vm, Value *args, int nargs) { (void)vm; return char_ci_chain(args, nargs, "char-ci=?", ci_eq); }
+static Value bi_char_ci_lt(VM *vm, Value *args, int nargs) { (void)vm; return char_ci_chain(args, nargs, "char-ci<?", ci_lt); }
+static Value bi_char_ci_gt(VM *vm, Value *args, int nargs) { (void)vm; return char_ci_chain(args, nargs, "char-ci>?", ci_gt); }
+static Value bi_char_ci_le(VM *vm, Value *args, int nargs) { (void)vm; return char_ci_chain(args, nargs, "char-ci<=?", ci_le); }
+static Value bi_char_ci_ge(VM *vm, Value *args, int nargs) { (void)vm; return char_ci_chain(args, nargs, "char-ci>=?", ci_ge); }
+
+/* string-ci=?/</>/<=/>= -- byte-wise lexicographic comparison of each
+ * adjacent pair after lowering, aware of each string's own length (no
+ * nul-termination assumption, unlike strcasecmp/strncasecmp). Equality
+ * additionally requires equal length (a length mismatch can still
+ * compare < or > via the shared prefix, same as plain strcmp semantics). */
+static int string_ci_pair_cmp(Value a, Value b) {
+  int alen = a.as.str.len, blen = b.as.str.len;
+  int n = alen < blen ? alen : blen;
+  for (int i = 0; i < n; i++) {
+    char ca = cvm_ascii_lower(a.as.str.chars[i]), cb = cvm_ascii_lower(b.as.str.chars[i]);
+    if (ca != cb) return ca < cb ? -1 : 1;
+  }
+  return alen == blen ? 0 : (alen < blen ? -1 : 1);
+}
+static Value string_ci_chain(Value *args, int nargs, const char *who, int (*ok)(int)) {
+  if (nargs < 2) cvm_abort("%s: expected at least two strings", who);
+  for (int i = 1; i < nargs; i++) {
+    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) cvm_abort("%s: expected strings", who);
+    if (!ok(string_ci_pair_cmp(args[i - 1], args[i]))) return v_bool(0);
+  }
+  return v_bool(1);
+}
+static int sci_eq(int c) { return c == 0; }
+static int sci_lt(int c) { return c < 0; }
+static int sci_gt(int c) { return c > 0; }
+static int sci_le(int c) { return c <= 0; }
+static int sci_ge(int c) { return c >= 0; }
+
+static Value bi_string_ci_eq(VM *vm, Value *args, int nargs) { (void)vm; return string_ci_chain(args, nargs, "string-ci=?", sci_eq); }
+static Value bi_string_ci_lt(VM *vm, Value *args, int nargs) { (void)vm; return string_ci_chain(args, nargs, "string-ci<?", sci_lt); }
+static Value bi_string_ci_gt(VM *vm, Value *args, int nargs) { (void)vm; return string_ci_chain(args, nargs, "string-ci>?", sci_gt); }
+static Value bi_string_ci_le(VM *vm, Value *args, int nargs) { (void)vm; return string_ci_chain(args, nargs, "string-ci<=?", sci_le); }
+static Value bi_string_ci_ge(VM *vm, Value *args, int nargs) { (void)vm; return string_ci_chain(args, nargs, "string-ci>=?", sci_ge); }
+
 /* ---- vectors ---- */
 static Value bi_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -1786,20 +2912,6 @@ static Value bi_make_parameter(VM *vm, Value *args, int nargs) {
   }
   return v_parameter(p);
 }
-static Value bi_read_line(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  (void)args;
-  (void)nargs;
-  char *line = NULL;
-  size_t cap = 0;
-  ssize_t n = getline(&line, &cap, stdin);
-  if (n < 0) { free(line); return v_bool(0); /* eof-object placeholder */ }
-  if (n > 0 && line[n - 1] == '\n') n--;
-  char *copy = GC_MALLOC((size_t)(n ? n : 1));
-  memcpy(copy, line, (size_t)n);
-  free(line);
-  return v_str(copy, (int)n);
-}
 /* (creme time)'s minimal surface surf.sld's logging middleware needs --
  * not worth its own module for two functions this small. */
 static Value bi_current_time(VM *vm, Value *args, int nargs) {
@@ -1814,6 +2926,39 @@ static Value bi_time_difference(VM *vm, Value *args, int nargs) {
   double a = args[0].tag == T_FLOAT ? args[0].as.f : (double)args[0].as.i;
   double b = args[1].tag == T_FLOAT ? args[1].as.f : (double)args[1].as.i;
   return v_float(a - b);
+}
+
+/* (scheme time)'s remaining R7RS-mandated surface: current-jiffy/
+ * jiffies-per-second (current-second, above, was already registered --
+ * see its own comment; it used to read CLOCK_MONOTONIC, a bug, now
+ * fixed). current-jiffy counts microseconds since this PROCESS's own
+ * first call to (current-jiffy) (lazily captured on first use, via
+ * CLOCK_MONOTONIC so it can't go backwards under a wall-clock adjustment)
+ * -- mirrors the native Crystal interpreter's own current-jiffy exactly in
+ * SHAPE (elapsed monotonic time, microsecond resolution, matching
+ * jiffies-per-second = 1000000) but the two can never agree on an
+ * absolute VALUE, since each is relative to its own process's start --
+ * see spec/creme/time_spec.scm's own header comment on why that file
+ * asserts plausibility/monotonicity rather than should-match-native?. */
+static struct timespec jiffy_epoch;
+static int jiffy_epoch_set = 0;
+
+static Value bi_current_jiffy(VM *vm, Value *args, int nargs) {
+  (void)vm; (void)args; (void)nargs;
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  if (!jiffy_epoch_set) {
+    jiffy_epoch = ts;
+    jiffy_epoch_set = 1;
+  }
+  int64_t micros = (int64_t)(ts.tv_sec - jiffy_epoch.tv_sec) * 1000000 +
+                   ((int64_t)ts.tv_nsec - (int64_t)jiffy_epoch.tv_nsec) / 1000;
+  return v_int(micros);
+}
+
+static Value bi_jiffies_per_second(VM *vm, Value *args, int nargs) {
+  (void)vm; (void)args; (void)nargs;
+  return v_int(1000000);
 }
 
 /* (scheme process-context)'s minimal surface app.scm needs -- just enough
@@ -1831,6 +2976,29 @@ static Value bi_get_environment_variable(VM *vm, Value *args, int nargs) {
   char *copy = GC_MALLOC((size_t)(len ? len : 1));
   memcpy(copy, val, (size_t)len);
   return v_str(copy, len);
+}
+
+/* (creme env)'s set-environment-variable! -- a subprocess spawned via
+ * process-run (cvm/process.c) inherits its parent's environ automatically
+ * (execvp doesn't touch it), so this is the one piece needed for a
+ * cvm-run parent to pass a flag down to a cvm-run child it spawns (e.g.
+ * spec/creme/main_spec.scm setting CREME_SPEC_DATA_MODE before spawning
+ * each spec file). */
+static Value bi_set_environment_variable(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) {
+    cvm_abort("set-environment-variable!: expected two strings");
+  }
+  char *name = malloc((size_t)args[0].as.str.len + 1);
+  memcpy(name, args[0].as.str.chars, (size_t)args[0].as.str.len);
+  name[args[0].as.str.len] = 0;
+  char *val = malloc((size_t)args[1].as.str.len + 1);
+  memcpy(val, args[1].as.str.chars, (size_t)args[1].as.str.len);
+  val[args[1].as.str.len] = 0;
+  setenv(name, val, 1);
+  free(name);
+  free(val);
+  return v_nil();
 }
 
 /* Whether STDOUT is an actual terminal, not a pipe/redirected file -- see
@@ -1868,6 +3036,41 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "current-second", bi_current_second);
   cvm_register_builtin(vm, "flonum->bits", bi_flonum_to_bits);
   cvm_register_builtin(vm, "bits->flonum", bi_bits_to_flonum);
+  cvm_register_builtin(vm, "sin", bi_sin);
+  cvm_register_builtin(vm, "cos", bi_cos);
+  cvm_register_builtin(vm, "tan", bi_tan);
+  cvm_register_builtin(vm, "asin", bi_asin);
+  cvm_register_builtin(vm, "acos", bi_acos);
+  cvm_register_builtin(vm, "atan", bi_atan);
+  cvm_register_builtin(vm, "log", bi_log);
+  cvm_register_builtin(vm, "exp", bi_exp);
+  cvm_register_builtin(vm, "log2", bi_log2);
+  cvm_register_builtin(vm, "log10", bi_log10);
+  cvm_register_builtin(vm, "atan2", bi_atan2);
+  cvm_register_builtin(vm, "pow", bi_pow);
+  cvm_register_builtin(vm, "hypot", bi_hypot);
+  cvm_register_builtin(vm, "sqrt", bi_sqrt);
+  cvm_register_builtin(vm, "nan?", bi_nan_p);
+  cvm_register_builtin(vm, "infinite?", bi_infinite_p);
+  cvm_register_builtin(vm, "finite?", bi_finite_p);
+  cvm_register_builtin(vm, "random-real", bi_random_real);
+  cvm_register_builtin(vm, "random-integer", bi_random_integer);
+  cvm_register_builtin(vm, "random-seed!", bi_random_seed_bang);
+  cvm_register_builtin(vm, "random-choice", bi_random_choice);
+  cvm_register_builtin(vm, "random-shuffle", bi_random_shuffle);
+  /* pi/e are value constants, not procedures -- interned directly into
+   * the global table (mirroring cvm_register_builtin's own two-line
+   * shape) rather than through a BuiltinFn, matching how native's own
+   * register_library block does `env.define("pi", ...)` alongside its
+   * register_module calls (see creme/math.cr). */
+  {
+    int pi_slot = cvm_global_intern(vm, "pi", 2);
+    vm->globals[pi_slot].value = v_float(M_PI);
+    vm->globals[pi_slot].bound = 1;
+    int e_slot = cvm_global_intern(vm, "e", 1);
+    vm->globals[e_slot].value = v_float(M_E);
+    vm->globals[e_slot].bound = 1;
+  }
   cvm_register_builtin(vm, "display", bi_display);
   cvm_register_builtin(vm, "newline", bi_newline);
   cvm_register_builtin(vm, "open-output-string", bi_open_output_string);
@@ -1879,6 +3082,25 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "reverse", bi_reverse);
   cvm_register_builtin(vm, "length", bi_length);
   cvm_register_builtin(vm, "current-output-port", bi_current_output_port);
+  cvm_register_builtin(vm, "current-input-port", bi_current_input_port);
+  cvm_register_builtin(vm, "open-input-string", bi_open_input_string);
+  cvm_register_builtin(vm, "port?", bi_port_p);
+  cvm_register_builtin(vm, "input-port?", bi_input_port_p);
+  cvm_register_builtin(vm, "output-port?", bi_output_port_p);
+  cvm_register_builtin(vm, "eof-object", bi_eof_object);
+  cvm_register_builtin(vm, "eof-object?", bi_eof_object_p);
+  cvm_register_builtin(vm, "close-port", bi_close_port);
+  cvm_register_builtin(vm, "close-input-port", bi_close_port);
+  cvm_register_builtin(vm, "close-output-port", bi_close_port);
+  cvm_register_builtin(vm, "read-char", bi_read_char);
+  cvm_register_builtin(vm, "peek-char", bi_peek_char);
+  cvm_register_builtin(vm, "read-line", bi_read_line);
+  cvm_register_builtin(vm, "char-ready?", bi_char_ready_p);
+  cvm_register_builtin(vm, "file-exists?", bi_file_exists_p);
+  cvm_register_builtin(vm, "open-input-file", bi_open_input_file);
+  cvm_register_builtin(vm, "open-output-file", bi_open_output_file);
+  cvm_register_builtin(vm, "call-with-input-file", bi_call_with_input_file);
+  cvm_register_builtin(vm, "call-with-output-file", bi_call_with_output_file);
   cvm_register_builtin(vm, "exit", bi_exit);
 
   cvm_register_builtin(vm, "not", bi_not);
@@ -1998,6 +3220,17 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "make-string", bi_make_string);
   cvm_register_builtin(vm, "string", bi_string_ctor);
   cvm_register_builtin(vm, "string=?", bi_string_eq);
+  cvm_register_builtin(vm, "string<?", bi_string_lt);
+  cvm_register_builtin(vm, "string>?", bi_string_gt);
+  cvm_register_builtin(vm, "string<=?", bi_string_le);
+  cvm_register_builtin(vm, "string>=?", bi_string_ge);
+  cvm_register_builtin(vm, "symbol=?", bi_symbol_eq);
+  cvm_register_builtin(vm, "boolean=?", bi_boolean_eq);
+  cvm_register_builtin(vm, "string-map", bi_string_map);
+  cvm_register_builtin(vm, "string-copy!", bi_string_copy_bang);
+  cvm_register_builtin(vm, "string-fill!", bi_string_fill_bang);
+  cvm_register_builtin(vm, "string->vector", bi_string_to_vector);
+  cvm_register_builtin(vm, "vector->string", bi_vector_to_string);
   cvm_register_builtin(vm, "string->number", bi_string_to_number);
   cvm_register_builtin(vm, "number->string", bi_number_to_string);
   cvm_register_builtin(vm, "string->symbol", bi_string_to_symbol);
@@ -2012,6 +3245,23 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "char>=?", bi_char_ge);
   cvm_register_builtin(vm, "char-downcase", bi_char_downcase);
   cvm_register_builtin(vm, "char-upcase", bi_char_upcase);
+  cvm_register_builtin(vm, "char-foldcase", bi_char_foldcase);
+  cvm_register_builtin(vm, "digit-value", bi_digit_value);
+  cvm_register_builtin(vm, "char-alphabetic?", bi_char_alphabetic_p);
+  cvm_register_builtin(vm, "char-numeric?", bi_char_numeric_p);
+  cvm_register_builtin(vm, "char-whitespace?", bi_char_whitespace_p);
+  cvm_register_builtin(vm, "char-upper-case?", bi_char_upper_case_p);
+  cvm_register_builtin(vm, "char-lower-case?", bi_char_lower_case_p);
+  cvm_register_builtin(vm, "char-ci=?", bi_char_ci_eq);
+  cvm_register_builtin(vm, "char-ci<?", bi_char_ci_lt);
+  cvm_register_builtin(vm, "char-ci>?", bi_char_ci_gt);
+  cvm_register_builtin(vm, "char-ci<=?", bi_char_ci_le);
+  cvm_register_builtin(vm, "char-ci>=?", bi_char_ci_ge);
+  cvm_register_builtin(vm, "string-ci=?", bi_string_ci_eq);
+  cvm_register_builtin(vm, "string-ci<?", bi_string_ci_lt);
+  cvm_register_builtin(vm, "string-ci>?", bi_string_ci_gt);
+  cvm_register_builtin(vm, "string-ci<=?", bi_string_ci_le);
+  cvm_register_builtin(vm, "string-ci>=?", bi_string_ci_ge);
 
   cvm_register_builtin(vm, "vector", bi_vector);
   cvm_register_builtin(vm, "vector->list", bi_vector_to_list);
@@ -2027,6 +3277,26 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "bytevector", bi_bytevector);
   cvm_register_builtin(vm, "bytevector-length", bi_bytevector_length);
   cvm_register_builtin(vm, "bytevector?", bi_bytevector_p);
+  cvm_register_builtin(vm, "bytevector-copy", bi_bytevector_copy);
+  cvm_register_builtin(vm, "bytevector-copy!", bi_bytevector_copy_bang);
+  cvm_register_builtin(vm, "bytevector-append", bi_bytevector_append);
+  cvm_register_builtin(vm, "utf8->string", bi_utf8_to_string);
+  cvm_register_builtin(vm, "string->utf8", bi_string_to_utf8);
+  cvm_register_builtin(vm, "open-input-bytevector", bi_open_input_bytevector);
+  cvm_register_builtin(vm, "open-output-bytevector", bi_open_output_bytevector);
+  cvm_register_builtin(vm, "get-output-bytevector", bi_get_output_bytevector);
+  cvm_register_builtin(vm, "binary-port?", bi_binary_port_p);
+  cvm_register_builtin(vm, "textual-port?", bi_textual_port_p);
+  cvm_register_builtin(vm, "input-port-open?", bi_input_port_open_p);
+  cvm_register_builtin(vm, "output-port-open?", bi_output_port_open_p);
+  cvm_register_builtin(vm, "read-u8", bi_read_u8);
+  cvm_register_builtin(vm, "peek-u8", bi_peek_u8);
+  cvm_register_builtin(vm, "u8-ready?", bi_char_ready_p);
+  cvm_register_builtin(vm, "write-u8", bi_write_u8);
+  cvm_register_builtin(vm, "read-bytevector", bi_read_bytevector);
+  cvm_register_builtin(vm, "read-bytevector!", bi_read_bytevector_bang);
+  cvm_register_builtin(vm, "write-bytevector", bi_write_bytevector);
+  cvm_register_builtin(vm, "call-with-port", bi_call_with_port);
 
   cvm_register_builtin(vm, "force", bi_force);
   cvm_register_builtin(vm, "promise?", bi_promise_p);
@@ -2040,6 +3310,16 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "quotient", bi_quotient);
   cvm_register_builtin(vm, "remainder", bi_remainder);
   cvm_register_builtin(vm, "modulo", bi_modulo);
+  cvm_register_builtin(vm, "truncate-quotient", bi_quotient);
+  cvm_register_builtin(vm, "truncate-remainder", bi_remainder);
+  cvm_register_builtin(vm, "floor-quotient", bi_floor_quotient);
+  cvm_register_builtin(vm, "floor-remainder", bi_modulo);
+  cvm_register_builtin(vm, "truncate/", bi_truncate_slash);
+  cvm_register_builtin(vm, "floor/", bi_floor_slash);
+  cvm_register_builtin(vm, "gcd", bi_gcd);
+  cvm_register_builtin(vm, "lcm", bi_lcm);
+  cvm_register_builtin(vm, "expt", bi_expt);
+  cvm_register_builtin(vm, "exact-integer-sqrt", bi_exact_integer_sqrt);
   cvm_register_builtin(vm, "+", bi_plus);
   cvm_register_builtin(vm, "-", bi_minus);
   cvm_register_builtin(vm, "*", bi_star);
@@ -2049,9 +3329,11 @@ void cvm_register_builtins(VM *vm) {
   cvm_register_builtin(vm, "<=", bi_num_le);
   cvm_register_builtin(vm, ">=", bi_num_ge);
   cvm_register_builtin(vm, "=", bi_num_eq);
-  cvm_register_builtin(vm, "read-line", bi_read_line);
   cvm_register_builtin(vm, "current-time", bi_current_time);
   cvm_register_builtin(vm, "time-difference", bi_time_difference);
+  cvm_register_builtin(vm, "current-jiffy", bi_current_jiffy);
+  cvm_register_builtin(vm, "jiffies-per-second", bi_jiffies_per_second);
   cvm_register_builtin(vm, "get-environment-variable", bi_get_environment_variable);
+  cvm_register_builtin(vm, "set-environment-variable!", bi_set_environment_variable);
   cvm_register_builtin(vm, "stdout-tty?", bi_stdout_tty);
 }

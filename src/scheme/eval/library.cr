@@ -105,7 +105,7 @@ module Scheme
     # Copies the resolved bindings into `into`. No-op (but still validated)
     # when `into` and a binding's source library Env are the same object —
     # a defensive guard against a caller importing a library into its own
-    # backing Env (e.g. (scheme base)'s Env, @base_env — see
+    # backing Env (e.g. (builtin base)'s Env, @base_env — see
     # modules/scheme/base.cr) rather than a real target.
     def self.import_bindings(into : Env, resolved : Array({String, SchemeLibrary, String})) : Nil
       resolved.each do |external, source_lib, internal|

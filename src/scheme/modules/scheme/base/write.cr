@@ -2,11 +2,11 @@
 # (scheme write): display / write / write-simple / write-shared
 # ===========================================================================
 #
-# These are (scheme write)'s procedures, not (scheme base)'s. They're
-# installed into @base_env (which both (scheme base) and (scheme write)
-# share as their Env) by install_write, whose register_module return value
-# becomes (scheme write)'s derived export list — see
-# install_base_and_write_libraries in base.cr.
+# These are (builtin write)'s procedures (re-exported by (scheme write)),
+# not (builtin base)'s/(scheme base)'s. They're installed into @base_env
+# (which both (builtin base) and (builtin write) share as their Env) by
+# install_write, whose register_module return value becomes (builtin
+# write)'s derived export list — see install_builtin_libraries in base.cr.
 
 module Scheme::Builtins::WriteLibrary
   extend self

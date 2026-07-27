@@ -402,6 +402,10 @@ static Value bi_format(VM *vm, Value *args, int nargs) {
 void cvm_register_string_builtins(VM *vm) {
   cvm_register_builtin(vm, "string-upcase", bi_string_upcase);
   cvm_register_builtin(vm, "string-downcase", bi_string_downcase);
+  /* (scheme char)'s string-foldcase is literally the same as string-downcase
+   * (native's own comment: "correct for the ASCII/simple-Unicode range
+   * this interpreter otherwise handles") -- same function, second name. */
+  cvm_register_builtin(vm, "string-foldcase", bi_string_downcase);
   cvm_register_builtin(vm, "string-trim", bi_string_trim);
   cvm_register_builtin(vm, "string-reverse", bi_string_reverse);
   cvm_register_builtin(vm, "string-split", bi_string_split);

@@ -245,7 +245,29 @@ struct VM {
                              * the old CVM2 header) carries no separate
                              * original-source-file field. */
   Profiler profiler;
+
+  /* (creme actor) (actor.c): set only for a spawned actor's own VM (the
+   * main script's VM leaves has_actor_unwind at its GC_MALLOC zero-init
+   * default), so an uncaught cvm_abort inside that actor's thunk longjmps
+   * here (see cvm_abort, vm.c) instead of exit()ing the whole process —
+   * the actor thread's entry function reads abort_message back out to
+   * build that actor's own <down> notification, then unwinds just that
+   * OS thread. */
+  jmp_buf actor_unwind;
+  int has_actor_unwind;
+  char abort_message[1024];
 };
+
+/* Note: condition_type (above) is lazily built PER-VM (see vm.c's
+ * get_condition_type) despite its own doc comment calling it "process-
+ * wide" -- true for the single-VM case this project always had before
+ * (creme actor), but each spawned actor's VM now lazily builds its OWN
+ * RecordType instance the first time IT raises a condition, so two
+ * actors' condition objects are tagged with DIFFERENT (if
+ * structurally-identical) RecordType pointers. Harmless for everything
+ * actor.c currently sends between actors (plain data, records, actor
+ * refs -- never a condition object itself), but worth knowing before
+ * ever trying to pass a raised condition across an actor boundary. */
 
 /* loader.c */
 Chunk *cvm_load(const char *path, VM *vm);
@@ -256,10 +278,22 @@ void cvm_run_chunk(VM *vm, Chunk *chunk);
 Value cvm_run_loaded_chunk(VM *vm, Chunk *chunk);
 Value cvm_apply(VM *vm, Value fn, Value *args, int nargs);
 int cvm_global_intern(VM *vm, const char *name, int len);
+VM *cvm_new_child_vm(VM *parent);
 void cvm_register_builtin(VM *vm, const char *name, BuiltinFn fn);
 Value cvm_cons(VM *vm, Value car, Value cdr);
+/* Shared Port read/write primitives (builtins.c) -- exposed so a module
+ * outside builtins.c (e.g. csv.c's streaming reader/writer) can read/
+ * write through an arbitrary Port the same kind-dispatched way write-
+ * string/read-char etc. do, without duplicating that dispatch logic.
+ * cvm_port_read_char/cvm_port_peek_char return -1 at EOF, else a byte
+ * value 0-255 (this prototype's chars are byte-wide, see string-ref's
+ * own "byte-wise" comment). */
+void cvm_port_write_bytes(Port *p, const char *bytes, int len);
+int cvm_port_read_char(Port *p);
+int cvm_port_peek_char(Port *p);
 Value cvm_build_qq(VM *vm, QQTemplate *t, Value *stack, int hole_base, int *idx);
 int cvm_eqv(Value a, Value b);
+int cvm_equal(Value a, Value b);
 double as_double(Value v, const char *who);
 Value num_add(Value x, Value y);
 Value num_sub(Value x, Value y);

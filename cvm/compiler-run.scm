@@ -27,7 +27,7 @@
 ;; wherever ITS OWN file lives), then compile the flattened list.
 (import (scheme base) (scheme write) (scheme lazy)
         (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
-        (creme compiler reader) (creme compiler compiler))
+        (creme compiler reader) (creme compiler compiler) (creme hash-table))
 
 ;; This file's own imports above are resolved NATIVELY (Crystal's own
 ;; import machinery, since this whole file is compiled with --emit-cvm --
@@ -74,7 +74,34 @@
 ;; (scheme eval)'s `eval` (e.g. modules/creme/compiler/spec-helper.sld's
 ;; native-eval/native-eval-forms) should be read with that in mind when
 ;; run this way.
-(define (eval form) (load-chunk-bytes (chunk->bytes (compile-program (list form)))))
+;; `eval`'s optional second argument (an environment specifier, per R7RS
+;; (scheme eval)) is accepted and ignored: cvm has exactly ONE flat global
+;; table (vm->globals in vm.c/vm.h) with no per-library/per-scope
+;; separation at the C runtime level at all -- there is no isolated
+;; environment to actually evaluate `form` against even if one were
+;; passed, so honoring vs. ignoring the argument makes no observable
+;; difference given this architecture. See interaction-environment/
+;; scheme-report-environment/null-environment below for the same
+;; reasoning applied to the specifier-constructing side.
+(define (eval form . env) (load-chunk-bytes (chunk->bytes (compile-program (list form)))))
+
+;; (scheme repl)'s interaction-environment and (scheme r5rs)'s
+;; scheme-report-environment/null-environment, deliberately reduced to
+;; trivial stubs: since eval (above) ignores its environment argument
+;; entirely regardless of what's passed, these just need to return SOME
+;; value satisfying eval's calling convention -- there is no real
+;; environment object to construct, isolate, or distinguish between (a
+;; genuinely isolated null-environment that lacks `+`, e.g., would need
+;; per-environment global tables, a much bigger change nothing here
+;; currently needs). A plain symbol is enough; nothing inspects it.
+;; Concretely, this means a Crystal-side spec case that depends on real
+;; isolation (e.g. "null-environment lacks +", "environment's only/except
+;; import-set combinators actually restrict access") can't be ported to
+;; run under cvm this way -- see spec/creme/environments_spec.scm's own
+;; header comment on which cases it deliberately does NOT include.
+(define (interaction-environment) 'the-global-environment)
+(define (scheme-report-environment version) 'the-global-environment)
+(define (null-environment version) 'the-global-environment)
 
 ;; (scheme base)'s with-exception-handler/raise-continuable, absent from
 ;; cvm as native C builtins -- built entirely atop dynamic-wind (a REAL
@@ -106,43 +133,42 @@
           (set! exception-handler-stack (cons handler rest))
           result))))
 
-;; cvm has no native (scheme read)/(scheme base) string-input-port
-;; support at all (open-input-string/read/eof-object are all absent --
-;; only read-line, hardwired to stdin, exists). Rather than writing a
-;; NEW incremental s-expression parser in C, this reuses the self-hosted
-;; reader ALREADY loaded here (read-program, which parses a whole string
-;; into a list of forms in one pass) to back all three: open-input-string
-;; parses the ENTIRE string upfront into a mutable "remaining forms" box;
-;; read pops one form off it per call, returning the (fresh, distinct --
-;; NOT #f, which is a legitimate datum a program could actually read)
-;; eof-object sentinel once exhausted. Sufficient for every real use in
-;; this project's own spec/creme test suite (native-eval/read-all-native
-;; in modules/creme/compiler/spec-helper.sld, always reading a complete,
-;; well-formed program) -- not a general incremental reader (e.g. mixing
-;; read-char with read on the same port isn't meaningful here), but nothing
-;; in this codebase needs that.
-(define-record-type <input-string-port>
-  (make-input-string-port forms)
-  input-string-port?
-  (forms input-string-port-forms set-input-string-port-forms!))
-
-(define-record-type <eof-object>
-  (make-eof-object)
-  eof-object?)
-
-(define the-eof-object (make-eof-object))
-(define (eof-object) the-eof-object)
-
-(define (open-input-string str)
-  (make-input-string-port (read-program str)))
+;; (scheme read)'s `read` has no native C implementation (cvm/builtins.c's
+;; ports are char-level -- read-char/peek-char/read-line -- not a full
+;; incremental s-expression parser; open-input-string/eof-object/
+;; eof-object?/read-char/etc. THEMSELVES are all real native builtins
+;; now, unlike when this comment was first written). Rather than writing
+;; a NEW incremental s-expression parser in C, `read` reuses the
+;; self-hosted reader ALREADY loaded here (read-program, which parses a
+;; whole string into a list of forms in one pass): on a port's FIRST
+;; `read` call, drain it completely via native read-char into a string,
+;; parse that once via read-program, and cache the resulting forms list
+;; (keyed by the port's own IDENTITY, via a native hash table -- value_to_
+;; fiobj's T_PORT case in hashtable.c hashes by pointer, i.e. eq?, exactly
+;; what's needed here); each call pops one form off the cached list,
+;; returning native (scheme base)'s own eof-object once exhausted.
+;; Sufficient for every real use in this project's own spec/creme test
+;; suite (native-eval/read-all-native in modules/creme/compiler/spec-
+;; helper.sld, always reading a complete, well-formed program from a
+;; port nothing else reads from) -- not a general incremental reader
+;; (e.g. mixing read-char with read on the SAME port isn't meaningful:
+;; the first read-char call drains it before read ever sees anything),
+;; but nothing in this codebase needs that.
+(define read-forms-cache (make-hash-table))
 
 (define (read port)
-  (let ((forms (input-string-port-forms port)))
+  (if (not (hash-table-contains? read-forms-cache port))
+      (let loop ((chars '()))
+        (let ((c (read-char port)))
+          (if (eof-object? c)
+              (hash-table-set! read-forms-cache port (read-program (list->string (reverse chars))))
+              (loop (cons c chars))))))
+  (let ((forms (hash-table-ref read-forms-cache port)))
     (if (null? forms)
-        the-eof-object
-        (let ((first (car forms)))
-          (set-input-string-port-forms! port (cdr forms))
-          first))))
+        (eof-object)
+        (begin
+          (hash-table-set! read-forms-cache port (cdr forms))
+          (car forms)))))
 
 (define (dirname path)
   (let loop ((i (- (string-length path) 1)))

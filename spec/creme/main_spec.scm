@@ -40,18 +40,33 @@
 (define (bound? name) (guard (e (#t #f)) (eval name) #t))
 
 (define spec-files
-  '("spec/creme/bootstrap_spec.scm"
+  '("spec/creme/actor_spec.scm"
+    "spec/creme/bootstrap_spec.scm"
     "spec/creme/bytecode_spec.scm"
+    "spec/creme/bytevectors_spec.scm"
+    "spec/creme/char_spec.scm"
     "spec/creme/compiler_defmacro_spec.scm"
+    "spec/creme/environments_spec.scm"
     "spec/creme/compiler_libraries_spec.scm"
     "spec/creme/compiler_numeric_tower_spec.scm"
     "spec/creme/compiler_self_host_spec.scm"
     "spec/creme/compiler_spec.scm"
+    "spec/creme/csv_spec.scm"
+    "spec/creme/file_ports_spec.scm"
+    "spec/creme/hashtable_spec.scm"
+    "spec/creme/inexact_spec.scm"
     "spec/creme/macro_spec.scm"
+    "spec/creme/math_spec.scm"
+    "spec/creme/ports_spec.scm"
     "spec/creme/prim_call_spec.scm"
+    "spec/creme/random_spec.scm"
     "spec/creme/reader_literals_spec.scm"
     "spec/creme/reader_native_spec.scm"
+    "spec/creme/regex_spec.scm"
+    "spec/creme/strings_arithmetic_spec.scm"
     "spec/creme/syntax_rules_spec.scm"
+    "spec/creme/time_spec.scm"
+    "spec/creme/treelist_spec.scm"
     "spec/creme/vm_spec.scm"))
 
 ;; (creme reader)'s lex-tokens/tokens->forms (reader_native_spec.scm's own

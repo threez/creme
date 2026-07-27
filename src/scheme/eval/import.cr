@@ -16,12 +16,15 @@
 # Each library gets its own fresh Env (no parent) populated by evaluating its
 # begin/include bodies against it — `define` already just calls
 # `env.define` against whatever Env it's handed (see eval_define), so this
-# needs no new Env capability. The one deliberate exception is (scheme base)
-# (and (scheme write)), whose Env *is* @base_env itself — see
-# modules/scheme/base.cr. @global (the top-level program's own root
-# Env, separate from @base_env) only sees (scheme base)/(scheme write)
-# bindings if Interpreter.new(auto_import_base: true) (the default) copies
-# them in at construction, or the program itself imports them.
+# needs no new Env capability. The one deliberate exception is (builtin
+# base) (and (builtin write)), whose Env *is* @base_env itself — see
+# modules/scheme/base.cr. (scheme base)/(scheme write) are ordinary
+# libraries built on top of those through this same machinery — they
+# `(import (builtin base))` and get their own fresh Env like any other
+# library. @global (the top-level program's own root Env, separate from
+# @base_env) only sees (scheme base)/(scheme write) bindings if
+# Interpreter.new(auto_import_base: true) (the default) copies them in at
+# construction, or the program itself imports them.
 #
 # `include`/`include-ci`/`cond-expand` inside a library body are handled in
 # process_library_declarations below: cond-expand splices its matched clause's
@@ -31,7 +34,7 @@
 module Scheme
   class Interpreter
     # Registers a library from an already-built Env + exports table, without
-    # going through source text — the mechanism (scheme base) uses to wrap
+    # going through source text — the mechanism (builtin base) uses to wrap
     # @base_env itself as a library (see modules/scheme/base.cr), and
     # generally useful for a host embedding this interpreter to expose its
     # own Crystal-native libraries the same way the R7RS standard/`(list

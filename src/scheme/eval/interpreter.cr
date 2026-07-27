@@ -197,7 +197,8 @@ module Scheme
       write_names = install_write(@base_env)
       install_special_forms(@base_env)
       load_prelude
-      install_base_and_write_libraries(base_names, write_names)
+      install_builtin_libraries(base_names, write_names)
+      install_scheme_base_and_write_libraries
       install_all_libraries
       install_cxr_conveniences
       # Special forms (if/define/import/...) must always be visible so a

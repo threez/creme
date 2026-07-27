@@ -2,12 +2,13 @@
 # R7RS (scheme ...) sub-libraries: manifest
 # ===========================================================================
 #
-# Each gets its own fresh (non-@base_env) Env, following (scheme base)'s
-# pattern from modules/scheme/base.cr but WITHOUT the auto-import special
-# case — these must be explicitly (import ...)ed, matching R7RS (only
-# base/write are ever auto-imported, and only when
+# Each gets its own fresh (non-@base_env) Env, same as (scheme base)/(scheme
+# write) themselves get (see modules/scheme/base.cr) but WITHOUT the
+# auto-import special case — these must be explicitly (import ...)ed,
+# matching R7RS (only base/write are ever auto-imported, and only when
 # Interpreter.new(auto_import_base: true), a deliberate deviation
-# documented in modules/scheme/base.cr).
+# documented in modules/scheme/base.cr). (builtin base)/(builtin write) are
+# the actual @base_env-identity libraries now.
 #
 # Every actual registration lives declaratively in each library's own file
 # under src/scheme/modules/scheme/, via a `register_library [...]` (or

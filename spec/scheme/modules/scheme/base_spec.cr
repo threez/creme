@@ -369,7 +369,10 @@ describe "builtins: pairs & lists" do
   end
 
   it "list-set! raises out of range" do
-    expect_raises(Scheme::SchemeRuntimeError, /list-set!: index out of range/) { w("(list-set! (list 1 2) 5 9)") }
+    # list-set! is implemented in terms of list-tail (see
+    # modules/scheme/base.cr's SCHEME_BASE_ADDITIONS_SRC), so the
+    # out-of-range error surfaces list-tail's own wording.
+    expect_raises(Scheme::SchemeRuntimeError, /list-tail: index out of range/) { w("(list-set! (list 1 2) 5 9)") }
   end
 
   it "list-tail returns the sublist after dropping n elements" do

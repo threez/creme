@@ -16,6 +16,18 @@
 ;; (CI logs, `| tee`, a file) automatically gets plain, escape-code-free
 ;; text, no flag needed either way.
 ;;
+;; describe!/it! always build a tree of the run (see render-spec-tree!
+;; below) alongside whatever they print live -- when the CREME_SPEC_
+;; DATA_MODE environment variable is set, printing is suppressed
+;; entirely and spec-summary! instead `write`s that tree as ONE Scheme
+;; value ((creme spec-runner) sets this before spawning a spec file as
+;; its own subprocess, then reads the value back and renders it itself
+;; via render-spec-tree! -- see that library's own header comment for
+;; why: the CHILD's own stdout, captured into a string by process-run,
+;; is never a tty, so IT would render everything colorless even on a
+;; real terminal; rendering happens in the PARENT process instead, which
+;; actually is attached to one).
+;;
 ;;   (describe "description" body ...)  -> runs body (an implicit begin),
 ;;                                         printed at the current nesting
 ;;                                         depth. `describe` blocks nest
@@ -91,8 +103,8 @@
 (define-library (creme spec)
   (export describe it
           should-equal? should-eqv? should-be-true? should-be-false? should-raise?
-          spec-describe! spec-it! spec-summary! spec-record-external-result!)
-  (import (scheme base) (scheme write) (scheme process-context) (creme introspection))
+          spec-describe! spec-it! spec-summary! spec-record-external-result! render-spec-tree! spec-data-marker)
+  (import (scheme base) (scheme cxr) (scheme write) (scheme process-context) (creme introspection))
   (begin
     ;; ANSI color, only when it'll actually help: STDOUT must be a real
     ;; terminal (stdout-tty?, (creme introspection) -- native Crystal's
@@ -108,6 +120,20 @@
       (if spec-use-color?
           (string-append "\x1b;[" code "m" text "\x1b;[0m")
           text))
+
+    ;; See this file's own header comment -- set only by (creme spec-
+    ;; runner), never by a directly-run spec file, so direct runs are
+    ;; completely unaffected.
+    (define spec-data-mode? (if (get-environment-variable "CREME_SPEC_DATA_MODE") #t #f))
+
+    ;; Printed on its own line right before spec-summary!'s data-mode
+    ;; value -- exported so (creme spec-runner) can search a child's
+    ;; captured stdout for this EXACT string rather than assuming the
+    ;; value is the first (or only) datum in it: a spec file's own test
+    ;; bodies can and do call display/write themselves as part of what
+    ;; they're testing, which would otherwise land before the real
+    ;; value and get `read` back instead of it.
+    (define spec-data-marker ";;;CREME-SPEC-RESULT;;;")
     ;; A distinct condition type for should-*?'s own failures, so
     ;; spec-condition-message below can show a clean, purpose-written
     ;; message for those while still handling an ordinary (error ...)/
@@ -182,11 +208,32 @@
                   (string-append (car path) " > " (loop (cdr path)))))
             " > " name)))
 
+    ;; ---- result tree ---------------------------------------------------------
+    ;; Built alongside the live printing below regardless of spec-data-
+    ;; mode?, so render-spec-tree! always has something to work with --
+    ;; a stack of "current nesting level's own children so far" lists,
+    ;; each in reverse (most-recent-first) order until popped/reversed. A
+    ;; describe node is (describe name children); an it node is (it name
+    ;; 'pass) or (it name 'fail message).
+    (define spec-frames (list '()))
+
+    (define (spec-frame-push!) (set! spec-frames (cons '() spec-frames)))
+
+    (define (spec-frame-pop!)
+      (let ((top (reverse (car spec-frames))))
+        (set! spec-frames (cdr spec-frames))
+        top))
+
+    (define (spec-frame-add! node)
+      (set! spec-frames (cons (cons node (car spec-frames)) (cdr spec-frames))))
+
     (define (spec-describe! name thunk)
-      (display (spec-indent)) (display name) (newline)
+      (if (not spec-data-mode?) (begin (display (spec-indent)) (display name) (newline)))
       (set! spec-depth (+ spec-depth 1))
       (set! spec-path (cons name spec-path))
+      (spec-frame-push!)
       (thunk)
+      (spec-frame-add! (list 'describe name (spec-frame-pop!)))
       (set! spec-path (cdr spec-path))
       (set! spec-depth (- spec-depth 1)))
 
@@ -194,10 +241,35 @@
       (set! spec-total (+ spec-total 1))
       (guard (e (#t
                  (set! spec-failed (+ spec-failed 1))
-                 (set! spec-failures (cons (cons (spec-full-name name) (spec-condition-message e)) spec-failures))
-                 (display (spec-indent)) (display (spec-colorize "31" "[FAIL]")) (display " ") (display name) (newline)))
+                 (let ((msg (spec-condition-message e)))
+                   (set! spec-failures (cons (cons (spec-full-name name) msg) spec-failures))
+                   (spec-frame-add! (list 'it name 'fail msg))
+                   (if (not spec-data-mode?)
+                       (begin (display (spec-indent)) (display (spec-colorize "31" "[FAIL]")) (display " ") (display name) (newline))))))
         (thunk)
-        (display (spec-indent)) (display (spec-colorize "32" "[PASS]")) (display " ") (display name) (newline)))
+        (spec-frame-add! (list 'it name 'pass #f))
+        (if (not spec-data-mode?)
+            (begin (display (spec-indent)) (display (spec-colorize "32" "[PASS]")) (display " ") (display name) (newline)))))
+
+    ;; Renders a tree exactly as spec-describe!/spec-it! would have
+    ;; printed it live (same indentation/color rules, driven by THIS
+    ;; process's own spec-use-color?) -- used by (creme spec-runner) to
+    ;; render a child's tree in the PARENT's own process, where the
+    ;; color decision reflects the parent's real terminal, not the
+    ;; child's (always-a-pipe, never-a-tty) one.
+    (define (render-spec-node! node depth)
+      (let ((indent (make-string (* depth 2) #\space)))
+        (case (car node)
+          ((describe)
+           (display indent) (display (cadr node)) (newline)
+           (for-each (lambda (child) (render-spec-node! child (+ depth 1))) (caddr node)))
+          ((it)
+           (display indent)
+           (display (if (eq? (caddr node) 'pass) (spec-colorize "32" "[PASS]") (spec-colorize "31" "[FAIL]")))
+           (display " ") (display (cadr node)) (newline)))))
+
+    (define (render-spec-tree! tree)
+      (for-each (lambda (node) (render-spec-node! node 0)) tree))
 
     ;; Folds another spec FILE's own already-reported "N examples, M
     ;; failures" counts into this process's own totals -- (creme spec-
@@ -220,20 +292,32 @@
                   spec-failures))))
 
     (define (spec-summary!)
-      (newline)
-      (display (spec-colorize (if (> spec-failed 0) "31" "32")
-                 (string-append (number->string spec-total) " examples, " (number->string spec-failed) " failures")))
-      (newline)
-      (if (> spec-failed 0)
+      (if spec-data-mode?
+          ;; No human-readable narration at all here -- just a marker
+          ;; line (so (creme spec-runner)'s run-spec-file! can find
+          ;; where this value starts even if the file's OWN test bodies
+          ;; printed other stray text via display/write of their own --
+          ;; several genuinely do, as part of what they're testing) and
+          ;; then the one value itself, read back via `read` and
+          ;; rendered in the PARENT's own process (render-spec-tree!,
+          ;; above).
+          (begin
+            (display spec-data-marker) (newline)
+            (write (list spec-total spec-failed (spec-frame-pop!))))
           (begin
             (newline)
-            (for-each
-              (lambda (f)
-                (display "  ") (display (spec-colorize "31" (car f))) (display ":") (newline)
-                (display "    ") (display (cdr f)) (newline))
-              (reverse spec-failures))
-            (exit 1))
-          (exit 0)))
+            (display (spec-colorize (if (> spec-failed 0) "31" "32")
+                       (string-append (number->string spec-total) " examples, " (number->string spec-failed) " failures")))
+            (newline)
+            (if (> spec-failed 0)
+                (begin
+                  (newline)
+                  (for-each
+                    (lambda (f)
+                      (display "  ") (display (spec-colorize "31" (car f))) (display ":") (newline)
+                      (display "    ") (display (cdr f)) (newline))
+                    (reverse spec-failures))))))
+      (if (> spec-failed 0) (exit 1) (exit 0)))
 
     (define-syntax describe
       (syntax-rules ()

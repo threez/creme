@@ -15,80 +15,77 @@
 ;; same way Crystal's own spec_helper.cr gives each individual `w`/`run`
 ;; call a brand new Scheme::Interpreter.
 ;;
-;; What THIS library adds is just the aggregation: run-spec-file! spawns
-;; one spec file, parses that CHILD process's own already-printed final
-;; "N examples, M failures" line (spec.sld's own spec-summary! output --
-;; plain/uncolored here since the child's stdout, captured into a string
-;; by process-run, is never a tty -- see spec.sld's own stdout-tty?
-;; check), and folds those counts into the CALLING process's own totals
-;; via (creme spec)'s spec-record-external-result!, so a driver script
-;; can call (spec-summary!) once at the end and get one real combined
-;; number instead of 13 separate per-file reports the caller has to add
-;; up by hand.
+;; What THIS library adds is the aggregation: run-spec-file! sets
+;; CREME_SPEC_DATA_MODE (an environment variable a spawned child
+;; inherits automatically -- see (creme spec)'s own header comment) so
+;; the child's own spec-summary! `write`s its whole result as ONE
+;; Scheme value (total failed tree) instead of printing human-readable
+;; text, reads that value back via `read`, renders the tree in THIS
+;; process via (creme spec)'s render-spec-tree! (so [PASS]/[FAIL] get
+;; colored according to the PARENT's own terminal, not the child's --
+;; the child's captured stdout is never a tty, so it would otherwise
+;; always render colorless even when the whole run is happening at a
+;; real terminal), and folds the counts into this process's own totals
+;; via spec-record-external-result!, so a driver script can call
+;; (spec-summary!) once at the end and get one real combined number
+;; instead of 13 separate per-file reports the caller has to add up by
+;; hand.
 ;;
 ;; A separate library from (creme spec) itself specifically so (creme
-;; spec)'s own dependency footprint doesn't grow: (creme string) is
-;; native-Crystal-only (no .sld, no cvm C equivalent), and (creme spec)
-;; is imported by EVERY spec/creme/*.scm file, including every one
-;; already passing under cvm's self-hosted loader today. Only spec/
-;; creme/main_spec.scm needs this library at all.
+;; spec)'s own dependency footprint doesn't grow: (creme env)/(creme
+;; process) are both native-Crystal-only from Crystal's point of view
+;; (though cvm now backs both process-run and set-environment-variable!
+;; too -- see cvm/process.c and cvm/builtins.c), and (creme spec) is
+;; imported by EVERY spec/creme/*.scm file, including every one already
+;; passing under cvm's self-hosted loader today. Only spec/creme/
+;; main_spec.scm needs this library at all.
 ;;
-;; (creme process)'s process-run itself now works under all three
-;; backends: cvm's own cvm/process.c backs it with plain POSIX fork/
-;; pipe/execvp/waitpid, matching native Crystal's exact contract -- so
-;; `./cvm/cvm spec/creme/main_spec.scm` spawns real `./cvm/cvm <file>`
-;; subprocesses the same way `./bin/creme spec/creme/main_spec.scm
-;; --cvm` does, no different code path needed here for that case.
+;; (creme process)'s process-run works under all three backends: cvm's
+;; own cvm/process.c backs it with plain POSIX fork/pipe/execvp/waitpid,
+;; matching native Crystal's exact contract -- so `./cvm/cvm spec/creme/
+;; main_spec.scm` spawns real `./cvm/cvm <file>` subprocesses the same
+;; way `./bin/creme spec/creme/main_spec.scm --cvm` does, no different
+;; code path needed here for that case. Likewise set-environment-
+;; variable! -- a subprocess inherits its parent's environ automatically
+;; (execvp/Process.run don't touch it), so setting the flag once here
+;; works whether THIS process is itself native or cvm.
 ;; ===========================================================================
 
 (define-library (creme spec-runner)
   (export run-spec-file!)
-  (import (scheme base) (scheme cxr) (scheme write) (creme process) (creme string) (creme spec))
+  (import (scheme base) (scheme cxr) (scheme write) (scheme read)
+          (creme env) (creme process) (creme string) (creme spec))
   (begin
-    ;; The last line in `lines` shaped like spec-summary!'s own output --
-    ;; last, not first, in case anything earlier in the child's own
-    ;; stdout ever happens to contain a same-shaped line (should-equal?
-    ;; failure messages could in principle echo arbitrary text).
-    (define (spec-runner-find-summary-line lines)
-      (let loop ((ls lines) (found #f))
-        (cond
-          ((null? ls) found)
-          ((and (string-contains? (car ls) " examples, ") (string-suffix? (car ls) " failures"))
-           (loop (cdr ls) (car ls)))
-          (else (loop (cdr ls) found)))))
+    ;; The child's own stdout is the WHOLE captured output, which can
+    ;; include stray display/write text from the file's own test bodies
+    ;; (several genuinely print things as part of what they're testing)
+    ;; before spec-data-marker ever appears -- so this searches for that
+    ;; exact marker rather than assuming the value is the first (or
+    ;; only) datum in the stream, then reads back whatever comes after
+    ;; it. #f if the marker never appears at all (the child crashed/
+    ;; errored before spec-summary! ran).
+    (define (spec-runner-extract-value out)
+      (let ((marker-pos (string-index-of out spec-data-marker)))
+        (if marker-pos
+            (guard (e (#t #f))
+              (read (open-input-string (substring out (+ marker-pos (string-length spec-data-marker)) (string-length out)))))
+            #f)))
 
-    ;; line is exactly "N examples, M failures" -- split it back into the
-    ;; two integers spec-record-external-result! needs.
-    (define (spec-runner-parse-counts line)
-      (let* ((ex-pos (string-index-of line " examples, "))
-             (n (string->number (substring line 0 ex-pos)))
-             (after (substring line (+ ex-pos (string-length " examples, ")) (string-length line)))
-             (fail-pos (string-index-of after " failures"))
-             (m (string->number (substring after 0 fail-pos))))
-        (cons n m)))
-
-    ;; `runner` is a list of strings, the command + any leading args to
-    ;; run `path` with -- e.g. '("./bin/creme"), '("./bin/creme"
-    ;; "--self-hosted"), or '("./cvm/cvm"). Always prints the child's own
-    ;; full captured output (so an individual failure is still fully
-    ;; diagnosable from the combined run, not just a bare count), then
-    ;; folds its reported counts into this process's own totals. If the
-    ;; child never printed a summary line at all (a crash/compile error
-    ;; before spec-summary! ever ran), records it as a single synthetic
-    ;; failure rather than silently dropping it from the total.
     (define (run-spec-file! runner path)
       (display "== ") (display path) (display " ==") (newline)
+      (set-environment-variable! "CREME_SPEC_DATA_MODE" "1")
       (let* ((result (process-run (car runner) (append (cdr runner) (list path))))
              (out (car result))
              (err (cadr result))
              (code (caddr result))
-             (summary (spec-runner-find-summary-line (string-split out "\n"))))
-        (display out)
-        (if summary
-            (let ((counts (spec-runner-parse-counts summary)))
-              (spec-record-external-result! path (car counts) (cdr counts)))
+             (parsed (spec-runner-extract-value out)))
+        (if (and (pair? parsed) (= (length parsed) 3) (integer? (car parsed)) (integer? (cadr parsed)))
             (begin
+              (render-spec-tree! (caddr parsed))
+              (spec-record-external-result! path (car parsed) (cadr parsed)))
+            (begin
+              (display out)
               (if (> (string-length err) 0) (begin (display err) (newline)))
-              (display "  (no \"N examples, M failures\" line -- process exited with code ")
-              (display code) (display " before printing one)") (newline)
+              (display "  (no valid (total failed tree) value read back -- process exited with code ")
+              (display code) (display " before spec-summary! ever ran)") (newline)
               (spec-record-external-result! path 1 1)))))))

@@ -137,25 +137,10 @@ module Scheme::Builtins::PairsLists
     SchemeBool.of(Scheme.proper_list?(args[0]))
   end
 
-  @[Scheme::SchemeFn("list-copy", min: 1, max: 1)]
-  def list_copy(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    v = args[0]
-    v.is_a?(Cons) ? Scheme.a_to_list(Scheme.list_to_a(v)) : v
-  end
-
-  @[Scheme::SchemeFn("list-set!", min: 3, max: 3)]
-  def list_set(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    idx = int_arg(args[1], "list-set!")
-    raise SchemeRuntimeError.new("list-set!: index #{idx} out of range") if idx < 0
-    cur = args[0]
-    idx.times do
-      raise SchemeRuntimeError.new("list-set!: index out of range") unless cur.is_a?(Cons)
-      cur = cur.cdr
-    end
-    raise SchemeRuntimeError.new("list-set!: index out of range") unless cur.is_a?(Cons)
-    cur.car = args[2]
-    NIL.as(SchemeValue)
-  end
+  # list-copy/list-set! moved to Scheme source in (scheme base)'s own
+  # scheme-defined layer — see install_scheme_base_and_write_libraries in
+  # base.cr — since both are trivially expressible in terms of other
+  # (scheme base) primitives (pair?/car/cdr/cons, set-car!/list-tail).
 
   @[Scheme::SchemeFn("list-tail", min: 2, max: 2)]
   def list_tail(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue

@@ -33,6 +33,25 @@
 
 (describe "numeric and bytevector literals requiring rational/complex support"
   (it "rationals, negative rationals, a complex, and a bytevector literal"
-    (should-match-native? '((quote (1/2 -3/4 1+2i #u8(1 2 3)))))))
+    (should-match-native? '((quote (1/2 -3/4 1+2i #u8(1 2 3))))))
+
+  ;; floor/ceiling/round/truncate of a rational used to be a deliberate
+  ;; cvm cut (see cvm/builtins.c's own comment at the top of its
+  ;; numeric-predicates section) -- now implemented, so verified here the
+  ;; same should-match-native? way as every other numeric-tower case in
+  ;; this file. (abs/zero?/positive?/negative? of a complex value stay
+  ;; unimplemented in cvm, matching the native interpreter's own
+  ;; behavior -- not a gap, see that same comment.)
+  (it "floor/ceiling/round/truncate of positive and negative rationals"
+    (should-match-native? '((floor 7/2)))
+    (should-match-native? '((floor -7/2)))
+    (should-match-native? '((ceiling 7/2)))
+    (should-match-native? '((ceiling -7/2)))
+    (should-match-native? '((truncate 7/2)))
+    (should-match-native? '((truncate -7/2)))
+    (should-match-native? '((round 7/2)))   ; halfway, even winner -> 4
+    (should-match-native? '((round -7/2)))  ; halfway, even winner -> -4
+    (should-match-native? '((round 5/2)))   ; halfway, even winner -> 2
+    (should-match-native? '((round 8/3)))))  ; not halfway -> 3
 
 (spec-summary!)

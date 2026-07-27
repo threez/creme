@@ -285,6 +285,7 @@ static void write_response(VM *vm, http_s *h, Value response) {
      * send it in one shot, which is behaviorally equivalent for any
      * caller that isn't relying on partial flushes. */
     Port *port = GC_MALLOC(sizeof(Port));
+    port->kind = PORT_KIND_OUTPUT_STRING; /* GC_MALLOC zero-inits, which would otherwise default to PORT_KIND_STDOUT (0) and misroute writes straight to real stdout instead of buffering here */
     Value port_val = v_port(port);
     cvm_apply(vm, body, &port_val, 1);
     http_send_body(h, port->buf, (uintptr_t)port->len);
