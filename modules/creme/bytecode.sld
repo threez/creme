@@ -12,9 +12,9 @@
 ;; separated from any particular source-language compiler: a chunk
 ;; builder (registers/scopes are NOT this library's concern -- see
 ;; bootstrap/compiler.scm's <fcomp> for that), a complete table of every
-;; opcode this VM defines (src/scheme/compile/opcode.cr's Op enum,
+;; opcode this VM defines (src/creme/compile/opcode.cr's Op enum,
 ;; ordinal-for-ordinal) so any of them can be emitted by name, and the
-;; SCB1 byte format (src/scheme/compile/chunk_serializer.cr /
+;; SCB1 byte format (src/creme/compile/chunk_serializer.cr /
 ;; chunk_deserializer.cr) a chunk gets turned into so it can be run via
 ;; (creme bootstrap)'s load-chunk-bytes on the real Crystal VM.
 ;;
@@ -42,7 +42,7 @@
 ;;                                         load-chunk-bytes
 ;;
 ;; FRAGILE DEPENDENCY: the op-ordinals table below must exactly match
-;; src/scheme/compile/opcode.cr's Op enum declaration order -- SCB1
+;; src/creme/compile/opcode.cr's Op enum declaration order -- SCB1
 ;; serializes the raw ordinal directly (same as ChunkSerializer does on
 ;; the Crystal side), so there's no separate translation table to keep
 ;; opcode.cr free to reorder against, unlike CVMSerializer's OP_IDS/cvm/
@@ -140,7 +140,7 @@
           (else (loop (cdr us) (+ i 1))))))
 
     ;; -----------------------------------------------------------------
-    ;; The complete Op table -- every opcode src/scheme/compile/opcode.cr
+    ;; The complete Op table -- every opcode src/creme/compile/opcode.cr
     ;; defines, not just the subset any one compiler happens to emit, so
     ;; a future compiler targeting this same library can reach for any of
     ;; them (e.g. the fused/Imm/Up superinstruction families, or

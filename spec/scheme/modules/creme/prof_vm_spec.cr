@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme prof-vm)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme prof-vm)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme prof-vm)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme prof-vm)) #{src}")
 end
 
 describe "prof-vm module" do
@@ -67,14 +67,14 @@ describe "prof-vm module" do
   end
 
   it "propagates a raised error and still leaves sampling in a clean state" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(import (creme prof-vm))")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(import (creme prof-vm))")
 
-    expect_raises(Scheme::SchemeRuntimeError, /boom/) do
-      Scheme.run_source(interp, %((profile-scheme (lambda () (error "boom")) 50)))
+    expect_raises(Creme::SchemeRuntimeError, /boom/) do
+      Creme.run_source(interp, %((profile-scheme (lambda () (error "boom")) 50)))
     end
 
-    Scheme.run_source(interp, <<-SCM).write_string.should eq("#t")
+    Creme.run_source(interp, <<-SCM).write_string.should eq("#t")
       (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
       (profile-scheme-report? (profile-scheme (lambda () (fib 20)) 50))
     SCM
@@ -89,12 +89,12 @@ describe "prof-vm module" do
   # share the parent's still-active sampler (see Interpreter::SampleSink)
   # so the parent's own report reflects work done on the child too.
   it "a child interpreter spawned while sampling is active contributes samples to the parent's report" do
-    parent = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    parent = Creme::Interpreter.new(library_search_path: ["./modules"])
     parent.start_scheme_sampling(1)
-    child = Scheme::Interpreter.new(inherit_from: parent)
-    Scheme::BytecodeCompiler.run_program(
+    child = Creme::Interpreter.new(inherit_from: parent)
+    Creme::BytecodeCompiler.run_program(
       child,
-      Scheme::Reader.read_all(<<-SCM, "<child>"),
+      Creme::Reader.read_all(<<-SCM, "<child>"),
         (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 22)
       SCM
@@ -104,11 +104,11 @@ describe "prof-vm module" do
   end
 
   it "a child interpreter spawned while the parent is NOT sampling stays uninstrumented" do
-    parent = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    child = Scheme::Interpreter.new(inherit_from: parent)
-    Scheme::BytecodeCompiler.run_program(
+    parent = Creme::Interpreter.new(library_search_path: ["./modules"])
+    child = Creme::Interpreter.new(inherit_from: parent)
+    Creme::BytecodeCompiler.run_program(
       child,
-      Scheme::Reader.read_all(<<-SCM, "<child>"),
+      Creme::Reader.read_all(<<-SCM, "<child>"),
         (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 22)
       SCM

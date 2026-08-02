@@ -1,5 +1,5 @@
 // Native Go counterpart to competition/bench.scm — same nine workloads,
-// same sizes, implemented directly in Go (no Scheme::Interpreter involved).
+// same sizes, implemented directly in Go (no Creme::Interpreter involved).
 // Gives a second compiled-code baseline alongside the native-Crystal one for
 // the identical work.
 //

@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -11,7 +11,7 @@ end
 
 describe "(scheme char)" do
   it "(scheme char)'s own library name is not auto-imported (the library table doesn't special-case it the way (scheme base)/(scheme write) are)" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: string-upcase/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: string-upcase/) do
       run("(string-upcase \"hi\")")
     end
   end
@@ -46,7 +46,7 @@ describe "(scheme cxr)" do
   end
 
   it "raises a clear error on an improper structure" do
-    expect_raises(Scheme::SchemeRuntimeError, /caaar: expected pair/) do
+    expect_raises(Creme::SchemeRuntimeError, /caaar: expected pair/) do
       run("(import (scheme cxr)) (caaar '(1 2 3))")
     end
   end
@@ -87,9 +87,9 @@ describe "(scheme process-context)" do
   end
 
   it "emergency-exit raises SchemeExit, same as exit" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeExit) do
-      Scheme.run_source(interp, "(import (scheme process-context)) (emergency-exit 3)")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeExit) do
+      Creme.run_source(interp, "(import (scheme process-context)) (emergency-exit 3)")
     end
   end
 end
@@ -108,10 +108,10 @@ describe "(scheme time)" do
   end
 
   it "current-jiffy increases monotonically" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(import (scheme time) (scheme base))")
-    a = Scheme.run_source(interp, "(current-jiffy)").as(Scheme::SchemeInt).value
-    b = Scheme.run_source(interp, "(current-jiffy)").as(Scheme::SchemeInt).value
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(import (scheme time) (scheme base))")
+    a = Creme.run_source(interp, "(current-jiffy)").as(Creme::SchemeInt).value
+    b = Creme.run_source(interp, "(current-jiffy)").as(Creme::SchemeInt).value
     (b >= a).should be_true
   end
 end

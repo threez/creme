@@ -9,7 +9,7 @@ precompiled `.cvmc`) knows what needs re-checking after an upgrade and
 what doesn't.
 
 Versions follow `shard.yml`'s own `version:` field, synced into
-`src/scheme.cr`'s `VERSION` constant via `make version`, tagged via
+`src/creme.cr`'s `VERSION` constant via `make version`, tagged via
 `make tag`. See `CHANGELOG.md` for what changed at each tag.
 
 ## Stable (won't break without a version bump and a CHANGELOG.md entry)
@@ -18,7 +18,7 @@ Versions follow `shard.yml`'s own `version:` field, synced into
   version check.** Every `.cvmc` file (and every `load-chunk-bytes`
   blob) carries a format-version byte immediately after the `"SCB1"`
   magic (`ChunkSerializer::FORMAT_VERSION` in
-  `src/scheme/compile/chunk_serializer.cr`, mirrored by
+  `src/creme/compile/chunk_serializer.cr`, mirrored by
   `modules/creme/bytecode.sld`'s own writer). `cvm/loader.c`'s
   `check_magic_and_version` and `chunk_deserializer.cr`'s own read both
   reject a mismatched version with a clean, actionable error instead of

@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme matrix)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme matrix)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme matrix)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme matrix)) #{src}")
 end
 
 describe "matrix module" do
@@ -46,7 +46,7 @@ describe "matrix module" do
   end
 
   it "raises on dimension mismatch for add" do
-    expect_raises(Scheme::SchemeError) { run("(matrix-add (matrix '(1 2)) (matrix '(1 2 3)))") }
+    expect_raises(Creme::SchemeError) { run("(matrix-add (matrix '(1 2)) (matrix '(1 2 3)))") }
   end
 
   it "scales every element" do
@@ -59,7 +59,7 @@ describe "matrix module" do
   end
 
   it "raises on dimension mismatch for multiply" do
-    expect_raises(Scheme::SchemeError) { run("(matrix-multiply (matrix '(1 2)) (matrix '(1 2)))") }
+    expect_raises(Creme::SchemeError) { run("(matrix-multiply (matrix '(1 2)) (matrix '(1 2)))") }
   end
 
   it "transposes" do
@@ -79,7 +79,7 @@ describe "matrix module" do
   end
 
   it "raises when determinant is asked of a non-square matrix" do
-    expect_raises(Scheme::SchemeError) { run("(matrix-determinant (matrix '(1 2 3) '(4 5 6)))") }
+    expect_raises(Creme::SchemeError) { run("(matrix-determinant (matrix '(1 2 3) '(4 5 6)))") }
   end
 
   it "checks matrix equality" do

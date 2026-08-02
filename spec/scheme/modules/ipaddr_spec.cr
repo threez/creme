@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme ipaddr)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme ipaddr)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme ipaddr)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme ipaddr)) #{src}")
 end
 
 describe "ipaddr module" do
@@ -60,7 +60,7 @@ describe "ipaddr module" do
   end
 
   it "raises when ipaddr-include? is given mismatched families" do
-    expect_raises(Scheme::SchemeError) { run(%((ipaddr-include? (make-ipaddr "10.0.0.0/8") (make-ipaddr "::1")))) }
+    expect_raises(Creme::SchemeError) { run(%((ipaddr-include? (make-ipaddr "10.0.0.0/8") (make-ipaddr "::1")))) }
   end
 
   it "ipaddr=? compares address only, ignoring prefix; ipaddr<? orders by address" do
@@ -70,7 +70,7 @@ describe "ipaddr module" do
   end
 
   it "raises when ipaddr<? is given mismatched families" do
-    expect_raises(Scheme::SchemeError) { run(%((ipaddr<? (make-ipaddr "192.168.1.1") (make-ipaddr "::1")))) }
+    expect_raises(Creme::SchemeError) { run(%((ipaddr<? (make-ipaddr "192.168.1.1") (make-ipaddr "::1")))) }
   end
 
   it "ipaddr-succ/ipaddr-pred step the address by one, carrying/borrowing across groups" do
@@ -81,8 +81,8 @@ describe "ipaddr module" do
   end
 
   it "raises rather than overflowing/underflowing past the address space" do
-    expect_raises(Scheme::SchemeError) { run(%((ipaddr-succ (make-ipaddr "255.255.255.255")))) }
-    expect_raises(Scheme::SchemeError) { run(%((ipaddr-pred (make-ipaddr "0.0.0.0")))) }
+    expect_raises(Creme::SchemeError) { run(%((ipaddr-succ (make-ipaddr "255.255.255.255")))) }
+    expect_raises(Creme::SchemeError) { run(%((ipaddr-pred (make-ipaddr "0.0.0.0")))) }
   end
 
   it "ipaddr->groups/groups->ipaddr round-trip the MSB-first per-group representation" do
@@ -91,10 +91,10 @@ describe "ipaddr module" do
   end
 
   it "raises on malformed input rather than silently truncating/wrapping" do
-    expect_raises(Scheme::SchemeError) { run(%((make-ipaddr "192.168.1.256"))) }
-    expect_raises(Scheme::SchemeError) { run(%((make-ipaddr "1.2.3"))) }
-    expect_raises(Scheme::SchemeError) { run(%((make-ipaddr "1::2::3"))) }
-    expect_raises(Scheme::SchemeError) { run(%((make-ipaddr "10.0.0.0/33"))) }
+    expect_raises(Creme::SchemeError) { run(%((make-ipaddr "192.168.1.256"))) }
+    expect_raises(Creme::SchemeError) { run(%((make-ipaddr "1.2.3"))) }
+    expect_raises(Creme::SchemeError) { run(%((make-ipaddr "1::2::3"))) }
+    expect_raises(Creme::SchemeError) { run(%((make-ipaddr "10.0.0.0/33"))) }
   end
 
   it "distinguishes ipaddr? from other values" do

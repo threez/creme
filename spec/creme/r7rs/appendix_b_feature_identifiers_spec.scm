@@ -9,7 +9,7 @@
 ;; of comparing write_string'd output against a literal string.
 ;;
 ;; The feature-identifier list itself ((features), Interpreter#features in
-;; src/scheme/eval/interpreter.cr) is `(r7rs creme creme.cr)`, matching the
+;; src/creme/eval/interpreter.cr) is `(r7rs creme creme.cr)`, matching the
 ;; Crystal original exactly -- verified directly rather than assumed. Same
 ;; list under `--self-hosted` (modules/creme/compiler/compiler.sld's own
 ;; cond-expand-known-features).
@@ -19,7 +19,7 @@
 ;; (modules/creme/compiler/compiler.sld, used by both `--self-hosted` and
 ;; `cvm/cvm`) used to treat EVERY `(library ...)` requirement as
 ;; unconditionally unsatisfied, unlike native Crystal's own cond-expand
-;; (src/scheme/eval/interpreter.cr), which really does consult the
+;; (src/creme/eval/interpreter.cr), which really does consult the
 ;; interpreter's own library registry. Fixed: `feature-satisfied?`'s own
 ;; `library` case now reuses the same `library-export-alist` check
 ;; `ensure-library-loaded!`/`import-set-resolved-bindings` already rely

@@ -1,4 +1,4 @@
-/* (creme actor) — see actor.h. A port of src/scheme/modules/creme/actor.cr
+/* (creme actor) — see actor.h. A port of src/creme/modules/creme/actor.cr
  * (948 lines: Fiber-per-actor + Channel mailboxes + an optional TCP/Unix/
  * 'local distributed transport) onto REAL OS THREADS instead of Crystal's
  * cooperative Fibers, per explicit direction (see this project's own

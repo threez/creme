@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme yaml)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme yaml)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme yaml)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme yaml)) #{src}")
 end
 
 describe "yaml module" do
@@ -38,7 +38,7 @@ describe "yaml module" do
   end
 
   it "raises on malformed yaml" do
-    expect_raises(Scheme::SchemeError) { run(%((yaml-read "a: [1,2"))) }
+    expect_raises(Creme::SchemeError) { run(%((yaml-read "a: [1,2"))) }
   end
 
   it "round-trips a vector through yaml-write/yaml-read" do
@@ -54,6 +54,6 @@ describe "yaml module" do
   end
 
   it "raises writing an improper list" do
-    expect_raises(Scheme::SchemeError) { run(%((yaml-write (cons 1 2)))) }
+    expect_raises(Creme::SchemeError) { run(%((yaml-write (cons 1 2)))) }
   end
 end

@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme html)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme html)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme html)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme html)) #{src}")
 end
 
 describe "html module" do
@@ -31,7 +31,7 @@ describe "html module" do
   it "self-closes void elements and rejects children on them" do
     w(%((html->string '(br)))).should eq(%("<br>"))
 
-    expect_raises(Scheme::SchemeRuntimeError, /void element cannot have children/) do
+    expect_raises(Creme::SchemeRuntimeError, /void element cannot have children/) do
       run(%((html->string '(br "oops"))))
     end
   end

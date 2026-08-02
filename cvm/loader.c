@@ -1,6 +1,6 @@
-/* Reads a "SCB1" file (the same format src/scheme/compile/chunk_serializer.cr/
+/* Reads a "SCB1" file (the same format src/creme/compile/chunk_serializer.cr/
  * chunk_deserializer.cr round-trip on the Crystal side, written here by
- * src/scheme/compile/cvm_emitter.cr) into the runtime Chunk tree, then
+ * src/creme/compile/cvm_emitter.cr) into the runtime Chunk tree, then
  * rewrites every global-name operand (originally a const-pool index into a
  * SchemeSym) into a direct index into the VM's own global table — see
  * cvm/README.md's "global resolution" section for why this is sound here (a

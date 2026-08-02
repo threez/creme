@@ -1,5 +1,5 @@
 /* (creme bootstrap) — the cvm-side counterpart of
- * src/scheme/modules/creme/bootstrap.cr's Crystal library. Lets a running
+ * src/creme/modules/creme/bootstrap.cr's Crystal library. Lets a running
  * cvm program load-and-run bytecode it (or the self-hosted compiler
  * running inside it) just computed, without a live Crystal process. See
  * bootstrap.c's own header comment. */

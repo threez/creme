@@ -7,7 +7,7 @@
 ;; existing discriminator between the two runtimes, needing no new feature
 ;; identifier anywhere: `(creme builtin raft)` is registered directly into
 ;; native's in-memory pending-library table by `register_library ["creme",
-;; "builtin", "raft"], ...` in src/scheme/modules/creme/raft.cr (no .sld
+;; "builtin", "raft"], ...` in src/creme/modules/creme/raft.cr (no .sld
 ;; file involved at all, always present whenever raft.cr's FFI code is
 ;; compiled into the binary) -- so it's ALWAYS true under any `bin/creme`
 ;; build, including `--self-hosted` mode (still native Crystal underneath).

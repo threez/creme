@@ -6,7 +6,7 @@
 ;;
 ;; (creme pkey) is a genuine dual-implementation module -- native reuses
 ;; the vendored jose.cr shard's own reopened LibCryptoJose FFI bindings
-;; (src/scheme/modules/creme/pkey.cr, since Crystal's stdlib has no
+;; (src/creme/modules/creme/pkey.cr, since Crystal's stdlib has no
 ;; OpenSSL::PKey class hierarchy at all), cvm drives the same EVP_PKEY/
 ;; RSA/EC_KEY/PEM API directly in C (cvm/pkey.c, where it's simply part
 ;; of <openssl/evp.h>/<openssl/rsa.h>/<openssl/ec.h>/<openssl/pem.h>) --

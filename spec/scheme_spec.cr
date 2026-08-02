@@ -1,8 +1,8 @@
 require "./spec_helper"
 
-describe Scheme do
+describe Creme do
   it "has a version" do
-    Scheme::VERSION.should be_a(String)
-    Scheme::VERSION.should_not be_empty
+    Creme::VERSION.should be_a(String)
+    Creme::VERSION.should_not be_empty
   end
 end

@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme bytecode)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme bytecode)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme bytecode)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme bytecode)) #{src}")
 end
 
 describe "bytecode module" do
@@ -20,14 +20,14 @@ describe "bytecode module" do
   end
 
   it "raises clearly on an unknown opcode name" do
-    expect_raises(Scheme::SchemeRuntimeError, /unknown opcode/) do
+    expect_raises(Creme::SchemeRuntimeError, /unknown opcode/) do
       run(%((op-ordinal 'NotARealOp)))
     end
   end
 
   it "builds, patches, and serializes a chunk that runs correctly via load-chunk-bytes" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(import (creme bytecode) (creme bootstrap))")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(import (creme bytecode) (creme bootstrap))")
     # (lambda () (if #f 1 2)) inlined as a top-level chunk: LoadFalse-free —
     # load a boolean const, test it, jump over the "then" branch.
     src = <<-SCM
@@ -45,12 +45,12 @@ describe "bytecode module" do
     (chunk-emit! ch 'Return dest 0 0 0)
     (load-chunk-bytes (chunk->bytes ch))
     SCM
-    Scheme.run_source(interp, src).write_string.should eq("222")
+    Creme.run_source(interp, src).write_string.should eq("222")
   end
 
   it "round-trips a chunk with a closure, upvalue capture, and a proto" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(import (creme bytecode) (creme bootstrap))")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(import (creme bytecode) (creme bootstrap))")
     # Hand-builds the equivalent of:
     #   (define (make-adder n) (lambda (x) (+ x n)))
     #   ((make-adder 5) 10)
@@ -89,6 +89,6 @@ describe "bytecode module" do
 
     (load-chunk-bytes (chunk->bytes program))
     SCM
-    Scheme.run_source(interp, src).write_string.should eq("15")
+    Creme.run_source(interp, src).write_string.should eq("15")
   end
 end

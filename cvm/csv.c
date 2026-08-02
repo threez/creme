@@ -1,6 +1,6 @@
 /* (creme csv) — see csv.h's own header comment.
  *
- * Unlike native's Scheme::Csv (a line-for-line derivation of Crystal
+ * Unlike native's Creme::Csv (a line-for-line derivation of Crystal
  * stdlib's own CSV, chunked-IO-optimized for multi-million-row imports —
  * see csv.cr's own header comment), this is a much smaller, single
  * generic row-parser (csv_parse_row below) driven through an abstract

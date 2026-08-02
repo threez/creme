@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme secure-random)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme secure-random)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme secure-random)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme secure-random)) #{src}")
 end
 
 describe "secure-random module" do
@@ -32,12 +32,12 @@ describe "secure-random module" do
   end
 
   it "raises on a negative count" do
-    expect_raises(Scheme::SchemeError) { run(%((secure-random-bytes -1))) }
-    expect_raises(Scheme::SchemeError) { run(%((secure-random-hex -1))) }
-    expect_raises(Scheme::SchemeError) { run(%((secure-random-base64 -1))) }
+    expect_raises(Creme::SchemeError) { run(%((secure-random-bytes -1))) }
+    expect_raises(Creme::SchemeError) { run(%((secure-random-hex -1))) }
+    expect_raises(Creme::SchemeError) { run(%((secure-random-base64 -1))) }
   end
 
   it "raises on a non-integer argument" do
-    expect_raises(Scheme::SchemeError) { run(%((secure-random-bytes "16"))) }
+    expect_raises(Creme::SchemeError) { run(%((secure-random-bytes "16"))) }
   end
 end

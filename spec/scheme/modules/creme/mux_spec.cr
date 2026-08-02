@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme mux) (creme http)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme mux) (creme http)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme mux) (creme http)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme mux) (creme http)) #{src}")
 end
 
 describe "mux module" do
@@ -35,18 +35,18 @@ describe "mux module" do
       (list get-result post-result)
     SCM
 
-    pair = Scheme.list_to_a(result)
-    get_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
-    post_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+    pair = Creme.list_to_a(result)
+    get_alist = Creme.list_to_a(pair[0]).map { |cons| cons.as(Creme::Cons) }
+    post_alist = Creme.list_to_a(pair[1]).map { |cons| cons.as(Creme::Cons) }
 
-    get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
-    get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hello 42"))
-    headers = Scheme.list_to_a(get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "headers" }.cdr)
-      .map { |cons| cons.as(Scheme::Cons) }
-    headers.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "content-type" }.cdr.write_string.should eq(%("text/plain"))
+    get_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+    get_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hello 42"))
+    headers = Creme.list_to_a(get_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "headers" }.cdr)
+      .map { |cons| cons.as(Creme::Cons) }
+    headers.find! { |cons| cons.car.as(Creme::SchemeStr).value == "content-type" }.cdr.write_string.should eq(%("text/plain"))
 
-    post_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("201")
-    post_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("payload"))
+    post_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("201")
+    post_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("payload"))
   end
 
   it "returns 404 for unmatched routes and 500 with the error message for a handler that raises" do
@@ -68,8 +68,8 @@ describe "mux module" do
       (mux-close! server)
       response
     SCM
-    alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-    alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("500")
+    alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+    alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("500")
   end
 
   it "reports the bound host/port via mux-address" do
@@ -103,8 +103,8 @@ describe "mux module" do
   end
 
   it "streams a body written directly into the response port when body is a procedure" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    result = Scheme.run_source(interp, <<-SCM)
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    result = Creme.run_source(interp, <<-SCM)
       (import (creme mux) (creme http) (creme html))
 
       (define router (mux-router))
@@ -130,15 +130,15 @@ describe "mux module" do
       (list stream-result plain-result)
       SCM
 
-    pair = Scheme.list_to_a(result)
-    stream_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
-    plain_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+    pair = Creme.list_to_a(result)
+    stream_alist = Creme.list_to_a(pair[0]).map { |cons| cons.as(Creme::Cons) }
+    plain_alist = Creme.list_to_a(pair[1]).map { |cons| cons.as(Creme::Cons) }
 
-    stream_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
-    stream_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("<p>a</p><p>b!</p><p>c</p>"))
+    stream_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+    stream_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("<p>a</p><p>b!</p><p>c</p>"))
 
-    plain_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
-    plain_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("plain string body"))
+    plain_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+    plain_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("plain string body"))
   end
 
   describe "mux-use!" do

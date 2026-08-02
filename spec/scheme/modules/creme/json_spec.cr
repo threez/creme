@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme json)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme json)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme json)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme json)) #{src}")
 end
 
 describe "json module" do
@@ -42,7 +42,7 @@ describe "json module" do
   end
 
   it "raises on malformed json" do
-    expect_raises(Scheme::SchemeRuntimeError, /json-read: invalid json/) do
+    expect_raises(Creme::SchemeRuntimeError, /json-read: invalid json/) do
       run(%((json-read "{not json")))
     end
   end

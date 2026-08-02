@@ -4,7 +4,7 @@
  * port, csv-reader-open/csv-reader-read!/csv-writer-open/
  * csv-writer-row!). See csv.c's own header comment for the parser/writer
  * design and how it compares to native's own (creme csv) implementation
- * (src/scheme/modules/creme/csv.cr). */
+ * (src/creme/modules/creme/csv.cr). */
 #ifndef CVM_CSV_H
 #define CVM_CSV_H
 

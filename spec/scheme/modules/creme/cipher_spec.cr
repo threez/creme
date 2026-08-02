@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme cipher)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme cipher)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme cipher)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme cipher)) #{src}")
 end
 
 describe "cipher module" do
@@ -38,7 +38,7 @@ describe "cipher module" do
   end
 
   it "raises rather than succeeding on a tampered ciphertext byte" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define key (aes-256-gcm-random-key))
         (define nonce (aes-256-gcm-random-nonce))
@@ -51,7 +51,7 @@ describe "cipher module" do
   end
 
   it "raises rather than succeeding on a tampered tag byte" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define key (aes-256-gcm-random-key))
         (define nonce (aes-256-gcm-random-nonce))
@@ -64,7 +64,7 @@ describe "cipher module" do
   end
 
   it "raises rather than succeeding with the wrong aad" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define key (aes-256-gcm-random-key))
         (define nonce (aes-256-gcm-random-nonce))
@@ -75,7 +75,7 @@ describe "cipher module" do
   end
 
   it "raises rather than succeeding with the wrong key" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define nonce (aes-256-gcm-random-nonce))
         (define enc (aes-256-gcm-encrypt (aes-256-gcm-random-key) nonce (string->utf8 "hello")))
@@ -85,19 +85,19 @@ describe "cipher module" do
   end
 
   it "raises on a wrong-size key" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(%((aes-256-gcm-encrypt (make-bytevector 16 0) (aes-256-gcm-random-nonce) (string->utf8 "hi"))))
     end
   end
 
   it "raises on a wrong-size nonce" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(%((aes-256-gcm-encrypt (aes-256-gcm-random-key) (make-bytevector 8 0) (string->utf8 "hi"))))
     end
   end
 
   it "raises on a wrong-size tag" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define key (aes-256-gcm-random-key))
         (define nonce (aes-256-gcm-random-nonce))

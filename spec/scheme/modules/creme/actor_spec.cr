@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme actor)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme actor)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme actor)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme actor)) #{src}")
 end
 
 describe "actor module" do
@@ -51,7 +51,7 @@ describe "actor module" do
   end
 
   it "send! raises for an unknown registered name" do
-    expect_raises(Scheme::SchemeRuntimeError, /no actor registered/) do
+    expect_raises(Creme::SchemeRuntimeError, /no actor registered/) do
       run(%((send! 'nope 'hi)))
     end
   end
@@ -69,7 +69,7 @@ describe "actor module" do
   end
 
   it "rejects a connection whose cookie doesn't match the server's" do
-    expect_raises(Scheme::SchemeRuntimeError, /handshake/) do
+    expect_raises(Creme::SchemeRuntimeError, /handshake/) do
       run(<<-SCHEME)
         (start-node "127.0.0.1" 0 "right-secret")
         (define port (node-port))
@@ -155,7 +155,7 @@ describe "actor module" do
   it "rejects a unix: connection whose cookie doesn't match the server's" do
     path = "/tmp/creme-actor-test-#{Random.new.hex(8)}.sock"
     begin
-      expect_raises(Scheme::SchemeRuntimeError, /handshake/) do
+      expect_raises(Creme::SchemeRuntimeError, /handshake/) do
         run(<<-SCHEME)
           (start-node 'unix "#{path}" "right-secret")
           (register! 'svc (spawn (lambda () (receive!))))
@@ -246,7 +246,7 @@ describe "actor module" do
   end
 
   it "send! to an unregistered local: node name raises a clear error" do
-    expect_raises(Scheme::SchemeRuntimeError, /no local node registered/) do
+    expect_raises(Creme::SchemeRuntimeError, /no local node registered/) do
       run(%((send! (remote-ref "local://x@no-such-node-#{Random.new.hex(4)}") 'hi)))
     end
   end

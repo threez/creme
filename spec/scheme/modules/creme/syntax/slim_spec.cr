@@ -1,8 +1,8 @@
 require "../../../../spec_helper"
 
 private def rendered(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, <<-SCHEME).as(Scheme::SchemeStr).value
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, <<-SCHEME).as(Creme::SchemeStr).value
     (import (scheme base) (scheme write) (scheme cxr) (scheme eval) (scheme repl) (creme html) (creme syntax slim))
     (let* ((forms (read-program #{src.inspect} "t" (quote ())))
            (html-write-form (cadr forms))
@@ -46,42 +46,42 @@ describe "(creme syntax slim)" do
   end
 
   it "raises when a '=' line has children" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeRuntimeError, /cannot have children/) do
-      Scheme.run_source(interp, %[(import (scheme base) (creme syntax slim)) (read-program "= 1\\n  li a" "t" (quote ()))])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeRuntimeError, /cannot have children/) do
+      Creme.run_source(interp, %[(import (scheme base) (creme syntax slim)) (read-program "= 1\\n  li a" "t" (quote ()))])
     end
   end
 end
 
 describe "(creme syntax slim) #lang define-mode ((export name) (params ...))" do
   it "defines an ordinary procedure of the declared params, parsed/compiled once" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, <<-SCHEME)
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, <<-SCHEME)
       #lang (creme syntax slim) (export row) (params id done title)
       li(class=(if done "done" "pending")) = title
       SCHEME
     row = interp.global.get("row")
-    interp.apply(row, [Scheme::SchemeInt.new(1_i64), Scheme::TRUE, Scheme::SchemeStr.new("Write report")] of Scheme::SchemeValue)
-      .as(Scheme::SchemeStr).value.should eq(%(<li class="done">Write report</li>))
-    interp.apply(row, [Scheme::SchemeInt.new(2_i64), Scheme::FALSE, Scheme::SchemeStr.new("Review PR")] of Scheme::SchemeValue)
-      .as(Scheme::SchemeStr).value.should eq(%(<li class="pending">Review PR</li>))
+    interp.apply(row, [Creme::SchemeInt.new(1_i64), Creme::TRUE, Creme::SchemeStr.new("Write report")] of Creme::SchemeValue)
+      .as(Creme::SchemeStr).value.should eq(%(<li class="done">Write report</li>))
+    interp.apply(row, [Creme::SchemeInt.new(2_i64), Creme::FALSE, Creme::SchemeStr.new("Review PR")] of Creme::SchemeValue)
+      .as(Creme::SchemeStr).value.should eq(%(<li class="pending">Review PR</li>))
   end
 
   it "defines a zero-argument procedure when (params ...) is omitted" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "#lang (creme syntax slim) (export greeting)\nh1 Hello\n")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "#lang (creme syntax slim) (export greeting)\nh1 Hello\n")
     greeting = interp.global.get("greeting")
-    interp.apply(greeting, [] of Scheme::SchemeValue).as(Scheme::SchemeStr).value.should eq("<h1>Hello</h1>")
+    interp.apply(greeting, [] of Creme::SchemeValue).as(Creme::SchemeStr).value.should eq("<h1>Hello</h1>")
   end
 
   it "an (import ...) header-arg makes an extra library visible to the template's own expressions" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, <<-SCHEME)
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, <<-SCHEME)
       #lang (creme syntax slim) (export link) (params id) (import (creme path) (creme format))
       a(href=(path 'todos id)) Link
       SCHEME
     link = interp.global.get("link")
-    interp.apply(link, [Scheme::SchemeInt.new(5_i64)] of Scheme::SchemeValue)
-      .as(Scheme::SchemeStr).value.should eq(%(<a href="/todos/5">Link</a>))
+    interp.apply(link, [Creme::SchemeInt.new(5_i64)] of Creme::SchemeValue)
+      .as(Creme::SchemeStr).value.should eq(%(<a href="/todos/5">Link</a>))
   end
 end

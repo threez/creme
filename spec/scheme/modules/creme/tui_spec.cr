@@ -1,8 +1,8 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme tui)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme tui)) #{src}").write_string
 end
 
 describe "tui module" do
@@ -14,11 +14,11 @@ describe "tui module" do
   end
 
   it "raises for an out-of-range color index" do
-    expect_raises(Scheme::SchemeRuntimeError, /tui-color-index:/) { w("(tui-color-index 999)") }
+    expect_raises(Creme::SchemeRuntimeError, /tui-color-index:/) { w("(tui-color-index 999)") }
   end
 
   it "raises for an unknown named color" do
-    expect_raises(Scheme::SchemeRuntimeError, /tui-color-named: unknown color name/) { w("(tui-color-named 'periwinkle)") }
+    expect_raises(Creme::SchemeRuntimeError, /tui-color-named: unknown color name/) { w("(tui-color-named 'periwinkle)") }
   end
 
   it "builds a style from an alist" do
@@ -26,7 +26,7 @@ describe "tui module" do
   end
 
   it "raises for an unknown style key" do
-    expect_raises(Scheme::SchemeRuntimeError, /tui-style: unknown style key/) do
+    expect_raises(Creme::SchemeRuntimeError, /tui-style: unknown style key/) do
       w(%((tui-style (list (cons "blorp" #t)))))
     end
   end
@@ -78,7 +78,7 @@ describe "tui module" do
   end
 
   it "raises when the highlighter-fn returns something other than a list of (text . style) pairs" do
-    expect_raises(Scheme::SchemeRuntimeError, /tui-text-edit-set-highlighter! highlighter-fn: expected a list of \(text . style\) pairs/) do
+    expect_raises(Creme::SchemeRuntimeError, /tui-text-edit-set-highlighter! highlighter-fn: expected a list of \(text . style\) pairs/) do
       w(<<-SCHEME)
         (define pane (tui-text-edit "hi"))
         (tui-text-edit-set-highlighter! pane (lambda (line) (list "not-a-pair")))
@@ -89,7 +89,7 @@ describe "tui module" do
   end
 
   it "raises when text-edit-set-highlighter! is given a non-text-edit scrollable" do
-    expect_raises(Scheme::SchemeRuntimeError, /tui-text-edit-set-highlighter!: expected a tui-text-edit pane/) do
+    expect_raises(Creme::SchemeRuntimeError, /tui-text-edit-set-highlighter!: expected a tui-text-edit pane/) do
       w(<<-SCHEME)
         (define pane
           (tui-make-scrollable (lambda () "") (lambda () 0) (lambda (buf) #f) (lambda (ev) #f) (lambda () "")))
@@ -99,7 +99,7 @@ describe "tui module" do
   end
 
   it "raises when text-edit-value is given a non-text-edit scrollable" do
-    expect_raises(Scheme::SchemeRuntimeError, /tui-text-edit-value: expected a tui-text-edit pane/) do
+    expect_raises(Creme::SchemeRuntimeError, /tui-text-edit-value: expected a tui-text-edit pane/) do
       w(<<-SCHEME)
         (define pane
           (tui-make-scrollable (lambda () "") (lambda () 0) (lambda (buf) #f) (lambda (ev) #f) (lambda () "")))
@@ -135,7 +135,7 @@ describe "tui module" do
   end
 
   it "raises for an unknown key name" do
-    expect_raises(Scheme::SchemeRuntimeError, /tui-handle-key!: unknown key name/) do
+    expect_raises(Creme::SchemeRuntimeError, /tui-handle-key!: unknown key name/) do
       w(<<-SCHEME)
         (define vs (tui-vstack (tui-screen) (tui-text-edit) (tui-text-edit) 3))
         (tui-handle-key! vs (list (cons "key" "not-a-key")))

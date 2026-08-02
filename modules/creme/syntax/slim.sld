@@ -5,7 +5,7 @@
 ;; numfmt.sld's header comment). Like (creme syntax scss), this hand-writes a
 ;; recursive-descent parser straight from characters (indentation-
 ;; sensitive syntax has no token-stream-shaped equivalent to reuse from
-;; (creme reader)/Scheme's own Lexer) — see src/scheme/runner.cr's `#lang`
+;; (creme reader)/Scheme's own Lexer) — see src/creme/runner.cr's `#lang`
 ;; doc comment for that split. No new Crystal surface at all.
 ;;
 ;; Scope (deliberately not full Slim): indentation-based nesting (2, 4,
@@ -26,7 +26,7 @@
 ;; whitespace must be spaces).
 ;;
 ;; A `#lang (creme syntax slim)` file's whole content is exactly one document
-;; fragment. Two ways to use it (see src/scheme/runner.cr's `#lang` doc
+;; fragment. Two ways to use it (see src/creme/runner.cr's `#lang` doc
 ;; comment for the header-args contract this implements):
 ;;   ./bin/creme page.slim            -- no `(export ...)` on the header
 ;;                                        line -> renders straight to
@@ -318,7 +318,7 @@
     (define (slim->string-with src imports bindings)
       (html->string (slim-render-with src imports bindings)))
 
-    ;; The #lang contract (see src/scheme/runner.cr): src is everything in
+    ;; The #lang contract (see src/creme/runner.cr): src is everything in
     ;; the file after the `#lang` line; the result is a proper list of
     ;; ordinary forms. No `(export name)` among header-args (run
     ;; standalone) -> render straight to stdout, "=" expressions

@@ -1,4 +1,4 @@
-/* (creme x509) — see x509.h. A port of src/scheme/modules/creme/x509.cr:
+/* (creme x509) — see x509.h. A port of src/creme/modules/creme/x509.cr:
  * x509-self-signed-certificate/x509-create-csr/x509-sign-csr/
  * x509-cert->pem/pem->x509-cert/x509-cert-subject/x509-cert-issuer/
  * x509-cert-public-key/x509-cert-not-before/x509-cert-not-after/

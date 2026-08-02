@@ -9,7 +9,7 @@
 ;; rationale.
 ;;
 ;; Named numfmt, not format: (creme format) already exists as a Crystal-
-;; native module (src/scheme/modules/format.cr) providing SRFI-28-style
+;; native module (src/creme/modules/format.cr) providing SRFI-28-style
 ;; printf directives (~a/~s/~c/~d/~x/~o/~b) — a different, unrelated job
 ;; (arbitrary-value interpolation into a template string) with no fixed-
 ;; decimal or ratio support. This module doesn't extend or replace it.

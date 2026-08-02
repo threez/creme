@@ -1,9 +1,9 @@
 require "../../spec_helper"
 require "file_utils"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -90,9 +90,9 @@ describe "R7RS §4.1.7 Inclusion (include/include-ci)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "triple.scm"), "(define (triple x) (* x 3))")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("15")
+      Creme.run_source(interp, <<-SCM).write_string.should eq("15")
         (include "triple.scm")
         (triple 5)
       SCM
@@ -106,9 +106,9 @@ describe "R7RS §4.1.7 Inclusion (include/include-ci)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "square.scm"), "(DEFINE (SQUARE X) (* X X))")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("25")
+      Creme.run_source(interp, <<-SCM).write_string.should eq("25")
         (include-ci "square.scm")
         (square 5)
       SCM
@@ -264,7 +264,7 @@ describe "R7RS §4.2.5 Delayed evaluation (delay/delay-force/force/make-promise/
   end
 
   it "delay/force are not auto-imported with (scheme base) — need (scheme lazy)" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: force/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: force/) do
       run("(force (delay 1))")
     end
   end
@@ -375,7 +375,7 @@ end
 
 describe "R7RS §4.3.3 Signaling errors in macro transformers (syntax-error)" do
   it "syntax-error raises when a macro use matches a syntax-error-producing clause" do
-    expect_raises(Scheme::SchemeRuntimeError) do
+    expect_raises(Creme::SchemeRuntimeError) do
       run(<<-SCM)
         (define-syntax simple-let
           (syntax-rules ()

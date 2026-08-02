@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -20,7 +20,7 @@ describe "defmacro" do
   end
 
   it "raises the same arity-mismatch wording as lambda" do
-    expect_raises(Scheme::SchemeRuntimeError, /expected 2 argument\(s\), got 1/) do
+    expect_raises(Creme::SchemeRuntimeError, /expected 2 argument\(s\), got 1/) do
       run("(defmacro two-args (a b) a) (two-args 1)")
     end
   end
@@ -63,42 +63,42 @@ describe "defmacro" do
   end
 
   it "raises when a macro is passed to the apply builtin" do
-    expect_raises(Scheme::SchemeRuntimeError, /macro cannot be applied as a procedure: m/) do
+    expect_raises(Creme::SchemeRuntimeError, /macro cannot be applied as a procedure: m/) do
       run("(defmacro m (x) x) (apply m (list 1))")
     end
   end
 
   it "raises when a macro is passed to map" do
-    expect_raises(Scheme::SchemeRuntimeError, /macro cannot be applied as a procedure: m/) do
+    expect_raises(Creme::SchemeRuntimeError, /macro cannot be applied as a procedure: m/) do
       run("(defmacro m (x) x) (map m (list 1 2))")
     end
   end
 
   describe "malformed input" do
     it "raises when the name is missing" do
-      expect_raises(Scheme::SchemeRuntimeError, /defmacro: malformed/) { run("(defmacro)") }
+      expect_raises(Creme::SchemeRuntimeError, /defmacro: malformed/) { run("(defmacro)") }
     end
 
     it "raises when the name isn't a symbol" do
-      expect_raises(Scheme::SchemeRuntimeError, /defmacro: macro name must be a symbol/) { run("(defmacro 1 (x) x)") }
+      expect_raises(Creme::SchemeRuntimeError, /defmacro: macro name must be a symbol/) { run("(defmacro 1 (x) x)") }
     end
 
     it "raises when the formals list is missing" do
-      expect_raises(Scheme::SchemeRuntimeError, /defmacro: malformed/) { run("(defmacro m)") }
+      expect_raises(Creme::SchemeRuntimeError, /defmacro: malformed/) { run("(defmacro m)") }
     end
 
     it "raises when the body is empty" do
-      expect_raises(Scheme::SchemeRuntimeError, /defmacro: macro body is empty/) { run("(defmacro m (x))") }
+      expect_raises(Creme::SchemeRuntimeError, /defmacro: macro body is empty/) { run("(defmacro m (x))") }
     end
 
     it "raises for a bad formal parameter" do
-      expect_raises(Scheme::SchemeRuntimeError, /bad formal parameter/) { run("(defmacro m (1) 1)") }
+      expect_raises(Creme::SchemeRuntimeError, /bad formal parameter/) { run("(defmacro m (1) 1)") }
     end
   end
 
   it "a macro named after a special form shadows it, like any other identifier (R7RS: syntactic keywords are lexically scoped bindings)" do
     w("(defmacro if (a) a) (if 42)").should eq("42")
-    expect_raises(Scheme::SchemeRuntimeError, /if: expected 1 argument\(s\), got 3/) do
+    expect_raises(Creme::SchemeRuntimeError, /if: expected 1 argument\(s\), got 3/) do
       run("(defmacro if (a) a) (if #t 1 2)")
     end
   end
@@ -109,7 +109,7 @@ describe "defmacro" do
 
   it "supports local, nested macro definitions scoped to their let" do
     w("(let () (defmacro m (x) x) (m 5))").should eq("5")
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: m/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: m/) do
       run("(let () (defmacro m (x) x) (m 5)) (m 5)")
     end
   end

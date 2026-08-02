@@ -1,4 +1,4 @@
-/* (creme http) — see http.h. A port of src/scheme/modules/creme/http.cr:
+/* (creme http) — see http.h. A port of src/creme/modules/creme/http.cr:
  * a plain HTTP/1.1 CLIENT (http-get/-head/-delete/-post/-put/-patch/
  * -request). Crystal's own `require "http/client"` is standard
  * library, not an external shard. Response format matches native

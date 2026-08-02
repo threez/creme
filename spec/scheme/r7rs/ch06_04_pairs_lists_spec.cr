@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -23,7 +23,7 @@ describe "R7RS §6.4 Pairs and lists" do
   it "car/cdr access the pair's fields; it is an error to take car/cdr of the empty list" do
     w("(car '(a b c))").should eq("a")
     w("(cdr '((a) b c d))").should eq("(b c d)")
-    expect_raises(Scheme::SchemeRuntimeError) { run("(car '())") }
+    expect_raises(Creme::SchemeRuntimeError) { run("(car '())") }
   end
 
   it "set-car!/set-cdr! mutate the pair's fields in place" do

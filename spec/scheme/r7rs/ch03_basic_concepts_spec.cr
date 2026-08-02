@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -15,7 +15,7 @@ describe "R7RS §3.1 Variables, syntactic keywords, and regions" do
   end
 
   it "referencing an unbound identifier is an error" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: totally-undefined-name/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: totally-undefined-name/) do
       run("totally-undefined-name")
     end
   end

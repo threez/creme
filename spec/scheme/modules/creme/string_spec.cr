@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme string)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme string)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme string)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme string)) #{src}")
 end
 
 describe "string module" do
@@ -39,7 +39,7 @@ describe "string module" do
   end
 
   it "raises on non-string arguments" do
-    expect_raises(Scheme::SchemeRuntimeError, /string-upcase: expected string/) do
+    expect_raises(Creme::SchemeRuntimeError, /string-upcase: expected string/) do
       run("(string-upcase 5)")
     end
   end
@@ -58,7 +58,7 @@ describe "string module" do
   end
 
   it "raises on a malformed pairs alist" do
-    expect_raises(Scheme::SchemeRuntimeError, /string-translate: expected an alist/) do
+    expect_raises(Creme::SchemeRuntimeError, /string-translate: expected an alist/) do
       run(%q((string-translate "x" (list (cons "&" "&amp;")))))
     end
   end

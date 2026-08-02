@@ -583,7 +583,7 @@ static inline Value v_box(void *ptr, int kind) {
 }
 
 /* Only #f is falsy — every other value (including '()) is truthy, per
- * R7RS/this project's own Scheme.truthy?. */
+ * R7RS/this project's own Creme.truthy?. */
 static inline int v_falsy(Value v) {
   return v.tag == T_BOOL && !v.as.b;
 }

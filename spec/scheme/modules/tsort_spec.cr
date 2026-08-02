@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme tsort) (creme sort)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme tsort) (creme sort)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme tsort)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme tsort)) #{src}")
 end
 
 describe "tsort module" do
@@ -29,7 +29,7 @@ describe "tsort module" do
   end
 
   it "raises on a cycle" do
-    expect_raises(Scheme::SchemeError) { run("(tsort '((a . (b)) (b . (a))))") }
+    expect_raises(Creme::SchemeError) { run("(tsort '((a . (b)) (b . (a))))") }
   end
 
   it "tsort? reports #t for a DAG and #f for a cyclic graph" do

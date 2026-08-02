@@ -1,6 +1,6 @@
 /* (creme process) -- see process.h.
  *
- * Just `process-run`, matching src/scheme/modules/creme/process.cr's own
+ * Just `process-run`, matching src/creme/modules/creme/process.cr's own
  * exact contract: (process-run cmd args) -> (list stdout stderr exit-code
  * success?), where cmd is a string and args a list of strings (NOT
  * including cmd itself, same as Crystal's own Process.run(cmd, args)).
@@ -150,7 +150,7 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
 }
 
 /* (sleep-ms! milliseconds) -- real nanosleep(2), matching native Crystal's
- * own sleep-ms! contract (src/scheme/modules/creme/process.cr) exactly:
+ * own sleep-ms! contract (src/creme/modules/creme/process.cr) exactly:
  * an exact non-negative integer count of milliseconds, unspecified return.
  * cvm actors (actor.c) are real OS threads (one pthread each, not a
  * green-thread scheduler), so blocking here only blocks the ONE calling

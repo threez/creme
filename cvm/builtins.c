@@ -187,7 +187,7 @@ static Value bi_string_to_utf8(VM *vm, Value *args, int nargs) {
 }
 
 /* force: mirrors Interpreter#force's own memoization exactly (see
- * src/scheme/value/values.cr's SchemePromise) — if `args[0]` isn't itself a
+ * src/creme/value/values.cr's SchemePromise) — if `args[0]` isn't itself a
  * promise, R7RS says force may just return it unchanged. Only ever invokes
  * the wrapped 0-arg thunk once; the result is cached in place so a second
  * force on the same promise is free. delay-force's own re-entrant "the
@@ -538,7 +538,7 @@ static Value bi_log(VM *vm, Value *args, int nargs) {
  * (the magnitude's square root goes on the imaginary axis, per R7RS),
  * mirroring native's own sqrt (modules/scheme/inexact.cr) exactly. A
  * genuinely T_COMPLEX argument aborts via as_double itself (same as
- * native's own Scheme.as_f64) -- this prototype's sqrt doesn't support
+ * native's own Creme.as_f64) -- this prototype's sqrt doesn't support
  * complex input either. */
 static Value bi_sqrt(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -1953,7 +1953,7 @@ static void write_char_literal(FILE *out, int64_t codepoint) {
   }
 }
 
-/* Mirrors native's own needs_pipe_escape? (src/scheme/value/values.cr:
+/* Mirrors native's own needs_pipe_escape? (src/creme/value/values.cr:
  * 138-163): a symbol needs |...| escaping if it's empty or contains any
  * character that would otherwise be read back as something else --
  * whitespace, parens/brackets, string/quote/comment syntax, or `|`/`\`
@@ -2424,7 +2424,7 @@ static Value bi_not(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) c
 static Value bi_pair_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("pair?: expected an argument"); return v_bool(args[0].tag == T_PAIR); }
 static Value bi_null_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("null?: expected an argument"); return v_bool(args[0].tag == T_NIL); }
 /* Walks cdr's until a non-pair; #t iff that's T_NIL -- mirrors the real
- * interpreter's own Scheme.proper_list? (helpers.cr) exactly, including
+ * interpreter's own Creme.proper_list? (helpers.cr) exactly, including
  * NOT being cycle-safe (a genuinely circular list would infinite-loop
  * here too, same as there -- a known, already-accepted simplification in
  * the reference implementation this isn't introducing anything new). */
@@ -2433,7 +2433,7 @@ static Value bi_null_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1
  * label literal, or set-cdr! at runtime), which a plain single-pointer
  * cdr-walk can't do by itself. `fast` advances two cdrs per iteration,
  * `slow` one; if they're ever the exact same pair again, `fast` has
- * lapped `slow` around a cycle. Mirrors src/scheme/helpers.cr's own
+ * lapped `slow` around a cycle. Mirrors src/creme/helpers.cr's own
  * proper_list? fix exactly. */
 static Value bi_list_p(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -2487,7 +2487,7 @@ static Value bi_vector_length(VM *vm, Value *args, int nargs) {
 }
 
 /* Shared by vector-copy/-copy!/-fill! below for their optional (start end)
- * args -- mirrors src/scheme/modules/scheme/base/vectors.cr's own
+ * args -- mirrors src/creme/modules/scheme/base/vectors.cr's own
  * seq_range_args (defaults: start 0, end len). */
 static void vector_range_args(int len, Value *args, int nargs, int start_idx, int *first, int *last) {
   *first = (nargs > start_idx && args[start_idx].tag == T_INT) ? (int)args[start_idx].as.i : 0;
@@ -2617,7 +2617,7 @@ static Value bi_integer_p(VM *vm, Value *args, int nargs) {
    * always false here -- mirrors integer? (predicates.cr) exactly. */
   return v_bool(0);
 }
-/* exact? is int/rational, matching Scheme.exact? exactly (helpers.cr);
+/* exact? is int/rational, matching Creme.exact? exactly (helpers.cr);
  * complex is neither exact? nor inexact? here, same gap native itself
  * has (see complex.cr's own header comment on this not being special-
  * cased) -- not something this port is trying to fix. */
@@ -2676,7 +2676,7 @@ static Value bi_equal_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 
  * bi_ceiling/bi_round/bi_truncate below for their own T_RATIONAL
  * handling. abs/zero?/positive?/negative? of a T_COMPLEX deliberately
  * stay unimplemented here, matching the native Crystal interpreter's own
- * behavior exactly (src/scheme/modules/scheme/base/arithmetic.cr's abs
+ * behavior exactly (src/creme/modules/scheme/base/arithmetic.cr's abs
  * and base/predicates.cr's zero?/positive?/negative? don't accept a
  * complex value either -- (scheme complex)'s magnitude has its own
  * separate complex-aware sqrt(re^2+im^2) logic instead) -- this is
@@ -2846,7 +2846,7 @@ static Value bi_inexact(VM *vm, Value *args, int nargs) {
   cvm_abort("inexact: not a number");
 }
 
-/* ---- (scheme complex) -- mirrors src/scheme/modules/scheme/complex.cr's
+/* ---- (scheme complex) -- mirrors src/creme/modules/scheme/complex.cr's
  * own small surface exactly (make-rectangular/make-polar/real-part/
  * imag-part/magnitude/angle); complex?/number? are above, alongside the
  * other predicates. This IS the complete native surface, not a subset --
@@ -3656,7 +3656,7 @@ static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if 
  * ("prefix__N", N a process-wide counter), needed by defmacro-based
  * capture-avoidance idioms (e.g. modules/creme/compiler/compiler.sld's
  * own swap!-with-gensym pattern, exercised directly by spec/creme/
- * macro_spec.scm). Mirrors src/scheme/modules/scheme/base/misc.cr's own
+ * macro_spec.scm). Mirrors src/creme/modules/scheme/base/misc.cr's own
  * gensym exactly (prefix defaults to "g" with no argument). */
 static int64_t g_gensym_counter = 0;
 static Value bi_gensym(VM *vm, Value *args, int nargs) {
@@ -4348,7 +4348,7 @@ static Value bi_set_environment_variable(VM *vm, Value *args, int nargs) {
 
 /* (creme env)'s delete-environment-variable! -- unsetenv is a no-op for a
  * key that was never set (matching native Crystal's ENV.delete semantics,
- * src/scheme/modules/creme/env.cr), so no existence check is needed here. */
+ * src/creme/modules/creme/env.cr), so no existence check is needed here. */
 static Value bi_delete_environment_variable(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_STR) {
@@ -4384,7 +4384,7 @@ static Value bi_litsym_runtime(const char *s) {
  * (version . "0.1.0") (os . <uname sysname>) (arch . <uname machine>)).
  * cvm always reports vm = "cvm" and compiler = "self-hosted" -- it has no
  * other way to run code at all (there is no native/tree-walking pipeline
- * here). See src/scheme/modules/creme/introspection.cr's own `runtime`
+ * here). See src/creme/modules/creme/introspection.cr's own `runtime`
  * for the Crystal-side twin of this builtin (vm = "crystal", compiler
  * "native" or "self-hosted" depending on how that process was invoked).
  * `version` is a hardcoded literal -- this project has no other
@@ -4655,7 +4655,7 @@ void cvm_register_file_builtins(VM *vm) {
 }
 
 /* (creme env)'s full accessor/mutator set -- native Crystal groups all
- * four under one "env" family (src/scheme/modules/creme/env.cr), so all
+ * four under one "env" family (src/creme/modules/creme/env.cr), so all
  * four are registered here together, matching that grouping exactly
  * (get-environment-variables lives in bi_get_environment_variables,
  * above, alongside process-context's own copy -- see

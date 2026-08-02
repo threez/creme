@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -16,7 +16,7 @@ describe "(creme ...) namespace" do
     # leaves it unspecified; a bare-name callee is resolved after its args
     # are evaluated) — the point is only that the (creme bigdecimal) name
     # itself isn't in scope without an explicit import.
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: bigdecimal-add/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: bigdecimal-add/) do
       run(%[(bigdecimal-add 1 2)])
     end
   end

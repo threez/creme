@@ -10,7 +10,7 @@
 ;;
 ;; Not auto-imported anywhere (unlike (scheme base)/(scheme write), which
 ;; the REPL still auto-imports at construction — see
-;; src/scheme/interpreter/base_library.cr's AUTO_IMPORTED_LIBRARIES).
+;; src/creme/interpreter/base_library.cr's AUTO_IMPORTED_LIBRARIES).
 ;; Auto-importing a file-based library would mean reading it off
 ;; library_search_path before any script runs, which an embedder who
 ;; never sets library_search_path shouldn't be forced into. Every script
@@ -36,7 +36,7 @@
 ;; question portably — and gensym has no R7RS analog since hygienic
 ;; syntax-rules expansion generates fresh identifiers automatically,
 ;; without a runtime call). Both moved to (creme introspection) instead —
-;; see src/scheme/interpreter/creme_libraries.cr.
+;; see src/creme/interpreter/creme_libraries.cr.
 ;; ===========================================================================
 
 (define-library (creme extra)

@@ -3,9 +3,9 @@ require "csv"
 
 # Adapted from Crystal stdlib's own spec/std/csv/{csv,csv_parse,csv_lex,csv_build}_spec.cr
 # (crystal-lang/crystal, tag v1.20.3) via the vendored `lib/fastcsv` fork this
-# project used to depend on -- Scheme::Csv (src/scheme/modules/creme/csv.cr)
+# project used to depend on -- Creme::Csv (src/creme/modules/creme/csv.cr)
 # replaced that vendored dependency with a self-contained port, so this file
-# is the same correctness suite retargeted at Scheme::Csv directly (a pure
+# is the same correctness suite retargeted at Creme::Csv directly (a pure
 # Crystal spec, no Scheme interpreter involved) rather than testing a
 # separate shard.
 #
@@ -20,12 +20,12 @@ require "csv"
 # project (a parser always owns its IO for its whole lifetime, never
 # interleaved with unrelated reads on the same IO), called out explicitly
 # rather than silently dropped.
-private def new_parser(string_or_io, separator = Scheme::Csv::DEFAULT_SEPARATOR, quote_char = Scheme::Csv::DEFAULT_QUOTE_CHAR,
-                       chunk_size = Scheme::Csv::DEFAULT_CHUNK_SIZE)
-  Scheme::Csv::Parser.new(string_or_io, separator, quote_char, chunk_size)
+private def new_parser(string_or_io, separator = Creme::Csv::DEFAULT_SEPARATOR, quote_char = Creme::Csv::DEFAULT_QUOTE_CHAR,
+                       chunk_size = Creme::Csv::DEFAULT_CHUNK_SIZE)
+  Creme::Csv::Parser.new(string_or_io, separator, quote_char, chunk_size)
 end
 
-private def parse(string_or_io, separator = Scheme::Csv::DEFAULT_SEPARATOR, quote_char = Scheme::Csv::DEFAULT_QUOTE_CHAR)
+private def parse(string_or_io, separator = Creme::Csv::DEFAULT_SEPARATOR, quote_char = Creme::Csv::DEFAULT_QUOTE_CHAR)
   rows = [] of Array(String)
   parser = new_parser(string_or_io, separator, quote_char)
   while row = parser.next_row
@@ -34,10 +34,10 @@ private def parse(string_or_io, separator = Scheme::Csv::DEFAULT_SEPARATOR, quot
   rows
 end
 
-private def build(separator = Scheme::Csv::DEFAULT_SEPARATOR, quote_char = Scheme::Csv::DEFAULT_QUOTE_CHAR,
-                  quoting = Scheme::Csv::Builder::Quoting::RFC, &)
+private def build(separator = Creme::Csv::DEFAULT_SEPARATOR, quote_char = Creme::Csv::DEFAULT_QUOTE_CHAR,
+                  quoting = Creme::Csv::Builder::Quoting::RFC, &)
   String.build do |io|
-    builder = Scheme::Csv::Builder.new(io, separator, quote_char, quoting)
+    builder = Creme::Csv::Builder.new(io, separator, quote_char, quoting)
     yield builder
   end
 end
@@ -62,7 +62,7 @@ private class OneByteIO < IO
   end
 end
 
-describe Scheme::Csv do
+describe Creme::Csv do
   describe "parse" do
     it "parses empty string" do
       parse("").should eq([] of String)
@@ -111,13 +111,13 @@ describe Scheme::Csv do
     end
 
     it "raises if single quote in the middle" do
-      expect_raises Scheme::Csv::MalformedError, "Unexpected quote at line 1, column 4" do
+      expect_raises Creme::Csv::MalformedError, "Unexpected quote at line 1, column 4" do
         parse(%(hel"lo))
       end
     end
 
     it "raises if command, newline or end doesn't follow quote" do
-      expect_raises Scheme::Csv::MalformedError, "Expecting comma, newline or end, not 'a' at line 2, column 6" do
+      expect_raises Creme::Csv::MalformedError, "Expecting comma, newline or end, not 'a' at line 2, column 6" do
         parse(%(foo\n"hel"a))
       end
     end
@@ -144,14 +144,14 @@ describe Scheme::Csv do
 
   describe "lex" do
     it "lexes two columns" do
-      lexer = Scheme::Csv::Lexer.new("hello,world")
+      lexer = Creme::Csv::Lexer.new("hello,world")
       expect_cell(lexer, "hello")
       expect_cell(lexer, "world")
       expect_eof(lexer)
     end
 
     it "lexes two columns with two rows" do
-      lexer = Scheme::Csv::Lexer.new("hello,world\nfoo,bar")
+      lexer = Creme::Csv::Lexer.new("hello,world\nfoo,bar")
       expect_cell(lexer, "hello")
       expect_cell(lexer, "world")
       expect_newline(lexer)
@@ -161,7 +161,7 @@ describe Scheme::Csv do
     end
 
     it "lexes two columns with two rows with \r\n" do
-      lexer = Scheme::Csv::Lexer.new("hello,world\r\nfoo,bar")
+      lexer = Creme::Csv::Lexer.new("hello,world\r\nfoo,bar")
       expect_cell(lexer, "hello")
       expect_cell(lexer, "world")
       expect_newline(lexer)
@@ -171,21 +171,21 @@ describe Scheme::Csv do
     end
 
     it "lexes two empty columns" do
-      lexer = Scheme::Csv::Lexer.new(",")
+      lexer = Creme::Csv::Lexer.new(",")
       expect_cell(lexer, "")
       expect_cell(lexer, "")
       expect_eof(lexer)
     end
 
     it "lexes last empty column" do
-      lexer = Scheme::Csv::Lexer.new("foo,")
+      lexer = Creme::Csv::Lexer.new("foo,")
       expect_cell(lexer, "foo")
       expect_cell(lexer, "")
       expect_eof(lexer)
     end
 
     it "lexes with empty columns" do
-      lexer = Scheme::Csv::Lexer.new("foo,,bar")
+      lexer = Creme::Csv::Lexer.new("foo,,bar")
       expect_cell(lexer, "foo")
       expect_cell(lexer, "")
       expect_cell(lexer, "bar")
@@ -193,40 +193,40 @@ describe Scheme::Csv do
     end
 
     it "lexes with whitespace" do
-      lexer = Scheme::Csv::Lexer.new("  foo  ,  bar  ")
+      lexer = Creme::Csv::Lexer.new("  foo  ,  bar  ")
       expect_cell(lexer, "  foo  ")
       expect_cell(lexer, "  bar  ")
       expect_eof(lexer)
     end
 
     it "lexes two with quotes" do
-      lexer = Scheme::Csv::Lexer.new(%("hello","world"))
+      lexer = Creme::Csv::Lexer.new(%("hello","world"))
       expect_cell(lexer, "hello")
       expect_cell(lexer, "world")
       expect_eof(lexer)
     end
 
     it "lexes two with inner quotes" do
-      lexer = Scheme::Csv::Lexer.new(%("hel""lo","wor""ld"))
+      lexer = Creme::Csv::Lexer.new(%("hel""lo","wor""ld"))
       expect_cell(lexer, %(hel"lo))
       expect_cell(lexer, %(wor"ld))
       expect_eof(lexer)
     end
 
     it "lexes with comma inside quote" do
-      lexer = Scheme::Csv::Lexer.new(%("foo,bar"))
+      lexer = Creme::Csv::Lexer.new(%("foo,bar"))
       expect_cell(lexer, "foo,bar")
       expect_eof(lexer)
     end
 
     it "lexes with newline inside quote" do
-      lexer = Scheme::Csv::Lexer.new(%("foo\nbar"))
+      lexer = Creme::Csv::Lexer.new(%("foo\nbar"))
       expect_cell(lexer, "foo\nbar")
       expect_eof(lexer)
     end
 
     it "lexes newline followed by eof" do
-      lexer = Scheme::Csv::Lexer.new("hello,world\n")
+      lexer = Creme::Csv::Lexer.new("hello,world\n")
       expect_cell(lexer, "hello")
       expect_cell(lexer, "world")
       expect_newline(lexer)
@@ -234,7 +234,7 @@ describe Scheme::Csv do
     end
 
     it "lexes with a given separator" do
-      lexer = Scheme::Csv::Lexer.new("hello;world\n", separator: ';')
+      lexer = Creme::Csv::Lexer.new("hello;world\n", separator: ';')
       expect_cell(lexer, "hello")
       expect_cell(lexer, "world")
       expect_newline(lexer)
@@ -242,29 +242,29 @@ describe Scheme::Csv do
     end
 
     it "lexes with a given quote char" do
-      lexer = Scheme::Csv::Lexer.new("'hello,world'\n", quote_char: '\'')
+      lexer = Creme::Csv::Lexer.new("'hello,world'\n", quote_char: '\'')
       expect_cell(lexer, "hello,world")
       expect_newline(lexer)
       expect_eof(lexer)
     end
 
     it "raises if single quote in the middle" do
-      expect_raises Scheme::Csv::MalformedError, "Unexpected quote at line 1, column 4" do
-        lexer = Scheme::Csv::Lexer.new %(hel"lo)
+      expect_raises Creme::Csv::MalformedError, "Unexpected quote at line 1, column 4" do
+        lexer = Creme::Csv::Lexer.new %(hel"lo)
         lexer.next_token
       end
     end
 
     it "raises if command, newline or end doesn't follow quote" do
-      expect_raises Scheme::Csv::MalformedError, "Expecting comma, newline or end, not 'a' at line 1, column 6" do
-        lexer = Scheme::Csv::Lexer.new %("hel"a)
+      expect_raises Creme::Csv::MalformedError, "Expecting comma, newline or end, not 'a' at line 1, column 6" do
+        lexer = Creme::Csv::Lexer.new %("hel"a)
         lexer.next_token
       end
     end
 
     it "raises on unclosed quote" do
-      expect_raises Scheme::Csv::MalformedError, "Unclosed quote at line 1, column 5" do
-        lexer = Scheme::Csv::Lexer.new %("foo)
+      expect_raises Creme::Csv::MalformedError, "Unclosed quote at line 1, column 5" do
+        lexer = Creme::Csv::Lexer.new %("foo)
         lexer.next_token
       end
     end
@@ -310,15 +310,15 @@ describe Scheme::Csv do
     end
 
     it "builds with quoting" do
-      build(quoting: Scheme::Csv::Builder::Quoting::NONE) { |csv|
+      build(quoting: Creme::Csv::Builder::Quoting::NONE) { |csv|
         csv.row 1, "doesn't", " , ", %(he said "no")
       }.should eq(%(1,doesn't, , ,he said "no"\n))
 
-      build(quoting: Scheme::Csv::Builder::Quoting::RFC) { |csv|
+      build(quoting: Creme::Csv::Builder::Quoting::RFC) { |csv|
         csv.row 1, "doesn't", " , ", %(he said "no")
       }.should eq(%(1,doesn't," , ","he said ""no"""\n))
 
-      build(quoting: Scheme::Csv::Builder::Quoting::ALL) { |csv|
+      build(quoting: Creme::Csv::Builder::Quoting::ALL) { |csv|
         csv.row 1, "doesn't", " , ", %(he said "no")
       }.should eq(%("1","doesn't"," , ","he said ""no"""\n))
     end
@@ -331,7 +331,7 @@ describe Scheme::Csv do
   # refill path directly, which none of the tiny-string specs above ever
   # touch.
 
-  chunk_size = Scheme::Csv::DEFAULT_CHUNK_SIZE
+  chunk_size = Creme::Csv::DEFAULT_CHUNK_SIZE
 
   it "parses a quoted cell whose content straddles a chunk boundary" do
     # Padding placed so the opening quote lands a few chars before the
@@ -410,14 +410,14 @@ end
 
 private def expect_cell(lexer, value, file = __FILE__, line = __LINE__)
   token = lexer.next_token
-  token.kind.should eq(Scheme::Csv::Token::Kind::Cell), file: file, line: line
+  token.kind.should eq(Creme::Csv::Token::Kind::Cell), file: file, line: line
   token.value.should eq(value), file: file, line: line
 end
 
 private def expect_eof(lexer, file = __FILE__, line = __LINE__)
-  lexer.next_token.kind.should eq(Scheme::Csv::Token::Kind::Eof), file: file, line: line
+  lexer.next_token.kind.should eq(Creme::Csv::Token::Kind::Eof), file: file, line: line
 end
 
 private def expect_newline(lexer, file = __FILE__, line = __LINE__)
-  lexer.next_token.kind.should eq(Scheme::Csv::Token::Kind::Newline), file: file, line: line
+  lexer.next_token.kind.should eq(Creme::Csv::Token::Kind::Newline), file: file, line: line
 end

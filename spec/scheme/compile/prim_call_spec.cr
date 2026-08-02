@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src).write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src).write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 # The analyzer specializes a handful of fixed-arity builtins (arithmetic
@@ -95,7 +95,7 @@ describe "primitive call specialization" do
     end
 
     it "reports an unbound-variable error at the operand's own position, not the call's" do
-      expect_raises(Scheme::SchemeRuntimeError, /unbound variable: y/) do
+      expect_raises(Creme::SchemeRuntimeError, /unbound variable: y/) do
         run("(define x 1)\n(+ x y)")
       end
     end
@@ -293,7 +293,7 @@ describe "primitive call specialization" do
     end
 
     it "raises on an out-of-range literal index" do
-      expect_raises(Scheme::SchemeRuntimeError, /index 5 out of range/) do
+      expect_raises(Creme::SchemeRuntimeError, /index 5 out of range/) do
         run("(vector-ref (vector 1 2 3) 5)")
       end
     end
@@ -317,7 +317,7 @@ describe "primitive call specialization" do
     end
 
     it "raises on an out-of-range literal index (string-ref)" do
-      expect_raises(Scheme::SchemeRuntimeError, /index out of range/) do
+      expect_raises(Creme::SchemeRuntimeError, /index out of range/) do
         run("(string-ref \"abc\" 5)")
       end
     end
@@ -341,7 +341,7 @@ describe "primitive call specialization" do
     end
 
     it "raises on an out-of-range literal index (bytevector-u8-ref)" do
-      expect_raises(Scheme::SchemeRuntimeError, /index out of range/) do
+      expect_raises(Creme::SchemeRuntimeError, /index out of range/) do
         run("(bytevector-u8-ref (bytevector 1 2 3) 5)")
       end
     end
@@ -531,7 +531,7 @@ describe "primitive call specialization" do
   # Op::IsEq, IsEqImm, IsEqUp, TestIsEq/TestIsEqImm/TestIsEqUp, IsEqReturn)
   # instead of compiling to a generic dynamic call — see ast.cr's
   # PrimOp::IsEq doc comment. Unlike NumEq, it never raises and never needs
-  # a numeric-tower fallback (it's literally Scheme.scheme_eqv? — eq? and
+  # a numeric-tower fallback (it's literally Creme.scheme_eqv? — eq? and
   # eqv? share one implementation, see arithmetic.cr's eq_p/eqv_p), so
   # these specs lean on that simplicity rather than mirroring every
   # NumEq-family edge case (there's no "falls back to the numeric tower"

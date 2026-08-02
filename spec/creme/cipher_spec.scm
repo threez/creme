@@ -6,7 +6,7 @@
 ;;
 ;; (creme cipher) is a genuine dual-implementation module -- native
 ;; drives OpenSSL's raw EVP AEAD API by reopening Crystal's own
-;; OpenSSL::LibCrypto binding (src/scheme/modules/creme/cipher.cr, see
+;; OpenSSL::LibCrypto binding (src/creme/modules/creme/cipher.cr, see
 ;; its own header comment for why: Crystal's high-level OpenSSL::Cipher
 ;; wrapper has no GCM/AEAD support at all in this Crystal version), cvm
 ;; drives the same EVP AEAD API directly in C (cvm/cipher.c) -- both

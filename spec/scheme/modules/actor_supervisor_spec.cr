@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme actor) (creme actor-supervisor)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme actor) (creme actor-supervisor)) #{src}").write_string
 end
 
 # Forces at least one scheduling round-trip on the calling actor/fiber, so

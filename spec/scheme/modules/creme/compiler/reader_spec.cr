@@ -1,25 +1,25 @@
 require "../../../../spec_helper"
 
-private def load_reader(interp : Scheme::Interpreter) : Nil
-  Scheme.run_source(interp, %((import (scheme write) (creme compiler reader))))
+private def load_reader(interp : Creme::Interpreter) : Nil
+  Creme.run_source(interp, %((import (scheme write) (creme compiler reader))))
 end
 
-private def bootstrap_read(interp : Scheme::Interpreter, source : String) : String
-  interp.global.define("bootstrap-test-source", Scheme::SchemeStr.new(source))
-  result = Scheme.run_source(interp, <<-SCM)
+private def bootstrap_read(interp : Creme::Interpreter, source : String) : String
+  interp.global.define("bootstrap-test-source", Creme::SchemeStr.new(source))
+  result = Creme.run_source(interp, <<-SCM)
   (let ((forms (read-program bootstrap-test-source))
         (out (open-output-string)))
     (for-each (lambda (f) (write f out) (write-char #\\newline out)) forms)
     (get-output-string out))
   SCM
-  result.as(Scheme::SchemeStr).value
+  result.as(Creme::SchemeStr).value
 end
 
 private def native_read(source : String) : String
-  Scheme::Reader.read_all(source).map(&.write_string).join("\n") + "\n"
+  Creme::Reader.read_all(source).map(&.write_string).join("\n") + "\n"
 end
 
-private def check(interp : Scheme::Interpreter, source : String) : Nil
+private def check(interp : Creme::Interpreter, source : String) : Nil
   bootstrap_read(interp, source).should eq(native_read(source))
 end
 
@@ -28,15 +28,15 @@ end
 # string->symbol would still `write` as "1/2", matching the real
 # rational's own write form) -- this asserts the bootstrap reader's first
 # datum is actually a number, not just that it prints like one.
-private def check_number(interp : Scheme::Interpreter, source : String) : Nil
+private def check_number(interp : Creme::Interpreter, source : String) : Nil
   check(interp, source)
-  interp.global.define("bootstrap-test-source", Scheme::SchemeStr.new(source))
-  Scheme.run_source(interp, "(number? (car (read-program bootstrap-test-source)))").write_string.should eq("#t")
+  interp.global.define("bootstrap-test-source", Creme::SchemeStr.new(source))
+  Creme.run_source(interp, "(number? (car (read-program bootstrap-test-source)))").write_string.should eq("#t")
 end
 
 describe "bootstrap-reader module" do
   it "reads atoms, lists, and structures matching the native reader" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_reader(interp)
     [
       "()", "(1 2 3)", "(1 . 2)", "(1 2 . 3)", "(a (b c) . d)",
@@ -57,7 +57,7 @@ describe "bootstrap-reader module" do
   end
 
   it "reads a full mixed program" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_reader(interp)
     src = <<-SCM
     (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
@@ -73,7 +73,7 @@ describe "bootstrap-reader module" do
   # competition/racket/bench/racket.scm is excluded: it's `#lang racket`,
   # not Scheme, and the NATIVE reader rejects it too.
   it "matches the native reader on every example/module source file in the repo" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_reader(interp)
     files = (Dir.glob("examples/**/*.scm") + Dir.glob("modules/**/*.sld") + Dir.glob("competition/**/*.scm"))
       .reject(&.includes?("racket.scm"))

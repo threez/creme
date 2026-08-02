@@ -1,7 +1,7 @@
 require "../../../../spec_helper"
 
-private def load_toolchain(interp : Scheme::Interpreter) : Nil
-  Scheme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
+private def load_toolchain(interp : Creme::Interpreter) : Nil
+  Creme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
   # Pre-seeds ensure-library-loaded!'s own tracking for every file-based
   # library just loaded NATIVELY above -- see src/main.cr's
   # SELF_HOSTED_TOOLCHAIN_MARK_LOADED's own doc comment for why this is
@@ -10,7 +10,7 @@ private def load_toolchain(interp : Scheme::Interpreter) : Nil
   # of these same libraries has its source re-read and re-run a SECOND
   # time, corrupting an in-progress record type (e.g. (creme bytecode)'s
   # own <chunk>).
-  Scheme.run_source(interp, %(
+  Creme.run_source(interp, %(
     (mark-self-hosted-library-loaded! '(creme peg))
     (mark-self-hosted-library-loaded! '(creme bytecode))
     (mark-self-hosted-library-loaded! '(creme compiler reader))
@@ -18,23 +18,23 @@ private def load_toolchain(interp : Scheme::Interpreter) : Nil
 end
 
 private def native_eval(source : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme lazy) (scheme eval)) #{source}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme lazy) (scheme eval)) #{source}").write_string
 end
 
-private def bootstrap_eval(interp : Scheme::Interpreter, source : String) : String
-  interp.global.define("compiler-test-source", Scheme::SchemeStr.new(source))
-  Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes compiler-test-source))").write_string
+private def bootstrap_eval(interp : Creme::Interpreter, source : String) : String
+  interp.global.define("compiler-test-source", Creme::SchemeStr.new(source))
+  Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes compiler-test-source))").write_string
 end
 
-private def check(interp : Scheme::Interpreter, source : String) : Nil
+private def check(interp : Creme::Interpreter, source : String) : Nil
   bootstrap_eval(interp, source).should eq(native_eval(source))
 end
 
-private def cons_to_array(v : Scheme::SchemeValue) : Array(Scheme::SchemeValue)
-  arr = [] of Scheme::SchemeValue
+private def cons_to_array(v : Creme::SchemeValue) : Array(Creme::SchemeValue)
+  arr = [] of Creme::SchemeValue
   cur = v
-  while cur.is_a?(Scheme::Cons)
+  while cur.is_a?(Creme::Cons)
     arr << cur.car
     cur = cur.cdr
   end
@@ -48,15 +48,15 @@ end
 # compile-source-to-bytes compiles a flat sequence of top-level forms,
 # not a define-library wrapper.
 private def library_body_source(path : String) : String
-  top = Scheme::Reader.read_all(File.read(path)).first.as(Scheme::Cons)
+  top = Creme::Reader.read_all(File.read(path)).first.as(Creme::Cons)
   clauses = cons_to_array(top.cdr)[1..] # drop the (creme name) library-name clause
-  begin_clause = clauses.find { |clause| clause.is_a?(Scheme::Cons) && clause.car.is_a?(Scheme::SchemeSym) && clause.car.as(Scheme::SchemeSym).name == "begin" }.as(Scheme::Cons)
+  begin_clause = clauses.find { |clause| clause.is_a?(Creme::Cons) && clause.car.is_a?(Creme::SchemeSym) && clause.car.as(Creme::SchemeSym).name == "begin" }.as(Creme::Cons)
   cons_to_array(begin_clause.cdr).map(&.write_string).join("\n")
 end
 
 describe "bootstrap-compiler module" do
   it "compiles and runs programs matching native evaluation" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     [
       "(+ 1 2 3)",
@@ -306,7 +306,7 @@ describe "bootstrap-compiler module" do
   # just checks the self-hosted compiler's own, independent
   # implementation, which never had either bug.
   it "protects a captured local's register across later sibling scopes" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     src = <<-SCM
     (define (h)
@@ -322,7 +322,7 @@ describe "bootstrap-compiler module" do
   end
 
   it "compiles a local defmacro (not define-syntax/syntax-rules) matching native evaluation" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     [
       %((defmacro my-swap! (a b) (list 'let (list (list 'tmp a)) (list 'set! a b) (list 'set! b 'tmp))) (define x 1) (define y 2) (my-swap! x y) (list x y)),
@@ -361,25 +361,25 @@ describe "bootstrap-compiler module" do
     # native_eval's own shared Interpreter has no library_search_path, so
     # (creme dao) -- a file-based library -- can't be found through it;
     # same workaround the existing sxql-select! test above already uses.
-    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    native_result = Scheme.run_source(native, src).write_string
+    native = Creme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Creme.run_source(native, src).write_string
 
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
-    interp.global.define("dao-test-source", Scheme::SchemeStr.new(src))
-    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes dao-test-source))").write_string
+    interp.global.define("dao-test-source", Creme::SchemeStr.new(src))
+    bootstrap_result = Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes dao-test-source))").write_string
 
     bootstrap_result.should eq(native_result)
   end
 
   it "suppresses fusion after a top-level redefinition of a fusable primitive" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     check(interp, "(define (my-plus a b) (list 'sum a b)) (define + my-plus) (+ 1 2)")
   end
 
   it "suppresses fusion after a set!-redefinition of a fusable primitive" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     check(interp, "(define orig-car car) (set! car (lambda (p) (list 'wrapped (orig-car p)))) (car (cons 1 2))")
   end
@@ -402,13 +402,13 @@ describe "bootstrap-compiler module" do
     result
     SCM
 
-    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    native_result = Scheme.run_source(native, src).write_string
+    native = Creme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Creme.run_source(native, src).write_string
 
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
-    interp.global.define("sxql-test-source", Scheme::SchemeStr.new(src))
-    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes sxql-test-source))").write_string
+    interp.global.define("sxql-test-source", Creme::SchemeStr.new(src))
+    bootstrap_result = Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes sxql-test-source))").write_string
 
     bootstrap_result.should eq(native_result)
   end
@@ -416,13 +416,13 @@ describe "bootstrap-compiler module" do
   it "honors a prefix import-set filter against a pure-Scheme file-based library" do
     src = %((import (prefix (creme extra) extra:)) (extra:filter odd? '(1 2 3 4 5)))
 
-    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    native_result = Scheme.run_source(native, src).write_string
+    native = Creme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Creme.run_source(native, src).write_string
 
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
-    interp.global.define("import-prefix-test-source", Scheme::SchemeStr.new(src))
-    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes import-prefix-test-source))").write_string
+    interp.global.define("import-prefix-test-source", Creme::SchemeStr.new(src))
+    bootstrap_result = Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes import-prefix-test-source))").write_string
 
     bootstrap_result.should eq(native_result)
   end
@@ -430,23 +430,23 @@ describe "bootstrap-compiler module" do
   it "honors a rename import-set filter against a pure-Scheme file-based library" do
     src = %((import (rename (creme extra) (filter my-filter))) (my-filter odd? '(1 2 3 4 5)))
 
-    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    native_result = Scheme.run_source(native, src).write_string
+    native = Creme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Creme.run_source(native, src).write_string
 
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
-    interp.global.define("import-rename-test-source", Scheme::SchemeStr.new(src))
-    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes import-rename-test-source))").write_string
+    interp.global.define("import-rename-test-source", Creme::SchemeStr.new(src))
+    bootstrap_result = Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes import-rename-test-source))").write_string
 
     bootstrap_result.should eq(native_result)
   end
 
   it "rejects a non-top-level import" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
-    interp.global.define("bad-import-source", Scheme::SchemeStr.new("(define (f) (import (creme regex)) 1) (f)"))
-    expect_raises(Scheme::SchemeUserError, /only supported at the top level/) do
-      Scheme.run_source(interp, "(compile-source-to-bytes bad-import-source)")
+    interp.global.define("bad-import-source", Creme::SchemeStr.new("(define (f) (import (creme regex)) 1) (f)"))
+    expect_raises(Creme::SchemeUserError, /only supported at the top level/) do
+      Creme.run_source(interp, "(compile-source-to-bytes bad-import-source)")
     end
   end
 
@@ -478,59 +478,59 @@ describe "bootstrap-compiler module" do
     # shared native_eval helper, which has none) so the generated library
     # under ./modules is actually resolvable -- same reasoning as the dao/
     # sxql tests above.
-    native = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    native_result = Scheme.run_source(native, src).write_string
+    native = Creme::Interpreter.new(library_search_path: ["./modules"])
+    native_result = Creme.run_source(native, src).write_string
 
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
-    interp.global.define("generated-library-test-source", Scheme::SchemeStr.new(src))
-    bootstrap_result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes generated-library-test-source))").write_string
+    interp.global.define("generated-library-test-source", Creme::SchemeStr.new(src))
+    bootstrap_result = Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes generated-library-test-source))").write_string
 
     bootstrap_result.should eq(native_result)
   end
 
   it "properly tail-calls a named-let loop over 200000 iterations without overflowing" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     src = "(let loop ((i 0) (acc 0)) (if (= i 200000) acc (loop (+ i 1) (+ acc i))))"
     check(interp, src)
   end
 
   it "self-compiles (creme compiler reader) and produces a working read-program" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
 
     body_source = library_body_source("modules/creme/compiler/reader.sld")
-    interp.global.define("reader-source-to-compile", Scheme::SchemeStr.new(body_source))
-    Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes reader-source-to-compile))")
+    interp.global.define("reader-source-to-compile", Creme::SchemeStr.new(body_source))
+    Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes reader-source-to-compile))")
 
     test_source = %((define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (display (fact 5)) (newline) (define v #(1 2 3)) (write v))
-    interp.global.define("nested-test-source", Scheme::SchemeStr.new(test_source))
-    result = Scheme.run_source(interp, <<-SCM)
+    interp.global.define("nested-test-source", Creme::SchemeStr.new(test_source))
+    result = Creme.run_source(interp, <<-SCM)
     (let ((forms (read-program nested-test-source))
           (out (open-output-string)))
       (for-each (lambda (f) (write f out) (write-char #\\newline out)) forms)
       (get-output-string out))
     SCM
 
-    expected = Scheme::Reader.read_all(test_source).map(&.write_string).join("\n") + "\n"
-    result.as(Scheme::SchemeStr).value.should eq(expected)
+    expected = Creme::Reader.read_all(test_source).map(&.write_string).join("\n") + "\n"
+    result.as(Creme::SchemeStr).value.should eq(expected)
   end
 
   it "self-compiles (creme compiler compiler) and the result compiles a small program correctly" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
 
     body_source = library_body_source("modules/creme/compiler/compiler.sld")
-    interp.global.define("compiler-source-to-compile", Scheme::SchemeStr.new(body_source))
-    Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes compiler-source-to-compile))")
+    interp.global.define("compiler-source-to-compile", Creme::SchemeStr.new(body_source))
+    Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes compiler-source-to-compile))")
 
     # `compile-source-to-bytes` is now the SELF-COMPILED version's own
     # definition -- use it to compile a small program, same verification
     # loop as everywhere else in this file.
     test_source = "(define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 6)"
-    interp.global.define("nested-program-source", Scheme::SchemeStr.new(test_source))
-    result = Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes nested-program-source))")
+    interp.global.define("nested-program-source", Creme::SchemeStr.new(test_source))
+    result = Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes nested-program-source))")
     result.write_string.should eq(native_eval(test_source))
   end
 end

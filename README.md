@@ -1,6 +1,6 @@
 # scheme.cr
 
-A Scheme interpreter, written in Crystal. The interpreter library is the `scheme` shard; the CLI/REPL executable is called `creme`.
+A Scheme interpreter, written in Crystal. The interpreter library is the `creme` shard; the CLI/REPL executable is also called `creme`.
 
 ## Features
 
@@ -30,23 +30,23 @@ shards build
 
 ```yaml
 dependencies:
-  scheme:
-    github: threez/scheme
+  creme:
+    github: threez/creme
 ```
 
 ```crystal
-require "scheme"
+require "creme"
 
 # auto_import_base: false — a script must (import (scheme base) ...)
 # itself, matching strict R7RS; this is what src/main.cr uses for both
 # file and piped-stdin execution. Omit it (or pass true) for a REPL-style
 # session where (scheme base)/(scheme write) should already be in scope.
-interp = Scheme::Interpreter.new(auto_import_base: false)
-Scheme.run_source(interp, "(import (scheme base)) (+ 1 2)")
-Scheme.run_file(interp, "script.scm")
+interp = Creme::Interpreter.new(auto_import_base: false)
+Creme.run_source(interp, "(import (scheme base)) (+ 1 2)")
+Creme.run_file(interp, "script.scm")
 ```
 
-`Scheme.run_source`/`Scheme.run_file` are pure library entry points with no STDOUT/STDERR/process-exit side effects. See [Embedding](#embedding) below for injecting host data, reading results back as native Crystal types, registering host callbacks, sandboxing, and execution limits.
+`Creme.run_source`/`Creme.run_file` are pure library entry points with no STDOUT/STDERR/process-exit side effects. See [Embedding](#embedding) below for injecting host data, reading results back as native Crystal types, registering host callbacks, sandboxing, and execution limits.
 
 ## Usage
 
@@ -170,11 +170,11 @@ Modules with no SRFI precedent (`sql`, `tui`, `http`, `digest`, `bigdecimal`, `r
 - **`(creme csv)`** — bulk `csv-read`/`csv-read-headers`/`csv-write`/`csv-write-headers` (rows decode to vectors of strings, or with headers to alists of `(header . cell)`, matching the `(creme json)` convention; cells to write may be strings, chars, numbers, or booleans) plus a row-by-row streaming API over ports — `csv-writer-open`/`csv-writer-row!`/`csv-writer?` and `csv-reader-open`/`csv-reader-read!`/`csv-reader?` (the latter returns `eof-object` at end of input) — all backed by Crystal's stdlib `CSV` parser/builder, with separator/quote-char/quoting (`'none`/`'rfc`/`'all`) all configurable
 - **`(creme digest)`** — `digest-md5`, `digest-sha1`, `digest-sha256`, `digest-sha384`, `digest-sha512`, `hmac-sha256`/`-sha384`/`-sha512` (hex digest strings; the `hmac-*`/`digest-sha384`/`-sha512` procedures accept a bytevector OR a string for their arguments, unlike the original three string-only ones), `base64-encode`, `base64-decode`
 - **`(creme secure-random)`** — Ruby `SecureRandom`, deliberately its own module distinct from `(creme random)`'s plain, non-cryptographic PRNG above: `secure-random-bytes` (→ a bytevector), `secure-random-hex`/`secure-random-base64` (→ hex/base64 strings of N random bytes) — backed by the OS's own CSPRNG (`Random::Secure` natively, OpenSSL's `RAND_bytes` in `cvm`, the same primitive `(creme actor)`'s handshake nonces and `(creme rfc8439)`'s random-key/nonce already use), no new system dependency on either backend
-- **`(creme cipher)`** — Ruby `OpenSSL::Cipher`, deliberately scoped to AES-256-GCM only (authenticated encryption, no raw CBC/ECB offered — the same AEAD-first cut `(creme rfc8439)` already made): `aes-256-gcm-encrypt key nonce plaintext [aad]` → an alist of `("ciphertext" . blob)`/`("tag" . blob)`; `aes-256-gcm-decrypt key nonce ciphertext tag [aad]` → the plaintext blob, raising on any tag/key/nonce/aad mismatch rather than ever returning corrupted data; `aes-256-gcm-random-key`/`-random-nonce` (32/12 bytes). Native drives OpenSSL's raw EVP AEAD API directly (Crystal's own high-level `OpenSSL::Cipher` wrapper has no GCM/AEAD support at all in this Crystal version — no way to feed it AAD or get/set an authentication tag — so `src/scheme/modules/creme/cipher.cr` reopens Crystal's own `OpenSSL::LibCrypto` binding to add the one missing entry point, `EVP_CIPHER_CTX_ctrl`); `cvm`'s own `cipher.c` drives the same EVP AEAD API directly in C. No new system dependency on either backend (both already link libcrypto)
+- **`(creme cipher)`** — Ruby `OpenSSL::Cipher`, deliberately scoped to AES-256-GCM only (authenticated encryption, no raw CBC/ECB offered — the same AEAD-first cut `(creme rfc8439)` already made): `aes-256-gcm-encrypt key nonce plaintext [aad]` → an alist of `("ciphertext" . blob)`/`("tag" . blob)`; `aes-256-gcm-decrypt key nonce ciphertext tag [aad]` → the plaintext blob, raising on any tag/key/nonce/aad mismatch rather than ever returning corrupted data; `aes-256-gcm-random-key`/`-random-nonce` (32/12 bytes). Native drives OpenSSL's raw EVP AEAD API directly (Crystal's own high-level `OpenSSL::Cipher` wrapper has no GCM/AEAD support at all in this Crystal version — no way to feed it AAD or get/set an authentication tag — so `src/creme/modules/creme/cipher.cr` reopens Crystal's own `OpenSSL::LibCrypto` binding to add the one missing entry point, `EVP_CIPHER_CTX_ctrl`); `cvm`'s own `cipher.c` drives the same EVP AEAD API directly in C. No new system dependency on either backend (both already link libcrypto)
 - **`(creme env)`** — process environment variables (SRFI-98 naming where it exists): `get-environment-variable`, `get-environment-variables`, `set-environment-variable!`, `delete-environment-variable!`, `environment-variable-set?`
 - **`(creme escm)`** — a minimal ERB-style template compiler for embedded Scheme (same `<% ... %>`/`<%= ... %>` syntax as Ruby's ERB, hence the style not the name): `<% ... %>` silent Scheme code, `<%= ... %>` a Scheme expression `display`ed unescaped, everything else literal text; `escm-compile`/`escm-render`/`escm-render-string` — locals are installed as fresh `(scheme eval)` bindings per render, so one compiled template renders safely and repeatedly with different locals — native `bin/creme` only (see the library's own header comment for why `cvm/cvm` doesn't support this yet) — a file-based `.sld` library (`modules/creme/escm.sld`), not compiled into the interpreter binary
 - **`(creme extra)`** — this project's own non-R7RS conveniences, a file-based `.sld` library (`modules/creme/extra.sld`, pure R7RS Scheme, same as `(creme sxql)`) rather than compiled into the interpreter binary — never auto-imported, even in the REPL: SRFI-1-style list procedures (`filter`, `reduce`, `foldl`/`foldr`, `any`, `every`, `count`, `iota`, `partition`, `cons*`, `append-map`, `filter-map`, `last-pair`, `delete`/`delete!`), `print`/`println`, and legacy R5RS numeric aliases (`exact->inexact`, `inexact->exact`, `float?`) — note there is deliberately no `blob*` family here: `blob?`/`blob-size`/`blob->string`/`string->blob` were exact duplicates of the real R7RS bytevector procedures (`bytevector?`/`bytevector-length`/`utf8->string`/`string->utf8` — `SchemeBlob` *is* the bytevector type) and were removed; there's also no `eval-string` — `current-output-port`/`current-input-port`/`current-error-port` are genuine R7RS parameter objects, so "capture printed output while evaluating" is expressible portably via `(parameterize ((current-output-port p)) (eval ...))` plus `guard`, with no interpreter-specific helper needed (see `examples/24-tui-try-scheme.scm`'s `eval-source-line` for a worked example). Internal conveniences (`add1`/`sub1`/`1+`/`identity`/`range`/`last`, plus the extra cxr accessors `caddr`/`cdddr`/`cadddr` and the aliases `first`/`second`/`third`/`rest`) are defined in `@base_env` but aren't exported through any library — `caddr`/`cdddr`/`cadddr` are reachable portably via `(scheme cxr)` instead. The cxr accessors and their aliases are real builtins (not wrapper closures), so a direct `(cadr x)`/`(first x)` fuses into the single `Op::Cxr` instruction; `add1`/`range`/etc. still live in `interpreter/prelude.cr`, while the cxr set is installed as builtins/value-aliases (see `Interpreter#install_cxr_conveniences`).
-- **`(creme ffi)`** — a generic `dlopen`/libffi bridge instead of a hand-written native module per C library: `(ffi-open "libm.so.6")` → a library handle, `(ffi-function lib "sqrt" 'double '(double))` → a callable handle for one function's name+signature, `(ffi-call fn (list 2.0))` → `1.4142135623730951`, `(ffi-close lib)`. MVP type-marshalling scope: `void` (return only), `int32`, `int64`, `double`, `bool`, `string`, `pointer` (an opaque handle round-tripped through a box). `ffi-pointer-ref`/`ffi-pointer-set!` read/write an individual struct FIELD given a pointer and that field's byte offset (`ffi-type-size` reports a type's byte size) — but this bridge never computes a struct's layout/alignment for you, and there's still no whole-struct-by-value marshalling or passing a Scheme closure as a C callback; see `cvm/creme_ffi.c`'s own header comment for the exact non-goals. `ffi-gc-malloc` allocates scratch memory through this process's own Boehm GC heap instead of libc's malloc — reclaimed automatically once unreachable, no matching free ever required; `ffi-gc-free` is an optional early release, valid ONLY on a pointer `ffi-gc-malloc` itself returned (never on a libc-malloc'd pointer or one a C function handed back, e.g. a `FILE*`, which corrupts the GC's own heap bookkeeping). Implemented identically on both backends — native `bin/creme` (`src/scheme/modules/creme/ffi.cr`) and `cvm/cvm` (`cvm/creme_ffi.c`) — see `examples/39-ffi-libm-caller.scm`/`examples/40-ffi-struct-pointer-clock.scm`/`examples/41-ffi-record-file-handle.scm`. SECURITY: genuine native code execution with every memory-safety risk that comes with it — an embedder MUST exclude this from any `allowed_libraries` allowlist for untrusted guest scripts, same as `(creme tui)`/`(creme rfc8439)`/etc.
+- **`(creme ffi)`** — a generic `dlopen`/libffi bridge instead of a hand-written native module per C library: `(ffi-open "libm.so.6")` → a library handle, `(ffi-function lib "sqrt" 'double '(double))` → a callable handle for one function's name+signature, `(ffi-call fn (list 2.0))` → `1.4142135623730951`, `(ffi-close lib)`. MVP type-marshalling scope: `void` (return only), `int32`, `int64`, `double`, `bool`, `string`, `pointer` (an opaque handle round-tripped through a box). `ffi-pointer-ref`/`ffi-pointer-set!` read/write an individual struct FIELD given a pointer and that field's byte offset (`ffi-type-size` reports a type's byte size) — but this bridge never computes a struct's layout/alignment for you, and there's still no whole-struct-by-value marshalling or passing a Scheme closure as a C callback; see `cvm/creme_ffi.c`'s own header comment for the exact non-goals. `ffi-gc-malloc` allocates scratch memory through this process's own Boehm GC heap instead of libc's malloc — reclaimed automatically once unreachable, no matching free ever required; `ffi-gc-free` is an optional early release, valid ONLY on a pointer `ffi-gc-malloc` itself returned (never on a libc-malloc'd pointer or one a C function handed back, e.g. a `FILE*`, which corrupts the GC's own heap bookkeeping). Implemented identically on both backends — native `bin/creme` (`src/creme/modules/creme/ffi.cr`) and `cvm/cvm` (`cvm/creme_ffi.c`) — see `examples/39-ffi-libm-caller.scm`/`examples/40-ffi-struct-pointer-clock.scm`/`examples/41-ffi-record-file-handle.scm`. SECURITY: genuine native code execution with every memory-safety risk that comes with it — an embedder MUST exclude this from any `allowed_libraries` allowlist for untrusted guest scripts, same as `(creme tui)`/`(creme rfc8439)`/etc.
 - **`(creme foreign)`** — declarative sugar over `(creme ffi)`, a file-based `.sld` library (`modules/creme/foreign.sld`), not compiled into the interpreter binary: `(define-foreign-function name lib c-name ret-type (arg-type ...))` turns the raw `ffi-function`+`ffi-call` boilerplate into an ordinary callable procedure (`(sqrt 2.0)` instead of `(ffi-call (ffi-function lib "sqrt" 'double '(double)) (list 2.0))`); `(define-foreign-struct type-name (accessor-name mutator-name field-type byte-offset) ...)` declares real struct-field accessors/mutators over `ffi-pointer-ref`/`ffi-pointer-set!` at explicit (caller-supplied, never auto-computed) byte offsets; `(define-foreign-record type-name (ctor-name lib c-name ret-type (arg-type ...)) pred-name (accessor-name lib c-name ret-type (arg-type ...)) ...)` wraps an opaque native handle (stdio's `FILE*`-style APIs, `sqlite3*`-style APIs) in a genuine, distinct Scheme record type (a real per-type predicate, via this interpreter's own `define-record-type`) whose accessors thread the wrapped pointer in as each underlying C function's first argument automatically. See the library's own header comment for the full contract (including why every macro here keeps its internal helper names confined to a private lexical scope rather than relying on macro hygiene, verified directly against this interpreter rather than assumed).
 - **`(creme for)`** — a Racket-`for`-family iteration/comprehension library, a file-based `.sld` library (`modules/creme/for.sld`, pure R7RS Scheme, built with `define-syntax`/`syntax-rules` rather than `defmacro` since there's no static template content to fold) — sequence constructors `in-range`/`in-list`/`in-vector`/`in-string`, each returning an ordinary (eager, not lazy) list; `for`/`for/list` (side-effecting/collecting parallel iteration over one or more `(var seq)` clauses, zipped and stopping at the shortest, same as R7RS's own multi-list `map`/`for-each`); `for/vector`, `for/sum`, `for/product`; `for/and`/`for/or` (true short-circuit — body isn't evaluated past the deciding element); `for/first`/`for/last`; `for/fold` (general accumulation, supporting multiple accumulators via `(values ...)`); `for/alist` (builds a `(key . value)` alist — this project's own convention for object-shaped data — instead of a real `(creme hash-table)` object, to stay dependency-free); and `for*`/`for*/list`, the nested (Cartesian-product) counterparts of `for`/`for/list`. Deliberately self-contained (no dependency beyond `(scheme base)`, not even `(creme extra)`/`(creme hash-table)`) since a macro's expansion is analyzed against the calling site's own environment in this interpreter — a cross-library dependency inside a macro's template would force every caller of that macro to import the other library too, not just `(creme for)`.
 - **`(creme ipaddr)`** — Ruby `IPAddr`-style IPv4/IPv6 address parsing/formatting/CIDR math: `make-ipaddr` (parses `"192.168.1.0/24"` or a bare `"192.168.1.1"`, `"fe80::/10"`/`"::1"` for ipv6, family autodetected), `ipaddr->string` (ipv6 canonical form per RFC 5952, longest zero run collapsed to `::`), `ipaddr-network`/`-broadcast`/`-netmask`/`-hostmask`, `ipaddr-include?` (CIDR containment), `ipaddr=?`/`-<?`, `ipaddr-succ`/`-pred` — internally a list of per-group integers rather than one combined address integer, since this interpreter's plain integers are fixnums that don't auto-promote to a bignum past ~2^62, too narrow for a full 128-bit IPv6 address (see the library's own header comment) — a file-based `.sld` library (`modules/creme/ipaddr.sld`), not compiled into the interpreter binary, no new builtins on either backend
@@ -238,7 +238,7 @@ A file-based library (`modules/dialect/ruby.sld`, pure R7RS Scheme, same as `(cr
 
 ### `(creme syntax ruby)`: a minimal Ruby-flavored `#lang` dialect
 
-A `#lang (creme syntax ruby)` file (see `src/scheme/runner.cr`'s `#lang` header handling — a literal first line `#lang <library-name> <extra-args>...` imports that library and calls its exported `read-program` to parse the rest of the file) gets real Ruby-looking concrete syntax, not just the renamed procedures `(dialect ruby)` above provides: `def`/`end` methods, `if`/`elsif`/`else`/`end`, `unless`/`end`, `while`/`end`, `name = expr` assignment, no-paren and dotted method calls, `do |x| ... end` blocks, string interpolation, and integer/float/string/symbol/array/`nil`/`true`/`false` literals with the usual `+-*/% < > <= >= == != && || !` operators — translating down to plain Scheme forms that call into `(dialect ruby)`. Built on `(creme lr)` above (a real SLR(1) grammar, not a hand-written recursive-descent parser like `(creme syntax scss)`/`(creme syntax slim)` use for their own line/indentation-shaped dialects, since Ruby genuinely needs infix expression precedence).
+A `#lang (creme syntax ruby)` file (see `src/creme/runner.cr`'s `#lang` header handling — a literal first line `#lang <library-name> <extra-args>...` imports that library and calls its exported `read-program` to parse the rest of the file) gets real Ruby-looking concrete syntax, not just the renamed procedures `(dialect ruby)` above provides: `def`/`end` methods, `if`/`elsif`/`else`/`end`, `unless`/`end`, `while`/`end`, `name = expr` assignment, no-paren and dotted method calls, `do |x| ... end` blocks, string interpolation, and integer/float/string/symbol/array/`nil`/`true`/`false` literals with the usual `+-*/% < > <= >= == != && || !` operators — translating down to plain Scheme forms that call into `(dialect ruby)`. Built on `(creme lr)` above (a real SLR(1) grammar, not a hand-written recursive-descent parser like `(creme syntax scss)`/`(creme syntax slim)` use for their own line/indentation-shaped dialects, since Ruby genuinely needs infix expression precedence).
 
 ```ruby
 #lang (creme syntax ruby)
@@ -268,12 +268,12 @@ Beyond the quick-start shown under [Installation](#as-a-crystal-library), a host
 `run_source`/`run_file` take optional `bindings`/`parent` arguments, for running one warm `Interpreter` many times — once per dataset row, rule evaluation, or template render — without state leaking between calls:
 
 ```crystal
-interp = Scheme::Interpreter.new
+interp = Creme::Interpreter.new
 
 rows.each do |row|
-  bindings = {"name" => Scheme.to_scheme(row.name), "age" => Scheme.to_scheme(row.age)} of String => Scheme::SchemeValue
-  result = Scheme.run_source(interp, "(> age 18)", bindings: bindings)
-  puts Scheme.truthy?(result)
+  bindings = {"name" => Creme.to_scheme(row.name), "age" => Creme.to_scheme(row.age)} of String => Creme::SchemeValue
+  result = Creme.run_source(interp, "(> age 18)", bindings: bindings)
+  puts Creme.truthy?(result)
 end
 ```
 
@@ -284,14 +284,14 @@ end
 
 ### Reading results back as native Crystal data
 
-`Scheme.to_scheme`/`Scheme.from_scheme` convert between `Scheme::SchemeValue` and plain Crystal data (`Nil`, `Bool`, `Int64`, `Float64`, `String`, `Array`, `Hash(String, _)` — aliased as `Scheme::Convertible`), so a rule/filter/template's result can be read back without touching `SchemeValue` at all:
+`Creme.to_scheme`/`Creme.from_scheme` convert between `Creme::SchemeValue` and plain Crystal data (`Nil`, `Bool`, `Int64`, `Float64`, `String`, `Array`, `Hash(String, _)` — aliased as `Creme::Convertible`), so a rule/filter/template's result can be read back without touching `SchemeValue` at all:
 
 ```crystal
-result = Scheme.run_source(interp, "(filter active? people)", bindings: bindings)
-Scheme.from_scheme(result) # => Array/Hash/String/Int64/Float64/Bool/nil, recursively
+result = Creme.run_source(interp, "(filter active? people)", bindings: bindings)
+Creme.from_scheme(result) # => Array/Hash/String/Int64/Float64/Bool/nil, recursively
 ```
 
-`Array`s convert to/from `SchemeVector`s; `Hash(String, _)`s convert to/from alists (`(key . value)` pairs, matching the `json`/`sql` module convention) — duplicate alist keys resolve first-occurrence-wins, matching `assoc`. `NIL` converts to Crystal `nil` (matching `json-read`'s existing `null`/`NIL` convention) — use `Scheme.list_to_a` directly instead when a value is known to be list-shaped and an empty result should read as `[]`.
+`Array`s convert to/from `SchemeVector`s; `Hash(String, _)`s convert to/from alists (`(key . value)` pairs, matching the `json`/`sql` module convention) — duplicate alist keys resolve first-occurrence-wins, matching `assoc`. `NIL` converts to Crystal `nil` (matching `json-read`'s existing `null`/`NIL` convention) — use `Creme.list_to_a` directly instead when a value is known to be list-shaped and an empty result should read as `[]`.
 
 ### Registering host callbacks
 
@@ -299,7 +299,7 @@ Scheme.from_scheme(result) # => Array/Hash/String/Int64/Float64/Bool/nil, recurs
 
 ```crystal
 interp.global.define_fn("lookup-tax-rate", 1, 1) do |args|
-  Scheme.to_scheme(tax_table[args[0].as(Scheme::SchemeStr).value])
+  Creme.to_scheme(tax_table[args[0].as(Creme::SchemeStr).value])
 end
 ```
 
@@ -310,7 +310,7 @@ Callbacks are ordinary `SchemeValue`s (`Builtin`s), so they can also go straight
 `library_search_path` (an `Array(String)` of directories, empty by default) is where `(import (a b c))` looks for an `a/b/c.sld` file when `(a b c)` isn't a Crystal-native library — the mechanism `(creme sxql)` itself uses (`modules/creme/sxql.sld`):
 
 ```crystal
-interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+interp = Creme::Interpreter.new(library_search_path: ["./modules"])
 ```
 
 A `.sld` file must contain exactly one top-level `(define-library (name ...) ...)` form whose name matches the path it was found at.
@@ -320,26 +320,26 @@ A `.sld` file must contain exactly one top-level `(define-library (name ...) ...
 For rule/template content from a less-trusted source (stored in a database, editable by end users), `Interpreter.sandboxed` gives safe-by-default construction — deny-all library imports, a finite step budget, captured (not real) stdout — so a host doesn't need to remember every knob:
 
 ```crystal
-interp = Scheme::Interpreter.sandboxed(allowed_libraries: ["scheme base", "creme string", "scheme inexact"])
-Scheme.run_source(interp, %[(import (scheme base) (creme string)) (string-upcase "hi")])
+interp = Creme::Interpreter.sandboxed(allowed_libraries: ["scheme base", "creme string", "scheme inexact"])
+Creme.run_source(interp, %[(import (scheme base) (creme string)) (string-upcase "hi")])
 ```
 
 `Interpreter.new` itself defaults to today's unrestricted behavior (`allowed_libraries: nil`) for backward compatibility — use `.sandboxed` when embedding content you don't fully trust. `allowed_libraries` restricts `(import ...)` by space-joined library name (e.g. `"creme sql"` for `(creme sql)`, `"scheme base"` for `(scheme base)`) — note that `"scheme base"` itself is not implicitly allowed, so guest code needs it listed explicitly if it's expected to `(import (scheme base))`. `.sandboxed` defaults `auto_import_base: false` (unlike `Interpreter.new`), so guest code gets nothing for free, including `(scheme base)`/`(scheme write)` — every binding it uses must come from an `(import ...)` it's actually allowed to make; pass `auto_import_base: true` to `.sandboxed` to opt back into pre-binding those two (still bypassing `allowed_libraries`, since that binding happens at construction, before any script runs). `interp.available_libraries` lists every library name the interpreter currently knows about, for building a deny-list (`interp.available_libraries - ["creme process", "creme file", "creme sql", "creme env"]`). `interp.stdout` (an `IO`) redirects/captures/suppresses `display`/`write`/`newline`/`print`/`println` output — swap in an `IO::Memory` per render to capture a template's printed output, or just to keep guest code from writing to the host process's real stdout.
 
 ### Execution limits
 
-`max_eval_depth` (existing) bounds non-tail recursion; `max_steps` additionally bounds every trampoline step, closing the one gap `max_eval_depth` doesn't cover — an infinite *tail*-recursive script. Both raise `Scheme::SchemeExecutionLimitError` (a `SchemeRuntimeError` subclass) when exceeded, distinguishable from an ordinary bug in the guest code:
+`max_eval_depth` (existing) bounds non-tail recursion; `max_steps` additionally bounds every trampoline step, closing the one gap `max_eval_depth` doesn't cover — an infinite *tail*-recursive script. Both raise `Creme::SchemeExecutionLimitError` (a `SchemeRuntimeError` subclass) when exceeded, distinguishable from an ordinary bug in the guest code:
 
 ```crystal
-interp = Scheme::Interpreter.new(max_steps: 100_000)
+interp = Creme::Interpreter.new(max_steps: 100_000)
 ```
 
-`(exit ...)` raises a catchable `Scheme::SchemeExit` rather than terminating the host process — `src/main.cr` (the `creme` CLI) is the only place that translates it back into a real process exit.
+`(exit ...)` raises a catchable `Creme::SchemeExit` rather than terminating the host process — `src/main.cr` (the `creme` CLI) is the only place that translates it back into a real process exit.
 
 ### Known caveats
 
 - `(define ...)` as a script's last top-level form returns the defined *symbol*, not its value — end a script with an explicit expression if you need its value back.
-- `Scheme.from_scheme` never returns a bare Crystal `nil` from anything except `NIL` itself.
+- `Creme.from_scheme` never returns a bare Crystal `nil` from anything except `NIL` itself.
 - `max_steps` resets per top-level form (per `run_source`/`run_file`/`apply` call), not once for an entire multi-form script.
 - This is `import`-gating (via `allowed_libraries`), output redirection, and a step budget — not OS-level sandboxing. There's no CPU/memory ceiling beyond `max_steps`, and no protection against concurrent use of one `Interpreter` from multiple fibers (construct one per fiber instead).
 - `define-syntax`/`syntax-rules` is unhygienic: template-introduced identifiers are not renamed, so they can capture (or be captured by) use-site identifiers of the same name. Same posture as `defmacro` — authors who need capture-avoidance should `gensym` template identifiers by hand.

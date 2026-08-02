@@ -8,7 +8,7 @@
 ;;
 ;; Named `pipe` rather than the literal `|>` token: this project's reader
 ;; treats a leading `|` as the start of a `|...|` piped/quoted identifier
-;; (see src/scheme/read/lexer.cr's lex_piped_identifier), the same
+;; (see src/creme/read/lexer.cr's lex_piped_identifier), the same
 ;; mechanism `#|...|#` block comments piggyback on for their closing
 ;; delimiter, so a bare `|>` symbol isn't lexable as-is.
 ;;

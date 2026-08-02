@@ -1,5 +1,5 @@
 /* (creme cipher) — see cipher.h. A port of
- * src/scheme/modules/creme/cipher.cr: aes-256-gcm-encrypt/-decrypt/
+ * src/creme/modules/creme/cipher.cr: aes-256-gcm-encrypt/-decrypt/
  * -random-key/-random-nonce. Deliberately scoped to ONE algorithm/mode
  * (AES-256-GCM, authenticated encryption, the modern default) rather
  * than Ruby's much broader OpenSSL::Cipher cipher-name-string surface --

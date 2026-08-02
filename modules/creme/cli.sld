@@ -38,7 +38,7 @@
 ;;
 ;; `program` (used in the usage header) is inferred as the second element of
 ;; (command-line) — the script's own path, per how `creme <script>
-;; [args...]` populates it (see src/main.cr/src/scheme/modules/process.cr).
+;; [args...]` populates it (see src/main.cr/src/creme/modules/process.cr).
 ;; This assumes the standard "creme SCRIPT [args...]" invocation `cli`/
 ;; `make-cli` are meant for; a script piped in over stdin (no script-path
 ;; argument at all) has no such element to infer from.
@@ -89,7 +89,7 @@
     ;; The script's own path, per how "creme SCRIPT [args...]" populates
     ;; (command-line) — see this file's header comment. Falls back to
     ;; whatever's actually there when a host other than the real CLI ran
-    ;; this script (e.g. embedding Scheme.run_file directly, as the spec
+    ;; this script (e.g. embedding Creme.run_file directly, as the spec
     ;; suite's integration tests do, or a REPL) and (command-line) doesn't
     ;; have a second element to match that assumption: the program name
     ;; alone if there's exactly one element, or a placeholder if there's

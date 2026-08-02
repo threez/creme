@@ -267,7 +267,7 @@ describe "main.cr (CLI)" do
     if cvm_available
       # Regression test for a real bug: cvm/hashtable.c's hash-table-ref
       # unconditionally cvm_apply'd its third argument as a thunk, but this
-      # project's own hash-table-ref contract (src/scheme/modules/creme/
+      # project's own hash-table-ref contract (src/creme/modules/creme/
       # hash_table.cr) allows a plain, non-procedure default too -- (creme
       # dao)'s dao-ref-keyword relies on exactly that (a plain #f default),
       # so any DAO-based script (e.g. competition/scheme/demo-todo/app.scm)
@@ -489,7 +489,7 @@ describe "main.cr (CLI)" do
         end
       end
 
-      # (creme ffi)'s generic dlopen/libffi bridge (src/scheme/modules/
+      # (creme ffi)'s generic dlopen/libffi bridge (src/creme/modules/
       # creme/ffi.cr, cvm/creme_ffi.c) -- calls libm's real `sqrt` and
       # libc's real `abs`/`strlen`/`malloc`/`free` by name at runtime,
       # covering every MVP marshalled type (double, int32, string, and a

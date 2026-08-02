@@ -1,5 +1,5 @@
 /* (creme bigdecimal) — see bigdecimal.h. A port of
- * src/scheme/modules/creme/big_decimal.cr: arbitrary-precision EXACT
+ * src/creme/modules/creme/big_decimal.cr: arbitrary-precision EXACT
  * decimal arithmetic, matching Crystal's own `require "big"` (standard
  * library, not an external shard) BigDecimal semantics for what this
  * project's own spec suite (spec/scheme/modules/creme/big_decimal_spec.cr)

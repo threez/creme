@@ -1,6 +1,6 @@
 /* (creme builtin term) -- see term.h.
  *
- * A direct C port of src/scheme/modules/creme/term.cr, which itself reuses
+ * A direct C port of src/creme/modules/creme/term.cr, which itself reuses
  * the exact same `stty` shell-outs and escape-sequence disambiguation logic
  * as lib/tui/src/tui/core/term.cr and lib/tui/src/tui/core/keys.cr. Kept in
  * lockstep with term.cr BY HAND (same procedure names/arities, same alist
@@ -256,7 +256,7 @@ static Value bi_term_write(VM *vm, Value *args, int nargs) {
 }
 
 /* Whether STDOUT is an actual terminal, not a pipe/redirected file -- see
- * src/scheme/modules/creme/term.cr's own stdout_tty_p for the same
+ * src/creme/modules/creme/term.cr's own stdout_tty_p for the same
  * builtin natively; kept in sync so (creme spec)'s color decision behaves
  * identically under bin/creme, --self-hosted, and cvm/cvm. */
 static Value bi_stdout_tty(VM *vm, Value *args, int nargs) {

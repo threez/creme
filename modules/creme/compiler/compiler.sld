@@ -18,7 +18,7 @@
 ;; internals directly. (creme compiler reader) supplies read-program,
 ;; used by compile-source-to-bytes.
 ;;
-;; Scope: unlike the real BytecodeCompiler (src/scheme/compile/
+;; Scope: unlike the real BytecodeCompiler (src/creme/compile/
 ;; bytecode_compiler.cr), this covers define (top-level only, both plain
 ;; and (define (f . args) ...) sugar, plus internal defines hoisted into
 ;; a letrec* -- see hoist-internal-defines), lambda (fixed + dotted-rest
@@ -1605,7 +1605,7 @@
 
     ;; ---------------------------------------------------------------------
     ;; Primitive call fusion -- mirrors the real Crystal analyzer's PRIM_OPS
-    ;; table (src/scheme/compile/ast.cr) and its analyze_app fusion gate
+    ;; table (src/creme/compile/ast.cr) and its analyze_app fusion gate
     ;; (analyzer.cr), just decided here at compile time instead of a
     ;; separate analyze pass (this compiler has none): a call whose head is
     ;; a bare symbol, not locally/upvalue-shadowed, naming a known
@@ -3708,7 +3708,7 @@
     ;; (compile_helper_form's DefineRecordType branch, HelperForm::
     ;; DefineRecordType -> kind 2) -- the raw form is stored as a chunk
     ;; constant and handed to Interpreter#eval_define_record_type at run
-    ;; time (src/scheme/eval/record.cr), which defines a genuine
+    ;; time (src/creme/eval/record.cr), which defines a genuine
     ;; SchemeRecordType/SchemeRecord directly into the global env: real
     ;; record identity (vector? is #f, equal?/display match a type/field
     ;; shape rather than a vector's), identical to what Crystal's own

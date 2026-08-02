@@ -8,7 +8,7 @@
 ;; involved — see modules/creme/extra.sld's own header comment for the same
 ;; rationale. Imports (creme prof) for its profiling helpers, so — unlike
 ;; every other file-based (creme ...) library — this one is NOT available on
-;; musl/Alpine builds (see src/scheme/modules/creme/prof_native.cr's header
+;; musl/Alpine builds (see src/creme/modules/creme/prof_native.cr's header
 ;; comment): any script that (import (creme bench)) at all, even one that
 ;; never calls a profiling export, pulls in (creme prof)'s prof-native half
 ;; transitively.
@@ -176,7 +176,7 @@
     ;; the top-level script's own forms report whatever path it was invoked
     ;; with (relative, when run as `./bin/creme some-script.scm`), while an
     ;; (include)d file's forms always report a fully resolved absolute path
-    ;; (see src/scheme/eval/import.cr's read_include_file) — an intentional
+    ;; (see src/creme/eval/import.cr's read_include_file) — an intentional
     ;; difference elsewhere in the interpreter (matters for backtrace/error-
     ;; reporting invariants), not something a profiling report's
     ;; presentation should surface. Strip the current working directory

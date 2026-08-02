@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -15,7 +15,7 @@ describe "R7RS §6.2.1 Numerical types" do
   end
 
   it "complex? is only available via (scheme complex), not the base library" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: complex\?/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: complex\?/) do
       run("(complex? 3)")
     end
     w("(import (scheme complex)) (complex? 3)").should eq("#t")
@@ -138,7 +138,7 @@ describe "R7RS §6.2.6 Numerical operations" do
   end
 
   it "sqrt returns the principal square root, exact when the input is a perfect square (only available via (scheme inexact), not auto-imported with base)" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: sqrt/) { run("(sqrt 9)") }
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: sqrt/) { run("(sqrt 9)") }
     w("(import (scheme inexact)) (sqrt 9)").should eq("3")
   end
 

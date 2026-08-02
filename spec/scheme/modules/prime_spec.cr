@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme prime)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme prime)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme prime)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme prime)) #{src}")
 end
 
 describe "prime module" do
@@ -38,7 +38,7 @@ describe "prime module" do
   end
 
   it "raises for n < 1" do
-    expect_raises(Scheme::SchemeError) { run("(prime-factors 0)") }
+    expect_raises(Creme::SchemeError) { run("(prime-factors 0)") }
   end
 
   it "lists primes up to n via the sieve" do

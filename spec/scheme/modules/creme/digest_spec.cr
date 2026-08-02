@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme digest)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme digest)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme digest)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme digest)) #{src}")
 end
 
 describe "digest module" do
@@ -44,13 +44,13 @@ describe "digest module" do
   end
 
   it "raises on invalid base64 input" do
-    expect_raises(Scheme::SchemeRuntimeError, /base64-decode: invalid base64/) do
+    expect_raises(Creme::SchemeRuntimeError, /base64-decode: invalid base64/) do
       run(%((base64-decode "not valid base64!!")))
     end
   end
 
   it "raises on non-string arguments" do
-    expect_raises(Scheme::SchemeRuntimeError, /digest-md5: expected string/) do
+    expect_raises(Creme::SchemeRuntimeError, /digest-md5: expected string/) do
       run("(digest-md5 5)")
     end
   end

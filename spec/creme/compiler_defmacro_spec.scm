@@ -41,7 +41,7 @@
         (list (my-when (> 2 1) 'yes) (my-when (> 1 2) 'yes))))))
 
 ;; NOTE: unlike compiler_spec.cr's own check() (which gives native_eval a
-;; BRAND NEW Scheme::Interpreter -- fresh global table -- on every single
+;; BRAND NEW Creme::Interpreter -- fresh global table -- on every single
 ;; call), this whole process shares ONE global table between bootstrap-
 ;; eval and native-eval alike, since load-chunk-bytes always loads into
 ;; the running interpreter's own global (no isolated-environment option).

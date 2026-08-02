@@ -40,7 +40,7 @@
 ;; (creme compiler spec-helper) already imports all of it FOR ITSELF:
 ;; native-eval's `(eval form)` call always runs `form` against THIS
 ;; SCRIPT's own shared global table (Crystal's `eval` builtin ignores its
-;; caller's own lexical env for the 1-arg case -- see src/scheme/modules/
+;; caller's own lexical env for the 1-arg case -- see src/creme/modules/
 ;; scheme/eval.cr), which is populated only by imports THIS FILE makes
 ;; directly, not by a library it imports importing them for its own
 ;; private use. Every should-match-native? test source below that uses

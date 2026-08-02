@@ -1,7 +1,7 @@
 ;; ===========================================================================
 ;; (creme syntax mex): adjacency-based M-expression application syntax --
 ;;   f(x y)   desugars to   (f x y)
-;; -- as a `#lang (creme syntax mex)` dialect (see src/scheme/runner.cr's `#lang`
+;; -- as a `#lang (creme syntax mex)` dialect (see src/creme/runner.cr's `#lang`
 ;; handling). No second bracket character: the disambiguator is purely
 ;; lexical adjacency -- is there a character gap between the symbol and
 ;; the `(`? `f (x y)` (WITH a space) is NOT sugar; it reads as two
@@ -11,7 +11,7 @@
 ;;
 ;; File-based (no FFI of its own — same rationale as modules/creme/
 ;; numfmt.sld's header comment), but built on top of `(creme reader)`
-;; (src/scheme/modules/creme/reader.cr), which IS Crystal-native: it
+;; (src/creme/modules/creme/reader.cr), which IS Crystal-native: it
 ;; exposes the real Lexer/Reader to Scheme as a token-stream hook so the
 ;; dialect-specific transform below (the actual "parser" for this
 ;; syntax) can be genuine Scheme code, while lexical grammar (numbers,
@@ -59,7 +59,7 @@
                (cons nxt (cons cur (mex-desugar-tokens (cddr tokens))))
                (cons cur (mex-desugar-tokens (cdr tokens))))))))
 
-    ;; The #lang contract this dialect implements (see src/scheme/
+    ;; The #lang contract this dialect implements (see src/creme/
     ;; runner.cr): src is everything in the file after the `#lang` line;
     ;; the result is a proper list of ordinary forms, ready for the
     ;; analyzer/compiler/VM exactly as if the plain Reader had produced

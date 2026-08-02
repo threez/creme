@@ -14,24 +14,24 @@ end
 describe "backtraces" do
   it "attaches no frames/position to a parse error (raised before any eval)" do
     ex = begin
-      Scheme::Reader.read_all(")")
+      Creme::Reader.read_all(")")
       nil
-    rescue e : Scheme::SchemeParseError
+    rescue e : Creme::SchemeParseError
       e
     end
     ex.should_not be_nil
     if ex
-      ex.frames.should eq([] of Scheme::Frame)
+      ex.frames.should eq([] of Creme::Frame)
       ex.pos.should be_nil
     end
   end
 
   it "captures the raising builtin's own position for a non-tail call" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     ex = begin
-      Scheme.run_source(interp, "(define (f x) (+ 1 (car x))) (f 5)", source_name: "prog.scm")
+      Creme.run_source(interp, "(define (f x) (+ 1 (car x))) (f 5)", source_name: "prog.scm")
       nil
-    rescue e : Scheme::SchemeRuntimeError
+    rescue e : Creme::SchemeRuntimeError
       e
     end
     ex.should_not be_nil
@@ -46,11 +46,11 @@ describe "backtraces" do
   end
 
   it "collapses deep tail recursion to a single frame instead of one per call" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     ex = begin
-      Scheme.run_source(interp, "(define (loop n) (if (= n 0) (car 5) (loop (- n 1)))) (loop 50)")
+      Creme.run_source(interp, "(define (loop n) (if (= n 0) (car 5) (loop (- n 1)))) (loop 50)")
       nil
-    rescue e : Scheme::SchemeRuntimeError
+    rescue e : Creme::SchemeRuntimeError
       e
     end
     ex.should_not be_nil
@@ -58,15 +58,15 @@ describe "backtraces" do
   end
 
   it "reports the innermost sub-expression's own position, several non-tail operands deep" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     ex = begin
-      Scheme.run_source(interp, <<-SCM, source_name: "prog.scm")
+      Creme.run_source(interp, <<-SCM, source_name: "prog.scm")
         (define (f x)
           (+ 1 (+ 2 (+ 3 (car x)))))
         (f 5)
         SCM
       nil
-    rescue e : Scheme::SchemeRuntimeError
+    rescue e : Creme::SchemeRuntimeError
       e
     end
     ex.should_not be_nil
@@ -96,11 +96,11 @@ describe "backtraces" do
         (wrapper 5)
         SCHEME
 
-      interp = Scheme::Interpreter.new(library_search_path: [dir, "./modules"])
+      interp = Creme::Interpreter.new(library_search_path: [dir, "./modules"])
       ex = begin
-        Scheme.run_file(interp, File.join(dir, "main.scm"))
+        Creme.run_file(interp, File.join(dir, "main.scm"))
         nil
-      rescue e : Scheme::SchemeRuntimeError
+      rescue e : Creme::SchemeRuntimeError
         e
       end
       ex.should_not be_nil

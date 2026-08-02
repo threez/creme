@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme csv)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme csv)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme csv)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme csv)) #{src}")
 end
 
 describe "csv module" do
@@ -44,7 +44,7 @@ describe "csv module" do
   end
 
   it "raises on malformed csv" do
-    expect_raises(Scheme::SchemeRuntimeError, /csv-read: /) do
+    expect_raises(Creme::SchemeRuntimeError, /csv-read: /) do
       run(%((csv-read "\\"unterminated")))
     end
   end

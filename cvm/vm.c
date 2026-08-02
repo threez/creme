@@ -1,4 +1,4 @@
-/* The dispatch loop — the C counterpart of src/scheme/eval/vm.cr's #execute
+/* The dispatch loop — the C counterpart of src/creme/eval/vm.cr's #execute
  * (fetch/decode/dispatch over an explicit CallFrame stack, non-tail calls
  * push a new register window, tail calls reuse the current frame's window).
  * Only implements the exact opcode subset competition/scheme/bench/creme.scm compiles to — see
@@ -619,7 +619,7 @@ int num_eq(Value x, Value y) {
  * so it's too large for the compiler to inline at every OP_ADD/OP_TESTLT/
  * etc. call site in cvm_dispatch below — confirmed via `objdump -dr vm.o`:
  * cvm_dispatch has real out-of-line `callq`s to these on every arithmetic/
- * comparison instruction, even for two plain fixnums. src/scheme/eval/
+ * comparison instruction, even for two plain fixnums. src/creme/eval/
  * vm.cr's own Op::Add/Op::TestLtImm arms already avoid exactly this by
  * inlining their own int/int fast path directly in the dispatch loop
  * instead of routing through a shared helper — these mirror that here.
@@ -673,7 +673,7 @@ static inline int fast_eq(Value x, Value y) {
 }
 
 /* ---- eqv? ----
- * Mirrors Scheme.scheme_eqv? for every tag this prototype has: numbers/
+ * Mirrors Creme.scheme_eqv? for every tag this prototype has: numbers/
  * chars/bools/nil compare by value, strings/symbols by content (this
  * prototype has no symbol interning to compare by identity against, and
  * R7RS leaves string eqv? implementation-defined for non-identical but
@@ -1529,7 +1529,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       [OP_VECREF] = &&L_OP_VECREF, [OP_VECLEN] = &&L_OP_VECLEN, [OP_VECSET] = &&L_OP_VECSET,
       [OP_VECLENUP] = &&L_OP_VECLENUP, [OP_CASEMATCH] = &&L_OP_CASEMATCH,
       [OP_SUBRETURN] = &&L_OP_SUBRETURN, [OP_MULRETURN] = &&L_OP_MULRETURN,
-      /* Ops present in the real Scheme::Op enum (opcode.cr) but not yet
+      /* Ops present in the real Creme::Op enum (opcode.cr) but not yet
        * implemented here — see cvm/README.md for current coverage. Each
        * gets a real dispatch-table entry (required so OP_COUNT/array
        * sizing/bounds-checking stay correct and a chunk that uses one of
@@ -2699,9 +2699,9 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     cvm_abort("cvm: unhandled exception (re-raised, no outer guard)");
   }
 
-  /* Every op in Scheme::Op (opcode.cr) has a real dispatch_table entry
+  /* Every op in Creme::Op (opcode.cr) has a real dispatch_table entry
    * above now (full 119/119 parity) -- no L_UNIMPL fallback label is
-   * live here anymore. If a future Scheme::Op grows a new member without
+   * live here anymore. If a future Creme::Op grows a new member without
    * immediate cvm support, add its [OP_X] = &&L_UNIMPL entry back to the
    * dispatch_table initializer plus a shared `L_UNIMPL:
    * cvm_abort("cvm: opcode %d not implemented", ins->op);` label here

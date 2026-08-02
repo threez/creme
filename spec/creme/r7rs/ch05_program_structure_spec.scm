@@ -3,7 +3,7 @@
 ;; spec.cr -- see modules/creme/spec.sld's own header comment for the
 ;; framework this uses. Ported per the task porting spec/scheme/r7rs/*.cr
 ;; into spec/creme/r7rs/*.scm: unlike the Crystal original (which builds a
-;; fresh Scheme::Interpreter per `run`/`w` call purely for isolation),
+;; fresh Creme::Interpreter per `run`/`w` call purely for isolation),
 ;; every case here runs directly against this file's own single, real
 ;; Scheme runtime -- no run(src)/w(src) string-eval indirection, just
 ;; ordinary Scheme forms compared with should-equal?/should-raise?

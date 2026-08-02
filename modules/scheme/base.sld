@@ -2,7 +2,7 @@
 ;; (scheme base): thin re-export frontend over (creme builtin base)
 ;;
 ;; The native/builtin split lives entirely behind (creme builtin base) now
-;; (see src/scheme/modules/scheme/base.cr) — that native family already
+;; (see src/creme/modules/scheme/base.cr) — that native family already
 ;; includes the Scheme-defined list-copy/list-set! layer (registered under
 ;; the very same ["creme","builtin","base"] key, overwriting the raw
 ;; Crystal-only registration during Interpreter#initialize), so this

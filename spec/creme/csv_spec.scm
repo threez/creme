@@ -6,7 +6,7 @@
 ;;
 ;; (creme csv) used to be entirely absent from cvm. Implemented as a
 ;; small, self-contained RFC4180-ish parser/writer (cvm/csv.c) rather
-;; than a port of native's own chunked-IO-optimized Scheme::Csv (see that
+;; than a port of native's own chunked-IO-optimized Creme::Csv (see that
 ;; file's own header comment on why the two designs differ) -- both bulk
 ;; (csv-read/csv-write/csv-read-headers/csv-write-headers) and streaming
 ;; (csv-reader-open/-read!/-?, csv-writer-open/-row!/-?) built on the same

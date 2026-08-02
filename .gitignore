@@ -24,7 +24,7 @@ crystal-run-*.tm.core
 # (creme ffi)'s small precompiled dlopen/libffi shim (see ffi_shim.c's own
 # header comment) -- built by the root Makefile's ffi_shim.o rule, same
 # convention as /cvm/*.o above.
-/src/scheme/modules/creme/ffi_shim.o
+/src/creme/modules/creme/ffi_shim.o
 
 # Libraries don't need dependency lock
 # Dependencies will be locked in applications that use them

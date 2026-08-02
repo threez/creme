@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (scheme write) (scheme char) (scheme cxr) (creme peg)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (scheme write) (scheme char) (scheme cxr) (creme peg)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (scheme char) (creme peg)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (scheme char) (creme peg)) #{src}")
 end
 
 describe "(creme peg)" do
@@ -68,13 +68,13 @@ describe "(creme peg)" do
   end
 
   it "peg-must raises a specific error instead of backtracking on failure" do
-    expect_raises(Scheme::SchemeRuntimeError, /wanted a/) do
+    expect_raises(Creme::SchemeRuntimeError, /wanted a/) do
       run(%[(peg-run (peg-must (peg-lit "a") "wanted a") "b")])
     end
   end
 
   it "peg-run raises if the parser doesn't consume the whole input" do
-    expect_raises(Scheme::SchemeRuntimeError, /did not consume all input/) do
+    expect_raises(Creme::SchemeRuntimeError, /did not consume all input/) do
       run(%[(peg-run (peg-lit "a") "ab")])
     end
   end

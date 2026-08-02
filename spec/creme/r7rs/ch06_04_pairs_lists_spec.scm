@@ -3,7 +3,7 @@
 ;; own cases -- see modules/creme/spec.sld's own header comment for the
 ;; framework this uses.
 ;;
-;; Unlike that Crystal file (which drives a fresh Scheme::Interpreter per
+;; Unlike that Crystal file (which drives a fresh Creme::Interpreter per
 ;; `w`/`run` call, embedding each case's Scheme source as a string), this
 ;; file already runs directly in a real Scheme runtime, so every case is
 ;; written as ordinary Scheme forms and compared directly against literal

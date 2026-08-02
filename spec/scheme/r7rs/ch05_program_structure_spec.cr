@@ -1,9 +1,9 @@
 require "../../spec_helper"
 require "file_utils"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -30,9 +30,9 @@ describe "R7RS §5.2 Import declarations" do
   end
 
   it "(except import-set identifier ...) imports everything except the listed identifiers" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: \+/) do
-      Scheme.run_source(interp, "(import (except (scheme base) +)) (+ 1 2)")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: \+/) do
+      Creme.run_source(interp, "(import (except (scheme base) +)) (+ 1 2)")
     end
   end
 
@@ -146,7 +146,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
   end
 
   it "a library body sees only what it explicitly imports, not the importer's own bindings" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: \+/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: \+/) do
       run(<<-SCM)
         (define-library (test no-implicit-base)
           (export broken)
@@ -163,9 +163,9 @@ describe "R7RS §5.6 Libraries (define-library)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "triple.scm"), "(define (triple x) (* x 3))")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("6")
+      Creme.run_source(interp, <<-SCM).write_string.should eq("6")
         (define-library (test include-lib)
           (export triple)
           (import (scheme base))
@@ -183,9 +183,9 @@ describe "R7RS §5.6 Libraries (define-library)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "quad.scm"), "(DEFINE (QUADRUPLE X) (* X 4))")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("8")
+      Creme.run_source(interp, <<-SCM).write_string.should eq("8")
         (define-library (test include-ci-lib)
           (export quadruple)
           (import (scheme base))

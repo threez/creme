@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -15,11 +15,11 @@ end
 # loop procedure), not just the computed value. Mirrors BytecodeCompiler.
 # run_program's own analyze-then-compile_program pairing (bytecode_
 # compiler.cr), just stopping before the VM.run step.
-private def compile_define(src : String) : Scheme::Chunk
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  form = Scheme.forms_for(interp, src, "spec").first
+private def compile_define(src : String) : Creme::Chunk
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  form = Creme.forms_for(interp, src, "spec").first
   node = interp.analyze(form, interp.global)
-  chunk = Scheme::BytecodeCompiler.compile_program([node])
+  chunk = Creme::BytecodeCompiler.compile_program([node])
   chunk.protos.first
 end
 
@@ -65,7 +65,7 @@ describe "general (non-counted) loop closure elimination" do
                 (else (scan (cdr entries))))))
     SCM
     chunk.protos.should be_empty
-    chunk.instructions.none? { |i| i.op == Scheme::Op::Closure }.should be_true
+    chunk.instructions.none? { |i| i.op == Creme::Op::Closure }.should be_true
   end
 
   it "computes correctly with no accumulator (for-each style, walking cdr)" do
@@ -84,7 +84,7 @@ describe "general (non-counted) loop closure elimination" do
           (if (null? l) n (loop (cdr l) (+ n 1)))))
     SCM
     chunk.protos.should be_empty
-    chunk.instructions.none? { |i| i.op == Scheme::Op::Closure }.should be_true
+    chunk.instructions.none? { |i| i.op == Creme::Op::Closure }.should be_true
   end
 
   it "computes correctly with multiple loop-carried values and no counter at all" do
@@ -139,7 +139,7 @@ describe "general (non-counted) loop closure elimination" do
               (lambda () acc)
               (loop (+ i 1) (cons (lambda () i) acc)))))
     SCM
-    chunk.instructions.any? { |i| i.op == Scheme::Op::Closure }.should be_true
+    chunk.instructions.any? { |i| i.op == Creme::Op::Closure }.should be_true
   end
 
   it "computes correctly for the equivalent do-loop shape" do
@@ -158,7 +158,7 @@ describe "general (non-counted) loop closure elimination" do
             ((null? l) n)))
     SCM
     chunk.protos.should be_empty
-    chunk.instructions.none? { |i| i.op == Scheme::Op::Closure }.should be_true
+    chunk.instructions.none? { |i| i.op == Creme::Op::Closure }.should be_true
   end
 
   it "computes correctly at a larger scale (matching hashtable-test's own order of magnitude)" do

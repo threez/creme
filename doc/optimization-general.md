@@ -1,7 +1,7 @@
 # The performance journey — shared across both backends
 
 This project has two independent implementations of the same bytecode
-format: the native Crystal compiler/VM (`src/scheme/`) and `cvm`, a
+format: the native Crystal compiler/VM (`src/creme/`) and `cvm`, a
 standalone C11 VM with its own self-hosted Scheme-to-bytecode compiler
 (`modules/creme/compiler/compiler.sld`, `cvm/`). This document covers
 optimization work that is genuinely cross-cutting — a technique designed,
@@ -74,7 +74,7 @@ counted-loop sites in the standard micro-benchmark suite compile to
 dropped noticeably for both the native Crystal VM and cvm.
 
 This landed first in the native compiler and both VM backends together
-(the new opcodes needed real implementations in both `src/scheme/eval/
+(the new opcodes needed real implementations in both `src/creme/eval/
 vm.cr` and `cvm/vm.c` to be usable at all, regardless of which compiler
 emits them). The self-hosted compiler is a genuinely separate
 implementation — it compiles from raw s-expressions, with no typed AST

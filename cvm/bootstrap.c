@@ -1,6 +1,6 @@
 /* (creme bootstrap) — see bootstrap.h.
  *
- * The cvm-side counterpart of src/scheme/modules/creme/bootstrap.cr's
+ * The cvm-side counterpart of src/creme/modules/creme/bootstrap.cr's
  * `load-chunk-bytes`/`import!`/(indirectly) `expand-if-macro` — same
  * names/contracts, so the self-hosted compiler (modules/creme/compiler/
  * {reader,bytecode,compiler}.sld) and anything built on top of it (e.g. a
@@ -356,7 +356,7 @@ static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
  * compiler_libraries_spec.scm's "imports a library file written by an
  * earlier form in the same program" case, which writes then deletes a
  * throwaway generated .sld file. Whole-file write (create/truncate),
- * matching src/scheme/modules/creme/file.cr's own file-write contract. */
+ * matching src/creme/modules/creme/file.cr's own file-write contract. */
 static Value bi_file_write(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("file-write: expected (path content)");

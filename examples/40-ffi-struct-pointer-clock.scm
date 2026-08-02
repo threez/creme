@@ -6,7 +6,7 @@
 ;; byte offset in the target C ABI, and (creme foreign)'s
 ;; define-foreign-struct turns a byte-offset table into ordinary-looking
 ;; accessor/mutator procedures. See cvm/creme_ffi.c's and
-;; src/scheme/modules/creme/ffi.cr's own header comments for the exact
+;; src/creme/modules/creme/ffi.cr's own header comments for the exact
 ;; scope (still no automatic layout/alignment computation -- offsets must
 ;; come from the real ABI), and modules/creme/foreign.sld's header
 ;; comment for define-foreign-struct's own contract.

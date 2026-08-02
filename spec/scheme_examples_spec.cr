@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 private def run_example(path : String) : Nil
-  Scheme.run_file(Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false), path)
+  Creme.run_file(Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false), path)
 end
 
 describe "integration: examples/*.scm" do

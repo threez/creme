@@ -1,9 +1,9 @@
 require "../../spec_helper"
 require "file_utils"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -16,9 +16,9 @@ describe "R7RS §6.14 System interface" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "triple.scm"), "(define (triple x) (* x 3))")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("15")
+      Creme.run_source(interp, <<-SCM).write_string.should eq("15")
         (import (scheme load))
         (load "triple.scm")
         (triple 5)
@@ -33,8 +33,8 @@ describe "R7RS §6.14 System interface" do
     Dir.mkdir_p(dir)
     begin
       path = File.join(dir, "probe.txt")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("(#f #t #f)")
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+      Creme.run_source(interp, <<-SCM).write_string.should eq("(#f #t #f)")
         (import (scheme file))
         (define path "#{path}")
         (define before (file-exists? path))
@@ -53,10 +53,10 @@ describe "R7RS §6.14 System interface" do
     w("(import (scheme process-context)) (list? (command-line))").should eq("#t")
   end
 
-  it "exit raises a catchable Scheme::SchemeExit rather than terminating the host process, per this implementation's embedding contract" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeExit) do
-      Scheme.run_source(interp, "(import (scheme process-context)) (exit)")
+  it "exit raises a catchable Creme::SchemeExit rather than terminating the host process, per this implementation's embedding contract" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeExit) do
+      Creme.run_source(interp, "(import (scheme process-context)) (exit)")
     end
   end
 

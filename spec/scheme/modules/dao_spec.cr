@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme dao) (creme sql)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme dao) (creme sql)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme dao) (creme sql)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme dao) (creme sql)) #{src}")
 end
 
 private def fresh_widget_dao : String
@@ -113,7 +113,7 @@ describe "dao module" do
   end
 
   it "a not-null violation raises" do
-    expect_raises(Scheme::SchemeRuntimeError) do
+    expect_raises(Creme::SchemeRuntimeError) do
       run(<<-SCM)
         #{fresh_widget_dao}
         (dao-insert! conn 'widget (list 'qty 1))

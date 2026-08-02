@@ -1,8 +1,8 @@
 require "../../../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -141,6 +141,6 @@ describe "read-error?" do
   end
 
   it "does not misfire for a script's own (unrelated) parse errors" do
-    expect_raises(Scheme::SchemeParseError) { run(")") }
+    expect_raises(Creme::SchemeParseError) { run(")") }
   end
 end

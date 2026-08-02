@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -27,7 +27,7 @@ describe "let-values" do
   end
 
   it "raises on arity mismatch" do
-    expect_raises(Scheme::SchemeRuntimeError, /expected 2 value\(s\), got 1/) do
+    expect_raises(Creme::SchemeRuntimeError, /expected 2 value\(s\), got 1/) do
       run("(let-values (((a b) 5)) a)")
     end
   end
@@ -39,7 +39,7 @@ describe "let*-values" do
   end
 
   it "an earlier binding is NOT visible to let-values' parallel bindings" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: a/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: a/) do
       run("(let-values (((a b) (values 1 2)) ((c) (+ a b))) c)")
     end
   end
@@ -65,7 +65,7 @@ describe "let-syntax" do
   end
 
   it "the macro is not visible outside the let-syntax body" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: double/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: double/) do
       run("(let-syntax ((double (syntax-rules () ((_ e) (* 2 e))))) (double 21)) (double 1)")
     end
   end

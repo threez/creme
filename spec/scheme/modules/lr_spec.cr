@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme lr)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme lr)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme lr)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme lr)) #{src}")
 end
 
 # A tiny tiered-precedence arithmetic grammar, shared by several examples
@@ -69,7 +69,7 @@ describe "(creme lr)" do
   end
 
   it "build-parser raises on a shift/reduce conflict instead of guessing" do
-    expect_raises(Scheme::SchemeRuntimeError, /conflict/) do
+    expect_raises(Creme::SchemeRuntimeError, /conflict/) do
       run(<<-SCHEME)
         ;; classic dangling-"else"-shaped ambiguity: a flat, non-tiered
         ;; `expr -> expr op expr | num` is genuinely ambiguous (no precedence
@@ -85,7 +85,7 @@ describe "(creme lr)" do
   end
 
   it "lr-parse raises on an unexpected token" do
-    expect_raises(Scheme::SchemeRuntimeError, /unexpected token/) do
+    expect_raises(Creme::SchemeRuntimeError, /unexpected token/) do
       run(<<-SCHEME)
         #{ARITH_GRAMMAR}
         (lr-parse pt (list (tok 'plus #f)) car cdr)

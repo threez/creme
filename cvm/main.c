@@ -167,7 +167,7 @@ static const struct {
  * path, but affecting the ordinary native --emit-cvm gate too,
  * independent of that: cvm's own C-level register_fn split (builtins.c/
  * strings.c's own file/function boundaries) doesn't line up 1:1 with
- * Crystal's native family grouping (src/scheme/modules/scheme/*.cr's own
+ * Crystal's native family grouping (src/creme/modules/scheme/*.cr's own
  * register_library calls). A program using ONLY (scheme char)
  * legitimately gets required_families = [..., "char"] (Crystal's char.cr
  * registers string-downcase/string-upcase/string-ci-comparisons/string-
@@ -191,7 +191,7 @@ static const struct {
  * too.
  *
  * A third case of the same mismatch: native Crystal's (creme file)/
- * (scheme file) (src/scheme/modules/creme/file.cr) groups file-write/
+ * (scheme file) (src/creme/modules/creme/file.cr) groups file-write/
  * delete-file under family "file" alongside file-exists?/open-input-
  * file/etc, but cvm's own file-write/delete-file (bi_file_write/
  * bi_delete_file) are implemented in bootstrap.c and registered only by

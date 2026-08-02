@@ -1,0 +1,423 @@
+# ===========================================================================
+# define-library / import — R7RS §5.6 library system
+# ===========================================================================
+#
+# Supported grammar:
+#   (define-library (name segment ...)
+#     (export export-spec ...)      ; export-spec = identifier | (rename internal external)
+#     (import import-set ...)
+#     (begin command-or-definition ...)
+#     (include filename ...) (include-ci filename ...)
+#     (cond-expand cond-expand-clause ...))
+#
+# `import` is also legal as a standalone top-level form, using the same
+# import-set grammar (only/except/prefix/rename — see library.cr).
+#
+# Each library gets its own fresh Env (no parent) populated by evaluating its
+# begin/include bodies against it — `define` already just calls
+# `env.define` against whatever Env it's handed (see eval_define), so this
+# needs no new Env capability. The one deliberate exception is (builtin
+# base) (and (builtin write)), whose Env *is* @base_env itself — see
+# modules/scheme/base.cr. (scheme base)/(scheme write) are ordinary
+# libraries built on top of those through this same machinery — they
+# `(import (builtin base))` and get their own fresh Env like any other
+# library. @global (the top-level program's own root Env, separate from
+# @base_env) only sees (scheme base)/(scheme write) bindings if
+# Interpreter.new(auto_import_base: true) (the default) copies them in at
+# construction, or the program itself imports them.
+#
+# `include`/`include-ci`/`cond-expand` inside a library body are handled in
+# process_library_declarations below: cond-expand splices its matched clause's
+# declarations back through the same method, and include/include-ci read and
+# evaluate the named files' forms against the library's own Env.
+
+module Creme
+  class Interpreter
+    # Registers a library from an already-built Env + exports table, without
+    # going through source text — the mechanism (builtin base) uses to wrap
+    # @base_env itself as a library (see modules/scheme/base.cr), and
+    # generally useful for a host embedding this interpreter to expose its
+    # own Crystal-native libraries the same way the R7RS standard/`(list
+    # ...)` libraries do.
+    def register_library(name : Array(String), env : Env, exports : Hash(String, String)) : SchemeLibrary
+      library = SchemeLibrary.new(name, env, exports)
+      @libraries[name] = library
+      library
+    end
+
+    # Every library name the interpreter currently knows about (space-joined,
+    # e.g. "list sql", "scheme base") — everything registered so far, whether
+    # via a Crystal-native installer or a previously-imported .sld file.
+    # Doesn't enumerate not-yet-imported file-based libraries discoverable
+    # under library_search_path (unlike the old require-era
+    # available_modules, which eagerly globbed *.scm — .sld resolution is
+    # by exact name, not directory listing, so there's nothing to glob).
+    # Useful for building a deny-list-style allowlist, e.g.
+    # `interp.available_libraries - ["list process", "list file", "list sql", "list env"]`.
+    def available_libraries : Array(String)
+      (@libraries.keys + @pending_libraries.keys).uniq.map { |name| SchemeLibrary.library_name_string(name) }
+    end
+
+    # An already-registered library's own export alist (external name ->
+    # internal name), or nil if that library hasn't been imported/
+    # registered yet. Exposed to Scheme via (creme introspection)'s
+    # library-exports builtin -- the self-hosted compiler's own alias-
+    # generation logic (compiler.sld's library-export-alist) normally
+    # learns a library's exports by reading its .sld source directly, which
+    # only works for a FILE-based library; this is the fallback for a
+    # NATIVE (Crystal-builtin) one, which has no .sld file to read but
+    # already tracks its own exports right here regardless.
+    def library_exports(name : Array(String)) : Hash(String, String)?
+      @libraries[name]?.try(&.exports)
+    end
+
+    # Used by Creme.run_file so a relative path inside a top-level script
+    # (e.g. a future relative-path library form) resolves against the
+    # script's own directory rather than the process's CWD. @load_dirs is
+    # also pushed/popped by load_library_file below, for the same reason
+    # when a .sld file itself has nested relative resolution needs.
+    def push_load_dir(dir : String) : Nil
+      @load_dirs << dir
+    end
+
+    def pop_load_dir : Nil
+      @load_dirs.pop?
+    end
+
+    def eval_define_library(expr : Cons, env : Env) : SchemeValue
+      parts = Creme.list_to_a(expr.cdr)
+      raise SchemeRuntimeError.new("define-library: malformed") if parts.empty?
+      name = SchemeLibrary.parse_library_name(parts[0])
+
+      return parts[0] if @libraries.has_key?(name)
+      raise SchemeRuntimeError.new("import: circular library dependency: (#{SchemeLibrary.library_name_string(name)})") if @libraries_loading.includes?(name)
+
+      @libraries_loading << name
+      begin
+        build_library(name, parts[1..])
+      ensure
+        @libraries_loading.delete(name)
+      end
+      parts[0]
+    end
+
+    # Processes each declaration form into lib_env/export_specs. A
+    # cond-expand declaration is not itself a member of the grammar's
+    # top-level result — it's resolved immediately by splicing its matched
+    # clause's own declarations back through this same method (recursively),
+    # exactly as if they'd appeared inline in the library body at that
+    # position — so include/import/begin/etc. nested inside a matched
+    # cond-expand clause work the same as everywhere else.
+    private def process_library_declarations(declarations : Array(SchemeValue), lib_env : Env, export_specs : Array(SchemeValue)) : Nil
+      declarations.each do |decl|
+        raise SchemeRuntimeError.new("define-library: bad declaration #{decl.write_string}") unless decl.is_a?(Cons)
+        tag = decl.car
+        raise SchemeRuntimeError.new("define-library: bad declaration #{decl.write_string}") unless tag.is_a?(SchemeSym)
+        args = Creme.list_to_a(decl.cdr)
+        case tag.name
+        when "export"
+          export_specs.concat(args)
+        when "import"
+          args.each { |import_set| import_into(lib_env, import_set) }
+        when "begin"
+          BytecodeCompiler.run_program(self, args, lib_env)
+        when "include", "include-ci"
+          fold_case = tag.name == "include-ci"
+          args.each do |filename_form|
+            raise SchemeRuntimeError.new("define-library: #{tag.name} expects string filenames") unless filename_form.is_a?(SchemeStr)
+            include_file(filename_form.value, lib_env, fold_case)
+          end
+        when "cond-expand"
+          process_library_declarations(matched_cond_expand_declarations(args), lib_env, export_specs)
+        else
+          raise SchemeRuntimeError.new("define-library: unknown declaration '#{tag.name}'")
+        end
+      end
+    end
+
+    # Finds the first ce-clause among a library's cond-expand declaration
+    # whose feature requirement is satisfied (or is `else`), mirroring
+    # eval_cond_expand's expression-level semantics — but returns the
+    # matched clause's own declaration forms (to be spliced back into the
+    # enclosing declaration list) instead of evaluating them as expressions.
+    private def matched_cond_expand_declarations(clauses : Array(SchemeValue)) : Array(SchemeValue)
+      clauses.each do |clause|
+        parts = Creme.list_to_a(clause)
+        raise SchemeRuntimeError.new("define-library: cond-expand: bad clause") if parts.empty?
+        requirement = parts[0]
+        matched = (requirement.is_a?(SchemeSym) && requirement.name == "else") || cond_expand_matches?(requirement)
+        return parts[1..] if matched
+      end
+      [] of SchemeValue
+    end
+
+    # Resolves filename against the current load directory (matching
+    # load_library_file's own relative-path convention) and reads it as a
+    # sequence of top-level forms, without evaluating them — the shared
+    # read-only half used both by define-library's include/include-ci
+    # declarations (include_file below evaluates the forms against the
+    # library's own Env) and by the standalone include/include-ci
+    # expression type (analyze_include below reads the forms and analyzes
+    # them inline into a BeginNode — the same way begin's own body is
+    # handled). include-ci additionally case-folds the source text before
+    # lexing, matching #!fold-case's documented effect. Pushes/pops the
+    # resolved file's own directory onto @load_dirs for the duration of the
+    # yielded block, so relative paths nested inside the included file (a
+    # further include, or a relative import) resolve correctly.
+    private def read_include_file(filename : String, fold_case : Bool, &) : Nil
+      dir = @load_dirs.last?
+      path = dir ? File.join(dir, filename) : filename
+      raise SchemeRuntimeError.new("include: #{filename}: file not found") unless File.exists?(path)
+      resolved = File.realpath(path)
+      source = File.read(resolved)
+      source = source.downcase if fold_case
+      forms = Reader.read_all(source, resolved)
+      @load_dirs << File.dirname(resolved)
+      begin
+        yield forms
+      ensure
+        @load_dirs.pop
+      end
+    end
+
+    # define-library's include/include-ci declaration: reads filename's
+    # forms and evaluates each against lib_env, as if they'd appeared
+    # inline in a begin declaration at this position.
+    private def include_file(filename : String, lib_env : Env, fold_case : Bool) : Nil
+      read_include_file(filename, fold_case) { |forms| BytecodeCompiler.run_program(self, forms, lib_env) }
+    end
+
+    # The standalone include/include-ci expression type (§4.1.7): reads and
+    # concatenates every named file's forms into one array, which analyze_include
+    # analyzes inline into a BeginNode — "the include or include-ci expression"
+    # is replaced by "a begin expression containing what was read from the
+    # files," per R7RS's own wording.
+    private def eval_include(filenames : Array(SchemeValue), fold_case : Bool) : Array(SchemeValue)
+      all_forms = [] of SchemeValue
+      filenames.each do |filename_form|
+        raise SchemeRuntimeError.new("include: expects string filenames") unless filename_form.is_a?(SchemeStr)
+        read_include_file(filename_form.value, fold_case) { |forms| all_forms.concat(forms) }
+      end
+      all_forms
+    end
+
+    # Builds and registers a library from its declaration forms, evaluating
+    # begin-bodies against a fresh Env. Shared by eval_define_library (inline
+    # forms) and load_library_file (a single define-library per .sld file).
+    #
+    # The Env is deliberately parentless — a library body sees ONLY what it
+    # explicitly (import ...)s, same as any other Scheme binding it defines
+    # itself. This is required for R7RS's own idioms to work correctly, e.g.
+    # (import (except (scheme base) set!) (rename ... (put! set!))) only
+    # makes sense if `set!` isn't still reachable through some fallback
+    # parent chain after being excluded — an implicit @global parent would
+    # silently defeat `except`/`rename` import-set exclusions. A library
+    # that wants +/car/display/etc. must (import (scheme base)) (and
+    # (scheme write)) explicitly, exactly like the R7RS spec's own examples.
+    private def build_library(name : Array(String), declarations : Array(SchemeValue)) : SchemeLibrary
+      lib_env = Env.new
+      export_specs = [] of SchemeValue
+      process_library_declarations(declarations, lib_env, export_specs)
+
+      exports = {} of String => String
+      export_specs.each do |spec|
+        case spec
+        when SchemeSym
+          exports[spec.name] = spec.name
+        when Cons
+          rename_parts = Creme.list_to_a(spec)
+          unless rename_parts.size == 3 && (r = rename_parts[0]).is_a?(SchemeSym) && r.name == "rename" &&
+                 (internal = rename_parts[1]).is_a?(SchemeSym) && (external = rename_parts[2]).is_a?(SchemeSym)
+            raise SchemeRuntimeError.new("define-library: bad export spec #{spec.write_string}")
+          end
+          exports[external.name] = internal.name
+        else
+          raise SchemeRuntimeError.new("define-library: bad export spec #{spec.write_string}")
+        end
+      end
+
+      register_library(name, lib_env, exports)
+    end
+
+    def eval_import(expr : Cons, env : Env) : SchemeValue
+      Creme.list_to_a(expr.cdr).each { |import_set| import_into(env, import_set) }
+      NIL
+    end
+
+    def import_into(into : Env, import_set : SchemeValue) : Nil
+      resolved = SchemeLibrary.resolve_import_set(import_set) { |name| resolve_library(name) }
+      SchemeLibrary.import_bindings(into, resolved)
+    end
+
+    private def resolve_library(name : Array(String)) : SchemeLibrary
+      if (allowed = @allowed_libraries) && !allowed.includes?(SchemeLibrary.library_name_string(name))
+        raise SchemeRuntimeError.new("import: library (#{SchemeLibrary.library_name_string(name)}) is not permitted")
+      end
+      construct_pending_library(name) || load_library_file(name) ||
+        raise SchemeRuntimeError.new("import: unknown library (#{SchemeLibrary.library_name_string(name)})")
+    end
+
+    # Resolves (a b c) -> "a/b/c.sld" searched across @library_search_path,
+    # parallel to require.cr's find_in_module_search_path/load_scheme_module.
+    # A .sld file must contain exactly one top-level (define-library ...)
+    # form whose name matches the requested name.
+    private def load_library_file(name : Array(String)) : SchemeLibrary?
+      relative = File.join(name) + ".sld"
+      path = @library_search_path.each do |dir|
+        candidate = File.join(dir, relative)
+        break candidate if File.exists?(candidate)
+      end
+      return nil unless path.is_a?(String)
+      resolved = File.realpath(path)
+
+      raise SchemeRuntimeError.new("import: circular library dependency: (#{SchemeLibrary.library_name_string(name)})") if @libraries_loading.includes?(name)
+      @libraries_loading << name
+      begin
+        forms = Reader.read_all(File.read(resolved), resolved)
+        raise SchemeRuntimeError.new("import: #{relative}: expected exactly one (define-library ...) form") unless forms.size == 1
+        form = forms[0]
+        unless form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && head.name == "define-library"
+          raise SchemeRuntimeError.new("import: #{relative}: expected a (define-library ...) form")
+        end
+        parts = Creme.list_to_a(form.cdr)
+        raise SchemeRuntimeError.new("import: #{relative}: malformed define-library") if parts.empty?
+        file_name = SchemeLibrary.parse_library_name(parts[0])
+        unless file_name == name
+          raise SchemeRuntimeError.new("import: #{relative} defines library (#{SchemeLibrary.library_name_string(file_name)}), expected (#{SchemeLibrary.library_name_string(name)})")
+        end
+
+        @load_dirs << File.dirname(resolved)
+        begin
+          # A file-based library's own internal (import ...) declarations
+          # are an implementation detail, not a guest-facing import — e.g.
+          # every old R7RS standard-library name (modules/scheme/*.sld) is
+          # now a thin frontend whose whole body is just
+          # `(import (creme builtin xxx))`. allowed_libraries gates which
+          # names a GUEST program may reach; it must not also have to
+          # separately permit whatever internal native family a permitted
+          # file-based library happens to be implemented on top of, or
+          # sandboxing one of these old names would need its entire
+          # dependency chain enumerated too. What's actually loadable here
+          # was already decided by @library_search_path (host-controlled) and
+          # the allowed_libraries check the caller made against `name`
+          # itself before ever reaching load_library_file.
+          previous_allowed = @allowed_libraries
+          @allowed_libraries = nil
+          begin
+            build_library(name, parts[1..])
+          ensure
+            @allowed_libraries = previous_allowed
+          end
+        ensure
+          @load_dirs.pop
+        end
+      ensure
+        @libraries_loading.delete(name)
+      end
+    end
+
+    # Re-parses `name`'s .sld source (if it resolves to one via
+    # @library_search_path — returns nil for a Crystal-native (creme ...)
+    # library with no .sld file of its own, e.g. mux/sql/string/format) and
+    # returns just the flat list of body forms its declarations expand to,
+    # WITHOUT executing or registering anything. Used only by
+    # CVMEmitter.emit (src/creme/compile/cvm_emitter.cr): the C VM
+    # prototype in cvm/ has no way to run arbitrary library source the way
+    # the ordinary import path does (see this file's own header comment on
+    # each library getting its own Env populated by evaluating its
+    # begin/include bodies against it) — it can only execute bytecode, so a
+    # file-based library's real body forms need to be compiled a SECOND
+    # time (the first, real compile+run already happened via the ordinary
+    # `import` path, which discards the form list once done). Mirrors
+    # process_library_declarations's own declaration walk but collects
+    # instead of compiling+running.
+    def library_body_forms_for_cvm(name : Array(String)) : Array(SchemeValue)?
+      relative = File.join(name) + ".sld"
+      path = @library_search_path.each do |dir|
+        candidate = File.join(dir, relative)
+        break candidate if File.exists?(candidate)
+      end
+      return nil unless path.is_a?(String)
+      resolved = File.realpath(path)
+
+      forms = Reader.read_all(File.read(resolved), resolved)
+      return nil unless forms.size == 1
+      form = forms[0]
+      return nil unless form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && head.name == "define-library"
+      parts = Creme.list_to_a(form.cdr)
+      return nil if parts.empty?
+
+      # An `include`/`include-ci` declaration below resolves its filename
+      # relative to the CURRENT top of @load_dirs (read_include_file's own
+      # contract) — the real `import` path (load_library_file) pushes the
+      # library's own directory before walking declarations for exactly this
+      # reason, but this second, cvm-only pass reuses the same file without
+      # going through load_library_file at all, so it needs the identical
+      # push/pop here or a relative include would resolve against whatever
+      # directory happened to be on top instead (e.g. the top-level script's
+      # own directory).
+      @load_dirs << File.dirname(resolved)
+      begin
+        collect_library_body_forms_for_cvm(parts[1..], relative)
+      ensure
+        @load_dirs.pop
+      end
+    end
+
+    private def collect_library_body_forms_for_cvm(declarations : Array(SchemeValue), relative : String) : Array(SchemeValue)
+      body = [] of SchemeValue
+      declarations.each do |decl|
+        next unless decl.is_a?(Cons)
+        tag = decl.car
+        next unless tag.is_a?(SchemeSym)
+        args = Creme.list_to_a(decl.cdr)
+        case tag.name
+        when "begin"
+          body.concat(inline_nested_includes_for_cvm(args))
+        when "include", "include-ci"
+          fold_case = tag.name == "include-ci"
+          args.each do |filename_form|
+            raise SchemeRuntimeError.new("define-library: #{tag.name} expects string filenames") unless filename_form.is_a?(SchemeStr)
+            read_include_file(filename_form.value, fold_case) { |forms| body.concat(inline_nested_includes_for_cvm(forms)) }
+          end
+        when "cond-expand"
+          body.concat(collect_library_body_forms_for_cvm(matched_cond_expand_declarations(args), relative))
+        else
+          # export/import contribute no body forms of their own.
+        end
+      end
+      body
+    end
+
+    # An included file's own top-level forms may themselves contain an
+    # expression-level `(include ...)`/`(include-ci ...)` form (R7RS
+    # §4.1.7's own definition-context "include" — same grammar as the
+    # define-library declaration above, just appearing inline in an
+    # ordinary body). The real (non-cvm) path leaves this for the Analyzer
+    # to expand lazily via analyze_include/eval_include, which works there
+    # because analysis happens immediately, in file order, while
+    # @load_dirs still reflects each include's own nesting at the exact
+    # moment it's analyzed. This cvm-only collection pass instead gathers
+    # every form upfront for CVMEmitter to analyze in a SECOND, much later
+    # pass (cvm_emitter.cr) against a totally different @load_dirs
+    # context by then — so a nested include must be expanded eagerly here,
+    # recursively, while @load_dirs (via read_include_file's own push/pop)
+    # still correctly reflects the nesting, rather than left as a raw form
+    # for that later pass to resolve against the wrong directory.
+    private def inline_nested_includes_for_cvm(forms : Array(SchemeValue)) : Array(SchemeValue)
+      result = [] of SchemeValue
+      forms.each do |form|
+        if form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && (head.name == "include" || head.name == "include-ci")
+          fold_case = head.name == "include-ci"
+          Creme.list_to_a(form.cdr).each do |filename_form|
+            raise SchemeRuntimeError.new("include: expects string filenames") unless filename_form.is_a?(SchemeStr)
+            read_include_file(filename_form.value, fold_case) { |nested| result.concat(inline_nested_includes_for_cvm(nested)) }
+          end
+        else
+          result << form
+        end
+      end
+      result
+    end
+  end
+end

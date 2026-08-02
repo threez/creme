@@ -1,4 +1,4 @@
-/* (creme json) — see json.h. A port of src/scheme/modules/creme/json.cr:
+/* (creme json) — see json.h. A port of src/creme/modules/creme/json.cr:
  * json-read/json-write. Crystal's own `require "json"` is standard
  * library, not an external shard (see shard.yml) -- this is a small
  * hand-rolled recursive-descent JSON parser/writer in C, since cvm has

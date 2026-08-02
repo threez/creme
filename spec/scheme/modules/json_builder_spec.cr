@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme json-builder)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme json-builder)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme json-builder)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme json-builder)) #{src}")
 end
 
 describe "json-builder module" do
@@ -44,7 +44,7 @@ describe "json-builder module" do
     end
 
     it "errors on a value with no valid JSON number syntax" do
-      expect_raises(Scheme::SchemeRuntimeError) do
+      expect_raises(Creme::SchemeRuntimeError) do
         run(%((json->string 1/2)))
       end
     end

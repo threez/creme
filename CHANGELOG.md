@@ -3,7 +3,7 @@
 All notable changes to this project are documented here, starting from
 the first tagged release (`v0.1.0`). Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
-follow `shard.yml`'s own `version:` field (synced into `src/scheme.cr`'s
+follow `shard.yml`'s own `version:` field (synced into `src/creme.cr`'s
 `VERSION` constant via `make version`, then tagged via `make tag` — see
 that Makefile target's own header comment).
 
@@ -14,6 +14,27 @@ both reaching their current shape) — not itemized individually here;
 `v0.1.0` onward gets a real entry below.
 
 ## [Unreleased]
+
+### Breaking: `Scheme` Crystal namespace renamed to `Creme`, shard renamed `scheme` → `creme`
+
+- The Crystal-side module namespace (`Scheme::Interpreter`, `Scheme.run_source`,
+  `Scheme::SchemeValue`, etc.) is renamed to `Creme` throughout, matching the
+  project's actual brand/CLI/shard-target name (`creme`) instead of the
+  language it interprets. The shard itself is renamed `scheme` → `creme` in
+  `shard.yml` (`require "creme"` instead of `require "scheme"`), and
+  `src/scheme.cr`/`src/scheme/` move to `src/creme.cr`/`src/creme/` to match
+  (the `modules/scheme/` and `modules/creme/` subdirectories keep their
+  existing names — those encode the *Scheme-language* library-naming
+  convention, `(scheme base)` vs `(creme json)`, which is unrelated to the
+  Crystal namespace).
+- Every builtin-library module's `Scheme::Builtins::Xxx` namespace is now
+  split by what it actually is: files implementing genuine R7RS
+  standard-library procedures (`(scheme base)`, `(scheme char)`, ...) move to
+  `Creme::R7RS::Xxx`; creme-only extensions (json/csv/mux/cipher/actor/...)
+  become `Creme::Builtins::Xxx`. This is a pre-1.0 breaking change to the
+  embedding API documented in this README's "As a Crystal library" section —
+  anyone requiring `"scheme"` or referencing `Scheme::...` directly needs to
+  update to `require "creme"` / `Creme::...`.
 
 ### New `(creme ...)` stdlib modules closing Ruby-stdlib gaps
 
@@ -45,7 +66,7 @@ both reaching their current shape) — not itemized individually here;
     vectors (the same convention `(creme json)` uses). Unlike the 14
     modules above, this one is a genuine dual-implementation module, not
     pure Scheme — native `bin/creme` backs it with Crystal's own bundled
-    `YAML` stdlib module (`src/scheme/modules/creme/yaml.cr`), and
+    `YAML` stdlib module (`src/creme/modules/creme/yaml.cr`), and
     `cvm/cvm` links libyaml (MIT) directly (new `cvm/yaml.c`/`yaml.h`,
     `pkg-config yaml-0.1` wired into `cvm/Makefile` the same way
     PCRE2/GMP/OpenSSL/libffi already are) — both ends up backed by the
@@ -107,7 +128,7 @@ both reaching their current shape) — not itemized individually here;
     the Crystal version this project builds against (no way to feed it
     AAD or get/set an authentication tag — `EVP_CIPHER_CTX_ctrl` is
     never bound in its `OpenSSL::LibCrypto`), so
-    `src/scheme/modules/creme/cipher.cr` reopens that `lib` binding to
+    `src/creme/modules/creme/cipher.cr` reopens that `lib` binding to
     add the one missing entry point and drives the raw EVP AEAD API
     directly; `cvm/cipher.c` drives the same API directly in C, where
     the full surface is simply part of `<openssl/evp.h>`. Verified
@@ -147,7 +168,7 @@ both reaching their current shape) — not itemized individually here;
     `OpenSSL::PKey` class hierarchy at all (no `pkey.cr`/`pkey/rsa.cr`/
     `pkey/ec.cr` anywhere) — a bigger gap than `(creme cipher)`'s own
     finding that `OpenSSL::Cipher` exists but lacks GCM methods; here the
-    whole class is simply absent. `src/scheme/modules/creme/pkey.cr`
+    whole class is simply absent. `src/creme/modules/creme/pkey.cr`
     reuses the vendored `jose.cr` shard's own reopened `LibCryptoJose`
     FFI bindings directly (`require "jose"`, already a project
     dependency) instead of re-declaring a parallel `lib LibCrypto` block
@@ -176,7 +197,7 @@ both reaching their current shape) — not itemized individually here;
   - Neither Crystal's stdlib nor the vendored `jose.cr` shard bind any
     X.509 certificate-building or chain-verification surface (Crystal's
     own `openssl/x509/` subdirectory has certificate *parsing* only) —
-    `src/scheme/modules/creme/x509.cr` reopens Crystal's own `lib
+    `src/creme/modules/creme/x509.cr` reopens Crystal's own `lib
     LibCrypto` binding for every `X509_`/`ASN1_` declaration this module
     needs beyond what's already there; `cvm/x509.c` drives the same
     X509/X509_REQ/X509_STORE API directly in C, where the full surface

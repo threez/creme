@@ -17,15 +17,15 @@ private PRELUDE = <<-SCHEME
   SCHEME
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
   interp.push_load_dir(File.expand_path("./modules/creme"))
-  Scheme.run_source(interp, "#{PRELUDE} #{src}").write_string
+  Creme.run_source(interp, "#{PRELUDE} #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
   interp.push_load_dir(File.expand_path("./modules/creme"))
-  Scheme.run_source(interp, "#{PRELUDE} #{src}")
+  Creme.run_source(interp, "#{PRELUDE} #{src}")
 end
 
 # Same shape as raft_spec.cr's own cluster_setup, but using bytevector
@@ -98,7 +98,7 @@ describe "(creme raft) pure-Scheme frontend (modules/creme/raft-scheme/frontend.
   end
 
   it "raft-propose! on a non-leader raises" do
-    expect_raises(Scheme::SchemeRuntimeError) do
+    expect_raises(Creme::SchemeRuntimeError) do
       run(<<-SCHEME)
         #{cluster_setup}
         (define follower (if (eq? leader n1) n2 n1))

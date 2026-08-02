@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme sql)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme sql)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme sql)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme sql)) #{src}")
 end
 
 describe "sql module" do
@@ -83,13 +83,13 @@ describe "sql module" do
   end
 
   it "raises a SchemeRuntimeError on invalid sql" do
-    expect_raises(Scheme::SchemeRuntimeError, /sql-execute:/) do
+    expect_raises(Creme::SchemeRuntimeError, /sql-execute:/) do
       run(%((sql-execute (sql-open ":memory:") "NOT VALID SQL")))
     end
   end
 
   it "raises a SchemeRuntimeError on scalar with no rows" do
-    expect_raises(Scheme::SchemeRuntimeError, /sql-scalar:/) do
+    expect_raises(Creme::SchemeRuntimeError, /sql-scalar:/) do
       run(<<-SCHEME)
         (define conn (sql-open ":memory:"))
         (sql-execute conn "CREATE TABLE person (id INTEGER PRIMARY KEY)")
@@ -131,19 +131,19 @@ describe "sql module" do
   end
 
   it "raises a SchemeRuntimeError on an odd number of trailing keyword arguments" do
-    expect_raises(Scheme::SchemeRuntimeError, /keyword arguments must come in/) do
+    expect_raises(Creme::SchemeRuntimeError, /keyword arguments must come in/) do
       run(%((sql-open ":memory:" 'reader)))
     end
   end
 
   it "raises a SchemeRuntimeError on an unknown keyword" do
-    expect_raises(Scheme::SchemeRuntimeError, /unknown keyword/) do
+    expect_raises(Creme::SchemeRuntimeError, /unknown keyword/) do
       run(%((sql-open ":memory:" 'bogus 4)))
     end
   end
 
   it "raises a SchemeRuntimeError when a keyword position isn't a symbol" do
-    expect_raises(Scheme::SchemeRuntimeError, /expected a keyword symbol/) do
+    expect_raises(Creme::SchemeRuntimeError, /expected a keyword symbol/) do
       run(%((sql-open ":memory:" "reader" 4)))
     end
   end
@@ -210,7 +210,7 @@ describe "sql module" do
 
   it "csv-import! raises when 'types is combined with 'columns" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "eng\t1\n" }.path
-    expect_raises(Scheme::SchemeRuntimeError, /'types cannot be combined with 'columns/) do
+    expect_raises(Creme::SchemeRuntimeError, /'types cannot be combined with 'columns/) do
       run(%[
         (csv-import! (sql-open ":memory:") "t" #{path.inspect}
                      'columns (list (cons "dept" "TEXT") (cons "n" "INTEGER"))
@@ -237,7 +237,7 @@ describe "sql module" do
 
   it "csv-import!'s custom 'create-table's own constraints are actually enforced (not just accepted verbatim)" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,-1\n" }.path
-    expect_raises(Scheme::SchemeRuntimeError, /CHECK constraint failed/) do
+    expect_raises(Creme::SchemeRuntimeError, /CHECK constraint failed/) do
       run(%[
         (csv-import! (sql-open ":memory:") "t" #{path.inspect}
                      'create-table "CREATE TABLE t (dept TEXT NOT NULL, n INTEGER CHECK (n > 0))")
@@ -249,7 +249,7 @@ describe "sql module" do
 
   it "csv-import! raises when 'types is combined with 'create-table" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,1\n" }.path
-    expect_raises(Scheme::SchemeRuntimeError, /'types cannot be combined with 'create-table/) do
+    expect_raises(Creme::SchemeRuntimeError, /'types cannot be combined with 'create-table/) do
       run(%[
         (csv-import! (sql-open ":memory:") "t" #{path.inspect}
                      'create-table "CREATE TABLE t (dept TEXT, n INTEGER)"
@@ -262,7 +262,7 @@ describe "sql module" do
 
   it "csv-import! raises on an empty file with no explicit columns" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |_| }.path
-    expect_raises(Scheme::SchemeRuntimeError, /empty CSV file/) do
+    expect_raises(Creme::SchemeRuntimeError, /empty CSV file/) do
       run(%[(csv-import! (sql-open ":memory:") "t" #{path.inspect})])
     end
   ensure
@@ -283,7 +283,7 @@ describe "sql module" do
 
   it "csv-import! raises on an unknown keyword" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "a\n1\n" }.path
-    expect_raises(Scheme::SchemeRuntimeError, /unknown keyword/) do
+    expect_raises(Creme::SchemeRuntimeError, /unknown keyword/) do
       run(%[(csv-import! (sql-open ":memory:") "t" #{path.inspect} 'bogus 1)])
     end
   ensure

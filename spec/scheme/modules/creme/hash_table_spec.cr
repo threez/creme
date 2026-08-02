@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme hash-table)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme hash-table)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme hash-table)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme hash-table)) #{src}")
 end
 
 describe "hash-table module" do
@@ -35,7 +35,7 @@ describe "hash-table module" do
   end
 
   it "hash-table-ref raises when the key is missing and no default is given" do
-    expect_raises(Scheme::SchemeRuntimeError, /key not found/) do
+    expect_raises(Creme::SchemeRuntimeError, /key not found/) do
       run("(define h (make-hash-table)) (hash-table-ref h 'missing)")
     end
   end
@@ -71,7 +71,7 @@ describe "hash-table module" do
   end
 
   it "raises when given a non-hash-table" do
-    expect_raises(Scheme::SchemeRuntimeError, /hash-table-ref: expected a hash table/) do
+    expect_raises(Creme::SchemeRuntimeError, /hash-table-ref: expected a hash table/) do
       run("(hash-table-ref 5 'a)")
     end
   end

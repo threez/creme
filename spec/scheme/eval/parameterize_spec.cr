@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -23,12 +23,12 @@ describe "make-parameter/parameterize" do
   end
 
   it "restores the previous value even when the body raises" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(define p (make-parameter 10))")
-    expect_raises(Scheme::SchemeUserError) do
-      Scheme.run_source(interp, %[(parameterize ((p 20)) (error "boom"))])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(define p (make-parameter 10))")
+    expect_raises(Creme::SchemeUserError) do
+      Creme.run_source(interp, %[(parameterize ((p 20)) (error "boom"))])
     end
-    Scheme.run_source(interp, "(p)").write_string.should eq("10")
+    Creme.run_source(interp, "(p)").write_string.should eq("10")
   end
 
   it "supports nested parameterize" do
@@ -49,19 +49,19 @@ describe "make-parameter/parameterize" do
   end
 
   it "raises when calling a parameter with an argument" do
-    expect_raises(Scheme::SchemeRuntimeError, /parameter: expected 0 arguments, got 1/) do
+    expect_raises(Creme::SchemeRuntimeError, /parameter: expected 0 arguments, got 1/) do
       run("(define p (make-parameter 10)) (p 20)")
     end
   end
 
   it "raises when parameterize is given a non-parameter" do
-    expect_raises(Scheme::SchemeRuntimeError, /parameterize: expected a parameter object/) do
+    expect_raises(Creme::SchemeRuntimeError, /parameterize: expected a parameter object/) do
       run("(parameterize ((+ 1)) 1)")
     end
   end
 
   it "raises on a malformed binding" do
-    expect_raises(Scheme::SchemeRuntimeError, /parameterize: bad binding/) do
+    expect_raises(Creme::SchemeRuntimeError, /parameterize: bad binding/) do
       run("(define p (make-parameter 10)) (parameterize ((p)) 1)")
     end
   end

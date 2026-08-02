@@ -1,5 +1,5 @@
 /* (creme digest) — see digest.h. A port of
- * src/scheme/modules/creme/digest.cr: digest-md5/digest-sha1/digest-
+ * src/creme/modules/creme/digest.cr: digest-md5/digest-sha1/digest-
  * sha256/digest-sha384/digest-sha512 (hex digest strings), hmac-sha256/
  * hmac-sha384/hmac-sha512, plus base64-encode/decode. Crystal's own
  * `require "digest/md5"`/`sha1`/`sha256`/`sha512`/`openssl/digest`/
@@ -50,7 +50,7 @@ static Value hmac_hex_digest(const EVP_MD *md, const char *key, int keylen, cons
  * untouched below), every NEW procedure added in this file accepts
  * EITHER a bytevector or a string for its argument(s) -- a key is often
  * raw binary (e.g. straight from (creme secure-random)) -- matching
- * native's own digest_bytes_arg (src/scheme/modules/creme/digest.cr). */
+ * native's own digest_bytes_arg (src/creme/modules/creme/digest.cr). */
 static void value_bytes(Value v, const char **out_ptr, int *out_len, const char *who) {
   if (v.tag == T_STR) {
     *out_ptr = v.as.chars;

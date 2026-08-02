@@ -1,8 +1,8 @@
 require "../../../../spec_helper"
 
 private def rendered(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, <<-SCHEME).as(Scheme::SchemeStr).value
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, <<-SCHEME).as(Creme::SchemeStr).value
     (import (scheme base) (scheme write) (scheme cxr) (creme css) (creme syntax scss))
     (let* ((forms (read-program #{src.inspect} "t" (quote ())))
            (css-render-form (cadr forms))
@@ -12,8 +12,8 @@ private def rendered(src : String) : String
 end
 
 private def rules_data(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, <<-SCHEME).write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, <<-SCHEME).write_string
     (import (scheme base) (scheme write) (scheme cxr) (creme syntax scss))
     (let* ((forms (read-program #{src.inspect} "t" (quote ())))
            (css-render-form (cadr forms)))
@@ -49,16 +49,16 @@ describe "(creme syntax scss)" do
   end
 
   it "raises on an undefined variable" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeRuntimeError, /undefined variable/) do
-      Scheme.run_source(interp, %[(import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { color: $nope; }" "t" (quote ()))])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeRuntimeError, /undefined variable/) do
+      Creme.run_source(interp, %[(import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { color: $nope; }" "t" (quote ()))])
     end
   end
 
   it "raises on a declaration missing a ':'" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeRuntimeError, /expected ':'/) do
-      Scheme.run_source(interp, %[(import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { oops; }" "t" (quote ()))])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeRuntimeError, /expected ':'/) do
+      Creme.run_source(interp, %[(import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { oops; }" "t" (quote ()))])
     end
   end
 end

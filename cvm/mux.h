@@ -2,7 +2,7 @@
  * mux-use!/mux-listen!/mux-address/mux-base-url/mux-close!, via a single
  * poll(2)-multiplexed I/O thread + picohttpparser (vendor/picohttpparser).
  * See mux.c's own header comment for the request/response alist contract
- * this replicates from src/scheme/modules/creme/mux.cr, the deliberate
+ * this replicates from src/creme/modules/creme/mux.cr, the deliberate
  * simplifications (single router served per process, a scoped-down
  * middleware model) this prototype makes, and the full dispatch-model
  * writeup: `mux-listen!`'s optional 3rd argument is a string-keyed

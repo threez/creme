@@ -1,6 +1,6 @@
 # Native Crystal counterpart to competition/bench.scm — same nine
 # workloads, same sizes, implemented directly in Crystal (no
-# Scheme::Interpreter involved). Gives a compiled-code baseline to set
+# Creme::Interpreter involved). Gives a compiled-code baseline to set
 # alongside the interpreter's and Racket's numbers for the identical work.
 #
 # hashtable-test exercises Crystal's own real, native Hash under a mixed

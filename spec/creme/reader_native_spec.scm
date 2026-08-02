@@ -6,13 +6,13 @@
 ;; (modules/creme/compiler/reader_spec.cr, the SELF-HOSTED reader's own
 ;; literal-classification tests) -- this one is about (creme reader)'s
 ;; lex-tokens/tokens->forms hook, exposing the real Lexer/Reader to Scheme
-;; as a token stream (see src/scheme/modules/creme/reader.cr's own header
+;; as a token stream (see src/creme/modules/creme/reader.cr's own header
 ;; comment: built so a `#lang` dialect's own parser can be written in
 ;; Scheme, rewriting the token list before handing it back to the
 ;; ordinary Reader).
 ;;
 ;; NOT runnable under cvm/cvm, structurally, not as a bug to fix: `(creme
-;; reader)`'s lex-tokens/tokens->forms are native-Crystal-only (src/scheme/
+;; reader)`'s lex-tokens/tokens->forms are native-Crystal-only (src/creme/
 ;; modules/creme/reader.cr) -- no pure-Scheme .sld fallback and no cvm C
 ;; equivalent at all (unlike (creme bytecode)/(creme compiler compiler),
 ;; which cvm's self-hosted loader can read straight off disk). Under

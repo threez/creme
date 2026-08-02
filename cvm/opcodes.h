@@ -1,10 +1,10 @@
-/* On-disk opcode ids — these ARE Scheme::Op's own enum ordinals now
- * (src/scheme/compile/opcode.cr), in that enum's exact declaration order.
+/* On-disk opcode ids — these ARE Creme::Op's own enum ordinals now
+ * (src/creme/compile/opcode.cr), in that enum's exact declaration order.
  * This file used to keep its own compacted 84-entry numbering in lockstep
  * by hand with a separate Crystal-side table (CVMSerializer::OP_IDS); that
  * table and the "CVM2" format it wrote are gone — cvm now reads "SCB1"
  * directly (see loader.c), the same format the real Crystal VM's
- * ChunkSerializer/ChunkDeserializer already round-trip. If Scheme::Op is
+ * ChunkSerializer/ChunkDeserializer already round-trip. If Creme::Op is
  * ever reordered/extended, this enum must be updated to match — there is
  * no other indirection left to absorb that change.
  *
@@ -138,7 +138,7 @@ enum {
   OP_HELPERFORMLOCAL = 118,
   /* a=counter register, b=forward jump offset (skip loop if zero-trip),
    * c=limit register, d=step immediate (nonzero int32). Range is INCLUSIVE
-   * of limit (Lua FORLOOP-style — see Scheme::Op::ForPrep's own doc
+   * of limit (Lua FORLOOP-style — see Creme::Op::ForPrep's own doc
    * comment in opcode.cr). */
   OP_FORPREP = 119,
   /* a=counter register, b=backward jump offset (to the instruction after
@@ -147,7 +147,7 @@ enum {
   OP_FORLOOP = 120,
   /* ForLoop's counterpart for a counted loop recursing through a GLOBAL binding (an
    * ordinary self-recursive `(define (f ...) ...)`, not a let-loop/do) -- see
-   * Scheme::Op::ForLoopGuardedInc/Dec's own doc comment in opcode.cr for the full
+   * Creme::Op::ForLoopGuardedInc/Dec's own doc comment in opcode.cr for the full
    * rationale. a=counter register, b=backward jump offset (same convention as
    * OP_FORLOOP), c=limit register. Step is implicit: +1 for OP_FORLOOPGUARDEDINC, -1 for
    * OP_FORLOOPGUARDEDDEC -- freeing d (OP_FORLOOP's step slot) to instead hold a

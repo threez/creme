@@ -1,8 +1,8 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src).write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src).write_string
 end
 
 describe "builtins: arithmetic" do
@@ -35,8 +35,8 @@ describe "builtins: arithmetic" do
   end
 
   it "/ inverts a single argument" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(/ 2)").write_string.should eq("1/2")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(/ 2)").write_string.should eq("1/2")
   end
 
   it "/ divides evenly to an int" do
@@ -52,7 +52,7 @@ describe "builtins: arithmetic" do
   end
 
   it "/ raises on division by zero" do
-    expect_raises(Scheme::SchemeRuntimeError, /division by zero/) { w("(/ 1 0)") }
+    expect_raises(Creme::SchemeRuntimeError, /division by zero/) { w("(/ 1 0)") }
   end
 
   it "modulo computes the modulus" do
@@ -60,7 +60,7 @@ describe "builtins: arithmetic" do
   end
 
   it "modulo raises on zero divisor" do
-    expect_raises(Scheme::SchemeRuntimeError, /modulo: division by zero/) { w("(modulo 1 0)") }
+    expect_raises(Creme::SchemeRuntimeError, /modulo: division by zero/) { w("(modulo 1 0)") }
   end
 
   it "remainder computes the remainder" do
@@ -68,7 +68,7 @@ describe "builtins: arithmetic" do
   end
 
   it "remainder raises on zero divisor" do
-    expect_raises(Scheme::SchemeRuntimeError, /remainder: division by zero/) { w("(remainder 1 0)") }
+    expect_raises(Creme::SchemeRuntimeError, /remainder: division by zero/) { w("(remainder 1 0)") }
   end
 
   it "quotient truncates toward zero" do
@@ -76,7 +76,7 @@ describe "builtins: arithmetic" do
   end
 
   it "quotient raises on zero divisor" do
-    expect_raises(Scheme::SchemeRuntimeError, /quotient: division by zero/) { w("(quotient 1 0)") }
+    expect_raises(Creme::SchemeRuntimeError, /quotient: division by zero/) { w("(quotient 1 0)") }
   end
 
   it "abs handles ints and floats" do
@@ -85,7 +85,7 @@ describe "builtins: arithmetic" do
   end
 
   it "abs raises for a non-number" do
-    expect_raises(Scheme::SchemeRuntimeError, /abs: expected number/) { w(%((abs "x"))) }
+    expect_raises(Creme::SchemeRuntimeError, /abs: expected number/) { w(%((abs "x"))) }
   end
 
   it "min returns the smallest" do
@@ -292,11 +292,11 @@ describe "builtins: pairs & lists" do
   end
 
   it "car raises for a non-pair" do
-    expect_raises(Scheme::SchemeRuntimeError, /car: expected pair/) { w("(car 1)") }
+    expect_raises(Creme::SchemeRuntimeError, /car: expected pair/) { w("(car 1)") }
   end
 
   it "cdr raises for a non-pair" do
-    expect_raises(Scheme::SchemeRuntimeError, /cdr: expected pair/) { w("(cdr 1)") }
+    expect_raises(Creme::SchemeRuntimeError, /cdr: expected pair/) { w("(cdr 1)") }
   end
 
   it "set-car!/set-cdr! mutate in place" do
@@ -304,11 +304,11 @@ describe "builtins: pairs & lists" do
   end
 
   it "set-car! raises for a non-pair" do
-    expect_raises(Scheme::SchemeRuntimeError, /set-car!: expected pair/) { w("(set-car! 1 2)") }
+    expect_raises(Creme::SchemeRuntimeError, /set-car!: expected pair/) { w("(set-car! 1 2)") }
   end
 
   it "set-cdr! raises for a non-pair" do
-    expect_raises(Scheme::SchemeRuntimeError, /set-cdr!: expected pair/) { w("(set-cdr! 1 2)") }
+    expect_raises(Creme::SchemeRuntimeError, /set-cdr!: expected pair/) { w("(set-cdr! 1 2)") }
   end
 
   it "list builds a list from its args" do
@@ -336,7 +336,7 @@ describe "builtins: pairs & lists" do
   end
 
   it "list-ref raises out of range" do
-    expect_raises(Scheme::SchemeRuntimeError, /list-ref: index 5 out of range/) { w("(list-ref '(a b c) 5)") }
+    expect_raises(Creme::SchemeRuntimeError, /list-ref: index 5 out of range/) { w("(list-ref '(a b c) 5)") }
   end
 
   it "null? tests for the empty list" do
@@ -372,7 +372,7 @@ describe "builtins: pairs & lists" do
     # list-set! is implemented in terms of list-tail (see
     # modules/scheme/base.cr's SCHEME_BASE_ADDITIONS_SRC), so the
     # out-of-range error surfaces list-tail's own wording.
-    expect_raises(Scheme::SchemeRuntimeError, /list-tail: index out of range/) { w("(list-set! (list 1 2) 5 9)") }
+    expect_raises(Creme::SchemeRuntimeError, /list-tail: index out of range/) { w("(list-set! (list 1 2) 5 9)") }
   end
 
   it "list-tail returns the sublist after dropping n elements" do
@@ -381,7 +381,7 @@ describe "builtins: pairs & lists" do
   end
 
   it "list-tail raises out of range" do
-    expect_raises(Scheme::SchemeRuntimeError, /list-tail: index out of range/) { w("(list-tail '(1 2) 5)") }
+    expect_raises(Creme::SchemeRuntimeError, /list-tail: index out of range/) { w("(list-tail '(1 2) 5)") }
   end
 
   it "make-list builds a list of n copies of a fill value" do
@@ -553,8 +553,8 @@ describe "builtins: symbols/booleans" do
   end
 
   it "symbol=?/boolean=? raise for a non-matching argument type" do
-    expect_raises(Scheme::SchemeRuntimeError, /symbol=\?: expected symbol/) { w("(symbol=? 'a 1)") }
-    expect_raises(Scheme::SchemeRuntimeError, /boolean=\?: expected boolean/) { w("(boolean=? #t 1)") }
+    expect_raises(Creme::SchemeRuntimeError, /symbol=\?: expected symbol/) { w("(symbol=? 'a 1)") }
+    expect_raises(Creme::SchemeRuntimeError, /boolean=\?: expected boolean/) { w("(boolean=? #t 1)") }
   end
 end
 
@@ -582,7 +582,7 @@ describe "builtins: exactness conversions" do
   end
 
   it "inexact->exact raises for a float whose exact value is too large to represent" do
-    expect_raises(Scheme::SchemeRuntimeError, /magnitude too large/) { w("(exact 1e300)") }
+    expect_raises(Creme::SchemeRuntimeError, /magnitude too large/) { w("(exact 1e300)") }
   end
 
   it "numerator/denominator on an exact integer" do
@@ -740,7 +740,7 @@ describe "builtins: characters" do
   end
 
   it "char procedures raise for a non-char argument" do
-    expect_raises(Scheme::SchemeRuntimeError, /char-upcase: expected char/) { w("(import (scheme char)) (char-upcase 5)") }
+    expect_raises(Creme::SchemeRuntimeError, /char-upcase: expected char/) { w("(import (scheme char)) (char-upcase 5)") }
   end
 end
 
@@ -750,7 +750,7 @@ describe "builtins: strings" do
   end
 
   it "string-append raises for a non-string" do
-    expect_raises(Scheme::SchemeRuntimeError, /string-append: expected string/) { w(%((string-append "a" 1))) }
+    expect_raises(Creme::SchemeRuntimeError, /string-append: expected string/) { w(%((string-append "a" 1))) }
   end
 
   it "string-length counts characters" do
@@ -766,7 +766,7 @@ describe "builtins: strings" do
   end
 
   it "substring raises out of range" do
-    expect_raises(Scheme::SchemeRuntimeError, /substring: index out of range/) { w(%((substring "hi" 0 5))) }
+    expect_raises(Creme::SchemeRuntimeError, /substring: index out of range/) { w(%((substring "hi" 0 5))) }
   end
 
   it "string->symbol converts" do
@@ -802,11 +802,11 @@ describe "builtins: strings" do
   end
 
   it "number->string raises for a non-10 radix on an inexact/non-integer number" do
-    expect_raises(Scheme::SchemeRuntimeError, /requires an exact integer/) { w("(number->string 4.5 16)") }
+    expect_raises(Creme::SchemeRuntimeError, /requires an exact integer/) { w("(number->string 4.5 16)") }
   end
 
   it "number->string raises for an unsupported radix" do
-    expect_raises(Scheme::SchemeRuntimeError, /radix must be 2, 8, 10, or 16/) { w("(number->string 42 7)") }
+    expect_raises(Creme::SchemeRuntimeError, /radix must be 2, 8, 10, or 16/) { w("(number->string 42 7)") }
   end
 
   it "string->number with a radix" do
@@ -834,7 +834,7 @@ describe "builtins: strings" do
 
   it "string-ref indexes a character" do
     w(%((string-ref "hello" 1))).should eq(%(#\\e))
-    expect_raises(Scheme::SchemeRuntimeError, /string-ref: index out of range/) { w(%((string-ref "hi" 5))) }
+    expect_raises(Creme::SchemeRuntimeError, /string-ref: index out of range/) { w(%((string-ref "hi" 5))) }
   end
 
   it "string->list and list->string round-trip" do
@@ -878,7 +878,7 @@ describe "builtins: strings" do
   end
 
   it "string-copy! raises when the destination range is out of bounds" do
-    expect_raises(Scheme::SchemeRuntimeError, /string-copy!: destination range out of bounds/) do
+    expect_raises(Creme::SchemeRuntimeError, /string-copy!: destination range out of bounds/) do
       w(%((string-copy! (make-string 2) 1 "AB")))
     end
   end
@@ -907,49 +907,49 @@ describe "builtins: I/O" do
   end
 
   it "writes to the real STDOUT by default" do
-    Scheme::Interpreter.new(library_search_path: ["./modules"]).stdout.should be(STDOUT)
+    Creme::Interpreter.new(library_search_path: ["./modules"]).stdout.should be(STDOUT)
   end
 
   it "captures display via a custom stdout" do
     io = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: io)
-    Scheme.run_source(interp, %((display "hello")))
+    interp = Creme::Interpreter.new(stdout: io)
+    Creme.run_source(interp, %((display "hello")))
     io.to_s.should eq("hello")
   end
 
   it "captures write via a custom stdout" do
     io = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: io)
-    Scheme.run_source(interp, %((write "hello")))
+    interp = Creme::Interpreter.new(stdout: io)
+    Creme.run_source(interp, %((write "hello")))
     io.to_s.should eq(%("hello"))
   end
 
   it "captures newline via a custom stdout" do
     io = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: io)
-    Scheme.run_source(interp, "(newline)")
+    interp = Creme::Interpreter.new(stdout: io)
+    Creme.run_source(interp, "(newline)")
     io.to_s.should eq("\n")
   end
 
   it "captures print via a custom stdout, concatenated with no separator" do
     io = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: io, library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(import (creme extra)) (print 1 2)")
+    interp = Creme::Interpreter.new(stdout: io, library_search_path: ["./modules"])
+    Creme.run_source(interp, "(import (creme extra)) (print 1 2)")
     io.to_s.should eq("12")
   end
 
   it "captures println via a custom stdout, with a trailing newline" do
     io = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: io, library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(import (creme extra)) (println 1 2)")
+    interp = Creme::Interpreter.new(stdout: io, library_search_path: ["./modules"])
+    Creme.run_source(interp, "(import (creme extra)) (println 1 2)")
     io.to_s.should eq("12\n")
   end
 
   it "accumulates output across multiple run_source calls against the same stdout" do
     io = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: io)
-    Scheme.run_source(interp, %((display "a")))
-    Scheme.run_source(interp, %((display "b")))
+    interp = Creme::Interpreter.new(stdout: io)
+    Creme.run_source(interp, %((display "a")))
+    Creme.run_source(interp, %((display "b")))
     io.to_s.should eq("ab")
   end
 end
@@ -965,8 +965,8 @@ describe "builtins: ports" do
 
   it "display/write/newline/write-char/write-string accept an explicit output port" do
     io = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: io)
-    Scheme.run_source(interp, %((display "z" (current-output-port))))
+    interp = Creme::Interpreter.new(stdout: io)
+    Creme.run_source(interp, %((display "z" (current-output-port))))
     io.to_s.should eq("z")
   end
 
@@ -977,12 +977,12 @@ describe "builtins: ports" do
 
   it "read-char/peek-char/read-line/read-string read from a custom stdin" do
     io = IO::Memory.new("ab\ncd")
-    interp = Scheme::Interpreter.new(stdin: io)
-    Scheme.run_source(interp, "(peek-char)").write_string.should eq(%(#\\a))
-    Scheme.run_source(interp, "(read-char)").write_string.should eq(%(#\\a))
-    Scheme.run_source(interp, "(read-line)").write_string.should eq(%("b"))
-    Scheme.run_source(interp, "(read-string 2)").write_string.should eq(%("cd"))
-    Scheme.run_source(interp, "(eof-object? (read-char))").write_string.should eq("#t")
+    interp = Creme::Interpreter.new(stdin: io)
+    Creme.run_source(interp, "(peek-char)").write_string.should eq(%(#\\a))
+    Creme.run_source(interp, "(read-char)").write_string.should eq(%(#\\a))
+    Creme.run_source(interp, "(read-line)").write_string.should eq(%("b"))
+    Creme.run_source(interp, "(read-string 2)").write_string.should eq(%("cd"))
+    Creme.run_source(interp, "(eof-object? (read-char))").write_string.should eq("#t")
   end
 
   it "current-error-port is an output port distinct from current-output-port" do
@@ -992,8 +992,8 @@ describe "builtins: ports" do
 
   it "current-error-port writes route to the interpreter's stderr" do
     err = IO::Memory.new
-    interp = Scheme::Interpreter.new(stderr: err)
-    Scheme.run_source(interp, %((write-string "boom" (current-error-port))))
+    interp = Creme::Interpreter.new(stderr: err)
+    Creme.run_source(interp, %((write-string "boom" (current-error-port))))
     err.to_s.should eq("boom")
   end
 
@@ -1017,24 +1017,24 @@ end
 
 describe "builtins: exit" do
   it "raises SchemeExit instead of terminating the process" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeExit) do
-      Scheme.run_source(interp, "(import (scheme process-context)) (exit)")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeExit) do
+      Creme.run_source(interp, "(import (scheme process-context)) (exit)")
     end
   end
 
   it "defaults to code 0" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    ex = expect_raises(Scheme::SchemeExit) do
-      Scheme.run_source(interp, "(import (scheme process-context)) (exit)")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    ex = expect_raises(Creme::SchemeExit) do
+      Creme.run_source(interp, "(import (scheme process-context)) (exit)")
     end
     ex.code.should eq(0)
   end
 
   it "clamps the given code to 0..255" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    ex = expect_raises(Scheme::SchemeExit) do
-      Scheme.run_source(interp, "(import (scheme process-context)) (exit 300)")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    ex = expect_raises(Creme::SchemeExit) do
+      Creme.run_source(interp, "(import (scheme process-context)) (exit 300)")
     end
     ex.code.should eq(255)
   end
@@ -1042,13 +1042,13 @@ end
 
 describe "builtins: misc" do
   it "error raises SchemeUserError with the joined message" do
-    expect_raises(Scheme::SchemeUserError, /boom 1 2/) do
+    expect_raises(Creme::SchemeUserError, /boom 1 2/) do
       w("(error \"boom\" 1 2)")
     end
   end
 
   it "error raises SchemeRuntimeError (superclass)" do
-    expect_raises(Scheme::SchemeRuntimeError) do
+    expect_raises(Creme::SchemeRuntimeError) do
       w(%((error "boom")))
     end
   end
@@ -1066,7 +1066,7 @@ describe "builtins: vectors" do
   end
 
   it "make-vector raises on a negative size" do
-    expect_raises(Scheme::SchemeRuntimeError, /make-vector: size must be non-negative/) do
+    expect_raises(Creme::SchemeRuntimeError, /make-vector: size must be non-negative/) do
       w("(make-vector -1)")
     end
   end
@@ -1076,7 +1076,7 @@ describe "builtins: vectors" do
   end
 
   it "vector-ref raises out of range" do
-    expect_raises(Scheme::SchemeRuntimeError, /vector-ref: index 5 out of range/) do
+    expect_raises(Creme::SchemeRuntimeError, /vector-ref: index 5 out of range/) do
       w("(vector-ref (vector 1 2 3) 5)")
     end
   end
@@ -1086,7 +1086,7 @@ describe "builtins: vectors" do
   end
 
   it "vector-set! raises out of range" do
-    expect_raises(Scheme::SchemeRuntimeError, /vector-set!: index -1 out of range/) do
+    expect_raises(Creme::SchemeRuntimeError, /vector-set!: index -1 out of range/) do
       w("(vector-set! (vector 1 2 3) -1 0)")
     end
   end
@@ -1142,7 +1142,7 @@ describe "builtins: vectors" do
   end
 
   it "vector-copy! raises when the destination range is out of bounds" do
-    expect_raises(Scheme::SchemeRuntimeError, /vector-copy!: destination range out of bounds/) do
+    expect_raises(Creme::SchemeRuntimeError, /vector-copy!: destination range out of bounds/) do
       w("(vector-copy! (make-vector 2) 1 (vector 9 9))")
     end
   end
@@ -1178,7 +1178,7 @@ describe "builtins: eval" do
   end
 
   it "propagates errors like a normal call" do
-    expect_raises(Scheme::SchemeRuntimeError, /car:/) { w("(import (scheme eval)) (eval '(car 1))") }
+    expect_raises(Creme::SchemeRuntimeError, /car:/) { w("(import (scheme eval)) (eval '(car 1))") }
   end
 end
 
@@ -1224,8 +1224,8 @@ describe "current-output-port as a real parameter (eval-string's portable replac
 
   it "interp.stdout= keeps working when no script has parameterized the port" do
     real_stdout = IO::Memory.new
-    interp = Scheme::Interpreter.new(stdout: real_stdout)
-    Scheme.run_source(interp, %((display "after")))
+    interp = Creme::Interpreter.new(stdout: real_stdout)
+    Creme.run_source(interp, %((display "after")))
     real_stdout.to_s.should eq("after")
   end
 end

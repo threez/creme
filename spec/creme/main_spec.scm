@@ -13,7 +13,7 @@
 ;;   ./bin/creme spec/creme/main_spec.scm --cvm            (spawns ./cvm/cvm per file)
 ;;   ./cvm/cvm spec/creme/main_spec.scm                    (cvm itself; ALSO spawns ./cvm/cvm per file)
 ;; The last two land on the same runner -- cvm's own process-run (cvm/
-;; process.c, POSIX fork/pipe/execvp/waitpid, matching src/scheme/
+;; process.c, POSIX fork/pipe/execvp/waitpid, matching src/creme/
 ;; modules/creme/process.cr's contract exactly) means it makes no
 ;; difference whether THIS file is itself being driven natively or
 ;; reentrantly under cvm: either way, each spec file still gets spawned

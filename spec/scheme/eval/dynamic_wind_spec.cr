@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -114,6 +114,6 @@ describe "dynamic-wind" do
   end
 
   it "raises for the wrong number of arguments" do
-    expect_raises(Scheme::SchemeRuntimeError) { run("(dynamic-wind (lambda () 1) (lambda () 2))") }
+    expect_raises(Creme::SchemeRuntimeError) { run("(dynamic-wind (lambda () 1) (lambda () 2))") }
   end
 end

@@ -1,6 +1,6 @@
 /* Runtime chunk/frame/VM structures — the C-side counterpart of
- * src/scheme/compile/chunk.cr's Chunk, src/scheme/compile/bytecode_closure.cr's
- * BytecodeClosure/Upvalue, and src/scheme/eval/vm.cr's CallFrame/VM. See
+ * src/creme/compile/chunk.cr's Chunk, src/creme/compile/bytecode_closure.cr's
+ * BytecodeClosure/Upvalue, and src/creme/eval/vm.cr's CallFrame/VM. See
  * cvm/README.md for the overall design and what's deliberately NOT
  * implemented. */
 #ifndef CVM_VM_H
@@ -42,7 +42,7 @@ typedef struct {
   int line, col;
 } InsPos;
 
-/* Mirrors Scheme::UpvalDesc (chunk.cr). `name` is carried for parity with
+/* Mirrors Creme::UpvalDesc (chunk.cr). `name` is carried for parity with
  * the real format's debug info; cvm doesn't currently use it for anything
  * (upvalues are resolved purely by index). */
 typedef struct {

@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme treelist)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme treelist)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme treelist)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme treelist)) #{src}")
 end
 
 describe "treelist module" do
@@ -56,13 +56,13 @@ describe "treelist module" do
     end
 
     it "raises on out-of-range ref" do
-      expect_raises(Scheme::SchemeRuntimeError, /out of range/) do
+      expect_raises(Creme::SchemeRuntimeError, /out of range/) do
         run("(treelist-ref (treelist 1 2) 5)")
       end
     end
 
     it "raises on first/last of an empty treelist" do
-      expect_raises(Scheme::SchemeRuntimeError, /empty treelist/) do
+      expect_raises(Creme::SchemeRuntimeError, /empty treelist/) do
         run("(treelist-first empty-treelist)")
       end
     end
@@ -97,10 +97,10 @@ describe "treelist module" do
     end
 
     it "raises on a bad insert position and take count" do
-      expect_raises(Scheme::SchemeRuntimeError, /out of range/) do
+      expect_raises(Creme::SchemeRuntimeError, /out of range/) do
         run("(treelist-insert (treelist 1 2) 9 'x)")
       end
-      expect_raises(Scheme::SchemeRuntimeError, /out of range/) do
+      expect_raises(Creme::SchemeRuntimeError, /out of range/) do
         run("(treelist-take (treelist 1 2) 9)")
       end
     end

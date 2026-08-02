@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme memoize)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme memoize)) #{src}").write_string
 end
 
 describe "memoize module" do
@@ -106,8 +106,8 @@ describe "memoize module" do
     end
 
     it "raises for a non-positive max-size" do
-      expect_raises(Scheme::SchemeRuntimeError, /memoize-lru: max-size must be at least 1/) do
-        Scheme.run_source(Scheme::Interpreter.new(library_search_path: ["./modules"]),
+      expect_raises(Creme::SchemeRuntimeError, /memoize-lru: max-size must be at least 1/) do
+        Creme.run_source(Creme::Interpreter.new(library_search_path: ["./modules"]),
           "(import (creme memoize)) (memoize-lru (lambda (x) x) 0)")
       end
     end

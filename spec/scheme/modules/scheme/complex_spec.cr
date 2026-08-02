@@ -1,8 +1,8 @@
 require "../../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme complex)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme complex)) #{src}")
 end
 
 private def w(src : String) : String
@@ -11,9 +11,9 @@ end
 
 describe "(scheme complex)" do
   it "must be explicitly imported (not auto-imported like base)" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: make-rectangular/) do
-      Scheme.run_source(interp, "(make-rectangular 1 2)")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: make-rectangular/) do
+      Creme.run_source(interp, "(make-rectangular 1 2)")
     end
   end
 
@@ -43,8 +43,8 @@ describe "(scheme complex)" do
 
   describe "make-polar" do
     it "round-trips through real-part/imag-part" do
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-      result = Scheme.run_source(interp, "(import (scheme complex)) (define p (make-polar 5 0)) (list (real-part p) (imag-part p))")
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+      result = Creme.run_source(interp, "(import (scheme complex)) (define p (make-polar 5 0)) (list (real-part p) (imag-part p))")
       result.write_string.should eq("(5.0 0.0)")
     end
   end
@@ -64,7 +64,7 @@ describe "(scheme complex)" do
     end
 
     it "angle of a negative real is pi" do
-      run("(angle -5)").as(Scheme::SchemeFloat).value.should be_close(Math::PI, 1e-9)
+      run("(angle -5)").as(Creme::SchemeFloat).value.should be_close(Math::PI, 1e-9)
     end
   end
 

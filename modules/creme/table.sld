@@ -51,7 +51,7 @@
 ;; The default bordered glyphs are borrowed from lib/tui/src/tui/core/term.cr
 ;; (a vendored Crystal shard's terminal-UI helpers) purely for the character
 ;; choices — there's no existing Scheme-exposed table/box API to reuse:
-;; (creme tui) (src/scheme/modules/tui.cr) deliberately only wraps
+;; (creme tui) (src/creme/modules/tui.cr) deliberately only wraps
 ;; color/style/buffer/window primitives, not box or table rendering.
 ;;
 ;; This module only lays out already-stringified cells — it has no idea

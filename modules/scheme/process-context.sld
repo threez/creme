@@ -6,7 +6,7 @@
 ;; process-context) surface — command-line (from ProcessLibrary),
 ;; get-environment-variable/get-environment-variables (from EnvVars), and
 ;; exit/emergency-exit (owned directly) — see
-;; src/scheme/modules/scheme/process_context.cr. No subset/superset split
+;; src/creme/modules/scheme/process_context.cr. No subset/superset split
 ;; needed here: the native family's export set IS the R7RS set, exactly.
 ;; ===========================================================================
 

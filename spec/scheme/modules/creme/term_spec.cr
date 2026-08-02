@@ -7,22 +7,22 @@ require "../../../spec_helper"
 # a real pipe so the reading side is a genuine file descriptor, matching how
 # STDIN is read in production -- same approach as lib/tui/spec/core/keys_spec.cr's
 # own read_from helper, which this ports the covered cases from.
-private def read_from(bytes : Bytes) : Scheme::SchemeValue
+private def read_from(bytes : Bytes) : Creme::SchemeValue
   reader, writer = IO.pipe
   writer.write(bytes)
   writer.close
-  Scheme::Builtins::Term.read_key_event(reader)
+  Creme::Builtins::Term.read_key_event(reader)
 ensure
   reader.try &.close
 end
 
-private def kind_of(v : Scheme::SchemeValue) : String
-  alist = v.as(Scheme::Cons)
-  pair = alist.car.as(Scheme::Cons)
-  pair.cdr.as(Scheme::SchemeStr).value
+private def kind_of(v : Creme::SchemeValue) : String
+  alist = v.as(Creme::Cons)
+  pair = alist.car.as(Creme::Cons)
+  pair.cdr.as(Creme::SchemeStr).value
 end
 
-describe Scheme::Builtins::Term do
+describe Creme::Builtins::Term do
   describe ".read_key_event" do
     it "parses a plain character" do
       kind_of(read_from("x".to_slice)).should eq("char")

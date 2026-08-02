@@ -1,8 +1,8 @@
 require "../../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -16,7 +16,7 @@ describe "(scheme base)" do
   end
 
   it "every (scheme base) export is bound in @global and callable/referenceable" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.library_export_names(["scheme", "base"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
@@ -44,23 +44,23 @@ end
 
 describe "(scheme write)" do
   it "display/write are auto-imported: work with zero import lines" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.stdout = out = IO::Memory.new
-    Scheme.run_source(interp, %[(display "hi") (write "hi")])
+    Creme.run_source(interp, %[(display "hi") (write "hi")])
     out.to_s.should eq(%(hi"hi"))
   end
 
   it "every (scheme write) export is bound in @global" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.library_export_names(["scheme", "write"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
   end
 
   it "explicitly importing (scheme write) is a harmless no-op" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.stdout = out = IO::Memory.new
-    Scheme.run_source(interp, %[(import (scheme write)) (display "ok")])
+    Creme.run_source(interp, %[(import (scheme write)) (display "ok")])
     out.to_s.should eq("ok")
   end
 end

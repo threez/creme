@@ -2,7 +2,7 @@
 
 How `scheme.cr` (the `creme` interpreter) got fast. This is a narrative of the
 performance work on the **native Crystal** evaluation core — the
-`Interpreter`/`VM`/`BytecodeCompiler` classes under `src/scheme/` — **what we
+`Interpreter`/`VM`/`BytecodeCompiler` classes under `src/creme/` — **what we
 did, why, and where we ended up** — including the experiments we measured and
 deliberately threw away.
 
@@ -85,7 +85,7 @@ for correctness (the explicit stack is what makes `call/cc`/`guard` possible) an
 partly for speed.
 
 - **Register bytecode, not a stack machine or tree-walker.** The compiler emits
-  Lua-style register instructions into a `Chunk`. The VM (`src/scheme/eval/vm.cr`)
+  Lua-style register instructions into a `Chunk`. The VM (`src/creme/eval/vm.cr`)
   runs a fetch-decode-dispatch loop over an explicit `CallFrame` stack rather
   than recursing in Crystal. The explicit stack is required for the unwinding
   features (`call/cc`, `dynamic-wind`, `guard`, `parameterize`) to unwind to an
@@ -124,7 +124,7 @@ by construction, and it is worth stating clearly because it removes a whole clas
 of "optimization" that would otherwise be tempting.
 
 `SchemeInt` is a **value-type `struct`**, not a class, inside the
-`SchemeValue` union (`src/scheme/value/values.cr`, `src/scheme/value/alias.cr`).
+`SchemeValue` union (`src/creme/value/values.cr`, `src/creme/value/alias.cr`).
 Crystal represents a `struct | class` union as a tagged value — a type tag plus
 an inline payload — so:
 
@@ -160,7 +160,7 @@ into one op that reads the operand directly. Each pass below was driven by an
 actual profile (via the built-in VM-instruction sampler in `(creme prof)`), not a
 guess, and targeted whatever the current hottest staging instruction was.
 
-The opcode families live in `src/scheme/compile/opcode.cr`; each has a detailed
+The opcode families live in `src/creme/compile/opcode.cr`; each has a detailed
 doc comment there.
 
 - **Immediate operands** — `AddImm`/`SubImm`/`MulImm`/`NumLtImm`/… A call like
@@ -256,7 +256,7 @@ doc comment there.
   alloc, builtin dispatch). Profiling `competition/scheme/demo-todo/
   app.scm` under load surfaced `(eq? (caar alist) key)` — `(creme sxql)`'s
   alist-lookup loop — as a real hot spot. `eq?`/`eqv?` are literally the
-  same implementation in this codebase (`Scheme.scheme_eqv?`), and unlike
+  same implementation in this codebase (`Creme.scheme_eqv?`), and unlike
   the numeric comparisons it fuses alongside, `eq?` never raises and needs
   no numeric-tower/overflow fallback — so the fused op is just a direct
   call to that helper (or, for the `*Imm` shapes, an even simpler check:
@@ -467,7 +467,7 @@ lookup on a hot path:
 
 - **Global reference cache.** A hot recursive call like `(fib (- n 1))`
   references the global `fib` on every invocation. `get_global_cached`
-  (`src/scheme/eval/vm.cr`) caches each `GetGlobal`/`CallGlobal`/`ReturnGlobal`
+  (`src/creme/eval/vm.cr`) caches each `GetGlobal`/`CallGlobal`/`ReturnGlobal`
   site's resolved value, keyed on the global environment's version counter. While
   nothing has redefined that name at top level, the cache hit skips the
   environment hash lookup entirely; a `define`/`set!` bumps the version and
@@ -481,7 +481,7 @@ lookup on a hot path:
   allocation (millions of short-lived heap objects in a hot loop → GC pressure)
   plus the full `apply` machinery, then a type check inside the builtin. We made
   them dedicated `Builtin` subtypes — `RecordAccessor` and `RecordMutator`
-  (`src/scheme/eval/record.cr`) — that carry their target record type and field
+  (`src/creme/eval/record.cr`) — that carry their target record type and field
   index *statically*, and gave `dispatch_call` a fast path that does the type
   guard and a direct field load/store inline, skipping the array allocation and
   `apply` entirely. This is the shape-guarded-accessor idea, except the "shape"

@@ -55,7 +55,7 @@
 ;; ---- Syntax highlighting for the input pane ----
 ;;
 ;; TextEdit's highlighter contract (tui-text-edit-set-highlighter! in
-;; src/scheme/modules/creme/tui.cr) wants `line-string -> list of
+;; src/creme/modules/creme/tui.cr) wants `line-string -> list of
 ;; (text . style-or-#f)` pairs, where `style` is a real tui-style OBJECT
 ;; (see tui_cells_from_scheme/tui_style_from_alist there) — a different
 ;; shape than (creme highlight)'s highlight-line, which instead returns a

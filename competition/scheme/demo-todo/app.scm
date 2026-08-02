@@ -12,7 +12,7 @@
 ;; ...` run -- each request still runs against its own child Interpreter
 ;; (mux-listen!'s own per-request isolation, see mux.cr), which shares
 ;; --profile's sampler by reference (see Interpreter::SampleSink's own
-;; doc comment, src/scheme/eval/interpreter.cr), so samples from request
+;; doc comment, src/creme/eval/interpreter.cr), so samples from request
 ;; handling show up in the report the same way as before this moved out
 ;; of the app's own code and into `creme` itself.
 (define port

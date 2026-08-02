@@ -1,4 +1,4 @@
-require "./scheme"
+require "./creme"
 
 # Reopens the stdlib's own `lib LibGC` (crystal/gc/boehm.cr) just to add the
 # two bdwgc functions it doesn't already bind, needed for the default-heap-
@@ -9,7 +9,7 @@ lib LibGC
   fun get_heap_size = GC_get_heap_size : LibC::SizeT
 end
 
-def format_error(ex : Scheme::SchemeError) : String
+def format_error(ex : Creme::SchemeError) : String
   String.build do |io|
     if pos = ex.pos
       io << "Error: " << ex.message << " (" << pos.file << ':' << pos.line << ':' << pos.col << ')'
@@ -31,11 +31,11 @@ end
 # # delegate to, instead of Crystal-native hand-rolled line-reading/
 # # buffering/error-formatting -- one implementation for line-editing,
 # # live syntax highlighting, and paren-matching across all three runtimes.
-def repl(interp : Scheme::Interpreter) : Nil
-  Scheme.run_source(interp, "(import (scheme process-context)) (import (creme repl)) (run-repl)")
-rescue ex : Scheme::SchemeExit
+def repl(interp : Creme::Interpreter) : Nil
+  Creme.run_source(interp, "(import (scheme process-context)) (import (creme repl)) (run-repl)")
+rescue ex : Creme::SchemeExit
   exit(ex.code)
-rescue ex : Scheme::SchemeError
+rescue ex : Creme::SchemeError
   STDERR.puts format_error(ex)
   exit 1
 rescue ex
@@ -140,7 +140,7 @@ end
 # disassembly before running it — for `creme --dump-bytecode`. Runs (rather
 # than just compiling) since a later form's analyze pass needs any earlier
 # define-syntax/import to have actually executed first, matching
-# Scheme.run_file's own incremental per-form driver. Auto-imports (scheme
+# Creme.run_file's own incremental per-form driver. Auto-imports (scheme
 # base)/(scheme write) by default (like the REPL) so the dump reflects what a
 # real run actually compiles to — notably so arithmetic/cxr/etc. fuse into
 # their PrimCallNode specializations (analyzer.cr's analyze_app requires the
@@ -150,27 +150,27 @@ end
 # R7RS behavior (no auto-import) for scripts that manage their own imports
 # and want to see exactly what they compile to before any import runs.
 #
-# Uses Scheme.forms_for (not a bare Reader.read_all) so a `#lang` file (e.g.
+# Uses Creme.forms_for (not a bare Reader.read_all) so a `#lang` file (e.g.
 # a `#lang (creme syntax sql)` query) is disassembled the same way running it
 # actually would be — via its own dialect's read_program, whatever generated
 # code that produces — rather than failing outright on `#lang` as unknown `#`
 # syntax. A plain (non-`#lang`) script is unaffected either way, since
 # forms_for falls through to the ordinary Reader for it.
 def dump_bytecode(path : String, strict : Bool = false) : Nil
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: !strict)
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: !strict)
   src = File.read(path)
-  # Push the script's own directory, matching Scheme.run_file, so a relative
+  # Push the script's own directory, matching Creme.run_file, so a relative
   # (include "...") inside it resolves against where the script lives, not
   # the process's CWD.
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
-    forms = Scheme.forms_for(interp, src, path)
+    forms = Creme.forms_for(interp, src, path)
     forms.each_with_index do |form, i|
       node = interp.analyze(form, interp.global)
-      chunk = Scheme::BytecodeCompiler.compile_program([node])
+      chunk = Creme::BytecodeCompiler.compile_program([node])
       puts "; ---- top-level form #{i} ----" if forms.size > 1
-      Scheme::Disassembler.disassemble(chunk, "form #{i}")
-      Scheme::VM.new(interp, interp.global).run(chunk)
+      Creme::Disassembler.disassemble(chunk, "form #{i}")
+      Creme::VM.new(interp, interp.global).run(chunk)
     end
   ensure
     interp.pop_load_dir
@@ -206,10 +206,10 @@ KITCHEN_SINK_IMPORT = %((import (scheme base) (scheme write) (scheme cxr) (schem
 
 def disassemble_scb1(path : String) : Nil
   bytes = File.read(path).to_slice
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, KITCHEN_SINK_IMPORT)
-  chunk = Scheme::ChunkDeserializer.deserialize(bytes, interp.global)
-  Scheme::Disassembler.disassemble(chunk, File.basename(path))
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, KITCHEN_SINK_IMPORT)
+  chunk = Creme::ChunkDeserializer.deserialize(bytes, interp.global)
+  Creme::Disassembler.disassemble(chunk, File.basename(path))
 end
 
 # Handles `creme --disassemble <file.cvmc>` — split out of `main` purely to
@@ -225,10 +225,10 @@ def handle_disassemble(args : Array(String)) : Nil
   end
   begin
     disassemble_scb1(path)
-  rescue ex : Scheme::ChunkDeserializer::FormatError
+  rescue ex : Creme::ChunkDeserializer::FormatError
     STDERR.puts "creme: #{path}: #{ex.message}"
     exit 1
-  rescue ex : Scheme::SchemeError
+  rescue ex : Creme::SchemeError
     STDERR.puts format_error(ex)
     exit 1
   rescue ex
@@ -243,18 +243,18 @@ end
 # "SCB1" format the real Crystal VM already round-trips through) — for
 # `creme --emit-cvm`, feeding the standalone C11 prototype VM in cvm/ (see
 # cvm/README.md for current opcode/value-model coverage). Pushes path's own
-# directory first, same as Scheme.run_file — bench/creme.scm's own
+# directory first, same as Creme.run_file — bench/creme.scm's own
 # `(include "workloads.scm")` resolves relative to wherever the script
 # lives, not the process's CWD, so this must match run_file's convention
 # rather than dump_bytecode's (which doesn't push one at all) for `creme
 # --emit-cvm bench/creme.scm ...` to work when invoked from the repo root.
 def emit_cvm(path : String, out_path : String) : Nil
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: true)
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: true)
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
     src = File.read(path)
-    forms = Scheme.forms_for(interp, src, path)
-    bytes = Scheme::CVMEmitter.emit(interp, forms, interp.global)
+    forms = Creme.forms_for(interp, src, path)
+    bytes = Creme::CVMEmitter.emit(interp, forms, interp.global)
     File.write(out_path, bytes)
   ensure
     interp.pop_load_dir
@@ -272,7 +272,7 @@ def handle_emit_cvm(args : Array(String)) : Nil
     path = args[1]
     out_path = args[2]
     emit_cvm(path, out_path)
-  rescue ex : Scheme::SchemeError
+  rescue ex : Creme::SchemeError
     STDERR.puts format_error(ex)
     exit 1
   rescue ex
@@ -301,7 +301,7 @@ def run_via_cvm(path : String, cvm_args : Array(String)) : Nil
     status = Process.run(cvm_bin, cvm_args + [tmp_path],
       output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
     exit_code = status.exit_code
-  rescue ex : Scheme::SchemeError
+  rescue ex : Creme::SchemeError
     STDERR.puts format_error(ex)
   rescue ex
     STDERR.puts "Internal error: #{ex.message}"
@@ -355,9 +355,9 @@ def handle_dump_bytecode(args : Array(String)) : Nil
     path = args[path_index]
     path_index.times { ARGV.shift }
     dump_bytecode(path, strict)
-  rescue ex : Scheme::SchemeExit
+  rescue ex : Creme::SchemeExit
     exit(ex.code)
-  rescue ex : Scheme::SchemeError
+  rescue ex : Creme::SchemeError
     STDERR.puts format_error(ex)
     exit 1
   end
@@ -369,9 +369,9 @@ end
 # (competition/scheme/demo-todo/app.scm, competition/scheme/demo-todo-dsl/
 # app.mex) used to hand-roll themselves, checking (command-line) for their
 # own "--profile" flag. Runs a small wrapper program that `load`s the real
-# script as the profiled thunk — `load` (src/scheme/modules/scheme/
+# script as the profiled thunk — `load` (src/creme/modules/scheme/
 # load.cr) resolves/pushes the target's own directory exactly like
-# Scheme.run_file does, and respects a `#lang` header exactly the same
+# Creme.run_file does, and respects a `#lang` header exactly the same
 # way too, so this works identically to a plain `creme <file.scm>` run
 # other than the profiling wrapper and report. Split out of `main` purely
 # to keep that method's own top-level dispatch simple.
@@ -389,7 +389,7 @@ def handle_profile(args : Array(String)) : Nil
     # --dump-bytecode/--strict above — (command-line)/(creme cli) assume
     # ARGV[0] is the script's own path.
     2.times { ARGV.shift }
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
     wrapper = <<-SCHEME
       (import (scheme base) (scheme write) (scheme load) (creme prof) (creme bench))
       (define scheme-report #f)
@@ -406,10 +406,10 @@ def handle_profile(args : Array(String)) : Nil
               (cons "crystal-total" (profile-total-samples crystal-report)))))
       (newline)
       SCHEME
-    Scheme.run_source(interp, wrapper, source_name: path)
-  rescue ex : Scheme::SchemeExit
+    Creme.run_source(interp, wrapper, source_name: path)
+  rescue ex : Creme::SchemeExit
     exit(ex.code)
-  rescue ex : Scheme::SchemeError
+  rescue ex : Creme::SchemeError
     STDERR.puts format_error(ex)
     exit 1
   rescue ex
@@ -423,12 +423,12 @@ end
 # matching strict R7RS and the same contract file execution has (see main's
 # args[0] branch). Split out of `main` purely to keep its own dispatch simple.
 def run_piped_script : Nil
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
   src = STDIN.gets_to_end
-  Scheme::BytecodeCompiler.run_program(interp, Scheme::Reader.read_all(src, "<stdin>"), interp.global)
-rescue ex : Scheme::SchemeExit
+  Creme::BytecodeCompiler.run_program(interp, Creme::Reader.read_all(src, "<stdin>"), interp.global)
+rescue ex : Creme::SchemeExit
   exit(ex.code)
-rescue ex : Scheme::SchemeError
+rescue ex : Creme::SchemeError
   STDERR.puts format_error(ex)
   exit 1
 rescue ex
@@ -443,10 +443,10 @@ end
 def run_script(path : String) : Nil
   # A script file must explicitly import what it uses, per R7RS — see the
   # auto_import_base doc comment on Interpreter#initialize.
-  Scheme.run_file(Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false), path)
-rescue ex : Scheme::SchemeExit
+  Creme.run_file(Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false), path)
+rescue ex : Creme::SchemeExit
   exit(ex.code)
-rescue ex : Scheme::SchemeError
+rescue ex : Creme::SchemeError
   STDERR.puts format_error(ex)
   exit 1
 rescue ex
@@ -488,7 +488,7 @@ SELF_HOSTED_TOOLCHAIN_MARK_LOADED = %(
   (mark-self-hosted-library-loaded! '(creme compiler compiler)))
 
 # Runs `path` through the self-hosted (creme compiler compiler) instead
-# of the native Crystal BytecodeCompiler run_script/Scheme.run_file uses —
+# of the native Crystal BytecodeCompiler run_script/Creme.run_file uses —
 # for `creme --self-hosted`, an explicit opt-in rather than the
 # interpreter's default execution path (see that flag's own usage text
 # for why: real performance cost, since compilation itself now runs as
@@ -497,16 +497,16 @@ SELF_HOSTED_TOOLCHAIN_MARK_LOADED = %(
 # native compiler has). Mirrors run_script's own auto_import_base: false
 # (a script must explicitly import what it uses, per R7RS) and load-dir
 # push/pop (so a relative (include ...) inside the script resolves
-# against where the script lives, matching Scheme.run_file's own
+# against where the script lives, matching Creme.run_file's own
 # convention) -- the only difference from run_script is compiling via
 # compile-source-to-bytes + load-chunk-bytes instead of BytecodeCompiler.
 def run_self_hosted(path : String) : Nil
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
-  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_IMPORT)
-  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_MARK_LOADED)
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+  Creme.run_source(interp, SELF_HOSTED_TOOLCHAIN_IMPORT)
+  Creme.run_source(interp, SELF_HOSTED_TOOLCHAIN_MARK_LOADED)
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
-    interp.global.define("self-hosted-script-source", Scheme::SchemeStr.new(File.read(path)))
+    interp.global.define("self-hosted-script-source", Creme::SchemeStr.new(File.read(path)))
     # Passed through as compile-source-to-bytes' own optional 2nd (file
     # path) argument -- lets a genuinely nested `(include ...)` (inside a
     # let/lambda body, not just this file's own top level) resolve a
@@ -514,19 +514,19 @@ def run_self_hosted(path : String) : Nil
     # current-compiling-file/expand-include-form). A plain global (not
     # string-interpolated into the source below) so there's no escaping
     # to worry about.
-    interp.global.define("self-hosted-script-path", Scheme::SchemeStr.new(path))
+    interp.global.define("self-hosted-script-path", Creme::SchemeStr.new(path))
     # A marker only this path defines -- (creme introspection)'s `runtime`
     # builtin checks whether it's bound in interp.global to report
     # compiler = "self-hosted" vs "native" (see introspection.cr's
     # `runtime` method). Its value is never inspected, only its presence.
-    interp.global.define("__creme_self_hosted__", Scheme::TRUE)
-    Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes self-hosted-script-source self-hosted-script-path))", source_name: path)
+    interp.global.define("__creme_self_hosted__", Creme::TRUE)
+    Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes self-hosted-script-source self-hosted-script-path))", source_name: path)
   ensure
     interp.pop_load_dir
   end
-rescue ex : Scheme::SchemeExit
+rescue ex : Creme::SchemeExit
   exit(ex.code)
-rescue ex : Scheme::SchemeError
+rescue ex : Creme::SchemeError
   STDERR.puts format_error(ex)
   exit 1
 rescue ex
@@ -541,14 +541,14 @@ end
 # self-hosted toolchain load is identical to run_self_hosted's, just
 # followed by (run-repl) instead of compiling+running a file's source.
 def run_self_hosted_repl : Nil
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
-  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_IMPORT)
-  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_MARK_LOADED)
-  interp.global.define("__creme_self_hosted__", Scheme::TRUE)
-  Scheme.run_source(interp, "(import (scheme process-context)) (import (creme repl)) (run-repl)")
-rescue ex : Scheme::SchemeExit
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+  Creme.run_source(interp, SELF_HOSTED_TOOLCHAIN_IMPORT)
+  Creme.run_source(interp, SELF_HOSTED_TOOLCHAIN_MARK_LOADED)
+  interp.global.define("__creme_self_hosted__", Creme::TRUE)
+  Creme.run_source(interp, "(import (scheme process-context)) (import (creme repl)) (run-repl)")
+rescue ex : Creme::SchemeExit
   exit(ex.code)
-rescue ex : Scheme::SchemeError
+rescue ex : Creme::SchemeError
   STDERR.puts format_error(ex)
   exit 1
 rescue ex
@@ -599,7 +599,7 @@ def main : Nil
       # Interactive REPL: batteries-included, matching this project's
       # established ergonomics — (scheme base)/(scheme write) are
       # auto-imported so there's no friction typing expressions live.
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
       repl(interp)
     else
       run_piped_script

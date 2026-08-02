@@ -116,7 +116,7 @@ static Value bi_hash_table_contains_p(VM *vm, Value *args, int nargs) {
 
 /* default may be a thunk (0-arg procedure, called lazily) or, for callers
  * that don't want laziness, an ordinary value -- a non-procedure default
- * simply isn't applied. Mirrors src/scheme/modules/creme/hash_table.cr's
+ * simply isn't applied. Mirrors src/creme/modules/creme/hash_table.cr's
  * own hash_table_ref/hash_table_default contract exactly -- (creme dao)'s
  * dao-ref-keyword relies on passing a plain #f default here (not a thunk),
  * so unconditionally cvm_apply-ing args[2] (this function's prior behavior)

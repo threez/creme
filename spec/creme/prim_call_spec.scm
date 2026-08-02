@@ -22,7 +22,7 @@
 ;; "primitive-fusion suppression after redefinition" cases must run last
 ;; (see that file's own long comment on the mechanism) -- generalized
 ;; here to every case that permanently redefines a widely-used builtin.
-;; Crystal's own w()/run() give native_eval a BRAND NEW Scheme::Interpreter
+;; Crystal's own w()/run() give native_eval a BRAND NEW Creme::Interpreter
 ;; every call; this file's should-match-native? runs bootstrap-eval and
 ;; native-eval alike against ONE shared global table for the whole
 ;; process. Every case that does `(define (+ ...) ...)` (or vector-ref/

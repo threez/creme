@@ -68,13 +68,13 @@ EXCLUDED = [
   "demo2.scm",
 ]
 
-private def load_toolchain(interp : Scheme::Interpreter) : Nil
-  Scheme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
+private def load_toolchain(interp : Creme::Interpreter) : Nil
+  Creme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
   # See src/main.cr's SELF_HOSTED_TOOLCHAIN_MARK_LOADED's own doc comment
   # -- needed now that compiler.sld's own file-read genuinely works
   # reentrant here too, to avoid re-reading/re-executing one of these
   # same libraries' own source a second time.
-  Scheme.run_source(interp, %(
+  Creme.run_source(interp, %(
     (mark-self-hosted-library-loaded! '(creme peg))
     (mark-self-hosted-library-loaded! '(creme bytecode))
     (mark-self-hosted-library-loaded! '(creme compiler reader))
@@ -83,19 +83,19 @@ end
 
 private def run_native(path : String) : String
   captured = IO::Memory.new
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], stdout: captured, auto_import_base: false)
-  Scheme.run_file(interp, path)
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"], stdout: captured, auto_import_base: false)
+  Creme.run_file(interp, path)
   captured.to_s
 end
 
 private def run_bootstrap(path : String) : String
   captured = IO::Memory.new
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], stdout: captured, auto_import_base: false)
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"], stdout: captured, auto_import_base: false)
   load_toolchain(interp)
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
-    interp.global.define("differential-example-source", Scheme::SchemeStr.new(File.read(path)))
-    Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes differential-example-source))", source_name: path)
+    interp.global.define("differential-example-source", Creme::SchemeStr.new(File.read(path)))
+    Creme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes differential-example-source))", source_name: path)
   ensure
     interp.pop_load_dir
   end

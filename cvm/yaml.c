@@ -2,7 +2,7 @@
  * JSON support to reuse from anywhere), this wraps libyaml directly --
  * writing a YAML 1.1 parser/emitter from scratch would be a much bigger
  * lift than JSON's recursive descent, and native's own (creme yaml)
- * (src/scheme/modules/creme/yaml.cr) already leans on Crystal's stdlib
+ * (src/creme/modules/creme/yaml.cr) already leans on Crystal's stdlib
  * `YAML`, itself a libyaml wrapper -- so both backends end up backed by
  * the same underlying C library either way.
  *

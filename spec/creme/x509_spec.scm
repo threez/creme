@@ -6,7 +6,7 @@
 ;;
 ;; (creme x509) is a genuine dual-implementation module -- native reopens
 ;; Crystal's own OpenSSL::LibCrypto binding to add every X509/ASN1
-;; declaration it needs (src/scheme/modules/creme/x509.cr, since neither
+;; declaration it needs (src/creme/modules/creme/x509.cr, since neither
 ;; Crystal's stdlib nor the vendored jose.cr shard bind a certificate-
 ;; building/chain-verification surface), cvm drives the same X509/
 ;; X509_REQ/X509_STORE API directly in C (cvm/x509.c, where it's simply

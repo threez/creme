@@ -1,4 +1,4 @@
-/* (creme pkey) — see pkey.h. A port of src/scheme/modules/creme/pkey.cr:
+/* (creme pkey) — see pkey.h. A port of src/creme/modules/creme/pkey.cr:
  * rsa-generate-key/ec-generate-key/pkey-sign/pkey-verify/rsa-encrypt/
  * rsa-decrypt/pkey->pem/pem->pkey/pkey-public-key/pkey?/pkey-private?/
  * pkey-type. Unlike native (which has to reuse the vendored jose.cr

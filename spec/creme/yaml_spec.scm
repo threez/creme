@@ -5,7 +5,7 @@
 ;; should-match-native? approach.
 ;;
 ;; (creme yaml) used to be entirely absent from both backends. Native's
-;; own (creme yaml) (src/scheme/modules/creme/yaml.cr) leans on Crystal's
+;; own (creme yaml) (src/creme/modules/creme/yaml.cr) leans on Crystal's
 ;; stdlib `YAML`; cvm's (cvm/yaml.c) wraps libyaml directly -- both end up
 ;; backed by the same underlying C library either way (see yaml.c's own
 ;; header comment for the full design and its one deliberate, narrow

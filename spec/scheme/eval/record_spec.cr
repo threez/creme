@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -58,7 +58,7 @@ describe "define-record-type" do
   end
 
   it "a field with no mutator spec has no setter defined" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: set-point-x!/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: set-point-x!/) do
       run("(define-record-type point (make-point x) point? (x point-x)) (set-point-x! (make-point 1) 2)")
     end
   end
@@ -72,7 +72,7 @@ describe "define-record-type" do
   end
 
   it "accessor raises when called on the wrong type" do
-    expect_raises(Scheme::SchemeRuntimeError, /point-x: expected a point record, got 5/) do
+    expect_raises(Creme::SchemeRuntimeError, /point-x: expected a point record, got 5/) do
       run("(define-record-type point (make-point x) point? (x point-x)) (point-x 5)")
     end
   end
@@ -87,13 +87,13 @@ describe "define-record-type" do
   end
 
   it "raises on a malformed constructor field" do
-    expect_raises(Scheme::SchemeRuntimeError, /define-record-type: constructor field '.*' is not a declared field/) do
+    expect_raises(Creme::SchemeRuntimeError, /define-record-type: constructor field '.*' is not a declared field/) do
       run("(define-record-type point (make-point x z) point? (x point-x) (y point-y))")
     end
   end
 
   it "raises on malformed input" do
-    expect_raises(Scheme::SchemeRuntimeError, /define-record-type: malformed/) do
+    expect_raises(Creme::SchemeRuntimeError, /define-record-type: malformed/) do
       run("(define-record-type point)")
     end
   end

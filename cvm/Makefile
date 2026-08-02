@@ -57,7 +57,7 @@ FFI_LIBS := $(shell pkg-config --libs libffi 2>/dev/null || echo -lffi)
 
 # libyaml (MIT) -- backs (creme yaml)'s yaml-read/yaml-write (yaml.c),
 # same pkg-config-with-a-fallback pattern as PCRE2/GMP/OpenSSL/libffi
-# above. Native's own (creme yaml) (src/scheme/modules/creme/yaml.cr)
+# above. Native's own (creme yaml) (src/creme/modules/creme/yaml.cr)
 # leans on Crystal's bundled `YAML` stdlib module, itself a libyaml
 # wrapper -- so both backends end up linking the same underlying C
 # library either way; see yaml.c's own header comment.

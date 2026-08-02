@@ -72,7 +72,7 @@
       (string-append "\x1b;[" code "m" text "\x1b;[0m"))
 
     ;; R7RS's syntactic-keyword set, as already recognized by this project's
-    ;; own (builtin base) -- see src/scheme/modules/scheme/base.cr's
+    ;; own (builtin base) -- see src/creme/modules/scheme/base.cr's
     ;; BUILTIN_BASE_NONFN -- extended with a few more common syntactic forms
     ;; (define-record-type, case, do, delay/delay-force/make-promise,
     ;; syntax-rules, case-lambda, λ) that aren't in that exact list but are

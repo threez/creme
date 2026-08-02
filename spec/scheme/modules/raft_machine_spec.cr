@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (scheme cxr) (creme raft) (creme raft-machine) (creme hash-table) (creme extra) (creme string)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (scheme cxr) (creme raft) (creme raft-machine) (creme hash-table) (creme extra) (creme string)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (scheme cxr) (creme raft) (creme raft-machine) (creme hash-table) (creme extra) (creme string)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (scheme cxr) (creme raft) (creme raft-machine) (creme hash-table) (creme extra) (creme string)) #{src}")
 end
 
 # A 3-node in-memory KV-store cluster built entirely with the raft-machine
@@ -87,7 +87,7 @@ describe "raft-machine module" do
   # raising. Exercising the macro's own dispatcher in isolation avoids that
   # and is a more precise unit test of raft-commands anyway.
   it "raft-commands raises on an unknown command" do
-    expect_raises(Scheme::SchemeRuntimeError, /unknown command/) do
+    expect_raises(Creme::SchemeRuntimeError, /unknown command/) do
       run(<<-SCHEME)
         (define apply-proc (raft-commands ((set key value) 'ok) ((get key) 'value)))
         (apply-proc (raft-sexp->bytevector '(delete x)))

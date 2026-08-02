@@ -1,5 +1,5 @@
 /* (creme secure-random) — see secure_random.h. A port of
- * src/scheme/modules/creme/secure_random.cr: secure-random-bytes/-hex/
+ * src/creme/modules/creme/secure_random.cr: secure-random-bytes/-hex/
  * -base64. Backed by OpenSSL's RAND_bytes (already linked via -lcrypto,
  * the exact same call cvm/actor.c's own TCP/Unix handshake already uses
  * for its nonces) -- a genuine OS-entropy CSPRNG, deliberately separate

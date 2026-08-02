@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -37,7 +37,7 @@ describe "guard" do
   end
 
   it "re-raises when no clause matches" do
-    expect_raises(Scheme::SchemeUserError, /boom/) do
+    expect_raises(Creme::SchemeUserError, /boom/) do
       run(%[(guard (e (#f 'never)) (error "boom"))])
     end
   end
@@ -60,15 +60,15 @@ describe "guard" do
   end
 
   it "does not catch (exit ...): it keeps propagating" do
-    expect_raises(Scheme::SchemeExit) do
+    expect_raises(Creme::SchemeExit) do
       run("(import (scheme process-context)) (guard (e (#t 'caught)) (exit 1))")
     end
   end
 
   it "does not catch a max_eval_depth exceeded error" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 10)
-    expect_raises(Scheme::SchemeExecutionLimitError, /recursion depth exceeded/) do
-      Scheme.run_source(interp, "(define (f n) (+ 1 (f (+ n 1)))) (guard (e (#t 'caught)) (f 0))")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 10)
+    expect_raises(Creme::SchemeExecutionLimitError, /recursion depth exceeded/) do
+      Creme.run_source(interp, "(define (f n) (+ 1 (f (+ n 1)))) (guard (e (#t 'caught)) (f 0))")
     end
   end
 
@@ -91,7 +91,7 @@ describe "guard" do
   end
 
   it "raises on malformed input" do
-    expect_raises(Scheme::SchemeRuntimeError, /guard: malformed/) do
+    expect_raises(Creme::SchemeRuntimeError, /guard: malformed/) do
       run("(guard)")
     end
   end

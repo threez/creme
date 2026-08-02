@@ -13,7 +13,7 @@
 ;; away from silently breaking every OTHER file that runs after it. A
 ;; genuinely separate process per file sidesteps that risk entirely, the
 ;; same way Crystal's own spec_helper.cr gives each individual `w`/`run`
-;; call a brand new Scheme::Interpreter.
+;; call a brand new Creme::Interpreter.
 ;;
 ;; What THIS library adds is the aggregation: run-spec-file! sets
 ;; CREME_SPEC_DATA_MODE (an environment variable a spawned child

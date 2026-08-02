@@ -6,7 +6,7 @@
 ;; does.
 ;;
 ;; `#lang <library-name>` is a general mechanism (see the doc comment on
-;; Scheme.lang_header_form/run_source in src/scheme/runner.cr), recognized
+;; Scheme.lang_header_form/run_source in src/creme/runner.cr), recognized
 ;; only there -- i.e. only for a whole file run as a script, not by the
 ;; REPL, `eval`, or --dump-bytecode (`load` recognizes it too, see below).
 ;; The named library must export a `read-program` procedure that turns
@@ -14,7 +14,7 @@
 ;; that (analyzer/compiler/VM) is completely unmodified and has no idea
 ;; a dialect was involved. `(creme syntax mex)` (modules/creme/syntax/
 ;; mex.sld) implements its `read-program` on top of `(creme reader)`
-;; (src/scheme/modules/creme/reader.cr), which exposes the real Lexer/
+;; (src/creme/modules/creme/reader.cr), which exposes the real Lexer/
 ;; Reader to Scheme as a token-stream hook -- `(creme syntax mex)`
 ;; itself does nothing but tokenize, run one swap-pass over the token
 ;; list, and hand the result back for parsing. A different dialect is
@@ -33,7 +33,7 @@
 ;; html!/css! template code here at all -- the stylesheet and markup
 ;; live in their own natural-syntax files (style.scss, row.slim,
 ;; page.slim), loaded via the SAME `#lang` mechanism, extended to `load`
-;; too (see src/scheme/modules/scheme/load.cr): loading a `#lang (creme
+;; too (see src/creme/modules/scheme/load.cr): loading a `#lang (creme
 ;; syntax scss) (export css)` file defines `css` as the compiled CSS
 ;; string in this file's own environment, and loading a `#lang (creme
 ;; syntax slim) (export row) (params ...)` file defines `row` as a

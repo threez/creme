@@ -104,7 +104,7 @@
 ; (creme bench) (used below for its table/HTML report helpers, by both
 ; suites) also imports (creme prof) for its profiling helpers, so this
 ; script — like anything else importing (creme bench) — isn't importable
-; on musl/Alpine builds (see src/scheme/modules/creme/prof_native.cr's
+; on musl/Alpine builds (see src/creme/modules/creme/prof_native.cr's
 ; header comment).
 
 (import (scheme base) (scheme write) (scheme cxr) (scheme process-context)

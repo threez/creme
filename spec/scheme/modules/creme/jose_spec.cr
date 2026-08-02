@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme jose)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme jose)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme jose)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme jose)) #{src}")
 end
 
 describe "jose module" do
@@ -97,7 +97,7 @@ describe "jose module" do
   end
 
   it "raises a SchemeRuntimeError for garbage PEM input" do
-    expect_raises(Scheme::SchemeRuntimeError, /jose-jwk-from-pem/) do
+    expect_raises(Creme::SchemeRuntimeError, /jose-jwk-from-pem/) do
       run(%((jose-jwk-from-pem "not a pem")))
     end
   end

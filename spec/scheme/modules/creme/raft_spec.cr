@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}")
 end
 
 # A tiny in-memory 3-node KV-store cluster, shared by every example below.
@@ -80,7 +80,7 @@ describe "raft module" do
   end
 
   it "raft-propose! on a non-leader raises NotLeader" do
-    expect_raises(Scheme::SchemeRuntimeError, /raft-propose!/) do
+    expect_raises(Creme::SchemeRuntimeError, /raft-propose!/) do
       run(<<-SCHEME)
         #{cluster_setup}
         (define follower (if (eq? leader n1) n2 n1))

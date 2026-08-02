@@ -748,7 +748,7 @@
         (else form)))
     
     ;; Converts one sql-query row (an alist of (SchemeStr-column-name . value),
-    ;; per src/scheme/modules/sql.cr) into an alist of (keyword-symbol . value)
+    ;; per src/creme/modules/sql.cr) into an alist of (keyword-symbol . value)
     ;; pairs, e.g. (("title" . "...")) -> ((:title . "...")).
     (define (sxql-row->kw-alist row)
       (map (lambda (pair) (cons (string->symbol (string-append ":" (car pair))) (cdr pair))) row))

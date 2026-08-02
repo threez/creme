@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -24,7 +24,7 @@ describe "R7RS §6.12 Environments and evaluation" do
 
   it "null-environment returns a specifier for an environment with only syntax, no procedures" do
     w("(import (scheme eval)(scheme r5rs)) (eval '(lambda (f x) (f x x)) (null-environment 5)) 'ok").should eq("ok")
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: \+/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: \+/) do
       run("(import (scheme eval)(scheme r5rs)) (eval '+ (null-environment 5))")
     end
   end

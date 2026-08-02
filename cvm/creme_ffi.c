@@ -4,7 +4,7 @@
  * per C library (this file's siblings — regex.c/sql.c/csv.c/etc. — each
  * expose one specific library's own fixed surface; this one lets Scheme
  * code call ANY native function by name/signature at runtime). Mirrors
- * src/scheme/modules/creme/ffi.cr's own surface exactly:
+ * src/creme/modules/creme/ffi.cr's own surface exactly:
  *
  *   (ffi-open "libm.so.6")                          -> lib handle (box)
  *   (ffi-function lib "sqrt" 'double '(double))      -> func handle (box)

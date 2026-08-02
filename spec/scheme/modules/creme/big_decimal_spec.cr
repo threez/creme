@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme bigdecimal)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme bigdecimal)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme bigdecimal)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme bigdecimal)) #{src}")
 end
 
 describe "bigdecimal module" do
@@ -27,13 +27,13 @@ describe "bigdecimal module" do
   end
 
   it "raises on division by zero" do
-    expect_raises(Scheme::SchemeRuntimeError, /bigdecimal-div: division by zero/) do
+    expect_raises(Creme::SchemeRuntimeError, /bigdecimal-div: division by zero/) do
       run(%((bigdecimal-div (string->bigdecimal "1") (string->bigdecimal "0"))))
     end
   end
 
   it "raises on invalid decimal strings" do
-    expect_raises(Scheme::SchemeRuntimeError, /string->bigdecimal: invalid decimal/) do
+    expect_raises(Creme::SchemeRuntimeError, /string->bigdecimal: invalid decimal/) do
       run(%((string->bigdecimal "not-a-number")))
     end
   end

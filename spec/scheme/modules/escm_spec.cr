@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme escm)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme escm)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme escm)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme escm)) #{src}")
 end
 
 describe "escm module" do
@@ -46,11 +46,11 @@ describe "escm module" do
   end
 
   it "raises at compile time on an unterminated tag" do
-    expect_raises(Scheme::SchemeError) { run(%((escm-compile "<%= 1 + 1"))) }
+    expect_raises(Creme::SchemeError) { run(%((escm-compile "<%= 1 + 1"))) }
   end
 
   it "raises at compile time on an empty <%= %>" do
-    expect_raises(Scheme::SchemeError) { run(%((escm-compile "<%=  %>"))) }
+    expect_raises(Creme::SchemeError) { run(%((escm-compile "<%=  %>"))) }
   end
 
   it "leaves an ordinary < not starting a tag as literal text" do

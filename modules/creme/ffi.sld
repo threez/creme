@@ -2,7 +2,7 @@
 ;;
 ;; ffi-pointer-ref/ffi-pointer-set! read/write an individual struct FIELD
 ;; given a pointer and that field's byte offset (ffi-type-size reports a
-;; type's byte size, for computing offsets); see src/scheme/modules/
+;; type's byte size, for computing offsets); see src/creme/modules/
 ;; creme/ffi.cr's own header comment for exactly what is/isn't supported
 ;; -- there's still no whole-struct-by-value marshalling, and layout
 ;; (alignment/padding) is never computed for you. (creme foreign)'s

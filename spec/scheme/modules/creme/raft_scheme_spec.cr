@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}")
 end
 
 # A tiny in-memory 3-node KV-store cluster, shared by every example below.
@@ -66,7 +66,7 @@ describe "(creme raft-scheme)" do
   end
 
   it "raft-scheme-propose! on a non-leader raises not-leader" do
-    expect_raises(Scheme::SchemeRuntimeError, /not leader/) do
+    expect_raises(Creme::SchemeRuntimeError, /not leader/) do
       run(<<-SCHEME)
         (define (drop-eq lst x)
           (cond ((null? lst) '())

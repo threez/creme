@@ -21,7 +21,7 @@
 ;;     sleep-ms!, write, and (creme hash-table)'s make-hash-table/-set!/-ref/
 ;;     -contains?/-delete!.
 ;;
-;; Why this exists at all: src/scheme/modules/creme/raft.cr ((creme raft)) is
+;; Why this exists at all: src/creme/modules/creme/raft.cr ((creme raft)) is
 ;; a Scheme *binding* over an external Crystal shard (threez/raft.cr) that
 ;; cvm has no native counterpart for at all -- see that file's own header
 ;; comment. (creme raft-scheme) is a separate, independent implementation:

@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -72,14 +72,14 @@ describe "call/cc" do
   end
 
   it "parameterize's restore fires correctly even after the escape" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(define p (make-parameter 10))")
-    Scheme.run_source(interp, "(call/cc (lambda (k) (parameterize ((p 20)) (k 'escaped))))")
-    Scheme.run_source(interp, "(p)").write_string.should eq("10")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(define p (make-parameter 10))")
+    Creme.run_source(interp, "(call/cc (lambda (k) (parameterize ((p 20)) (k 'escaped))))")
+    Creme.run_source(interp, "(p)").write_string.should eq("10")
   end
 
   it "raises when the continuation is invoked with the wrong number of arguments" do
-    expect_raises(Scheme::SchemeRuntimeError, /continuation: expected 1 argument, got 2/) do
+    expect_raises(Creme::SchemeRuntimeError, /continuation: expected 1 argument, got 2/) do
       run("(call/cc (lambda (k) (k 1 2)))")
     end
   end
@@ -90,18 +90,18 @@ describe "call/cc" do
       (call/cc (lambda (k) (set! saved-k k) 'initial))
       (saved-k 'late-value)
       SCHEME
-    expect_raises(Scheme::SchemeRuntimeError, /continuation invoked outside its dynamic extent/) do
+    expect_raises(Creme::SchemeRuntimeError, /continuation invoked outside its dynamic extent/) do
       run(src)
     end
   end
 
   it "the interpreter remains usable after a stale continuation invocation raises" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    Scheme.run_source(interp, "(define saved-k #f)")
-    Scheme.run_source(interp, "(call/cc (lambda (k) (set! saved-k k) 'initial))")
-    expect_raises(Scheme::SchemeRuntimeError) do
-      Scheme.run_source(interp, "(saved-k 'late-value)")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    Creme.run_source(interp, "(define saved-k #f)")
+    Creme.run_source(interp, "(call/cc (lambda (k) (set! saved-k k) 'initial))")
+    expect_raises(Creme::SchemeRuntimeError) do
+      Creme.run_source(interp, "(saved-k 'late-value)")
     end
-    Scheme.run_source(interp, "(+ 1 2)").write_string.should eq("3")
+    Creme.run_source(interp, "(+ 1 2)").write_string.should eq("3")
   end
 end

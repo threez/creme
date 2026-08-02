@@ -8,7 +8,7 @@
 ;; a Scheme line-comment starter, `{`/`}`/`:` aren't meaningful Scheme
 ;; delimiters) — so this is a recursive-descent parser built declaratively
 ;; on `(creme peg)`'s parser combinators, exactly the "truly alien
-;; grammar" escape hatch described in src/scheme/runner.cr's `#lang` doc
+;; grammar" escape hatch described in src/creme/runner.cr's `#lang` doc
 ;; comment. No new Crystal surface at all. Only the statement/nesting/
 ;; comment-skipping GRAMMAR is expressed as combinators; a decl's own
 ;; "property : value" splitting and $variable substitution stay ordinary
@@ -31,7 +31,7 @@
 ;; is unambiguous — that "/" is never mistaken for a comment opener).
 ;;
 ;; A `#lang (creme syntax scss)` file's whole content is exactly one stylesheet.
-;; Two ways to use it (see src/scheme/runner.cr's `#lang` doc comment for
+;; Two ways to use it (see src/creme/runner.cr's `#lang` doc comment for
 ;; the header-args contract this implements):
 ;;   ./bin/creme style.scss                -- no `(export ...)` on the
 ;;                                             header line -> prints the
@@ -181,7 +181,7 @@
     (define (scss->string src)
       (css->string (parse-stylesheet src)))
 
-    ;; The #lang contract (see src/scheme/runner.cr): src is everything in
+    ;; The #lang contract (see src/creme/runner.cr): src is everything in
     ;; the file after the `#lang` line; the result is a proper list of
     ;; ordinary forms. No `(export name)` among header-args (run
     ;; standalone) -> print the compiled CSS; `(export name)` present

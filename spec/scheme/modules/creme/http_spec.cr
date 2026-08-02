@@ -2,13 +2,13 @@ require "../../../spec_helper"
 require "http/server"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme http)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme http)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme http)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme http)) #{src}")
 end
 
 private TEST_SERVER = HTTP::Server.new do |context|
@@ -47,9 +47,9 @@ end
 describe "http module" do
   it "performs a GET and returns status/headers/body" do
     result = run(%((http-get "#{base_url}/hello")))
-    alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-    status = alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr
-    body = alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr
+    alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+    status = alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr
+    body = alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr
     status.write_string.should eq("200")
     body.write_string.should eq(%("hello"))
     w(%((cdr (assoc "Content-Type" (cdr (assoc "headers" (http-get "#{base_url}/hello"))))))).should eq(%("text/plain"))
@@ -62,9 +62,9 @@ describe "http module" do
 
   it "performs a POST with a body" do
     result = run(%((http-post "#{base_url}/echo" "payload")))
-    alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-    status = alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr
-    body = alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr
+    alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+    status = alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr
+    body = alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr
     status.write_string.should eq("201")
     body.write_string.should eq(%("payload"))
   end
@@ -84,13 +84,13 @@ describe "http module" do
   end
 
   it "raises on connection failure" do
-    expect_raises(Scheme::SchemeRuntimeError, /http-get:/) do
+    expect_raises(Creme::SchemeRuntimeError, /http-get:/) do
       run(%((http-get "http://127.0.0.1:1")))
     end
   end
 
   it "raises on a malformed url" do
-    expect_raises(Scheme::SchemeRuntimeError, /http-get: invalid url/) do
+    expect_raises(Creme::SchemeRuntimeError, /http-get: invalid url/) do
       run(%((http-get "not a url")))
     end
   end

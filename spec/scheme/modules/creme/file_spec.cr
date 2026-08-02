@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme file)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme file)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme file)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme file)) #{src}")
 end
 
 describe "file module" do
@@ -40,7 +40,7 @@ describe "file module" do
   end
 
   it "raises when reading a missing file" do
-    expect_raises(Scheme::SchemeRuntimeError, /file-read: file not found/) do
+    expect_raises(Creme::SchemeRuntimeError, /file-read: file not found/) do
       run(%((file-read "/no/such/path/scheme-spec")))
     end
   end

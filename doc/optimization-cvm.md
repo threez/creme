@@ -3,7 +3,7 @@
 `cvm` is a second, independent implementation of this project's bytecode
 format: a standalone C11 VM (`cvm/vm.c`) with its own self-hosted
 Scheme-to-bytecode compiler (`modules/creme/compiler/compiler.sld`),
-distinct from the native Crystal compiler/VM under `src/scheme/`. Having a
+distinct from the native Crystal compiler/VM under `src/creme/`. Having a
 genuinely separate implementation of the same bytecode semantics is useful
 in its own right — it's a real cross-check on the bytecode format and
 compiler behavior, not just an alternate runtime — and its C-level hot

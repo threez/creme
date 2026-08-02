@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme rfc8439)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme rfc8439)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme rfc8439)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme rfc8439)) #{src}")
 end
 
 describe "rfc8439 module" do
@@ -16,7 +16,7 @@ describe "rfc8439 module" do
   end
 
   it "raises on invalid hex input" do
-    expect_raises(Scheme::SchemeRuntimeError, /hex->bytevector: invalid hex string/) do
+    expect_raises(Creme::SchemeRuntimeError, /hex->bytevector: invalid hex string/) do
       run(%((hex->bytevector "zz")))
     end
   end
@@ -24,7 +24,7 @@ describe "rfc8439 module" do
   it "random-key and random-nonce produce blobs of the right size" do
     w("(bytevector-length (rfc8439-random-key))").should eq("32")
     w("(bytevector-length (rfc8439-random-nonce))").should eq("12")
-    run("(equal? (rfc8439-random-key) (rfc8439-random-key))").as(Scheme::SchemeBool).value?.should be_false
+    run("(equal? (rfc8439-random-key) (rfc8439-random-key))").as(Creme::SchemeBool).value?.should be_false
   end
 
   it "encrypts and decrypts a round trip without aad" do
@@ -62,7 +62,7 @@ describe "rfc8439 module" do
              (ciphertext (cdr (assoc "ciphertext" sealed))))
         (rfc8439-decrypt key nonce ciphertext (hex->bytevector "00000000000000000000000000000000")))
       SCHEME
-    expect_raises(Scheme::SchemeRuntimeError, /rfc8439-decrypt: authentication failed \(tag mismatch\)/) do
+    expect_raises(Creme::SchemeRuntimeError, /rfc8439-decrypt: authentication failed \(tag mismatch\)/) do
       run(src)
     end
   end
@@ -76,7 +76,7 @@ describe "rfc8439 module" do
              (tag (cdr (assoc "tag" sealed))))
         (rfc8439-decrypt key nonce (string->utf8 "tampered!") tag))
       SCHEME
-    expect_raises(Scheme::SchemeRuntimeError, /rfc8439-decrypt: authentication failed \(tag mismatch\)/) do
+    expect_raises(Creme::SchemeRuntimeError, /rfc8439-decrypt: authentication failed \(tag mismatch\)/) do
       run(src)
     end
   end
@@ -102,7 +102,7 @@ describe "rfc8439 module" do
   end
 
   it "raises on non-blob/string arguments" do
-    expect_raises(Scheme::SchemeRuntimeError, /poly1305-auth: expected blob or string/) do
+    expect_raises(Creme::SchemeRuntimeError, /poly1305-auth: expected blob or string/) do
       run(%((poly1305-auth 5 "msg")))
     end
   end

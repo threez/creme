@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme format)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme format)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme format)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme format)) #{src}")
 end
 
 describe "format module" do
@@ -30,13 +30,13 @@ describe "format module" do
   end
 
   it "raises on unknown directives and missing arguments" do
-    expect_raises(Scheme::SchemeRuntimeError, /unknown format directive/) do
+    expect_raises(Creme::SchemeRuntimeError, /unknown format directive/) do
       run(%((format #f "~q")))
     end
-    expect_raises(Scheme::SchemeRuntimeError, /not enough arguments/) do
+    expect_raises(Creme::SchemeRuntimeError, /not enough arguments/) do
       run(%((format #f "~a")))
     end
-    expect_raises(Scheme::SchemeRuntimeError, /expected #t or #f as destination/) do
+    expect_raises(Creme::SchemeRuntimeError, /expected #t or #f as destination/) do
       run(%((format 5 "~a" 1)))
     end
   end

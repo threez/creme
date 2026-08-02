@@ -1,7 +1,7 @@
 /* (creme treelist) — see treelist.h.
  *
  * A direct, line-for-line port of the RRB (Relaxed Radix Balanced) tree
- * engine in src/scheme/modules/creme/treelist.cr (module Scheme::RRB) --
+ * engine in src/creme/modules/creme/treelist.cr (module Creme::RRB) --
  * every internal branch node carries a cumulative size table (i.e.
  * every node is "relaxed"), giving O(log n) ref/set/add/cons/insert/
  * delete/take/drop/concat without needing pure radix bit-masking. See
@@ -376,7 +376,7 @@ static Value *rrb_to_array(RRBNode *root) {
   return out;
 }
 
-/* ---- Tree-level ops (mirrors Scheme::RRB::Tree's own methods, one to
+/* ---- Tree-level ops (mirrors Creme::RRB::Tree's own methods, one to
  * one, operating directly on an RRBNode* root -- root->size already IS
  * Tree#size, no separate wrapper needed) ---- */
 

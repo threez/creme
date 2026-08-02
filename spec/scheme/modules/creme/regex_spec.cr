@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme regex)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme regex)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme regex)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme regex)) #{src}")
 end
 
 describe "regex module" do
@@ -35,7 +35,7 @@ describe "regex module" do
   end
 
   it "raises on an invalid pattern" do
-    expect_raises(Scheme::SchemeRuntimeError, /regexp: invalid pattern/) do
+    expect_raises(Creme::SchemeRuntimeError, /regexp: invalid pattern/) do
       run("(regexp \"(\")")
     end
   end

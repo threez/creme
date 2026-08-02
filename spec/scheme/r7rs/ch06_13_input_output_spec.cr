@@ -1,9 +1,9 @@
 require "../../spec_helper"
 require "file_utils"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -49,8 +49,8 @@ describe "R7RS §6.13.1 Ports" do
     Dir.mkdir_p(dir)
     begin
       path = File.join(dir, "probe.txt")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-      Scheme.run_source(interp, <<-SCM).write_string.should eq(%("hi"))
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+      Creme.run_source(interp, <<-SCM).write_string.should eq(%("hi"))
         (import (scheme file))
         (define op (open-output-file "#{path}"))
         (write-string "hi" op)

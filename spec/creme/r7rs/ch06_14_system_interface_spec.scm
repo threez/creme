@@ -24,13 +24,13 @@
 ;; used to register only `exit`) -- so every case in this file runs
 ;; unconditionally now.
 ;;
-;; "exit raises a catchable Scheme::SchemeExit rather than terminating the
+;; "exit raises a catchable Creme::SchemeExit rather than terminating the
 ;; host process" has no faithful port here at all, structurally: the
 ;; original Crystal case tests the EMBEDDING contract from Crystal's own
-;; side (expect_raises(Scheme::SchemeExit) catches a Crystal-level
-;; exception around a fresh, disposable Scheme::Interpreter). From
+;; side (expect_raises(Creme::SchemeExit) catches a Crystal-level
+;; exception around a fresh, disposable Creme::Interpreter). From
 ;; INSIDE Scheme, `exit` is deliberately NOT guard-catchable in any of
-;; the three backends (see src/scheme/errors.cr's own comment on
+;; the three backends (see src/creme/errors.cr's own comment on
 ;; SchemeExit -- "Deliberately not a SchemeError... `guard` must not be
 ;; able to intercept" -- and cvm/builtins.c's own bi_exit, which calls
 ;; the raw C exit() directly): actually invoking `(exit)` here would just

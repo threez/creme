@@ -6,8 +6,8 @@ require "../../spec_helper"
 # redirected to a string port -- the same approach (creme syntax slim)'s
 # own spec uses for its no-export ("run standalone") mode.
 private def run_ruby(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, <<-SCHEME).write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, <<-SCHEME).write_string
     (import (scheme base) (scheme write) (scheme eval) (creme syntax ruby))
     (let ((forms (cdr (read-program #{src.inspect} "t" (quote ()))))
           (env (environment '(scheme base) '(scheme write) '(dialect ruby)))

@@ -7,30 +7,30 @@ require "file_utils"
 # uses for the real thing. Every library body under test must explicitly
 # (import (test base)) to see +/string-append/etc., since library Envs are
 # deliberately parentless (see interpreter/library.cr's doc comment).
-private def new_interp : Scheme::Interpreter
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+private def new_interp : Creme::Interpreter
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
   exports = %w[+ - * < = string-append car cdr cons list vector-set! vector-ref vector-length make-vector].to_h { |name| {name, name} }
   interp.register_library(["test", "base"], interp.global, exports)
   interp
 end
 
 # Bootstraps a (scheme base)-equivalent (including special forms like set!,
-# do, let — see Scheme::Interpreter::SPECIAL_FORM_NAMES) for tests that need
+# do, let — see Creme::Interpreter::SPECIAL_FORM_NAMES) for tests that need
 # the real R7RS library name, e.g. exercising R7RS's own spec examples
 # verbatim. (scheme base) becomes a genuine always-on library in Stage 2;
 # until then this mirrors what that stage will register.
-private def new_scheme_base_interp : Scheme::Interpreter
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+private def new_scheme_base_interp : Creme::Interpreter
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
   exports = (%w[
     + - * < = > <= >= string-append car cdr cons list
     vector-set! vector-ref vector-length make-vector display newline
-  ] + Scheme::Interpreter::SPECIAL_FORM_NAMES).uniq.to_h { |name| {name, name} }
+  ] + Creme::Interpreter::SPECIAL_FORM_NAMES).uniq.to_h { |name| {name, name} }
   interp.register_library(["scheme", "base"], interp.global, exports)
   interp
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  Scheme.run_source(new_interp, src)
+private def run(src : String) : Creme::SchemeValue
+  Creme.run_source(new_interp, src)
 end
 
 private def w(src : String) : String
@@ -60,7 +60,7 @@ describe "define-library / import" do
   end
 
   it "keeps non-exported bindings invisible to the importer" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: helper/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: helper/) do
       run(<<-SCM)
         (define-library (test hidden)
           (export add)
@@ -86,7 +86,7 @@ describe "define-library / import" do
       (add 1 2)
     SCM
 
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: sub/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: sub/) do
       run(<<-SCM)
         (define-library (test two-exports-b)
           (export add sub)
@@ -101,7 +101,7 @@ describe "define-library / import" do
   end
 
   it "supports (except ...) import sets" do
-    expect_raises(Scheme::SchemeRuntimeError, /unbound variable: sub/) do
+    expect_raises(Creme::SchemeRuntimeError, /unbound variable: sub/) do
       run(<<-SCM)
         (define-library (test except-lib)
           (export add sub)
@@ -164,7 +164,7 @@ describe "define-library / import" do
   end
 
   it "raises for an unknown library" do
-    expect_raises(Scheme::SchemeRuntimeError, /import: unknown library \(no such library\)/) do
+    expect_raises(Creme::SchemeRuntimeError, /import: unknown library \(no such library\)/) do
       run("(import (no such library))")
     end
   end
@@ -200,7 +200,7 @@ describe "define-library / import" do
       File.write(File.join(dir, "x.scm"), "(define x 1)")
       interp = new_interp
       interp.push_load_dir(dir)
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("1")
+      Creme.run_source(interp, <<-SCM).write_string.should eq("1")
         (define-library (test include-lib)
           (export x)
           (include "x.scm"))
@@ -222,7 +222,7 @@ describe "define-library / import" do
         SLD
         interp = new_interp
         interp.library_search_path = [dir]
-        result = Scheme.run_source(interp, %[(import (greet hello)) (hello "Ada")])
+        result = Creme.run_source(interp, %[(import (greet hello)) (hello "Ada")])
         result.write_string.should eq(%("hi Ada"))
       end
     end
@@ -237,8 +237,8 @@ describe "define-library / import" do
         SLD
         interp = new_interp
         interp.library_search_path = [dir]
-        expect_raises(Scheme::SchemeRuntimeError, /expected \(mismatch\)/) do
-          Scheme.run_source(interp, "(import (mismatch))")
+        expect_raises(Creme::SchemeRuntimeError, /expected \(mismatch\)/) do
+          Creme.run_source(interp, "(import (mismatch))")
         end
       end
     end
@@ -254,8 +254,8 @@ describe "define-library / import" do
         SLD
         interp = new_interp
         interp.library_search_path = [dir]
-        expect_raises(Scheme::SchemeRuntimeError, /expected exactly one \(define-library/) do
-          Scheme.run_source(interp, "(import (extra))")
+        expect_raises(Creme::SchemeRuntimeError, /expected exactly one \(define-library/) do
+          Creme.run_source(interp, "(import (extra))")
         end
       end
     end
@@ -278,8 +278,8 @@ describe "define-library / import" do
         SLD
         interp = new_interp
         interp.library_search_path = [dir]
-        expect_raises(Scheme::SchemeRuntimeError, /circular library dependency/) do
-          Scheme.run_source(interp, "(import (a))")
+        expect_raises(Creme::SchemeRuntimeError, /circular library dependency/) do
+          Creme.run_source(interp, "(import (a))")
         end
       end
     end
@@ -289,14 +289,14 @@ describe "define-library / import" do
     it "a library can export a procedure renamed as set!, and importing code can exclude the base set! in favor of it" do
       interp = new_scheme_base_interp
       interp.stdout = out = IO::Memory.new
-      Scheme.run_source(interp, File.read("#{__DIR__}/../../fixtures/r7rs_grid_life.scm"))
+      Creme.run_source(interp, File.read("#{__DIR__}/../../fixtures/r7rs_grid_life.scm"))
       out.to_s.should eq("alive\n#f\n")
     end
 
     it "a special form shadowed by a local define is used in place of the built-in for the rest of that scope" do
       interp = new_scheme_base_interp
-      Scheme.run_source(interp, "(import (scheme base))").should_not be_nil
-      Scheme.run_source(interp, "(let ((if list)) (if 1 2 3))").write_string.should eq("(1 2 3)")
+      Creme.run_source(interp, "(import (scheme base))").should_not be_nil
+      Creme.run_source(interp, "(let ((if list)) (if 1 2 3))").write_string.should eq("(1 2 3)")
     end
   end
 end

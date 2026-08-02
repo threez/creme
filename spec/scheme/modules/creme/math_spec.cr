@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme math)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme math)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme math)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme math)) #{src}")
 end
 
 describe "math module" do
@@ -32,7 +32,7 @@ describe "math module" do
   end
 
   it "raises when given a non-number" do
-    expect_raises(Scheme::SchemeRuntimeError, /sin: expected number/) do
+    expect_raises(Creme::SchemeRuntimeError, /sin: expected number/) do
       run(%((sin "x")))
     end
   end

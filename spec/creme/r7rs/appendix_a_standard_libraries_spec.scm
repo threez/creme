@@ -3,7 +3,7 @@
 ;; spec/scheme/r7rs/appendix_a_standard_libraries_spec.cr's own cases -- see
 ;; modules/creme/spec.sld's own header comment for the framework this uses.
 ;;
-;; Unlike that Crystal file (which drives a fresh Scheme::Interpreter per
+;; Unlike that Crystal file (which drives a fresh Creme::Interpreter per
 ;; `w`/`run` call and inspects it directly, e.g. interp.library_export_
 ;; names/interp.global.get?), this file already runs directly in a real
 ;; Scheme runtime with no Interpreter object of its own to poke at, so the
@@ -29,7 +29,7 @@
 ;; procedure" below is gated behind `it-unless (equal? (spec-vm) "cvm")`
 ;; and shows as [PEND] only under ./cvm/cvm.
 ;;
-;; `load` (src/scheme/modules/scheme/load.cr) joins a relative path
+;; `load` (src/creme/modules/scheme/load.cr) joins a relative path
 ;; against the RUNNING SCRIPT's own directory (the last entry of
 ;; active.load_dirs, pushed once by Scheme.run_file/runner.cr) via a
 ;; plain File.join -- which, unlike File.expand_path, does NOT special-

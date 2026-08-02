@@ -24,9 +24,9 @@ lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext
 # libffi-dev under /usr/include don't need it either) and covers this
 # project's own FreeBSD dev environment, where libffi's headers live
 # under /usr/local/include specifically (a ports/pkg convention).
-FFI_SHIM_OBJ = src/scheme/modules/creme/ffi_shim.o
+FFI_SHIM_OBJ = src/creme/modules/creme/ffi_shim.o
 
-src/scheme/modules/creme/ffi_shim.o: src/scheme/modules/creme/ffi_shim.c
+src/creme/modules/creme/ffi_shim.o: src/creme/modules/creme/ffi_shim.c
 	$(CC) -O2 -I/usr/local/include -c -o $@ $<
 
 spec: $(NEON_OBJ) $(FFI_SHIM_OBJ)

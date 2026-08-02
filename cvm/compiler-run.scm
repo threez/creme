@@ -120,7 +120,7 @@
 
 ;; (environment import-set ...) -- a fresh, otherwise-empty environment
 ;; (make-environment) populated by importing each import-set, mirroring
-;; native's own `environment` (src/scheme/modules/scheme/eval.cr)
+;; native's own `environment` (src/creme/modules/scheme/eval.cr)
 ;; exactly: only/except/prefix/rename all genuinely restrict/rename what
 ;; ends up bound, not just alias a FEW extra names the way import!'s own
 ;; runtime bridge (bi_import_bang, cvm/bootstrap.c) does for an ordinary

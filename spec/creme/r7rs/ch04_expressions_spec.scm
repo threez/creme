@@ -6,7 +6,7 @@
 ;; framework this uses.
 ;;
 ;; Unlike the Crystal original (whose run(src)/w(src) helpers construct a
-;; fresh Scheme::Interpreter and evaluate a source STRING through it, since
+;; fresh Creme::Interpreter and evaluate a source STRING through it, since
 ;; that test is Crystal code driving a Scheme interpreter from the
 ;; outside), this file already runs directly as Scheme -- every case below
 ;; is written as plain Scheme forms compared with should-equal?/
@@ -136,7 +136,7 @@
 (describe "R7RS §4.1.7 Inclusion (include/include-ci)"
   ;; Fixtures live alongside this file, under spec/creme/r7rs/fixtures/ --
   ;; `include`'s own filename resolves relative to the INCLUDING file's own
-  ;; directory (src/scheme/eval/import.cr's @load_dirs stack, pushed once
+  ;; directory (src/creme/eval/import.cr's @load_dirs stack, pushed once
   ;; for the script this whole spec file is), same rule the Crystal
   ;; original gets via its own interp.push_load_dir(dir).
   (it "include replaces the expression with a begin expression containing what was read from the file"

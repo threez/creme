@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme sxql)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme sxql)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme sxql)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme sxql)) #{src}")
 end
 
 describe "sxql module" do
@@ -154,25 +154,25 @@ describe "sxql module" do
   end
 
   it "raises a SchemeRuntimeError on a malformed clause" do
-    expect_raises(Scheme::SchemeRuntimeError, /sxql-select: expected a clause/) do
+    expect_raises(Creme::SchemeRuntimeError, /sxql-select: expected a clause/) do
       run(%((sxql-select '(id) 42)))
     end
   end
 
   it "raises a SchemeRuntimeError when yielding a non-statement" do
-    expect_raises(Scheme::SchemeRuntimeError, /sxql-yield: expected a built statement/) do
+    expect_raises(Creme::SchemeRuntimeError, /sxql-yield: expected a built statement/) do
       run(%((sxql-yield 42)))
     end
   end
 
   it "raises a SchemeRuntimeError on odd set= arguments" do
-    expect_raises(Scheme::SchemeRuntimeError, /sxql-set=: expected an even number/) do
+    expect_raises(Creme::SchemeRuntimeError, /sxql-set=: expected an even number/) do
       run(%((sxql-set= 'a 1 'b)))
     end
   end
 
   it "raises a SchemeRuntimeError on an unknown column constraint" do
-    expect_raises(Scheme::SchemeRuntimeError, /sxql-column: unknown constraint/) do
+    expect_raises(Creme::SchemeRuntimeError, /sxql-column: unknown constraint/) do
       run(%((sxql-yield (sxql-create-table 'x (list (sxql-column 'id "INTEGER" (sxql-where 1)))))))
     end
   end

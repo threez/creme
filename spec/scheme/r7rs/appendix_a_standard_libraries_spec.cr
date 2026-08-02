@@ -1,9 +1,9 @@
 require "../../spec_helper"
 require "file_utils"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -12,7 +12,7 @@ end
 
 describe "Appendix A Standard Libraries" do
   it "(scheme base) imports and every (scheme base) export is bound in @global" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.library_export_names(["scheme", "base"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
@@ -20,7 +20,7 @@ describe "Appendix A Standard Libraries" do
 
   it "(scheme write) imports and exports display/write" do
     w("(import (scheme write)) (+ 1 1)").should eq("2")
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.library_export_names(["scheme", "write"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
@@ -74,9 +74,9 @@ describe "Appendix A Standard Libraries" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "answer.scm"), "(define answer 42)")
-      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
+      interp = Creme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
-      Scheme.run_source(interp, <<-SCM).write_string.should eq("42")
+      Creme.run_source(interp, <<-SCM).write_string.should eq("42")
         (import (scheme load))
         (load "answer.scm")
         answer
@@ -108,7 +108,7 @@ describe "Appendix A Standard Libraries" do
   end
 
   it "importing an unknown library name (not just an unimplemented standard one) raises the same clear error" do
-    expect_raises(Scheme::SchemeRuntimeError, /import: unknown library \(totally not a real library\)/) do
+    expect_raises(Creme::SchemeRuntimeError, /import: unknown library \(totally not a real library\)/) do
       run("(import (totally not a real library))")
     end
   end

@@ -124,7 +124,7 @@ void cvm_profiler_tick(VM *vm, Frame *frame) {
   pthread_mutex_unlock(&sh->mu);
 
   /* Jittered reseed, uniform in [1, 2*vm_interval] — mirrors
-   * src/scheme/eval/interpreter.cr's tick_sample anti-aliasing jitter, so
+   * src/creme/eval/interpreter.cr's tick_sample anti-aliasing jitter, so
    * the sampler doesn't beat in lockstep with a fixed-length recursive
    * call and always land on the same instruction. Per-VM-instance, not
    * shared -- each thread's own sampling stays independently jittered. */

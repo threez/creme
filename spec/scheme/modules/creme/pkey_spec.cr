@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme pkey)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme pkey)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme pkey)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme pkey)) #{src}")
 end
 
 describe "pkey module" do
@@ -23,11 +23,11 @@ describe "pkey module" do
   end
 
   it "rsa-generate-key raises for a key smaller than 2048 bits" do
-    expect_raises(Scheme::SchemeError) { run(%((rsa-generate-key 512))) }
+    expect_raises(Creme::SchemeError) { run(%((rsa-generate-key 512))) }
   end
 
   it "ec-generate-key raises for an unknown curve" do
-    expect_raises(Scheme::SchemeError) { run(%((ec-generate-key 'bogus))) }
+    expect_raises(Creme::SchemeError) { run(%((ec-generate-key 'bogus))) }
   end
 
   it "pkey-public-key strips the private component" do
@@ -85,7 +85,7 @@ describe "pkey module" do
   end
 
   it "pkey-sign raises when given a public-only key" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(%((pkey-sign (pkey-public-key (rsa-generate-key)) (string->utf8 "hi"))))
     end
   end
@@ -100,7 +100,7 @@ describe "pkey module" do
   end
 
   it "rsa-decrypt raises on a tampered ciphertext" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define key (rsa-generate-key))
         (define ct (bytevector-copy (rsa-encrypt (pkey-public-key key) (string->utf8 "secret"))))
@@ -111,7 +111,7 @@ describe "pkey module" do
   end
 
   it "rsa-decrypt raises when given a public-only key" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define key (rsa-generate-key))
         (define ct (rsa-encrypt (pkey-public-key key) (string->utf8 "secret")))
@@ -121,12 +121,12 @@ describe "pkey module" do
   end
 
   it "rsa-encrypt/rsa-decrypt raise on an EC key" do
-    expect_raises(Scheme::SchemeError) { run(%((rsa-encrypt (ec-generate-key) (string->utf8 "hi")))) }
-    expect_raises(Scheme::SchemeError) { run(%((rsa-decrypt (ec-generate-key) (string->utf8 "hi")))) }
+    expect_raises(Creme::SchemeError) { run(%((rsa-encrypt (ec-generate-key) (string->utf8 "hi")))) }
+    expect_raises(Creme::SchemeError) { run(%((rsa-decrypt (ec-generate-key) (string->utf8 "hi")))) }
   end
 
   it "pem->pkey raises on unrecognizable input" do
-    expect_raises(Scheme::SchemeError) { run(%((pem->pkey "not a pem key at all"))) }
+    expect_raises(Creme::SchemeError) { run(%((pem->pkey "not a pem key at all"))) }
   end
 
   it "distinguishes pkey? from other values" do

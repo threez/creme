@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme pipe)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme pipe)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme pipe)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme pipe)) #{src}")
 end
 
 describe "pipe module" do
@@ -32,6 +32,6 @@ describe "pipe module" do
   end
 
   it "raises when trying to call pipe outside a use of its macro" do
-    expect_raises(Scheme::SchemeError) { run("(pipe)") }
+    expect_raises(Creme::SchemeError) { run("(pipe)") }
   end
 end

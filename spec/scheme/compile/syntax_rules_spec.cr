@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -100,19 +100,19 @@ describe "define-syntax/syntax-rules" do
   end
 
   it "raises when no rule matches" do
-    expect_raises(Scheme::SchemeRuntimeError, /no matching syntax-rules clause/) do
+    expect_raises(Creme::SchemeRuntimeError, /no matching syntax-rules clause/) do
       run("(define-syntax only-one (syntax-rules () ((_ a b) (+ a b)))) (only-one 1)")
     end
   end
 
   it "raises on malformed input" do
-    expect_raises(Scheme::SchemeRuntimeError, /define-syntax: malformed/) do
+    expect_raises(Creme::SchemeRuntimeError, /define-syntax: malformed/) do
       run("(define-syntax bad)")
     end
   end
 
   it "raises when the syntax-rules keyword is missing" do
-    expect_raises(Scheme::SchemeRuntimeError, /define-syntax: expected syntax-rules/) do
+    expect_raises(Creme::SchemeRuntimeError, /define-syntax: expected syntax-rules/) do
       run("(define-syntax bad (not-syntax-rules () ((_ a) a)))")
     end
   end

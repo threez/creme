@@ -1,0 +1,145 @@
+# ===========================================================================
+# (scheme base): higher-order procedures, values, call/cc
+#
+# eval/environment live in (scheme eval), null-environment/
+# scheme-report-environment in (scheme r5rs), and interaction-environment
+# in (scheme repl) — each defined in that library's own module file.
+# ===========================================================================
+
+module Creme::R7RS::HigherOrder
+  extend self
+  include Creme::BuiltinHelpers
+
+  @[Creme::SchemeFn("map", min: 2, max: -1)]
+  def map(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    f = args[0]
+    lists = args[1..-1].map { |list| Creme.list_to_a(list) }
+    minlen = lists.min_of(&.size)
+    acc = [] of SchemeValue
+    each_call_args(f, lists, minlen) { |call_args| acc << interp.apply(f, call_args) }
+    Creme.a_to_list(acc)
+  end
+
+  @[Creme::SchemeFn("for-each", min: 2, max: -1)]
+  def for_each(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    f = args[0]
+    lists = args[1..-1].map { |list| Creme.list_to_a(list) }
+    minlen = lists.min_of(&.size)
+    each_call_args(f, lists, minlen) { |call_args| interp.apply(f, call_args) }
+    NIL.as(SchemeValue)
+  end
+
+  # Yields the per-element argument array for each of `minlen` positions
+  # across `lists` (column i of each list). When `f` is a closure, one array
+  # is REUSED across all iterations — safe because apply copies a closure's
+  # args into VM registers (bind_args_from_array) before its body runs and
+  # never retains the array, so refilling it can't corrupt an earlier call.
+  # A Builtin callback might retain the array (e.g. values -> SchemeValues),
+  # so those get a fresh array per call, exactly as before.
+  private def each_call_args(f : SchemeValue, lists : Array(Array(SchemeValue)), minlen : Int32, & : Array(SchemeValue) -> _) : Nil
+    if f.is_a?(Creme::BytecodeClosure) || f.is_a?(Creme::BytecodeCaseClosure)
+      call_args = Array(SchemeValue).new(lists.size, NIL)
+      (0...minlen).each do |i|
+        lists.each_with_index { |list, j| call_args[j] = list[i] }
+        yield call_args
+      end
+    else
+      (0...minlen).each do |i|
+        yield lists.map { |list| list[i] }
+      end
+    end
+  end
+
+  @[Creme::SchemeFn("apply", min: 2, max: -1)]
+  def apply(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    f = args[0]
+    middle = args[1...args.size - 1]
+    last = args[args.size - 1]
+    call_args = middle + Creme.list_to_a(last)
+    interp.apply(f, call_args)
+  end
+
+  # (values x) is x itself, not a wrapped single-element SchemeValues —
+  # `values` is transparent outside call-with-values, per R7RS.
+  @[Creme::SchemeFn("values", min: 0, max: -1)]
+  def values(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    args.size == 1 ? args[0] : SchemeValues.new(args).as(SchemeValue)
+  end
+
+  @[Creme::SchemeFn("call-with-values", min: 2, max: 2)]
+  def call_with_values(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    producer, consumer = args[0], args[1]
+    result = interp.apply(producer, [] of SchemeValue)
+    interp.apply(consumer, values_to_a(result))
+  end
+
+  # call/cc: escape continuations only (non-local exit / early return /
+  # guard-style unwinding), not full R7RS multi-shot re-entrant
+  # continuations — see Interpreter#call_cc's doc comment for the
+  # mechanism and its limits.
+  @[Creme::SchemeFn("call/cc", min: 1, max: 1)]
+  def call_cc(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    interp.call_cc(args[0])
+  end
+
+  @[Creme::SchemeFn("call-with-current-continuation", min: 1, max: 1)]
+  def call_with_current_continuation(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    interp.call_cc(args[0])
+  end
+
+  # (dynamic-wind before thunk after): before/after always run in pairs
+  # around thunk, even when thunk escapes via a call/cc continuation,
+  # an uncaught SchemeError, or (exit ...) — Crystal's `ensure` doesn't
+  # discriminate the unwind's cause, so after always fires. Since
+  # call/cc here is escape-only (see Interpreter#call_cc's own doc
+  # comment), what this does NOT provide is R7RS's full requirement that
+  # `before` re-fires when a continuation captured INSIDE this
+  # dynamic-wind is later invoked to re-enter it from OUTSIDE, after
+  # dynamic-wind itself already returned — that needs true re-entrant
+  # continuations. Invoking such a continuation here instead raises the
+  # existing "continuation invoked outside its dynamic extent" error (see
+  # call_cc/apply's SchemeContinuation arm) rather than behaving
+  # incorrectly.
+  @[Creme::SchemeFn("dynamic-wind", min: 3, max: 3)]
+  def dynamic_wind(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    before, thunk, after = args[0], args[1], args[2]
+    interp.apply(before, [] of SchemeValue)
+    begin
+      interp.apply(thunk, [] of SchemeValue)
+    ensure
+      interp.apply(after, [] of SchemeValue)
+    end
+  end
+end
+
+module Creme
+  class Interpreter
+    private def install_higher_order(env : Env) : Array(String)
+      register_module(Creme::R7RS::HigherOrder, env)
+    end
+
+    # Escape-only call/cc: mints a tag unique to this invocation, marks it
+    # live for the duration of `f`'s call, and hands `f` a SchemeContinuation
+    # carrying that tag. Interpreter#apply's SchemeContinuation arm raises
+    # ContinuationInvoked(tag, value) when the continuation is applied; this
+    # rescue only catches its OWN tag (a nested call/cc's escape must pass
+    # through untouched, hence `raise ex unless ex.tag == tag`), and the
+    # `ensure` un-marks the tag as live regardless of how this call ends —
+    # success, an ordinary error, or a matching continuation invocation —
+    # so a stale (already-returned) continuation is never mistaken for a
+    # live one: @cc_tag_counter only increases and tags are never reused.
+    def call_cc(f : SchemeValue) : SchemeValue
+      @cc_tag_counter += 1
+      tag = @cc_tag_counter
+      @live_continuation_tags << tag
+      begin
+        apply(f, [SchemeContinuation.new(tag).as(SchemeValue)])
+      rescue ex : ContinuationInvoked
+        raise ex unless ex.tag == tag
+        ex.value
+      ensure
+        @live_continuation_tags.delete(tag)
+      end
+    end
+  end
+end

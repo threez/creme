@@ -1,8 +1,8 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme xml)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme xml)) #{src}").write_string
 end
 
 describe "xml module" do
@@ -38,9 +38,9 @@ describe "xml module" do
   end
 
   it "raises on a mismatched closing tag" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    expect_raises(Scheme::SchemeError) do
-      Scheme.run_source(interp, "(import (scheme base) (creme xml)) (xml-read \"<a>1</b>\")")
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    expect_raises(Creme::SchemeError) do
+      Creme.run_source(interp, "(import (scheme base) (creme xml)) (xml-read \"<a>1</b>\")")
     end
   end
 

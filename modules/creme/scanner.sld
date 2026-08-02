@@ -5,7 +5,7 @@
 ;; File-based (no FFI of its own — same rationale as modules/creme/
 ;; numfmt.sld's header comment). Factored out of (creme syntax scss)/
 ;; (creme syntax slim) — both hand-write a recursive-descent parser
-;; straight from characters (see src/scheme/runner.cr's `#lang` doc
+;; straight from characters (see src/creme/runner.cr's `#lang` doc
 ;; comment for why: their grammars don't fit Scheme's own Lexer at all),
 ;; and both kept re-deriving the same few peek-char/read-char idioms
 ;; under different names. A future from-characters dialect should reach

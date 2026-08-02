@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme match)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme match)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme match)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme match)) #{src}")
 end
 
 private def define_types(src : String) : String
@@ -43,7 +43,7 @@ describe "match module" do
   end
 
   it "raises when no clause matches and there's no else" do
-    expect_raises(Scheme::SchemeError) { run(define_types(%((match (make-ping 1) ((pong?) 'x))))) }
+    expect_raises(Creme::SchemeError) { run(define_types(%((match (make-ping 1) ((pong?) 'x))))) }
   end
 
   it "record-fields is re-exported for callers that want raw positional access" do

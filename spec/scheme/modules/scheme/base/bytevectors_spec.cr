@@ -1,8 +1,8 @@
 require "../../../../spec_helper"
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, src)
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, src)
 end
 
 private def w(src : String) : String
@@ -19,13 +19,13 @@ describe "#u8(...) reader syntax" do
   end
 
   it "raises for an out-of-range byte value" do
-    expect_raises(Scheme::SchemeParseError, /out of range/) { run("#u8(256)") }
-    expect_raises(Scheme::SchemeParseError, /out of range/) { run("#u8(-1)") }
+    expect_raises(Creme::SchemeParseError, /out of range/) { run("#u8(256)") }
+    expect_raises(Creme::SchemeParseError, /out of range/) { run("#u8(-1)") }
   end
 
   it "raises for a non-integer element" do
-    expect_raises(Scheme::SchemeParseError, /must be integers/) { run("#u8(1.5)") }
-    expect_raises(Scheme::SchemeParseError, /must be integers/) { run(%[#u8("x")]) }
+    expect_raises(Creme::SchemeParseError, /must be integers/) { run("#u8(1.5)") }
+    expect_raises(Creme::SchemeParseError, /must be integers/) { run(%[#u8("x")]) }
   end
 end
 
@@ -63,12 +63,12 @@ describe "bytevector access/mutation" do
   end
 
   it "raises on out-of-range ref/set!" do
-    expect_raises(Scheme::SchemeRuntimeError, /index out of range/) { run("(bytevector-u8-ref (bytevector 1) 5)") }
-    expect_raises(Scheme::SchemeRuntimeError, /index out of range/) { run("(bytevector-u8-set! (bytevector 1) 5 0)") }
+    expect_raises(Creme::SchemeRuntimeError, /index out of range/) { run("(bytevector-u8-ref (bytevector 1) 5)") }
+    expect_raises(Creme::SchemeRuntimeError, /index out of range/) { run("(bytevector-u8-set! (bytevector 1) 5 0)") }
   end
 
   it "raises when setting a byte out of 0..255" do
-    expect_raises(Scheme::SchemeRuntimeError, /expected a byte/) { run("(bytevector-u8-set! (bytevector 1) 0 256)") }
+    expect_raises(Creme::SchemeRuntimeError, /expected a byte/) { run("(bytevector-u8-set! (bytevector 1) 0 256)") }
   end
 end
 
@@ -88,7 +88,7 @@ describe "bytevector-copy / bytevector-copy!" do
   end
 
   it "raises when the destination is too small" do
-    expect_raises(Scheme::SchemeRuntimeError, /destination too small/) { run("(bytevector-copy! (make-bytevector 2) 0 (bytevector 1 2 3))") }
+    expect_raises(Creme::SchemeRuntimeError, /destination too small/) { run("(bytevector-copy! (make-bytevector 2) 0 (bytevector 1 2 3))") }
   end
 end
 
@@ -110,7 +110,7 @@ describe "utf8->string / string->utf8" do
   end
 
   it "raises for invalid UTF-8" do
-    expect_raises(Scheme::SchemeRuntimeError, /invalid UTF-8/) { run("(utf8->string (bytevector 255 254))") }
+    expect_raises(Creme::SchemeRuntimeError, /invalid UTF-8/) { run("(utf8->string (bytevector 255 254))") }
   end
 end
 

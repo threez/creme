@@ -18,7 +18,7 @@
 ; (see (creme cli), modules/creme/cli.sld). (creme bench) imports (creme
 ; prof) — modules/creme/prof.sld's own frontend combining (creme prof-native)
 ; and (creme prof-vm) — and prof-native isn't available on musl/Alpine builds
-; (see src/scheme/modules/creme/prof_native.cr's header comment) — this
+; (see src/creme/modules/creme/prof_native.cr's header comment) — this
 ; script (and any other importer of (creme bench), including
 ; competition/bench.scm) will fail to import there.
 ;

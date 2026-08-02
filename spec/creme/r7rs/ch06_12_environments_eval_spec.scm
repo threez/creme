@@ -42,7 +42,7 @@
 (import (scheme base) (scheme eval) (scheme r5rs) (scheme repl) (creme spec))
 
 ;; interaction-environment specifically means the REAL global environment
-;; (@global, per src/scheme/modules/scheme/repl.cr's own comment) -- unlike
+;; (@global, per src/creme/modules/scheme/repl.cr's own comment) -- unlike
 ;; every other top-level define in this file (deliberately avoided so
 ;; test-local names can't collide across `it`s in this one shared
 ;; process), this one genuinely has to be a top-level define: an internal

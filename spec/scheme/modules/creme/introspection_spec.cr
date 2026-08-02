@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme introspection)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme introspection)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme introspection)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme introspection)) #{src}")
 end
 
 describe "introspection module" do
@@ -36,7 +36,7 @@ describe "introspection module" do
   end
 
   it "raises for a non-record argument" do
-    expect_raises(Scheme::SchemeRuntimeError, /expected a record instance/) do
+    expect_raises(Creme::SchemeRuntimeError, /expected a record instance/) do
       run(%((record-fields 42)))
     end
   end

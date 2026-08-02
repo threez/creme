@@ -1,17 +1,17 @@
 require "../../spec_helper"
 
 # The register VM (BytecodeCompiler + VM, eval/vm.cr) is not wired into
-# Scheme.run_source/run_file yet (see feature/bytecode-vm's phased plan) — it
+# Creme.run_source/run_file yet (see feature/bytecode-vm's phased plan) — it
 # compiles/runs its own fresh Interpreter's forms directly, bypassing the
 # tree-walker entirely, so these specs exercise it as its own independent
 # evaluator. Uses BytecodeCompiler.run_program's per-form analyze-compile-run
-# loop (mirroring Scheme.run_source), not a single upfront compile of every
+# loop (mirroring Creme.run_source), not a single upfront compile of every
 # form — required for define-syntax/import to correctly affect later forms'
 # analysis, exactly like the tree-walker's own per-form loop.
-private def vm_run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  forms = Scheme::Reader.read_all(src)
-  Scheme::BytecodeCompiler.run_program(interp, forms)
+private def vm_run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  forms = Creme::Reader.read_all(src)
+  Creme::BytecodeCompiler.run_program(interp, forms)
 end
 
 private def w(src : String) : String
@@ -403,7 +403,7 @@ describe "BytecodeCompiler + VM" do
     end
 
     it "falls back to the linear path for a malformed clause" do
-      expect_raises(Scheme::SchemeRuntimeError, /empty clause/) do
+      expect_raises(Creme::SchemeRuntimeError, /empty clause/) do
         vm_run(<<-SCM
           (case 99
             ((0 1) 'a) ((2 3) 'b) ((4 5) 'c) ((6 7) 'd) ())

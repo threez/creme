@@ -3,10 +3,10 @@
 ;; ===========================================================================
 ;;
 ;; Part of the self-hosting bootstrap effort (see the project's own compile
-;; pipeline: src/scheme/read/lexer.cr + src/scheme/read/reader.cr, which this
+;; pipeline: src/creme/read/lexer.cr + src/creme/read/reader.cr, which this
 ;; is meant to eventually replace as a Scheme-written equivalent). Verified
 ;; against the native reader in spec/scheme/modules/creme/compiler/reader_spec.cr:
-;; every test string is read by BOTH this file and Scheme::Reader.read_all,
+;; every test string is read by BOTH this file and Creme::Reader.read_all,
 ;; then the results are compared via `write` (same underlying value objects
 ;; either way, since this file runs as ordinary Scheme code on top of the
 ;; real Crystal interpreter/VM -- see (creme bootstrap)/(creme bytecode) for
@@ -48,7 +48,7 @@
     ;; Numeric literal classification -- `string->number` (the RUNTIME
     ;; procedure) only understands plain unprefixed integers/floats in this
     ;; implementation; radix/exactness prefixes, rationals, and complex
-    ;; literals are parsed by the LEXER instead (src/scheme/read/lexer.cr's
+    ;; literals are parsed by the LEXER instead (src/creme/read/lexer.cr's
     ;; own INT_RE/FLOAT_RE/RATIONAL_RE/COMPLEX_RE), so this reader must
     ;; replicate that grammar itself rather than delegating to string->number
     ;; wholesale. (creme regex) gives real regex objects to classify a raw

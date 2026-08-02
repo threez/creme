@@ -5,11 +5,11 @@ front end (Lexer → Reader → `analyze` → `BytecodeCompiler`) is unchanged a
 still owns compilation. `creme --emit-cvm <file.scm> <out.cvmc>` compiles the
 whole script (plus its transitively-imported pure-Scheme library bodies)
 into one combined `Chunk` and serializes it (see
-`src/scheme/compile/cvm_emitter.cr`) as "SCB1" — the SAME format
-`src/scheme/compile/chunk_serializer.cr`/`chunk_deserializer.cr` round-trip
+`src/creme/compile/cvm_emitter.cr`) as "SCB1" — the SAME format
+`src/creme/compile/chunk_serializer.cr`/`chunk_deserializer.cr` round-trip
 on the Crystal side, and the format `(creme bootstrap)`'s `load-chunk-bytes`
 already reads. This directory is a from-scratch C11 VM that loads and
-executes that file directly, using `Scheme::Op`'s own opcode numbering —
+executes that file directly, using `Creme::Op`'s own opcode numbering —
 there's no separate cvm-specific bytecode format anymore. `creme --cvm
 <file.scm>` / `creme --profile --cvm <file.scm>` do the compile-then-run
 step in one command (see `src/main.cr`'s `run_via_cvm`).
@@ -476,7 +476,7 @@ src/main.cr's `handle_profile`), ported to this VM's own execution model:
 - **Hot Scheme functions** (`cvm/profiler.c`'s `cvm_profiler_tick`, hooked
   into `vm.c`'s dispatch loop at every instruction fetch): a cooperative,
   jittered-interval instruction counter — mirrors
-  `src/scheme/eval/interpreter.cr`'s `tick_sample` exactly, one sample every
+  `src/creme/eval/interpreter.cr`'s `tick_sample` exactly, one sample every
   ~200 instructions on average. Each sample is a `(chunk, instruction index)`
   pair, symbolized as the chunk's own name, `file:line` (via a source line
   now stored per instruction in the `.cvmc` format — see below), and the
@@ -516,7 +516,7 @@ again.
 
 ### Opcodes: 119 of 119 — full parity
 
-`cvm/opcodes.h`'s enum now IS `Scheme::Op`'s own enum, in the exact same
+`cvm/opcodes.h`'s enum now IS `Creme::Op`'s own enum, in the exact same
 declaration order — no separate compacted numbering to keep in lockstep by
 hand anymore, and no unimplemented ops left (`OP_COUNT` = 119, all real).
 Covers all
@@ -899,7 +899,7 @@ Per `value.h`'s own header comment — deliberate, not accidental:
 ### Call/upvalue mechanics
 
 Even where opcodes overlap, cvm's *execution model* deliberately mirrors
-`src/scheme/eval/vm.cr`, not just its instruction set: one shared,
+`src/creme/eval/vm.cr`, not just its instruction set: one shared,
 fixed-capacity register stack + explicit call-frame array (a trampolined
 dispatch loop, not C recursion); non-tail `Call` pushes a new register
 window, `TailCall*` reuses the current frame's window in place; upvalues
@@ -916,7 +916,7 @@ correctly through `--emit-cvm` + `cvm` — both the compiled-literal
 identity (`eq?`-preserving, not just structurally-equal duplicates) and,
 for a genuine cycle, without hanging. This spans three files:
 
-- **`src/scheme/compile/chunk_serializer.cr`**: `write_datum` used to
+- **`src/creme/compile/chunk_serializer.cr`**: `write_datum` used to
   recurse unconditionally over a literal's own pair/vector structure —
   a genuinely circular one would never terminate, a real (previously
   undiscovered) crash/hang bug, not just "unsupported". Now does a
@@ -945,17 +945,17 @@ for a genuine cycle, without hanging. This spans three files:
   way** (both pre-existing, both independent of datum labels
   specifically — reachable by any runtime-built cycle too, e.g. via
   `set-cdr!`/`vector-set!`, not just a literal): native Crystal's own
-  `Cons`/`SchemeVector#write_seq` (`src/scheme/value/values.cr`) had no
+  `Cons`/`SchemeVector#write_seq` (`src/creme/value/values.cr`) had no
   cycle guard at all and hung forever printing a circular value —
   triggered unconditionally by `emit_load_literal`'s own profiler-
   sample tagging (`bytecode_compiler.cr`) for EVERY compiled literal,
   meaning a circular literal hung at compile time in plain `./bin/creme`
   too, before ever reaching `--emit-cvm`'s own serializer. Fixed with an
-  ancestor-tracking guard (`Scheme.write_seq_ancestor?`/
+  ancestor-tracking guard (`Creme.write_seq_ancestor?`/
   `mark_write_seq_ancestor`/`unmark_write_seq_ancestor`, module-scoped
   rather than per-`SchemeBaseValue`-including-class, so a cycle spanning
   both a pair AND a vector is still caught). Separately,
-  `Scheme.proper_list?` (`src/scheme/helpers.cr`, backing `list?`) also
+  `Creme.proper_list?` (`src/creme/helpers.cr`, backing `list?`) also
   had no cycle guard — R7RS requires `list?` to return `#f` (not hang)
   on a circular list — fixed with Floyd's tortoise-and-hare. `cvm`'s own
   `list?` builtin (`cvm/builtins.c`) had the identical bug, fixed the
@@ -1301,8 +1301,8 @@ different path.
 
 ## Files
 
-- `opcodes.h` — on-disk opcode/const-tag ids: `Scheme::Op`'s own enum
-  ordinals (`src/scheme/compile/opcode.cr`) and SCB1's `TAG_*`/`CDK_*`/`QQ_*`
+- `opcodes.h` — on-disk opcode/const-tag ids: `Creme::Op`'s own enum
+  ordinals (`src/creme/compile/opcode.cr`) and SCB1's `TAG_*`/`CDK_*`/`QQ_*`
   constants (`chunk_serializer.cr`), not a separate cvm-specific numbering.
 - `value.h` — the tagged `Value` struct and heap object types.
 - `vm.h` — `Chunk`/`Frame`/`Closure`/`Upvalue`/`VM` struct definitions.

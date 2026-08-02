@@ -556,7 +556,7 @@
 
     (define rb-parser-table (build-parser rb-grammar))
 
-    ;; The #lang contract (see src/scheme/runner.cr): src is everything in
+    ;; The #lang contract (see src/creme/runner.cr): src is everything in
     ;; the file after the `#lang` line; the result is a proper list of
     ;; ordinary forms, ready for the analyzer/compiler/VM exactly as if
     ;; the plain Reader had produced them. header-args' optional `(import

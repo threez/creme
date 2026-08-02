@@ -15,7 +15,7 @@
 ;;
 ;; NOTE: "dialect" is used elsewhere in this codebase for a different
 ;; concept — #lang <library> SYNTAX dialects (modules/creme/syntax/*.sld,
-;; wired through src/scheme/runner.cr's reader). This library is unrelated
+;; wired through src/creme/runner.cr's reader). This library is unrelated
 ;; to that: it's a plain naming/wrapping layer over existing procedures, not
 ;; a Ruby-syntax reader. `(import (dialect ruby))` just happens to reuse the
 ;; same English word for a different purpose.
@@ -103,7 +103,7 @@
 ;;     named-loop construct), not an ordinary identifier — but this
 ;;     interpreter's analyzer checks for a local macro/variable binding
 ;;     named `do` before falling back to the special-form table (see
-;;     src/scheme/compile/analyzer.cr's analyze_cons), so a library-exported
+;;     src/creme/compile/analyzer.cr's analyze_cons), so a library-exported
 ;;     `define-syntax do` DOES shadow it once imported. This library exports
 ;;     `do` as a Ruby-block-flavored macro, `(do (param ...) body ...)` =>
 ;;     `(lambda (param ... . %do-rest) body ...)` (the trailing rest param

@@ -9,7 +9,7 @@
 /* Called once per dispatched instruction from vm.c's NEXT() (both the
  * computed-goto and switch dispatch variants), only when
  * vm->profiler.enabled — a cooperative, jittered-interval instruction
- * counter mirroring src/scheme/eval/interpreter.cr's tick_sample. `frame` is
+ * counter mirroring src/creme/eval/interpreter.cr's tick_sample. `frame` is
  * the CURRENT top frame (already cached as a local in cvm_dispatch), about
  * to execute the instruction at frame->ip. */
 void cvm_profiler_tick(VM *vm, Frame *frame);

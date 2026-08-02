@@ -7,7 +7,7 @@
 ;; file already runs in a real Scheme runtime).
 ;;
 ;; "referencing an unbound identifier is an error" is ported via should-
-;; raise? rather than the original's own expect_raises(Scheme::
+;; raise? rather than the original's own expect_raises(Creme::
 ;; SchemeRuntimeError, /unbound variable: .../) -- should-raise? only
 ;; confirms SOMETHING was raised (see modules/creme/spec.sld's own header
 ;; comment), not the exact message text, since this framework has no

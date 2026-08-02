@@ -1,13 +1,13 @@
 require "../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme json-builder) (creme http)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme json-builder) (creme http)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme json-builder) (creme http)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme surf) (creme mux) (creme html) (creme json-builder) (creme http)) #{src}")
 end
 
 describe "surf module" do
@@ -25,7 +25,7 @@ describe "surf module" do
     end
 
     it "raises on an unsupported handler return value" do
-      expect_raises(Scheme::SchemeRuntimeError, /unsupported value/) do
+      expect_raises(Creme::SchemeRuntimeError, /unsupported value/) do
         run(%((surf-normalize-response 42)))
       end
     end
@@ -122,15 +122,15 @@ describe "surf module" do
         (list get-result post-result)
         SCM
 
-      pair = Scheme.list_to_a(result)
-      get_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
-      post_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+      pair = Creme.list_to_a(result)
+      get_alist = Creme.list_to_a(pair[0]).map { |cons| cons.as(Creme::Cons) }
+      post_alist = Creme.list_to_a(pair[1]).map { |cons| cons.as(Creme::Cons) }
 
-      get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
-      get_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hello 42"))
+      get_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+      get_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hello 42"))
 
-      post_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
-      post_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hi there"))
+      post_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+      post_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("hi there"))
     end
 
     it "auto-binds extra clause names to their surf-param value" do
@@ -153,14 +153,14 @@ describe "surf module" do
         (list path-param-result form-field-result missing-result)
         SCM
 
-      triple = Scheme.list_to_a(result)
-      path_param_alist = Scheme.list_to_a(triple[0]).map { |cons| cons.as(Scheme::Cons) }
-      form_field_alist = Scheme.list_to_a(triple[1]).map { |cons| cons.as(Scheme::Cons) }
-      missing_alist = Scheme.list_to_a(triple[2]).map { |cons| cons.as(Scheme::Cons) }
+      triple = Creme.list_to_a(result)
+      path_param_alist = Creme.list_to_a(triple[0]).map { |cons| cons.as(Creme::Cons) }
+      form_field_alist = Creme.list_to_a(triple[1]).map { |cons| cons.as(Creme::Cons) }
+      missing_alist = Creme.list_to_a(triple[2]).map { |cons| cons.as(Creme::Cons) }
 
-      path_param_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("id=42"))
-      form_field_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("title=hi there"))
-      missing_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("absent"))
+      path_param_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("id=42"))
+      form_field_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("title=hi there"))
+      missing_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("absent"))
     end
 
     it "an (name integer) binding parses a numeric path param" do
@@ -175,9 +175,9 @@ describe "surf module" do
         (mux-close! server)
         result
         SCM
-      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
-      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("id=42"))
+      alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+      alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("200")
+      alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("id=42"))
     end
 
     it "an (name integer) binding responds 404 instead of running body when the segment isn't numeric" do
@@ -192,8 +192,8 @@ describe "surf module" do
         (mux-close! server)
         result
         SCM
-      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
+      alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+      alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
     end
 
     it "an (name integer) binding responds 404 for a fractional segment -- integer means integer, not just numeric" do
@@ -208,8 +208,8 @@ describe "surf module" do
         (mux-close! server)
         result
         SCM
-      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
+      alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+      alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
     end
 
     it "an (name float) binding parses both whole and fractional segments" do
@@ -225,12 +225,12 @@ describe "surf module" do
         (mux-close! server)
         (list whole fractional)
         SCM
-      pair = Scheme.list_to_a(result)
-      whole_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
-      fractional_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+      pair = Creme.list_to_a(result)
+      whole_alist = Creme.list_to_a(pair[0]).map { |cons| cons.as(Creme::Cons) }
+      fractional_alist = Creme.list_to_a(pair[1]).map { |cons| cons.as(Creme::Cons) }
 
-      whole_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("amount=42"))
-      fractional_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("amount=3.14"))
+      whole_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("amount=42"))
+      fractional_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("amount=3.14"))
     end
 
     it "an (name float) binding responds 404 instead of running body when the segment isn't numeric" do
@@ -245,8 +245,8 @@ describe "surf module" do
         (mux-close! server)
         result
         SCM
-      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
+      alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+      alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("404")
     end
 
     it "an unrecognized type in a (name kind) binding raises instead of miscompiling (surfaces as 500, not a crash)" do
@@ -267,8 +267,8 @@ describe "surf module" do
         (mux-close! server)
         result
         SCM
-      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "status" }.cdr.write_string.should eq("500")
+      alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+      alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("500")
     end
 
     it "mixes a typed (name integer) binding with a plain name binding in the same clause" do
@@ -283,8 +283,8 @@ describe "surf module" do
         (mux-close! server)
         result
         SCM
-      alist = Scheme.list_to_a(result).map { |cons| cons.as(Scheme::Cons) }
-      alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("7:hi there"))
+      alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
+      alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("7:hi there"))
     end
 
     it "surf-route! adds a route to an already-existing app one at a time" do
@@ -339,12 +339,12 @@ describe "surf module" do
         (list json-result html-result)
         SCM
 
-      pair = Scheme.list_to_a(result)
-      json_alist = Scheme.list_to_a(pair[0]).map { |cons| cons.as(Scheme::Cons) }
-      html_alist = Scheme.list_to_a(pair[1]).map { |cons| cons.as(Scheme::Cons) }
+      pair = Creme.list_to_a(result)
+      json_alist = Creme.list_to_a(pair[0]).map { |cons| cons.as(Creme::Cons) }
+      html_alist = Creme.list_to_a(pair[1]).map { |cons| cons.as(Creme::Cons) }
 
-      json_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq("\"{\\\"kind\\\":\\\"json\\\"}\"")
-      html_alist.find! { |cons| cons.car.as(Scheme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("html-ish"))
+      json_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq("\"{\\\"kind\\\":\\\"json\\\"}\"")
+      html_alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "body" }.cdr.write_string.should eq(%("html-ish"))
     end
 
     it "a missing Accept header and */* both match any clause" do
@@ -362,7 +362,7 @@ describe "surf module" do
         (mux-close! server)
         (list no-header star)
         SCM
-      pair = Scheme.list_to_a(result)
+      pair = Creme.list_to_a(result)
       pair[0].write_string.should eq(%("json-branch"))
       pair[1].write_string.should eq(%("json-branch"))
     end

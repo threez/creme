@@ -36,7 +36,7 @@ Sampled the release binary (`sample <pid>`, 6s @ 1ms) on a heavy workload (`fib 
 
 - an `Env` object, **plus two fresh arrays** (`@names`, `@values`) — 3 heap allocations per call frame;
 - the args `Array` built during argument evaluation;
-- a fresh `SchemeInt` box for every integer arithmetic result (`checked_int_op` / `Scheme.num_binop`).
+- a fresh `SchemeInt` box for every integer arithmetic result (`checked_int_op` / `Creme.num_binop`).
 
 `Env` (578), `Array` (740) and `SchemeInt` boxing were the dominant allocators.
 

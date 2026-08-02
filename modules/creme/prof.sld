@@ -6,14 +6,14 @@
 ;; has no definitions of its own — it just (import)s and re-exports the two
 ;; Crystal-registered libraries that actually implement profiling:
 ;;
-;;   (creme prof-native)  src/scheme/modules/creme/prof_native.cr
+;;   (creme prof-native)  src/creme/modules/creme/prof_native.cr
 ;;     Wraps prof.cr's SIGPROF-based sampler: unwinds the raw native C
 ;;     stack, so its frame names are Crystal internals (e.g.
-;;     "*Scheme::VM#call") — useful for finding hot spots in the
+;;     "*Creme::VM#call") — useful for finding hot spots in the
 ;;     *interpreter itself*. Not present on musl (Alpine); see that file's
 ;;     own header comment.
 ;;
-;;   (creme prof-vm)  src/scheme/modules/creme/prof_vm.cr
+;;   (creme prof-vm)  src/creme/modules/creme/prof_vm.cr
 ;;     A cooperative sampler that periodically inspects the VM's own
 ;;     dispatch loop, so its labels are Scheme-level source text (e.g.
 ;;     "(fib (- n 1))") — useful for finding hot spots in the *guest
@@ -31,7 +31,7 @@
 ;;
 ;; Importing this library on musl fails the same way importing
 ;; (creme prof-native) directly would (see that file's require guard in
-;; src/scheme.cr) — there is no degraded "prof-vm only" fallback here; ask
+;; src/creme.cr) — there is no degraded "prof-vm only" fallback here; ask
 ;; for (creme prof-vm) directly if that's what you want on musl.
 ;; ===========================================================================
 

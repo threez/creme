@@ -1,8 +1,8 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (creme time)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (creme time)) #{src}").write_string
 end
 
 describe "time module" do
@@ -27,9 +27,9 @@ describe "time module" do
   end
 
   it "current-time returns a plausible unix epoch float" do
-    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-    result = Scheme.run_source(interp, "(import (creme time)) (current-time)")
-    result.should be_a(Scheme::SchemeFloat)
-    result.as(Scheme::SchemeFloat).value.should be > 1_700_000_000.0
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    result = Creme.run_source(interp, "(import (creme time)) (current-time)")
+    result.should be_a(Creme::SchemeFloat)
+    result.as(Creme::SchemeFloat).value.should be > 1_700_000_000.0
   end
 end

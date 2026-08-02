@@ -1,13 +1,13 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme pkey) (creme x509)) #{src}").write_string
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme pkey) (creme x509)) #{src}").write_string
 end
 
-private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-  Scheme.run_source(interp, "(import (scheme base) (creme pkey) (creme x509)) #{src}")
+private def run(src : String) : Creme::SchemeValue
+  interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+  Creme.run_source(interp, "(import (scheme base) (creme pkey) (creme x509)) #{src}")
 end
 
 describe "x509 module" do
@@ -50,7 +50,7 @@ describe "x509 module" do
   end
 
   it "x509-verify-chain raises against an unrelated CA" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(<<-SCHEME)
         (define ca-key (rsa-generate-key))
         (define ca-cert (x509-self-signed-certificate ca-key '(("CN" . "Test CA"))))
@@ -106,15 +106,15 @@ describe "x509 module" do
   end
 
   it "x509-self-signed-certificate/x509-create-csr raise when given a public-only key" do
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(%((x509-self-signed-certificate (pkey-public-key (rsa-generate-key)) '(("CN" . "x")))))
     end
-    expect_raises(Scheme::SchemeError) do
+    expect_raises(Creme::SchemeError) do
       run(%((x509-create-csr (pkey-public-key (rsa-generate-key)) '(("CN" . "x")))))
     end
   end
 
   it "pem->x509-cert raises on unrecognizable input" do
-    expect_raises(Scheme::SchemeError) { run(%((pem->x509-cert "not a certificate"))) }
+    expect_raises(Creme::SchemeError) { run(%((pem->x509-cert "not a certificate"))) }
   end
 end
