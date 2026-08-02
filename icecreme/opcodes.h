@@ -13,8 +13,8 @@
  * dispatch-table slot aborts cleanly rather than being absent, so
  * OP_COUNT/array sizing/bounds-checking stay correct regardless of
  * implementation status. */
-#ifndef CVM_OPCODES_H
-#define CVM_OPCODES_H
+#ifndef CREME_OPCODES_H
+#define CREME_OPCODES_H
 
 enum {
   OP_LOADK = 0,
@@ -238,8 +238,8 @@ enum {
    * creme's version does (icecreme's dispatch_call already passes a raw stack
    * slice to every builtin call, quickened or not -- see its own T_BUILTIN
    * branch). No separate argument-type validation here: an unquickened
-   * call to the same C function would hit the exact same cvm_abort on bad
-   * input, and cvm_abort's own longjmp-to-nearest-guard-handler unwinds
+   * call to the same C function would hit the exact same creme_abort on bad
+   * input, and creme_abort's own longjmp-to-nearest-guard-handler unwinds
    * correctly regardless of how many C frames are between it and that
    * handler, so calling the builtin directly here (bypassing dispatch_
    * call) changes nothing about error/guard behavior. HashRef quickens at
@@ -252,7 +252,7 @@ enum {
   OP_QUICK_COUNT,
 };
 
-/* int -> mnemonic lookup for these ids lives in profiler.c (cvm_op_name),
+/* int -> mnemonic lookup for these ids lives in profiler.c (creme_op_name),
  * not here — kept out of this header so it isn't duplicated (and flagged as
  * unused) in every other TU that just needs the enum. */
 

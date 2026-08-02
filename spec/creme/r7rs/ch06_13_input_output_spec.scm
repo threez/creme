@@ -13,9 +13,9 @@
 ;; make-parameter-backed parameter object (so `parameterize` couldn't
 ;; target it -- "parameterize: expected a parameter object"), plus
 ;; write-shared/write-simple/read-string/flush-output-port each having no
-;; cvm_register_builtin entry at all. All five are now fixed:
+;; creme_register_builtin entry at all. All five are now fixed:
 ;; current-output-port/current-input-port are genuine T_PARAMETER values
-;; (icecreme/builtins.c's cvm_init_current_ports, icecreme/vm.h's own VM-struct doc
+;; (icecreme/builtins.c's creme_init_current_ports, icecreme/vm.h's own VM-struct doc
 ;; comment), and write-shared genuinely tracks shared/circular structure
 ;; and emits real #n=/#n# datum labels (`write_value_shared`), not just
 ;; an alias to `write`. Every case in this file runs unconditionally now.

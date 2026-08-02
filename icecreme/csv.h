@@ -5,11 +5,11 @@
  * csv-writer-row!). See csv.c's own header comment for the parser/writer
  * design and how it compares to native's own (creme csv) implementation
  * (src/creme/modules/creme/csv.cr). */
-#ifndef CVM_CSV_H
-#define CVM_CSV_H
+#ifndef CREME_CSV_H
+#define CREME_CSV_H
 
 #include "vm.h"
 
-void cvm_register_csv_builtins(VM *vm);
+void creme_register_csv_builtins(VM *vm);
 
 #endif

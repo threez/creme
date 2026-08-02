@@ -20,7 +20,7 @@
 ;; `load` is a real icecreme/compiler-run.scm-defined procedure now (the same
 ;; compile-mode-only pattern `eval`/`read`/`open-input-string` already
 ;; used, see that file's own comment), and `(scheme process-context)` is
-;; a full port (icecreme/builtins.c's cvm_register_process_context_builtins
+;; a full port (icecreme/builtins.c's creme_register_process_context_builtins
 ;; used to register only `exit`) -- so every case in this file runs
 ;; unconditionally now.
 ;;

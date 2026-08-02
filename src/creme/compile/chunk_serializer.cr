@@ -208,7 +208,7 @@ module Creme
     # whether because it's a genuine cycle still mid-traversal, or a
     # separate later reference to already-fully-walked shared
     # substructure -- stops further descent there (same reasoning icecreme's
-    # own cvm_equal/write_value_shared use for the identical problem):
+    # own creme_equal/write_value_shared use for the identical problem):
     # this is what makes the pass terminate on a circular datum instead
     # of recursing forever. Every scalar tag (ints, symbols, strings, …)
     # is untouched -- only pairs/vectors can be shared/cyclic here.

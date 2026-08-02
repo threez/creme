@@ -26,14 +26,14 @@
 
 static Value bi_regexp(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) cvm_abort("regexp: expected a pattern string");
+  if (nargs != 1 || args[0].tag != T_STR) creme_abort("regexp: expected a pattern string");
   int errcode;
   PCRE2_SIZE erroffset;
   pcre2_code *re = pcre2_compile((PCRE2_SPTR)args[0].as.chars, (PCRE2_SIZE)args[0].aux, 0, &errcode, &erroffset, NULL);
   if (!re) {
     PCRE2_UCHAR errbuf[256];
     pcre2_get_error_message(errcode, errbuf, sizeof(errbuf));
-    cvm_abort("regexp: invalid pattern: %s", (char *)errbuf);
+    creme_abort("regexp: invalid pattern: %s", (char *)errbuf);
   }
   return v_box(re, BOX_KIND_REGEX);
 }
@@ -41,7 +41,7 @@ static Value bi_regexp(VM *vm, Value *args, int nargs) {
 static Value bi_regexp_matches_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_REGEX || args[1].tag != T_STR) {
-    cvm_abort("regexp-matches?: expected (regexp string)");
+    creme_abort("regexp-matches?: expected (regexp string)");
   }
   pcre2_code *re = (pcre2_code *)args[0].as.ptr;
   /* Short-lived scratch space, freed immediately after use -- unlike the
@@ -57,12 +57,12 @@ static Value bi_regexp_matches_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_regexp_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("regexp?: expected an argument");
+  if (nargs < 1) creme_abort("regexp?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_REGEX);
 }
 
 static pcre2_code *regex_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_REGEX) cvm_abort("%s: expected a regexp", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_REGEX) creme_abort("%s: expected a regexp", who);
   return (pcre2_code *)v.as.ptr;
 }
 
@@ -92,7 +92,7 @@ static int regex_match_once(VM *vm, pcre2_code *re, const char *subj, int subj_l
       memcpy(buf, subj + (int)s, (size_t)len);
       group = v_str(buf, len);
     }
-    list = cvm_cons(vm, group, list);
+    list = creme_cons(vm, group, list);
   }
   *match_start = (int)ov[0];
   *match_end = (int)ov[1];
@@ -102,7 +102,7 @@ static int regex_match_once(VM *vm, pcre2_code *re, const char *subj, int subj_l
 }
 
 static Value bi_regexp_search(VM *vm, Value *args, int nargs) {
-  if (nargs != 2 || args[1].tag != T_STR) cvm_abort("regexp-search: expected (regexp string)");
+  if (nargs != 2 || args[1].tag != T_STR) creme_abort("regexp-search: expected (regexp string)");
   pcre2_code *re = regex_arg(args[0], "regexp-search");
   int ms, me;
   Value groups;
@@ -111,7 +111,7 @@ static Value bi_regexp_search(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_regexp_extract(VM *vm, Value *args, int nargs) {
-  if (nargs != 2 || args[1].tag != T_STR) cvm_abort("regexp-extract: expected (regexp string)");
+  if (nargs != 2 || args[1].tag != T_STR) creme_abort("regexp-extract: expected (regexp string)");
   pcre2_code *re = regex_arg(args[0], "regexp-extract");
   const char *subj = args[1].as.chars;
   int len = args[1].aux;
@@ -126,7 +126,7 @@ static Value bi_regexp_extract(VM *vm, Value *args, int nargs) {
     collected[n++] = groups;
     start = me > ms ? me : me + 1;
   }
-  for (int i = n - 1; i >= 0; i--) matches = cvm_cons(vm, collected[i], matches);
+  for (int i = n - 1; i >= 0; i--) matches = creme_cons(vm, collected[i], matches);
   return matches;
 }
 
@@ -139,7 +139,7 @@ static Value bi_regexp_extract(VM *vm, Value *args, int nargs) {
  * backreference expansion. */
 static Value bi_regexp_replace(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 3 || args[1].tag != T_STR || args[2].tag != T_STR) cvm_abort("regexp-replace: expected (regexp string string)");
+  if (nargs != 3 || args[1].tag != T_STR || args[2].tag != T_STR) creme_abort("regexp-replace: expected (regexp string string)");
   pcre2_code *re = regex_arg(args[0], "regexp-replace");
   const char *subj = args[2].as.chars;
   int len = args[2].aux;
@@ -158,7 +158,7 @@ static Value bi_regexp_replace(VM *vm, Value *args, int nargs) {
 
 static Value bi_regexp_replace_all(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 3 || args[1].tag != T_STR || args[2].tag != T_STR) cvm_abort("regexp-replace-all: expected (regexp string string)");
+  if (nargs != 3 || args[1].tag != T_STR || args[2].tag != T_STR) creme_abort("regexp-replace-all: expected (regexp string string)");
   pcre2_code *re = regex_arg(args[0], "regexp-replace-all");
   const char *subj = args[2].as.chars;
   int len = args[2].aux;
@@ -207,7 +207,7 @@ static Value bi_regexp_replace_all(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_regexp_split(VM *vm, Value *args, int nargs) {
-  if (nargs != 2 || args[1].tag != T_STR) cvm_abort("regexp-split: expected (regexp string)");
+  if (nargs != 2 || args[1].tag != T_STR) creme_abort("regexp-split: expected (regexp string)");
   pcre2_code *re = regex_arg(args[0], "regexp-split");
   const char *subj = args[1].as.chars;
   int len = args[1].aux;
@@ -230,17 +230,17 @@ static Value bi_regexp_split(VM *vm, Value *args, int nargs) {
   char *tail_buf = GC_MALLOC((size_t)(tail_len ? tail_len : 1));
   memcpy(tail_buf, subj + last, (size_t)tail_len);
   collected[n++] = v_str(tail_buf, tail_len);
-  for (int i = n - 1; i >= 0; i--) pieces = cvm_cons(vm, collected[i], pieces);
+  for (int i = n - 1; i >= 0; i--) pieces = creme_cons(vm, collected[i], pieces);
   return pieces;
 }
 
-void cvm_register_regex_builtins(VM *vm) {
-  cvm_register_builtin(vm, "regexp", bi_regexp);
-  cvm_register_builtin(vm, "regexp-matches?", bi_regexp_matches_p);
-  cvm_register_builtin(vm, "regexp?", bi_regexp_p);
-  cvm_register_builtin(vm, "regexp-search", bi_regexp_search);
-  cvm_register_builtin(vm, "regexp-extract", bi_regexp_extract);
-  cvm_register_builtin(vm, "regexp-replace", bi_regexp_replace);
-  cvm_register_builtin(vm, "regexp-replace-all", bi_regexp_replace_all);
-  cvm_register_builtin(vm, "regexp-split", bi_regexp_split);
+void creme_register_regex_builtins(VM *vm) {
+  creme_register_builtin(vm, "regexp", bi_regexp);
+  creme_register_builtin(vm, "regexp-matches?", bi_regexp_matches_p);
+  creme_register_builtin(vm, "regexp?", bi_regexp_p);
+  creme_register_builtin(vm, "regexp-search", bi_regexp_search);
+  creme_register_builtin(vm, "regexp-extract", bi_regexp_extract);
+  creme_register_builtin(vm, "regexp-replace", bi_regexp_replace);
+  creme_register_builtin(vm, "regexp-replace-all", bi_regexp_replace_all);
+  creme_register_builtin(vm, "regexp-split", bi_regexp_split);
 }

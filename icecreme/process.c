@@ -45,7 +45,7 @@ static void pr_buf_grow(char **buf, size_t *cap, size_t len, size_t extra) {
 }
 
 static char *pr_cstring(Value s, const char *who) {
-  if (s.tag != T_STR) cvm_abort("%s: expected a string", who);
+  if (s.tag != T_STR) creme_abort("%s: expected a string", who);
   char *cs = GC_MALLOC((size_t)s.aux + 1);
   memcpy(cs, s.as.chars, (size_t)s.aux);
   cs[s.aux] = 0;
@@ -102,7 +102,7 @@ static void pr_drain_pipes(int out_fd, int err_fd,
 }
 
 static Value bi_process_run(VM *vm, Value *args, int nargs) {
-  if (nargs != 2) cvm_abort("process-run: expected (cmd args)");
+  if (nargs != 2) creme_abort("process-run: expected (cmd args)");
   char *cmd = pr_cstring(args[0], "process-run");
 
   int argc = 1;
@@ -114,10 +114,10 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
   argv[argc] = NULL;
 
   int out_pipe[2], err_pipe[2];
-  if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0) cvm_abort("process-run: pipe() failed");
+  if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0) creme_abort("process-run: pipe() failed");
 
   pid_t pid = fork();
-  if (pid < 0) cvm_abort("process-run: fork() failed");
+  if (pid < 0) creme_abort("process-run: fork() failed");
 
   if (pid == 0) {
     dup2(out_pipe[1], STDOUT_FILENO);
@@ -142,10 +142,10 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
   int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
   Value result = v_nil();
-  result = cvm_cons(vm, v_bool(exit_code == 0), result);
-  result = cvm_cons(vm, v_int(exit_code), result);
-  result = cvm_cons(vm, v_str(err_buf ? err_buf : "", (int)err_len), result);
-  result = cvm_cons(vm, v_str(out_buf ? out_buf : "", (int)out_len), result);
+  result = creme_cons(vm, v_bool(exit_code == 0), result);
+  result = creme_cons(vm, v_int(exit_code), result);
+  result = creme_cons(vm, v_str(err_buf ? err_buf : "", (int)err_len), result);
+  result = creme_cons(vm, v_str(out_buf ? out_buf : "", (int)out_len), result);
   return result;
 }
 
@@ -161,7 +161,7 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
 static Value bi_sleep_ms(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 1 || args[0].tag != T_INT || args[0].as.i < 0)
-    cvm_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
+    creme_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
   struct timespec req;
   req.tv_sec = args[0].as.i / 1000;
   req.tv_nsec = (args[0].as.i % 1000) * 1000000L;
@@ -172,7 +172,7 @@ static Value bi_sleep_ms(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 
-void cvm_register_process_builtins(VM *vm) {
-  cvm_register_builtin(vm, "process-run", bi_process_run);
-  cvm_register_builtin(vm, "sleep-ms!", bi_sleep_ms);
+void creme_register_process_builtins(VM *vm) {
+  creme_register_builtin(vm, "process-run", bi_process_run);
+  creme_register_builtin(vm, "sleep-ms!", bi_sleep_ms);
 }

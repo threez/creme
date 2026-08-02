@@ -1,8 +1,8 @@
 /* (creme pkey) — RSA/EC key generation, signing/verification, RSA-OAEP
  * encryption, PEM import/export, backed by OpenSSL's EVP_PKEY/RSA/
  * EC_KEY/PEM API. See pkey.c's own header comment. */
-#ifndef CVM_PKEY_H
-#define CVM_PKEY_H
+#ifndef CREME_PKEY_H
+#define CREME_PKEY_H
 
 #include <openssl/ec.h>
 #include <openssl/rsa.h>
@@ -24,12 +24,12 @@ typedef struct {
   int pem_len;
 } PKeyBox;
 
-void cvm_register_pkey_builtins(VM *vm);
+void creme_register_pkey_builtins(VM *vm);
 
 /* Exported for (creme x509)'s x509-cert-public-key -- see pkey.c's own
- * comment on cvm_pkey_box_public_rsa/_ec. Each takes ownership of
+ * comment on creme_pkey_box_public_rsa/_ec. Each takes ownership of
  * neither pointer (caller still owns/frees rsa/ec). */
-Value cvm_pkey_box_public_rsa(RSA *rsa);
-Value cvm_pkey_box_public_ec(EC_KEY *ec);
+Value creme_pkey_box_public_rsa(RSA *rsa);
+Value creme_pkey_box_public_ec(EC_KEY *ec);
 
 #endif

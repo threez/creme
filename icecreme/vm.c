@@ -14,7 +14,7 @@
  * this VM can beat the Crystal one on the merits of the dispatch mechanism
  * itself, not just on lower per-op overhead. The instruction bodies are
  * written ONCE (via the CASE/NEXT macros below) and compiled into whichever
- * shape is active — see the CVM_COMPUTED_GOTO block for how. `frame`/`base`
+ * shape is active — see the CREME_COMPUTED_GOTO block for how. `frame`/`base`
  * are cached locals, refreshed only right after an op that can change which
  * frame is on top (a call or a return) — everything else reuses them
  * as-is, matching the invariant that only those ops touch `vm->depth`. */
@@ -29,7 +29,7 @@
 #include "profiler.h"
 #include "vm.h"
 
-/* Set once by main.c right after allocating the VM -- cvm_abort's own
+/* Set once by main.c right after allocating the VM -- creme_abort's own
  * signature (unchanged across ~100+ existing call sites) has no VM*
  * parameter, so this is how it reaches the current run's guard-handler
  * stack. Mirrors profiler.c's own g_profiled_vm (same rationale: a
@@ -37,21 +37,21 @@
  * parameters through).
  *
  * _Thread_local since (creme actor) (actor.c): every actor gets its own
- * VM running on its own real OS thread (see cvm_new_child_vm below) --
+ * VM running on its own real OS thread (see creme_new_child_vm below) --
  * a single process-wide pointer would have two concurrently-running
- * actors stomping on each other's "which VM does cvm_abort raise
+ * actors stomping on each other's "which VM does creme_abort raise
  * against" pointer, misdirecting errors to the wrong actor entirely.
- * Each thread sets its own copy via cvm_set_current_vm at thread start
+ * Each thread sets its own copy via creme_set_current_vm at thread start
  * (main.c for the main thread, actor.c's thread entry function for a
  * spawned actor). */
 static _Thread_local VM *g_current_vm = NULL;
 
-void cvm_set_current_vm(VM *vm) {
+void creme_set_current_vm(VM *vm) {
   g_current_vm = vm;
 }
 
 /* Lazily builds the one process-wide condition RecordType every
- * cvm_abort/error-raised condition uses -- mirrors record.cr's own
+ * creme_abort/error-raised condition uses -- mirrors record.cr's own
  * CONDITION_TYPE constant (name "condition", fields "message"/
  * "irritants"). Field/type names are plain T_SYM values pointing at
  * static string literals -- safe (unlike an ordinary T_STR) since T_SYM
@@ -68,7 +68,7 @@ static RecordType *get_condition_type(VM *vm) {
   return rt;
 }
 
-Value cvm_make_condition(VM *vm, const char *msg, size_t msglen, Value irritants) {
+Value creme_make_condition(VM *vm, const char *msg, size_t msglen, Value irritants) {
   char *copy = GC_MALLOC(msglen ? msglen : 1);
   memcpy(copy, msg, msglen);
   SchemeRecord *r = GC_MALLOC(sizeof(SchemeRecord));
@@ -79,7 +79,7 @@ Value cvm_make_condition(VM *vm, const char *msg, size_t msglen, Value irritants
   return v_record(r);
 }
 
-int cvm_is_condition(VM *vm, Value v) {
+int creme_is_condition(VM *vm, Value v) {
   return v.tag == T_RECORD && v.as.record->type == get_condition_type(vm);
 }
 
@@ -90,7 +90,7 @@ int cvm_is_condition(VM *vm, Value v) {
  * rest (unwind draining, upvalue closing, depth collapse). Never
  * returns. The caller MUST have already confirmed vm->n_handlers > 0 --
  * this only pops/jumps, it doesn't fall back to aborting the process. */
-_Noreturn void cvm_raise_condition(VM *vm, Value condition) {
+_Noreturn void creme_raise_condition(VM *vm, Value condition) {
   int idx = --vm->n_handlers;
   GuardHandler *h = &vm->handlers[idx];
   vm->pending_condition = condition;
@@ -98,7 +98,7 @@ _Noreturn void cvm_raise_condition(VM *vm, Value condition) {
   longjmp(h->buf, 1);
 }
 
-_Noreturn void cvm_abort(const char *fmt, ...) {
+_Noreturn void creme_abort(const char *fmt, ...) {
   char buf[1024];
   va_list ap;
   va_start(ap, fmt);
@@ -106,8 +106,8 @@ _Noreturn void cvm_abort(const char *fmt, ...) {
   va_end(ap);
 
   if (g_current_vm && g_current_vm->n_handlers > 0) {
-    Value cond = cvm_make_condition(g_current_vm, buf, strlen(buf), v_nil());
-    cvm_raise_condition(g_current_vm, cond);
+    Value cond = creme_make_condition(g_current_vm, buf, strlen(buf), v_nil());
+    creme_raise_condition(g_current_vm, cond);
   }
 
   /* An uncaught abort inside a spawned actor's own VM (see actor.c's
@@ -129,27 +129,27 @@ _Noreturn void cvm_abort(const char *fmt, ...) {
 }
 
 /* See vm.h's own doc comment. Note: the guard-handler branch inside
- * cvm_abort above (cvm_make_condition) itself calls GC_MALLOC a few
+ * creme_abort above (creme_make_condition) itself calls GC_MALLOC a few
  * times -- if the heap is exhausted badly enough that even THAT few-
  * dozen-byte allocation fails, this callback re-enters recursively. A
  * script running deeply enough under a `guard` to hit that is already
  * in a genuinely catastrophic OOM state no allocator-level fix can fully
- * paper over; falling through to cvm_abort's other two (allocation-free)
+ * paper over; falling through to creme_abort's other two (allocation-free)
  * branches -- actor unwind's fixed-size abort_message buffer, or the
  * plain print+exit(1) -- remains the eventual, correct backstop either
  * way. */
-void *cvm_gc_oom_handler(size_t bytes_requested) {
-  cvm_abort("icecreme: out of memory (GC allocation of %zu bytes failed)", bytes_requested);
-  return NULL; /* unreachable -- cvm_abort never returns */
+void *creme_gc_oom_handler(size_t bytes_requested) {
+  creme_abort("icecreme: out of memory (GC allocation of %zu bytes failed)", bytes_requested);
+  return NULL; /* unreachable -- creme_abort never returns */
 }
 
-int cvm_global_intern(VM *vm, const char *name, int len) {
+int creme_global_intern(VM *vm, const char *name, int len) {
   for (int i = 0; i < vm->n_globals; i++) {
     if ((int)strlen(vm->globals[i].name) == len && memcmp(vm->globals[i].name, name, (size_t)len) == 0) {
       return i;
     }
   }
-  if (vm->n_globals >= CVM_GLOBALS_CAP) cvm_abort("icecreme: global table full (CVM_GLOBALS_CAP=%d)", CVM_GLOBALS_CAP);
+  if (vm->n_globals >= CREME_GLOBALS_CAP) creme_abort("icecreme: global table full (CREME_GLOBALS_CAP=%d)", CREME_GLOBALS_CAP);
   int slot = vm->n_globals++;
   vm->globals[slot].name = name;
   vm->globals[slot].value = v_nil();
@@ -175,18 +175,18 @@ int cvm_global_intern(VM *vm, const char *name, int len) {
  * Env parent pointer gives it) -- this only ever takes a snapshot at
  * spawn time. */
 /* A shared, immutable, all-zero "root" chunk purely so a freshly built
- * child VM's frame 0 has a non-NULL `chunk` to satisfy cvm_apply's own
+ * child VM's frame 0 has a non-NULL `chunk` to satisfy creme_apply's own
  * `caller->chunk->num_registers` read (see below) -- num_registers==0
  * is exactly right, since this frame is never itself dispatched
  * through (nothing ever advances its `ip` or returns "past" it); it
- * only ever serves as the register-window base cvm_apply's own
+ * only ever serves as the register-window base creme_apply's own
  * new_base arithmetic measures from. */
 static Chunk g_empty_root_chunk;
 
 /* See vm.h's own doc comment. */
-VM *cvm_alloc_vm(int stack_cap, int frames_cap) {
-  if (stack_cap <= 0) stack_cap = CVM_DEFAULT_STACK_CAP;
-  if (frames_cap <= 0) frames_cap = CVM_DEFAULT_FRAMES_CAP;
+VM *creme_alloc_vm(int stack_cap, int frames_cap) {
+  if (stack_cap <= 0) stack_cap = CREME_DEFAULT_STACK_CAP;
+  if (frames_cap <= 0) frames_cap = CREME_DEFAULT_FRAMES_CAP;
   VM *vm = GC_MALLOC(sizeof(VM));
   vm->stack = GC_MALLOC(sizeof(Value) * (size_t)stack_cap);
   vm->stack_cap = stack_cap;
@@ -195,19 +195,19 @@ VM *cvm_alloc_vm(int stack_cap, int frames_cap) {
   return vm;
 }
 
-/* cvm_run_chunk (the normal top-level entry point) sets up frame 0 by
- * hand before ever calling cvm_dispatch; cvm_apply(vm, fn, ...) --
+/* creme_run_chunk (the normal top-level entry point) sets up frame 0 by
+ * hand before ever calling creme_dispatch; creme_apply(vm, fn, ...) --
  * actor.c's own way of starting a spawned actor's thunk -- assumes that
  * SAME setup already happened (it reads vm->frames[vm->depth - 1]),
  * which a bare GC_MALLOC'd VM (depth left at its zero-init default)
  * does NOT have. Give every child VM the same minimal frame 0
- * cvm_run_chunk would, so cvm_apply can be called on it directly.
+ * creme_run_chunk would, so creme_apply can be called on it directly.
  * Inherits the PARENT's own stack_cap/frames_cap (not the bare
  * defaults) -- an actor spawned by a resource-limited script should
  * stay under that same limit, not silently regain the full default the
  * instant it's spawned. */
-VM *cvm_new_child_vm(VM *parent) {
-  VM *vm = cvm_alloc_vm(parent->stack_cap, parent->frames_cap);
+VM *creme_new_child_vm(VM *parent) {
+  VM *vm = creme_alloc_vm(parent->stack_cap, parent->frames_cap);
   memcpy(vm->globals, parent->globals, sizeof(GlobalCell) * (size_t)parent->n_globals);
   vm->n_globals = parent->n_globals;
 
@@ -219,20 +219,20 @@ VM *cvm_new_child_vm(VM *parent) {
    * (a genuine cross-thread bug, not just wrong scoping). Give this VM
    * its own fresh pair and re-point the two global slots at them,
    * overwriting what the memcpy above brought over. */
-  cvm_init_current_ports(vm);
-  int cop_slot = cvm_global_intern(vm, "current-output-port", 20);
+  creme_init_current_ports(vm);
+  int cop_slot = creme_global_intern(vm, "current-output-port", 20);
   vm->globals[cop_slot].value = v_parameter(vm->current_output_param);
   vm->globals[cop_slot].bound = 1;
-  int cip_slot = cvm_global_intern(vm, "current-input-port", 19);
+  int cip_slot = creme_global_intern(vm, "current-input-port", 19);
   vm->globals[cip_slot].value = v_parameter(vm->current_input_param);
   vm->globals[cip_slot].bound = 1;
 
-  cvm_setup_frame0(vm);
+  creme_setup_frame0(vm);
 
   /* Propagate --profile's own state onto this child VM too -- a spawned
    * actor, or one of (creme mux)'s worker-pool/inline dispatch VMs, runs
    * Scheme code on THIS VM instance, never the parent's, so without this
-   * cvm_profiler_tick would never fire here at all and every sample
+   * creme_profiler_tick would never fire here at all and every sample
    * would silently come from wherever the ORIGINAL top-level thread
    * happened to be (for a spawn-then-block-forever program, essentially
    * nothing useful). `shared_vm_samples` is a shared POINTER (see its
@@ -250,11 +250,11 @@ VM *cvm_new_child_vm(VM *parent) {
   return vm;
 }
 
-/* Shared by cvm_new_child_vm (above) and cvm_new_empty_vm (below) -- the
- * minimal frame 0 a freshly built VM needs before cvm_apply/
- * cvm_run_loaded_chunk can be called on it at all (see cvm_new_child_vm's
+/* Shared by creme_new_child_vm (above) and creme_new_empty_vm (below) -- the
+ * minimal frame 0 a freshly built VM needs before creme_apply/
+ * creme_run_loaded_chunk can be called on it at all (see creme_new_child_vm's
  * own doc comment for why). */
-void cvm_setup_frame0(VM *vm) {
+void creme_setup_frame0(VM *vm) {
   Frame *f0 = &vm->frames[0];
   f0->chunk = &g_empty_root_chunk;
   f0->base = 0;
@@ -266,7 +266,7 @@ void cvm_setup_frame0(VM *vm) {
 }
 
 /* (scheme eval)'s environment/null-environment/eval-2-arg target -- unlike
- * cvm_new_child_vm (used for a spawned actor's own VM, which inherits
+ * creme_new_child_vm (used for a spawned actor's own VM, which inherits
  * every existing global by value/pointer), this starts with a completely
  * EMPTY global table: no memcpy at all. Correct for null-environment
  * (R7RS: only syntax, no procedures -- and icecreme has no global bindings
@@ -278,10 +278,10 @@ void cvm_setup_frame0(VM *vm) {
  * environment-copy-global! (bootstrap.c) -- copying each requested
  * name's CURRENT value from the calling VM, not re-importing/
  * re-compiling anything. */
-VM *cvm_new_empty_vm(void) {
-  VM *vm = cvm_alloc_vm(0, 0);
-  cvm_setup_frame0(vm);
-  /* Suppresses cvm_register_required_builtins' own "always register
+VM *creme_new_empty_vm(void) {
+  VM *vm = creme_alloc_vm(0, 0);
+  creme_setup_frame0(vm);
+  /* Suppresses creme_register_required_builtins' own "always register
    * base+write on first use" auto-registration (main.c) for THIS vm --
    * load-chunk-bytes-into (bootstrap.c) calls that on every eval into an
    * environment, and this VM must stay genuinely empty until
@@ -296,8 +296,8 @@ VM *cvm_new_empty_vm(void) {
   return vm;
 }
 
-void cvm_register_builtin(VM *vm, const char *name, BuiltinFn fn) {
-  int slot = cvm_global_intern(vm, name, (int)strlen(name));
+void creme_register_builtin(VM *vm, const char *name, BuiltinFn fn) {
+  int slot = creme_global_intern(vm, name, (int)strlen(name));
   vm->globals[slot].value = v_builtin(fn);
   vm->globals[slot].bound = 1;
 }
@@ -313,7 +313,7 @@ double as_double(Value v, const char *who) {
   if (v.tag == T_INT) return (double)v.as.i;
   if (v.tag == T_FLOAT) return v.as.f;
   if (v.tag == T_RATIONAL) return mpq_get_d(v.as.rational->q);
-  cvm_abort("%s: not a real number", who);
+  creme_abort("%s: not a real number", who);
   return 0.0; /* unreachable */
 }
 
@@ -328,7 +328,7 @@ static void value_to_mpq(Value v, mpq_t out) {
   } else if (v.tag == T_RATIONAL) {
     mpq_set(out, v.as.rational->q);
   } else {
-    cvm_abort("icecreme: value_to_mpq called on a non-exact value (internal dispatch bug)");
+    creme_abort("icecreme: value_to_mpq called on a non-exact value (internal dispatch bug)");
   }
 }
 
@@ -339,7 +339,7 @@ Value make_rational_from_mpq(mpq_t q) {
      * only target (Linux/LP64, see icecreme/Makefile), that's 64 bits, matching
      * T_INT's own int64_t exactly. */
     if (!mpz_fits_slong_p(mpq_numref(q))) {
-      cvm_abort("icecreme: rational collapsed to an integer too large for this prototype's fixnum-only int type (bignum ints not implemented)");
+      creme_abort("icecreme: rational collapsed to an integer too large for this prototype's fixnum-only int type (bignum ints not implemented)");
     }
     return v_int((int64_t)mpz_get_si(mpq_numref(q)));
   }
@@ -397,7 +397,7 @@ static Value complex_div(Value a, Value b) {
   double ar = as_double(ca->real, "/"), ai = as_double(ca->imag, "/");
   double br = as_double(cb->real, "/"), bi = as_double(cb->imag, "/");
   double denom = br * br + bi * bi;
-  if (denom == 0.0) cvm_abort("/: division by zero");
+  if (denom == 0.0) creme_abort("/: division by zero");
   return make_complex(v_float((ar * br + ai * bi) / denom), v_float((ai * br - ar * bi) / denom));
 }
 
@@ -405,7 +405,7 @@ Value num_add(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) {
     int64_t r;
     if (__builtin_add_overflow(x.as.i, y.as.i, &r)) {
-      cvm_abort("+: integer overflow (bignum fallback not implemented in this prototype)");
+      creme_abort("+: integer overflow (bignum fallback not implemented in this prototype)");
     }
     return v_int(r);
   }
@@ -432,7 +432,7 @@ Value num_sub(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) {
     int64_t r;
     if (__builtin_sub_overflow(x.as.i, y.as.i, &r)) {
-      cvm_abort("-: integer overflow (bignum fallback not implemented in this prototype)");
+      creme_abort("-: integer overflow (bignum fallback not implemented in this prototype)");
     }
     return v_int(r);
   }
@@ -459,7 +459,7 @@ Value num_mul(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) {
     int64_t r;
     if (__builtin_mul_overflow(x.as.i, y.as.i, &r)) {
-      cvm_abort("*: integer overflow (bignum fallback not implemented in this prototype)");
+      creme_abort("*: integer overflow (bignum fallback not implemented in this prototype)");
     }
     return v_int(r);
   }
@@ -496,7 +496,7 @@ Value num_div(Value x, Value y) {
     mpq_init(qr);
     value_to_mpq(x, qx);
     value_to_mpq(y, qy);
-    if (mpq_sgn(qy) == 0) cvm_abort("/: division by zero");
+    if (mpq_sgn(qy) == 0) creme_abort("/: division by zero");
     mpq_div(qr, qx, qy);
     Value result = make_rational_from_mpq(qr);
     mpq_clear(qx);
@@ -505,7 +505,7 @@ Value num_div(Value x, Value y) {
     return result;
   }
   double dx = as_double(x, "/"), dy = as_double(y, "/");
-  if (dy == 0.0) cvm_abort("/: division by zero");
+  if (dy == 0.0) creme_abort("/: division by zero");
   return v_float(dx / dy);
 }
 
@@ -617,8 +617,8 @@ int num_eq(Value x, Value y) {
  * real T_INT/T_INT fast path already, but the function AS A WHOLE also
  * handles float/rational/complex (GMP mpq_init/mpq_clear calls and all),
  * so it's too large for the compiler to inline at every OP_ADD/OP_TESTLT/
- * etc. call site in cvm_dispatch below — confirmed via `objdump -dr vm.o`:
- * cvm_dispatch has real out-of-line `callq`s to these on every arithmetic/
+ * etc. call site in creme_dispatch below — confirmed via `objdump -dr vm.o`:
+ * creme_dispatch has real out-of-line `callq`s to these on every arithmetic/
  * comparison instruction, even for two plain fixnums. src/creme/eval/
  * vm.cr's own Op::Add/Op::TestLtImm arms already avoid exactly this by
  * inlining their own int/int fast path directly in the dispatch loop
@@ -679,7 +679,7 @@ static inline int fast_eq(Value x, Value y) {
  * R7RS leaves string eqv? implementation-defined for non-identical but
  * content-equal strings anyway), everything else (pairs/vectors/closures/
  * builtins/ports) by identity (pointer equality). */
-int cvm_eqv(Value a, Value b) {
+int creme_eqv(Value a, Value b) {
   if (a.tag != b.tag) {
     /* An int and a float are never eqv? even if numerically equal
      * (R7RS: eqv? distinguishes exactness) — mirrors scheme_eqv?. */
@@ -740,7 +740,7 @@ int cvm_eqv(Value a, Value b) {
   case T_RATIONAL:
     return mpq_equal(a.as.rational->q, b.as.rational->q);
   case T_COMPLEX:
-    return cvm_eqv(a.as.cplx->real, b.as.cplx->real) && cvm_eqv(a.as.cplx->imag, b.as.cplx->imag);
+    return creme_eqv(a.as.cplx->real, b.as.cplx->real) && creme_eqv(a.as.cplx->imag, b.as.cplx->imag);
   default:
     return 0;
   }
@@ -779,7 +779,7 @@ static void close_upvalues(Frame *f) {
  * own resume branch). */
 static void run_unwind_action(VM *vm, UnwindAction *a) {
   if (a->kind == UNWIND_DYNAMIC_WIND) {
-    cvm_apply(vm, a->after, NULL, 0);
+    creme_apply(vm, a->after, NULL, 0);
     return;
   }
   if (a->kind == UNWIND_EXC_HANDLER) {
@@ -798,7 +798,7 @@ static void run_unwind_action(VM *vm, UnwindAction *a) {
  * dynamic-wind's thunk via a captured continuation still runs its
  * `after`), restores vm->depth to what it was AT CAPTURE time, stashes
  * `arg` where the corresponding setjmp will read it back from, then
- * longjmps there. Called from both dispatch_call and cvm_apply's own
+ * longjmps there. Called from both dispatch_call and creme_apply's own
  * "callee is a continuation" case -- the two places a Value can be
  * invoked as a procedure at all. */
 static _Noreturn void invoke_continuation(VM *vm, Continuation *k, Value arg) {
@@ -845,10 +845,10 @@ static int sym_eq(Value a, Value b) {
 
 static Value list_ref(Value lst, int i) {
   while (i-- > 0) {
-    if (lst.tag != T_PAIR) cvm_abort("define-record-type: malformed form");
+    if (lst.tag != T_PAIR) creme_abort("define-record-type: malformed form");
     lst = lst.as.pair->cdr;
   }
-  if (lst.tag != T_PAIR) cvm_abort("define-record-type: malformed form");
+  if (lst.tag != T_PAIR) creme_abort("define-record-type: malformed form");
   return lst.as.pair->car;
 }
 
@@ -873,18 +873,18 @@ typedef struct {
  * (inside a function body) genuinely produces a disjoint type on every
  * call, matching R7RS and this project's own real interpreter. */
 static RecordBindings build_record_bindings(Value form) {
-  if (form.tag != T_PAIR) cvm_abort("define-record-type: malformed form");
+  if (form.tag != T_PAIR) creme_abort("define-record-type: malformed form");
   Value parts = form.as.pair->cdr; /* drop the leading `define-record-type` symbol */
   int n_parts = list_len(parts);
-  if (n_parts < 3) cvm_abort("define-record-type: malformed");
+  if (n_parts < 3) creme_abort("define-record-type: malformed");
 
   Value type_name = list_ref(parts, 0);
-  if (type_name.tag != T_SYM) cvm_abort("define-record-type: type name must be a symbol");
+  if (type_name.tag != T_SYM) creme_abort("define-record-type: type name must be a symbol");
 
   Value ctor_spec = list_ref(parts, 1);
-  if (ctor_spec.tag != T_PAIR) cvm_abort("define-record-type: malformed constructor spec");
+  if (ctor_spec.tag != T_PAIR) creme_abort("define-record-type: malformed constructor spec");
   Value ctor_name = ctor_spec.as.pair->car;
-  if (ctor_name.tag != T_SYM) cvm_abort("define-record-type: constructor name must be a symbol");
+  if (ctor_name.tag != T_SYM) creme_abort("define-record-type: constructor name must be a symbol");
   Value ctor_fields_list = ctor_spec.as.pair->cdr;
   int n_ctor_fields = list_len(ctor_fields_list);
   Value *ctor_field_names = GC_MALLOC(sizeof(Value) * (size_t)(n_ctor_fields ? n_ctor_fields : 1));
@@ -893,14 +893,14 @@ static RecordBindings build_record_bindings(Value form) {
     int i = 0;
     while (cur.tag == T_PAIR) {
       Value f = cur.as.pair->car;
-      if (f.tag != T_SYM) cvm_abort("define-record-type: constructor field must be a symbol");
+      if (f.tag != T_SYM) creme_abort("define-record-type: constructor field must be a symbol");
       ctor_field_names[i++] = f;
       cur = cur.as.pair->cdr;
     }
   }
 
   Value pred_name = list_ref(parts, 2);
-  if (pred_name.tag != T_SYM) cvm_abort("define-record-type: predicate name must be a symbol");
+  if (pred_name.tag != T_SYM) creme_abort("define-record-type: predicate name must be a symbol");
 
   int n_fields = n_parts - 3;
   Value *field_names = GC_MALLOC(sizeof(Value) * (size_t)(n_fields ? n_fields : 1));
@@ -914,16 +914,16 @@ static RecordBindings build_record_bindings(Value form) {
     while (cur.tag == T_PAIR) {
       Value spec = cur.as.pair->car;
       int speclen = list_len(spec);
-      if (speclen != 2 && speclen != 3) cvm_abort("define-record-type: bad field spec");
+      if (speclen != 2 && speclen != 3) creme_abort("define-record-type: bad field spec");
       Value fname = list_ref(spec, 0);
-      if (fname.tag != T_SYM) cvm_abort("define-record-type: field name must be a symbol");
+      if (fname.tag != T_SYM) creme_abort("define-record-type: field name must be a symbol");
       Value acc = list_ref(spec, 1);
-      if (acc.tag != T_SYM) cvm_abort("define-record-type: accessor name must be a symbol");
+      if (acc.tag != T_SYM) creme_abort("define-record-type: accessor name must be a symbol");
       field_names[idx] = fname;
       accessor_names[idx] = acc;
       if (speclen == 3) {
         Value mut = list_ref(spec, 2);
-        if (mut.tag != T_SYM) cvm_abort("define-record-type: mutator name must be a symbol");
+        if (mut.tag != T_SYM) creme_abort("define-record-type: mutator name must be a symbol");
         has_mutator[idx] = 1;
         mutator_names[idx] = mut;
       } else {
@@ -941,7 +941,7 @@ static RecordBindings build_record_bindings(Value form) {
         break;
       }
     }
-    if (!found) cvm_abort("define-record-type: constructor field is not a declared field");
+    if (!found) creme_abort("define-record-type: constructor field is not a declared field");
   }
 
   RecordType *rt = GC_MALLOC(sizeof(RecordType));
@@ -1018,7 +1018,7 @@ static Value call_record_callable(RecordCallable *rc, Value *args, int nargs) {
   switch (rc->kind) {
   case RC_CTOR: {
     if (nargs != rc->n_ctor_args) {
-      cvm_abort("%.*s: expected %d argument(s), got %d", rc->type->name.aux, rc->type->name.as.chars, rc->n_ctor_args, nargs);
+      creme_abort("%.*s: expected %d argument(s), got %d", rc->type->name.aux, rc->type->name.as.chars, rc->n_ctor_args, nargs);
     }
     SchemeRecord *r = GC_MALLOC(sizeof(SchemeRecord));
     r->type = rc->type;
@@ -1028,35 +1028,35 @@ static Value call_record_callable(RecordCallable *rc, Value *args, int nargs) {
     return v_record(r);
   }
   case RC_PRED: {
-    if (nargs != 1) cvm_abort("record predicate: expected 1 argument");
+    if (nargs != 1) creme_abort("record predicate: expected 1 argument");
     Value v = args[0];
     return v_bool(v.tag == T_RECORD && v.as.record->type == rc->type);
   }
   case RC_ACCESSOR: {
-    if (nargs != 1) cvm_abort("record accessor: expected 1 argument");
+    if (nargs != 1) creme_abort("record accessor: expected 1 argument");
     Value v = args[0];
-    if (v.tag != T_RECORD || v.as.record->type != rc->type) cvm_abort("record accessor: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
+    if (v.tag != T_RECORD || v.as.record->type != rc->type) creme_abort("record accessor: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
     return v.as.record->fields[rc->field_index];
   }
   case RC_MUTATOR: {
-    if (nargs != 2) cvm_abort("record mutator: expected 2 arguments");
+    if (nargs != 2) creme_abort("record mutator: expected 2 arguments");
     Value v = args[0];
-    if (v.tag != T_RECORD || v.as.record->type != rc->type) cvm_abort("record mutator: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
+    if (v.tag != T_RECORD || v.as.record->type != rc->type) creme_abort("record mutator: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
     v.as.record->fields[rc->field_index] = args[1];
     return v_nil();
   }
   default:
-    cvm_abort("icecreme: bad RecordCallable kind %d", rc->kind);
+    creme_abort("icecreme: bad RecordCallable kind %d", rc->kind);
     return v_nil(); /* unreachable */
   }
 }
 
 /* ---- pairs / cxr ---- */
 
-Value cvm_cons(VM *vm, Value car, Value cdr) {
+Value creme_cons(VM *vm, Value car, Value cdr) {
   if (!vm->pair_freelist) {
     vm->pair_freelist = GC_malloc_many(sizeof(Pair));
-    if (!vm->pair_freelist) cvm_abort("cons: out of memory");
+    if (!vm->pair_freelist) creme_abort("cons: out of memory");
   }
   Pair *p = (Pair *)vm->pair_freelist;
   vm->pair_freelist = GC_NEXT(p);
@@ -1087,18 +1087,18 @@ Value cvm_cons(VM *vm, Value car, Value cdr) {
  * instead of global resolution). */
 static Value cxr_abs_cmpzero_deopt_target(VM *vm, Chunk *chunk, int idx) {
   if (idx < 0 || idx >= chunk->n_consts) {
-    cvm_abort("icecreme: bad deopt-target const index %d (n_consts=%d)", idx, chunk->n_consts);
+    creme_abort("icecreme: bad deopt-target const index %d (n_consts=%d)", idx, chunk->n_consts);
   }
   Value c = chunk->consts[idx];
   if (c.tag == T_BUILTIN) return c;
   if (c.tag == T_SYM || c.tag == T_STR) {
-    int slot = cvm_global_intern(vm, c.as.chars, c.aux);
+    int slot = creme_global_intern(vm, c.as.chars, c.aux);
     if (!vm->globals[slot].bound) {
-      cvm_abort("icecreme: deopt target '%.*s' is not bound", c.aux, c.as.chars);
+      creme_abort("icecreme: deopt target '%.*s' is not bound", c.aux, c.as.chars);
     }
     return vm->globals[slot].value;
   }
-  cvm_abort("icecreme: bad deopt-target constant (tag %d)", c.tag);
+  creme_abort("icecreme: bad deopt-target constant (tag %d)", c.tag);
   return v_nil(); /* unreachable */
 }
 
@@ -1116,7 +1116,7 @@ static Value exec_cxr(VM *vm, Chunk *chunk, Value v, int code, int deopt_const_i
   while (code != 1) {
     if (v.tag != T_PAIR) {
       Value builtin = cxr_abs_cmpzero_deopt_target(vm, chunk, deopt_const_idx);
-      return cvm_apply(vm, builtin, &orig, 1);
+      return creme_apply(vm, builtin, &orig, 1);
     }
     v = (code & 1) ? v.as.pair->car : v.as.pair->cdr;
     code >>= 1;
@@ -1156,14 +1156,14 @@ static void qq_build_items(VM *vm, QQTemplate *t, Value *stack, int hole_base, i
         qqbuf_push(buf, list.as.pair->car);
         list = list.as.pair->cdr;
       }
-      if (list.tag != T_NIL) cvm_abort("quasiquote: unquote-splicing of an improper list");
+      if (list.tag != T_NIL) creme_abort("quasiquote: unquote-splicing of an improper list");
     } else {
-      qqbuf_push(buf, cvm_build_qq(vm, item, stack, hole_base, idx));
+      qqbuf_push(buf, creme_build_qq(vm, item, stack, hole_base, idx));
     }
   }
 }
 
-Value cvm_build_qq(VM *vm, QQTemplate *t, Value *stack, int hole_base, int *idx) {
+Value creme_build_qq(VM *vm, QQTemplate *t, Value *stack, int hole_base, int *idx) {
   switch (t->tag) {
   case QQ_CONST:
     return t->const_value;
@@ -1172,8 +1172,8 @@ Value cvm_build_qq(VM *vm, QQTemplate *t, Value *stack, int hole_base, int *idx)
   case QQ_LIST: {
     QQBuf buf = {0};
     qq_build_items(vm, t, stack, hole_base, idx, &buf);
-    Value result = cvm_build_qq(vm, t->tail, stack, hole_base, idx);
-    for (int i = buf.len - 1; i >= 0; i--) result = cvm_cons(vm, buf.data[i], result);
+    Value result = creme_build_qq(vm, t->tail, stack, hole_base, idx);
+    for (int i = buf.len - 1; i >= 0; i--) result = creme_cons(vm, buf.data[i], result);
     return result;
   }
   case QQ_VECTOR: {
@@ -1190,7 +1190,7 @@ Value cvm_build_qq(VM *vm, QQTemplate *t, Value *stack, int hole_base, int *idx)
      * qq_build_items above — reaching here means a malformed template. */
     return v_nil();
   default:
-    cvm_abort("icecreme: unknown QQTemplate tag %d", t->tag);
+    creme_abort("icecreme: unknown QQTemplate tag %d", t->tag);
     return v_nil(); /* unreachable */
   }
 }
@@ -1205,7 +1205,7 @@ Value cvm_build_qq(VM *vm, QQTemplate *t, Value *stack, int hole_base, int *idx)
  * O(1) Hash lookup for a simpler O(n) scan rather than adding a real hash
  * table just for this). Returns the table's own default target if nothing
  * matches. */
-static int cvm_case_dispatch(Value key, CaseDispatchTable *table) {
+static int creme_case_dispatch(Value key, CaseDispatchTable *table) {
   int tag;
   int64_t ival = 0;
   const char *sval = NULL;
@@ -1251,23 +1251,23 @@ static int cvm_case_dispatch(Value key, CaseDispatchTable *table) {
 static inline __attribute__((always_inline)) void bind_args(VM *vm, Chunk *callee, int nargs, int new_base, Value *stack, int arg_base) {
   int fixed = callee->param_count;
   if (callee->has_rest) {
-    if (nargs < fixed) cvm_abort("%s: expected at least %d argument(s), got %d", callee->name, fixed, nargs);
+    if (nargs < fixed) creme_abort("%s: expected at least %d argument(s), got %d", callee->name, fixed, nargs);
     for (int i = 0; i < fixed; i++) stack[new_base + i] = stack[arg_base + i];
     Value rest = v_nil();
-    for (int i = nargs - 1; i >= fixed; i--) rest = cvm_cons(vm, stack[arg_base + i], rest);
+    for (int i = nargs - 1; i >= fixed; i--) rest = creme_cons(vm, stack[arg_base + i], rest);
     stack[new_base + fixed] = rest;
   } else {
-    if (nargs != fixed) cvm_abort("%s: expected %d argument(s), got %d", callee->name, fixed, nargs);
+    if (nargs != fixed) creme_abort("%s: expected %d argument(s), got %d", callee->name, fixed, nargs);
     for (int i = 0; i < fixed; i++) stack[new_base + i] = stack[arg_base + i];
   }
 }
 
 /* Returns 1 if this delivered the target frame's return (that whole
- * dispatch, chunk or reentrant cvm_apply call, is done — value in *out), 0
+ * dispatch, chunk or reentrant creme_apply call, is done — value in *out), 0
  * otherwise (execution continues in the caller). Mirrors VM#deliver_return
- * in vm.cr. `target_depth` is normally 0 (a top-level cvm_run_chunk call)
- * but is the depth cvm_apply pushed its own frame at when this dispatch is
- * a reentrant call from a builtin (see cvm_apply) — either way, "done" means
+ * in vm.cr. `target_depth` is normally 0 (a top-level creme_run_chunk call)
+ * but is the depth creme_apply pushed its own frame at when this dispatch is
+ * a reentrant call from a builtin (see creme_apply) — either way, "done" means
  * depth has unwound back to whatever it was right before this dispatch's
  * own outermost frame was pushed. */
 static inline __attribute__((always_inline)) int deliver_return(VM *vm, Value val, Value *out, int target_depth) {
@@ -1336,7 +1336,7 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
   if (callee.tag == T_CLOSURE) {
     Closure *cl = callee.as.closure;
     int new_base = tail ? caller_base : caller_base + frame->chunk->num_registers;
-    if (new_base + cl->chunk->num_registers > vm->stack_cap) cvm_abort("icecreme: register stack exhausted (stack_cap=%d)", vm->stack_cap);
+    if (new_base + cl->chunk->num_registers > vm->stack_cap) creme_abort("icecreme: register stack exhausted (stack_cap=%d)", vm->stack_cap);
     if (tail) close_upvalues(frame);
     bind_args(vm, cl->chunk, nargs, new_base, vm->stack, arg_base);
     if (tail) {
@@ -1346,7 +1346,7 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
       frame->ip = 0;
       /* return_reg carries over unchanged, matching CallFrame#reset. */
     } else {
-      if (vm->depth >= vm->frames_cap) cvm_abort("icecreme: call depth exceeded (frames_cap=%d)", vm->frames_cap);
+      if (vm->depth >= vm->frames_cap) creme_abort("icecreme: call depth exceeded (frames_cap=%d)", vm->frames_cap);
       Frame *nf = &vm->frames[vm->depth];
       nf->chunk = cl->chunk;
       nf->base = new_base;
@@ -1383,7 +1383,7 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
         break;
       }
     }
-    if (!matched) cvm_abort("case-lambda: no matching clause for %d argument(s)", nargs);
+    if (!matched) creme_abort("case-lambda: no matching clause for %d argument(s)", nargs);
     /* Recurse once with the matched clause resolved to a plain closure --
      * still skips T_RECORD_CALLABLE/T_CONTINUATION/T_PARAMETER below on
      * this second pass, since it lands directly in the T_CLOSURE arm
@@ -1402,12 +1402,12 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
   }
 
   if (callee.tag == T_CONTINUATION) {
-    if (nargs != 1) cvm_abort("continuation: expected exactly 1 argument, got %d", nargs);
+    if (nargs != 1) creme_abort("continuation: expected exactly 1 argument, got %d", nargs);
     invoke_continuation(vm, callee.as.continuation, vm->stack[arg_base]); /* never returns */
   }
 
   if (callee.tag == T_PARAMETER) {
-    if (nargs != 0) cvm_abort("parameter: expected 0 arguments, got %d", nargs);
+    if (nargs != 0) creme_abort("parameter: expected 0 arguments, got %d", nargs);
     Value result = callee.as.parameter->value;
     if (tail) {
       return deliver_return(vm, result, out, target_depth);
@@ -1416,14 +1416,14 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
     return 0;
   }
 
-  cvm_abort("icecreme: attempt to call a non-procedure value");
+  creme_abort("icecreme: attempt to call a non-procedure value");
   return 0; /* unreachable */
 }
 
 /* ---- main dispatch loop ---- */
 
 #if defined(__GNUC__) || defined(__clang__)
-#define CVM_COMPUTED_GOTO 1
+#define CREME_COMPUTED_GOTO 1
 #endif
 
 /* Installs a (possibly quickened) opcode into an already-live instruction —
@@ -1431,7 +1431,7 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
  * `ins->op` are otherwise used everywhere else (including on every single
  * dispatch, so those must stay a bare read — no atomics there), but THIS
  * write is reachable from more than one actor's pthread at once when the
- * same Chunk's closure is shared across actors (cvm_new_child_vm memcpy's
+ * same Chunk's closure is shared across actors (creme_new_child_vm memcpy's
  * the parent's globals, Value pointers and all — see actor.c). That's
  * still a benign race even so: every racing writer independently computes
  * the exact same target opcode for a given instruction (a pure function of
@@ -1440,9 +1440,9 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
  * from a genuine data race, not a wrong-but-plausible one — a single
  * relaxed atomic store rules that out for free. */
 #if defined(__GNUC__) || defined(__clang__)
-#define CVM_QUICKEN(insptr, newop) __atomic_store_n(&(insptr)->op, (newop), __ATOMIC_RELAXED)
+#define CREME_QUICKEN(insptr, newop) __atomic_store_n(&(insptr)->op, (newop), __ATOMIC_RELAXED)
 #else
-#define CVM_QUICKEN(insptr, newop) ((insptr)->op = (newop))
+#define CREME_QUICKEN(insptr, newop) ((insptr)->op = (newop))
 #endif
 
 /* Decides whether an OP_CALLGLOBAL call site is a candidate for quickening
@@ -1481,21 +1481,21 @@ static inline int quicken_callglobal_op(Value callee, int nargs) {
   return -1;
 }
 
-/* The shared dispatch core, entered either fresh (cvm_run_chunk, always at
- * depth 0) or reentrantly (cvm_apply, called from a builtin like map/apply/
+/* The shared dispatch core, entered either fresh (creme_run_chunk, always at
+ * depth 0) or reentrantly (creme_apply, called from a builtin like map/apply/
  * a mux request handler — depth > 0, with the caller's own frames still
  * live below). Runs until `vm->depth` unwinds back to `target_depth`
  * (the depth it was AT ENTRY, before this dispatch's own outermost frame —
  * already pushed by the caller — is accounted for), returning that frame's
  * value. See deliver_return's own doc comment for the exact signal. */
-static Value cvm_dispatch(VM *vm, int target_depth) {
+static Value creme_dispatch(VM *vm, int target_depth) {
   Frame *frame = &vm->frames[vm->depth - 1];
   int base = frame->base;
   Value *stack = vm->stack;
   Value final_result;
   Instruction *ins;
 
-#ifdef CVM_COMPUTED_GOTO
+#ifdef CREME_COMPUTED_GOTO
   static const void *dispatch_table[OP_QUICK_COUNT] = {
       [OP_LOADK] = &&L_OP_LOADK, [OP_LOADNIL] = &&L_OP_LOADNIL, [OP_LOADTRUE] = &&L_OP_LOADTRUE,
       [OP_LOADFALSE] = &&L_OP_LOADFALSE, [OP_MOVE] = &&L_OP_MOVE, [OP_GETUPVAL] = &&L_OP_GETUPVAL,
@@ -1564,18 +1564,18 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
 #define CASE(op) L_##op:
 #define NEXT()                                          \
   do {                                                   \
-    if (vm->profiler.enabled) cvm_profiler_tick(vm, frame); \
+    if (vm->profiler.enabled) creme_profiler_tick(vm, frame); \
     ins = &frame->chunk->instrs[frame->ip++];            \
     goto *dispatch_table[ins->op];                       \
   } while (0)
-  if (vm->profiler.enabled) cvm_profiler_tick(vm, frame);
+  if (vm->profiler.enabled) creme_profiler_tick(vm, frame);
   ins = &frame->chunk->instrs[frame->ip++];
   goto *dispatch_table[ins->op];
 #else
 #define CASE(op) case op:
 #define NEXT() break
   for (;;) {
-    if (vm->profiler.enabled) cvm_profiler_tick(vm, frame);
+    if (vm->profiler.enabled) creme_profiler_tick(vm, frame);
     ins = &frame->chunk->instrs[frame->ip++];
     switch (ins->op) {
 #endif
@@ -1600,7 +1600,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   CASE(OP_GETGLOBAL) {
     GlobalCell *cell = &vm->globals[ins->b];
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     stack[base + ins->a] = cell->value;
     NEXT();
   }
@@ -1612,7 +1612,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   }
   CASE(OP_SETGLOBAL) {
     GlobalCell *cell = &vm->globals[ins->a];
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     cell->value = stack[base + ins->b];
     NEXT();
   }
@@ -1623,7 +1623,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     stack[base + ins->a] = fast_sub(stack[base + ins->b], stack[base + ins->c]);
     NEXT();
   CASE(OP_CONS)
-    stack[base + ins->a] = cvm_cons(vm, stack[base + ins->b], stack[base + ins->c]);
+    stack[base + ins->a] = creme_cons(vm, stack[base + ins->b], stack[base + ins->c]);
     NEXT();
   CASE(OP_ISNULL)
     stack[base + ins->a] = v_bool(stack[base + ins->b].tag == T_NIL);
@@ -1639,9 +1639,9 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   CASE(OP_MULIMM) {
     Value x = stack[base + ins->b];
-    if (x.tag != T_INT) cvm_abort("*: not an integer (float/overflow fallback not implemented in this prototype)");
+    if (x.tag != T_INT) creme_abort("*: not an integer (float/overflow fallback not implemented in this prototype)");
     int64_t r;
-    if (__builtin_mul_overflow(x.as.i, (int64_t)ins->c, &r)) cvm_abort("*: integer overflow (bignum fallback not implemented in this prototype)");
+    if (__builtin_mul_overflow(x.as.i, (int64_t)ins->c, &r)) creme_abort("*: integer overflow (bignum fallback not implemented in this prototype)");
     stack[base + ins->a] = v_int(r);
     NEXT();
   }
@@ -1673,11 +1673,11 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     if (!fast_ge(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTISEQUP)
-    if (!cvm_eqv(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
+    if (!creme_eqv(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_THROW) {
     Value msg = frame->chunk->consts[ins->a];
-    cvm_abort("%.*s", msg.aux, msg.as.chars);
+    creme_abort("%.*s", msg.aux, msg.as.chars);
   }
   CASE(OP_TESTFALSE)
     if (v_falsy(stack[base + ins->a])) frame->ip += ins->b;
@@ -1726,7 +1726,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value v = stack[base + ins->b];
     if (v.tag != T_INT || v.as.i == INT64_MIN) {
       Value builtin = cxr_abs_cmpzero_deopt_target(vm, frame->chunk, ins->d);
-      stack[base + ins->a] = cvm_apply(vm, builtin, &v, 1);
+      stack[base + ins->a] = creme_apply(vm, builtin, &v, 1);
       NEXT();
     }
     stack[base + ins->a] = v_int(v.as.i < 0 ? -v.as.i : v.as.i);
@@ -1736,7 +1736,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value v = stack[base + ins->b];
     if (v.tag != T_INT) {
       Value builtin = cxr_abs_cmpzero_deopt_target(vm, frame->chunk, ins->d);
-      stack[base + ins->a] = cvm_apply(vm, builtin, &v, 1);
+      stack[base + ins->a] = creme_apply(vm, builtin, &v, 1);
       NEXT();
     }
     int result;
@@ -1751,7 +1751,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       result = v.as.i < 0;
       break;
     default:
-      cvm_abort("icecreme: bad CmpZero test %d", ins->c);
+      creme_abort("icecreme: bad CmpZero test %d", ins->c);
       result = 0; /* unreachable */
     }
     stack[base + ins->a] = v_bool(result);
@@ -1767,7 +1767,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     cc->clauses = GC_MALLOC(sizeof(Closure *) * (size_t)(n ? n : 1));
     for (int i = 0; i < n; i++) {
       Value clv = stack[base + ins->b + i];
-      if (clv.tag != T_CLOSURE) cvm_abort("icecreme: case-lambda clause is not a closure");
+      if (clv.tag != T_CLOSURE) creme_abort("icecreme: case-lambda clause is not a closure");
       cc->clauses[i] = clv.as.closure;
     }
     stack[base + ins->a] = v_case_closure(cc);
@@ -1801,7 +1801,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       RecordBindings rb = build_record_bindings(form);
       for (int i = 0; i < rb.count; i++) {
         Value name = rb.names[i];
-        int slot = cvm_global_intern(vm, name.as.chars, name.aux);
+        int slot = creme_global_intern(vm, name.as.chars, name.aux);
         vm->globals[slot].value = rb.values[i];
         vm->globals[slot].bound = 1;
       }
@@ -1812,12 +1812,12 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     } else if (ins->c == 3 || ins->c == 4) {
       Value form = frame->chunk->consts[ins->b];
       const char *kind = ins->c == 3 ? "define-syntax" : "defmacro";
-      if (form.tag != T_PAIR) cvm_abort("%s: malformed form", kind);
+      if (form.tag != T_PAIR) creme_abort("%s: malformed form", kind);
       Value parts = form.as.pair->cdr; /* drop the leading define-syntax/defmacro symbol */
-      if (parts.tag != T_PAIR) cvm_abort("%s: malformed form", kind);
+      if (parts.tag != T_PAIR) creme_abort("%s: malformed form", kind);
       Value name = parts.as.pair->car;
-      if (name.tag != T_SYM) cvm_abort("%s: name must be a symbol", kind);
-      int slot = cvm_global_intern(vm, name.as.chars, name.aux);
+      if (name.tag != T_SYM) creme_abort("%s: name must be a symbol", kind);
+      int slot = creme_global_intern(vm, name.as.chars, name.aux);
       vm->globals[slot].value = v_macro(form.as.pair);
       vm->globals[slot].bound = 1;
       /* eval_define_syntax/eval_defmacro both return the macro's own name
@@ -1838,79 +1838,79 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   CASE(OP_VECREFUP) {
     Value vec = upvalue_get(frame->closure->upvalues[ins->b]);
     Value idxv = stack[base + ins->c];
-    if (vec.tag != T_VECTOR || idxv.tag != T_INT) cvm_abort("vector-ref: bad arguments");
+    if (vec.tag != T_VECTOR || idxv.tag != T_INT) creme_abort("vector-ref: bad arguments");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= vec.as.vec->len) cvm_abort("vector-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-ref: index %d out of range", idx);
     stack[base + ins->a] = vec.as.vec->items[idx];
     NEXT();
   }
   CASE(OP_VECSETUP) {
     Value vec = upvalue_get(frame->closure->upvalues[ins->a]);
     Value idxv = stack[base + ins->b];
-    if (vec.tag != T_VECTOR || idxv.tag != T_INT) cvm_abort("vector-set!: bad arguments");
+    if (vec.tag != T_VECTOR || idxv.tag != T_INT) creme_abort("vector-set!: bad arguments");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= vec.as.vec->len) cvm_abort("vector-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-set!: index %d out of range", idx);
     vec.as.vec->items[idx] = stack[base + ins->c];
     stack[base + ins->d] = vec;
     NEXT();
   }
   CASE(OP_BVREF) {
     Value bv = stack[base + ins->b];
-    if (bv.tag != T_BYTEVECTOR) cvm_abort("bytevector-u8-ref: not a bytevector");
+    if (bv.tag != T_BYTEVECTOR) creme_abort("bytevector-u8-ref: not a bytevector");
     Value idxv = stack[base + ins->c];
-    if (idxv.tag != T_INT) cvm_abort("bytevector-u8-ref: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("bytevector-u8-ref: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= bv.as.bv->len) cvm_abort("bytevector-u8-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-ref: index %d out of range", idx);
     stack[base + ins->a] = v_int(bv.as.bv->bytes[idx]);
     NEXT();
   }
   CASE(OP_BVSET) {
     Value bv = stack[base + ins->a];
-    if (bv.tag != T_BYTEVECTOR) cvm_abort("bytevector-u8-set!: not a bytevector");
+    if (bv.tag != T_BYTEVECTOR) creme_abort("bytevector-u8-set!: not a bytevector");
     Value idxv = stack[base + ins->b];
-    if (idxv.tag != T_INT) cvm_abort("bytevector-u8-set!: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("bytevector-u8-set!: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= bv.as.bv->len) cvm_abort("bytevector-u8-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-set!: index %d out of range", idx);
     Value val = stack[base + ins->c];
-    if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) cvm_abort("bytevector-u8-set!: byte out of range");
+    if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) creme_abort("bytevector-u8-set!: byte out of range");
     bv.as.bv->bytes[idx] = (unsigned char)val.as.i;
     NEXT();
   }
   CASE(OP_BVREFIMM) {
     Value bv = stack[base + ins->b];
-    if (bv.tag != T_BYTEVECTOR) cvm_abort("bytevector-u8-ref: not a bytevector");
+    if (bv.tag != T_BYTEVECTOR) creme_abort("bytevector-u8-ref: not a bytevector");
     int idx = ins->c;
-    if (idx < 0 || idx >= bv.as.bv->len) cvm_abort("bytevector-u8-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-ref: index %d out of range", idx);
     stack[base + ins->a] = v_int(bv.as.bv->bytes[idx]);
     NEXT();
   }
   CASE(OP_BVSETIMM) {
     Value bv = stack[base + ins->a];
-    if (bv.tag != T_BYTEVECTOR) cvm_abort("bytevector-u8-set!: not a bytevector");
+    if (bv.tag != T_BYTEVECTOR) creme_abort("bytevector-u8-set!: not a bytevector");
     int idx = ins->b;
-    if (idx < 0 || idx >= bv.as.bv->len) cvm_abort("bytevector-u8-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-set!: index %d out of range", idx);
     Value val = stack[base + ins->c];
-    if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) cvm_abort("bytevector-u8-set!: byte out of range");
+    if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) creme_abort("bytevector-u8-set!: byte out of range");
     bv.as.bv->bytes[idx] = (unsigned char)val.as.i;
     NEXT();
   }
   CASE(OP_BVREFUP) {
     Value bv = upvalue_get(frame->closure->upvalues[ins->b]);
     Value idxv = stack[base + ins->c];
-    if (bv.tag != T_BYTEVECTOR || idxv.tag != T_INT) cvm_abort("bytevector-u8-ref: bad arguments");
+    if (bv.tag != T_BYTEVECTOR || idxv.tag != T_INT) creme_abort("bytevector-u8-ref: bad arguments");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= bv.as.bv->len) cvm_abort("bytevector-u8-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-ref: index %d out of range", idx);
     stack[base + ins->a] = v_int(bv.as.bv->bytes[idx]);
     NEXT();
   }
   CASE(OP_BVSETUP) {
     Value bv = upvalue_get(frame->closure->upvalues[ins->a]);
     Value idxv = stack[base + ins->b];
-    if (bv.tag != T_BYTEVECTOR || idxv.tag != T_INT) cvm_abort("bytevector-u8-set!: bad arguments");
+    if (bv.tag != T_BYTEVECTOR || idxv.tag != T_INT) creme_abort("bytevector-u8-set!: bad arguments");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= bv.as.bv->len) cvm_abort("bytevector-u8-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-set!: index %d out of range", idx);
     Value val = stack[base + ins->c];
-    if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) cvm_abort("bytevector-u8-set!: byte out of range");
+    if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) creme_abort("bytevector-u8-set!: byte out of range");
     bv.as.bv->bytes[idx] = (unsigned char)val.as.i;
     stack[base + ins->d] = bv;
     NEXT();
@@ -1920,7 +1920,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   CASE(OP_QUASIQUOTE) {
     int idx = 0;
-    stack[base + ins->a] = cvm_build_qq(vm, frame->chunk->qq_templates[ins->b], stack, base + ins->c, &idx);
+    stack[base + ins->a] = creme_build_qq(vm, frame->chunk->qq_templates[ins->b], stack, base + ins->c, &idx);
     NEXT();
   }
   CASE(OP_MAKEPROMISE) {
@@ -1946,14 +1946,14 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     int fixed = ins->c;
     int has_rest = ins->d != 0;
     if (has_rest) {
-      if (n < fixed) cvm_abort("let-values: expected at least %d value(s), got %d", fixed, n);
+      if (n < fixed) creme_abort("let-values: expected at least %d value(s), got %d", fixed, n);
     } else if (n != fixed) {
-      cvm_abort("let-values: expected %d value(s), got %d", fixed, n);
+      creme_abort("let-values: expected %d value(s), got %d", fixed, n);
     }
     for (int i = 0; i < fixed; i++) stack[base + ins->b + i] = vals[i];
     if (has_rest) {
       Value rest = v_nil();
-      for (int i = n - 1; i >= fixed; i--) rest = cvm_cons(vm, vals[i], rest);
+      for (int i = n - 1; i >= fixed; i--) rest = creme_cons(vm, vals[i], rest);
       stack[base + ins->b + fixed] = rest;
     }
     NEXT();
@@ -1989,7 +1989,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     stack[base + ins->a] = v_bool(stack[base + ins->b].tag == T_PAIR);
     NEXT();
   CASE(OP_ISEQ)
-    stack[base + ins->a] = v_bool(cvm_eqv(stack[base + ins->b], stack[base + ins->c]));
+    stack[base + ins->a] = v_bool(creme_eqv(stack[base + ins->b], stack[base + ins->c]));
     NEXT();
   CASE(OP_SETUPVAL) {
     Upvalue *uv = frame->closure->upvalues[ins->a];
@@ -1999,35 +1999,35 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   }
   CASE(OP_VECREFIMM) {
     Value vec = stack[base + ins->b];
-    if (vec.tag != T_VECTOR) cvm_abort("vector-ref: not a vector");
+    if (vec.tag != T_VECTOR) creme_abort("vector-ref: not a vector");
     int idx = ins->c;
-    if (idx < 0 || idx >= vec.as.vec->len) cvm_abort("vector-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-ref: index %d out of range", idx);
     stack[base + ins->a] = vec.as.vec->items[idx];
     NEXT();
   }
   CASE(OP_VECSETIMM) {
     Value vec = stack[base + ins->a];
-    if (vec.tag != T_VECTOR) cvm_abort("vector-set!: not a vector");
+    if (vec.tag != T_VECTOR) creme_abort("vector-set!: not a vector");
     int idx = ins->b;
-    if (idx < 0 || idx >= vec.as.vec->len) cvm_abort("vector-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-set!: index %d out of range", idx);
     vec.as.vec->items[idx] = stack[base + ins->c];
     NEXT();
   }
   CASE(OP_STRREFIMM) {
     Value sv = stack[base + ins->b];
-    if (sv.tag != T_STR) cvm_abort("string-ref: not a string");
+    if (sv.tag != T_STR) creme_abort("string-ref: not a string");
     int idx = ins->c;
-    if (idx < 0 || idx >= sv.aux) cvm_abort("string-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) creme_abort("string-ref: index %d out of range", idx);
     stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
   }
   CASE(OP_STRREF) {
     Value sv = stack[base + ins->b];
-    if (sv.tag != T_STR) cvm_abort("string-ref: not a string");
+    if (sv.tag != T_STR) creme_abort("string-ref: not a string");
     Value idxv = stack[base + ins->c];
-    if (idxv.tag != T_INT) cvm_abort("string-ref: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("string-ref: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.aux) cvm_abort("string-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) creme_abort("string-ref: index %d out of range", idx);
     stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
   }
@@ -2039,45 +2039,45 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
    * that way only to stop MOST code from writing through it) is sound. */
   CASE(OP_STRSET) {
     Value sv = stack[base + ins->a];
-    if (sv.tag != T_STR) cvm_abort("string-set!: not a string");
+    if (sv.tag != T_STR) creme_abort("string-set!: not a string");
     Value idxv = stack[base + ins->b];
-    if (idxv.tag != T_INT) cvm_abort("string-set!: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("string-set!: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.aux) cvm_abort("string-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) creme_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
-    if (ch.tag != T_CHAR) cvm_abort("string-set!: not a character");
+    if (ch.tag != T_CHAR) creme_abort("string-set!: not a character");
     ((char *)sv.as.chars)[idx] = (char)ch.as.i;
     NEXT();
   }
   CASE(OP_STRSETIMM) {
     Value sv = stack[base + ins->a];
-    if (sv.tag != T_STR) cvm_abort("string-set!: not a string");
+    if (sv.tag != T_STR) creme_abort("string-set!: not a string");
     int idx = ins->b;
-    if (idx < 0 || idx >= sv.aux) cvm_abort("string-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) creme_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
-    if (ch.tag != T_CHAR) cvm_abort("string-set!: not a character");
+    if (ch.tag != T_CHAR) creme_abort("string-set!: not a character");
     ((char *)sv.as.chars)[idx] = (char)ch.as.i;
     NEXT();
   }
   CASE(OP_STRREFUP) {
     Value sv = upvalue_get(frame->closure->upvalues[ins->b]);
-    if (sv.tag != T_STR) cvm_abort("string-ref: not a string");
+    if (sv.tag != T_STR) creme_abort("string-ref: not a string");
     Value idxv = stack[base + ins->c];
-    if (idxv.tag != T_INT) cvm_abort("string-ref: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("string-ref: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.aux) cvm_abort("string-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) creme_abort("string-ref: index %d out of range", idx);
     stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
   }
   CASE(OP_STRSETUP) {
     Value sv = upvalue_get(frame->closure->upvalues[ins->a]);
-    if (sv.tag != T_STR) cvm_abort("string-set!: not a string");
+    if (sv.tag != T_STR) creme_abort("string-set!: not a string");
     Value idxv = stack[base + ins->b];
-    if (idxv.tag != T_INT) cvm_abort("string-set!: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("string-set!: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.aux) cvm_abort("string-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) creme_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
-    if (ch.tag != T_CHAR) cvm_abort("string-set!: not a character");
+    if (ch.tag != T_CHAR) creme_abort("string-set!: not a character");
     ((char *)sv.as.chars)[idx] = (char)ch.as.i;
     stack[base + ins->d] = sv;
     NEXT();
@@ -2089,10 +2089,10 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     if (!fast_gt(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTISEQ)
-    if (!cvm_eqv(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
+    if (!creme_eqv(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
     NEXT();
   CASE(OP_CASEDISPATCH)
-    frame->ip = cvm_case_dispatch(stack[base + ins->a], &frame->chunk->case_tables[ins->b]);
+    frame->ip = creme_case_dispatch(stack[base + ins->a], &frame->chunk->case_tables[ins->b]);
     NEXT();
   CASE(OP_CASEMATCH) {
     Value key = stack[base + ins->b];
@@ -2100,7 +2100,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     int found = 0;
     if (datums.tag == T_VECTOR) {
       for (int i = 0; i < datums.as.vec->len; i++) {
-        if (cvm_eqv(key, datums.as.vec->items[i])) { found = 1; break; }
+        if (creme_eqv(key, datums.as.vec->items[i])) { found = 1; break; }
       }
     }
     stack[base + ins->a] = v_bool(found);
@@ -2137,7 +2137,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     stack[base + ins->a] = v_bool(stack[base + ins->b].tag == T_INT && stack[base + ins->b].as.i == ins->c);
     NEXT();
   CASE(OP_ISEQUP)
-    stack[base + ins->a] = v_bool(cvm_eqv(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
+    stack[base + ins->a] = v_bool(creme_eqv(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
     NEXT();
   CASE(OP_TESTLE)
     if (!fast_le(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
@@ -2156,33 +2156,33 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   CASE(OP_VECREF) {
     Value vec = stack[base + ins->b];
-    if (vec.tag != T_VECTOR) cvm_abort("vector-ref: not a vector");
+    if (vec.tag != T_VECTOR) creme_abort("vector-ref: not a vector");
     Value idxv = stack[base + ins->c];
-    if (idxv.tag != T_INT) cvm_abort("vector-ref: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("vector-ref: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= vec.as.vec->len) cvm_abort("vector-ref: index %d out of range", idx);
+    if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-ref: index %d out of range", idx);
     stack[base + ins->a] = vec.as.vec->items[idx];
     NEXT();
   }
   CASE(OP_VECLEN) {
     Value vec = stack[base + ins->b];
-    if (vec.tag != T_VECTOR) cvm_abort("vector-length: not a vector");
+    if (vec.tag != T_VECTOR) creme_abort("vector-length: not a vector");
     stack[base + ins->a] = v_int(vec.as.vec->len);
     NEXT();
   }
   CASE(OP_VECSET) {
     Value vec = stack[base + ins->a];
-    if (vec.tag != T_VECTOR) cvm_abort("vector-set!: not a vector");
+    if (vec.tag != T_VECTOR) creme_abort("vector-set!: not a vector");
     Value idxv = stack[base + ins->b];
-    if (idxv.tag != T_INT) cvm_abort("vector-set!: not an integer index");
+    if (idxv.tag != T_INT) creme_abort("vector-set!: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= vec.as.vec->len) cvm_abort("vector-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-set!: index %d out of range", idx);
     vec.as.vec->items[idx] = stack[base + ins->c];
     NEXT();
   }
   CASE(OP_VECLENUP) {
     Value vec = upvalue_get(frame->closure->upvalues[ins->b]);
-    if (vec.tag != T_VECTOR) cvm_abort("vector-length: not a vector");
+    if (vec.tag != T_VECTOR) creme_abort("vector-length: not a vector");
     stack[base + ins->a] = v_int(vec.as.vec->len);
     NEXT();
   }
@@ -2208,9 +2208,9 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   CASE(OP_CALLGLOBAL) {
     GlobalCell *cell = &vm->globals[ins->d];
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     int qop = quicken_callglobal_op(cell->value, ins->b);
-    if (qop >= 0) CVM_QUICKEN(ins, qop);
+    if (qop >= 0) CREME_QUICKEN(ins, qop);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2231,8 +2231,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = fast_add(stack[base + ins->a + 1], stack[base + ins->a + 2]);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2244,8 +2244,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = fast_sub(stack[base + ins->a + 1], stack[base + ins->a + 2]);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2257,8 +2257,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = fast_mul(stack[base + ins->a + 1], stack[base + ins->a + 2]);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2267,11 +2267,11 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   CASE(OP_QCALLGLOBAL_CONS2) {
     GlobalCell *cell = &vm->globals[ins->d];
     if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_cons) {
-      stack[base + ins->c] = cvm_cons(vm, stack[base + ins->a + 1], stack[base + ins->a + 2]);
+      stack[base + ins->c] = creme_cons(vm, stack[base + ins->a + 1], stack[base + ins->a + 2]);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2284,8 +2284,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = arg.as.pair->car;
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2298,8 +2298,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = arg.as.pair->cdr;
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2315,8 +2315,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
         NEXT();
       }
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2346,8 +2346,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
         NEXT();
       }
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2363,8 +2363,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = fast_add(fast_add(stack[base + ins->a + 1], stack[base + ins->a + 2]), stack[base + ins->a + 3]);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2389,8 +2389,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = v_int(r);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2400,7 +2400,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
    * hash-table-ref -- see opcodes.h's own comment on why these call the
    * matched builtin directly rather than needing any argument-type
    * fast-path/fallback split the way Add2/etc. do: an unquickened call to
-   * the same builtin would hit the exact same cvm_abort on bad input
+   * the same builtin would hit the exact same creme_abort on bad input
    * anyway, which unwinds correctly (via longjmp) regardless of how many
    * C frames are between it and the nearest guard handler. */
   CASE(OP_QCALLGLOBAL_STRAPPEND2) {
@@ -2409,8 +2409,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = bi_string_append(vm, &stack[base + ins->a + 1], 2);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2422,8 +2422,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = bi_number_to_string(vm, &stack[base + ins->a + 1], 1);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2435,8 +2435,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = bi_hash_table_set(vm, &stack[base + ins->a + 1], 3);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2445,7 +2445,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   /* Quickens at both hash-table-ref's 2- and 3-arg (explicit default)
    * forms (see quicken_callglobal_op) -- ins->b (nargs) is whatever it
    * already was on the original OP_CALLGLOBAL instruction this was
-   * quickened from (CVM_QUICKEN only ever overwrites the op field), so
+   * quickened from (CREME_QUICKEN only ever overwrites the op field), so
    * it's read here exactly the same way the generic, unquickened path
    * already does. */
   CASE(OP_QCALLGLOBAL_HASHREF) {
@@ -2454,8 +2454,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       stack[base + ins->c] = bi_hash_table_ref(vm, &stack[base + ins->a + 1], ins->b);
       NEXT();
     }
-    CVM_QUICKEN(ins, OP_CALLGLOBAL);
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    CREME_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2463,7 +2463,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   }
   CASE(OP_TAILCALLGLOBAL) {
     GlobalCell *cell = &vm->globals[ins->d];
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     if (dispatch_call(vm, frame, ins, cell->value, 1, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2506,7 +2506,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   CASE(OP_RETURNGLOBAL) {
     GlobalCell *cell = &vm->globals[ins->a];
-    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    if (!cell->bound) creme_abort("unbound variable: %s", cell->name);
     if (deliver_return(vm, cell->value, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
     base = frame->base;
@@ -2584,7 +2584,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_ISEQRETURN) {
-    Value res = v_bool(cvm_eqv(stack[base + ins->b], stack[base + ins->c]));
+    Value res = v_bool(creme_eqv(stack[base + ins->b], stack[base + ins->c]));
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -2597,14 +2597,14 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value *newvals = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
     for (int i = 0; i < n; i++) {
       Value pv = stack[base + ins->a + i];
-      if (pv.tag != T_PARAMETER) cvm_abort("parameterize: expected a parameter object");
+      if (pv.tag != T_PARAMETER) creme_abort("parameterize: expected a parameter object");
       Parameter *p = pv.as.parameter;
       Value newval = stack[base + ins->b + i];
-      if (p->has_converter) newval = cvm_apply(vm, p->converter, &newval, 1);
+      if (p->has_converter) newval = creme_apply(vm, p->converter, &newval, 1);
       params[i] = p;
       newvals[i] = newval;
     }
-    if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("icecreme: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+    if (vm->n_unwind >= CREME_UNWIND_CAP) creme_abort("icecreme: parameterize/dynamic-wind unwind stack full (CREME_UNWIND_CAP=%d)", CREME_UNWIND_CAP);
     UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
     ua->kind = UNWIND_PARAMS;
     ua->params = params;
@@ -2624,7 +2624,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
    * ever compiled/executed as ONE C code path): once normally, right
    * after installing the handler (falls straight through to the final
    * NEXT() below); and again whenever setjmp's corresponding longjmp
-   * (cvm_raise_condition, called from cvm_abort or a builtin like
+   * (creme_raise_condition, called from creme_abort or a builtin like
    * error/raise) resumes execution here -- setjmp returns nonzero on
    * that path, and everything inside the `if` is the actual guard
    * "catch": unwind every pending parameterize/dynamic-wind action above
@@ -2635,10 +2635,10 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
    * vm.cr's handle_guarded_error exactly, just expressed as "resume a
    * suspended C computation" instead of "catch a Crystal exception". */
   CASE(OP_PUSHHANDLER) {
-    if (vm->n_handlers >= CVM_HANDLERS_CAP) cvm_abort("icecreme: guard handler stack full (CVM_HANDLERS_CAP=%d)", CVM_HANDLERS_CAP);
+    if (vm->n_handlers >= CREME_HANDLERS_CAP) creme_abort("icecreme: guard handler stack full (CREME_HANDLERS_CAP=%d)", CREME_HANDLERS_CAP);
     /* This CASE body is one shared piece of code re-executed on every
      * dynamic PushHandler (e.g. once per nested guard) within the SAME C
-     * stack frame (no intervening cvm_apply recursion) -- it's a loop, not
+     * stack frame (no intervening creme_apply recursion) -- it's a loop, not
      * real recursion, so every dynamic install shares the exact same
      * physical stack slot/register for any local variable declared here,
      * REGARDLESS of volatile-qualifying it: volatile only stops the
@@ -2650,7 +2650,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
      * recently written) handler's index, not this resume's own. See
      * vm.h's own pending_handler_idx doc comment for why the fix is to
      * identify the resuming handler through a heap field instead (set by
-     * cvm_raise_condition immediately before its longjmp, read here
+     * creme_raise_condition immediately before its longjmp, read here
      * immediately after) -- that's a plain memory read on the far side of
      * the jump, not a value carried across it, so it isn't subject to
      * this hazard at all. (Found via `make sanitize`: with two nested
@@ -2687,16 +2687,16 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   CASE(OP_GUARDRERAISE) {
     if (vm->n_handlers > 0) {
-      cvm_raise_condition(vm, vm->pending_condition);
+      creme_raise_condition(vm, vm->pending_condition);
     }
     /* No outer handler left -- surface it the same way an unhandled
      * error would, matching the real VM's own SchemeRuntimeError
      * propagating past every guard when nothing catches it. */
-    if (cvm_is_condition(vm, vm->pending_condition)) {
+    if (creme_is_condition(vm, vm->pending_condition)) {
       Value msg = vm->pending_condition.as.record->fields[0];
-      cvm_abort("%.*s", msg.aux, msg.as.chars);
+      creme_abort("%.*s", msg.aux, msg.as.chars);
     }
-    cvm_abort("icecreme: unhandled exception (re-raised, no outer guard)");
+    creme_abort("icecreme: unhandled exception (re-raised, no outer guard)");
   }
 
   /* Every op in Creme::Op (opcode.cr) has a real dispatch_table entry
@@ -2704,19 +2704,19 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
    * live here anymore. If a future Creme::Op grows a new member without
    * immediate icecreme support, add its [OP_X] = &&L_UNIMPL entry back to the
    * dispatch_table initializer plus a shared `L_UNIMPL:
-   * cvm_abort("icecreme: opcode %d not implemented", ins->op);` label here
+   * creme_abort("icecreme: opcode %d not implemented", ins->op);` label here
    * (see git history for the exact shape) rather than leaving it an
    * unhandled array slot, which would `goto *NULL`. */
-#ifndef CVM_COMPUTED_GOTO
+#ifndef CREME_COMPUTED_GOTO
     default:
-      cvm_abort("icecreme: unimplemented opcode %d", ins->op);
+      creme_abort("icecreme: unimplemented opcode %d", ins->op);
     }
   }
 #endif
   return final_result; /* unreachable: every path above returns via a CASE's own `return final_result;` */
 }
 
-void cvm_run_chunk(VM *vm, Chunk *chunk) {
+void creme_run_chunk(VM *vm, Chunk *chunk) {
   Frame *f0 = &vm->frames[0];
   f0->chunk = chunk;
   f0->base = 0;
@@ -2725,25 +2725,25 @@ void cvm_run_chunk(VM *vm, Chunk *chunk) {
   f0->return_reg = -1;
   f0->n_opened = 0;
   vm->depth = 1;
-  cvm_dispatch(vm, 0);
+  creme_dispatch(vm, 0);
 }
 
-/* Reentrant counterpart of cvm_run_chunk -- runs an already-loaded
- * top-level Chunk (e.g. from cvm_load_from_bytes) from WITHIN an
+/* Reentrant counterpart of creme_run_chunk -- runs an already-loaded
+ * top-level Chunk (e.g. from creme_load_from_bytes) from WITHIN an
  * already-running program and returns its value, instead of assuming
- * depth 0/a fresh VM. Mirrors cvm_apply's own T_CLOSURE frame-push
+ * depth 0/a fresh VM. Mirrors creme_apply's own T_CLOSURE frame-push
  * exactly (new_base at the current top frame's own register-window
  * boundary), just without bind_args -- a top-level program chunk from
  * BytecodeCompiler.compile_program always takes 0 arguments, the same
- * assumption cvm_run_chunk itself already makes for frame 0. Used by
+ * assumption creme_run_chunk itself already makes for frame 0. Used by
  * (creme bootstrap)'s icecreme-side `load-chunk-bytes` builtin (bootstrap.c). */
-Value cvm_run_loaded_chunk(VM *vm, Chunk *chunk) {
+Value creme_run_loaded_chunk(VM *vm, Chunk *chunk) {
   Frame *caller = &vm->frames[vm->depth - 1];
   int new_base = caller->base + caller->chunk->num_registers;
   if (new_base + chunk->num_registers > vm->stack_cap) {
-    cvm_abort("icecreme: register stack exhausted (stack_cap=%d)", vm->stack_cap);
+    creme_abort("icecreme: register stack exhausted (stack_cap=%d)", vm->stack_cap);
   }
-  if (vm->depth >= vm->frames_cap) cvm_abort("icecreme: call depth exceeded (frames_cap=%d)", vm->frames_cap);
+  if (vm->depth >= vm->frames_cap) creme_abort("icecreme: call depth exceeded (frames_cap=%d)", vm->frames_cap);
   int target_depth = vm->depth;
   Frame *nf = &vm->frames[vm->depth];
   nf->chunk = chunk;
@@ -2753,7 +2753,7 @@ Value cvm_run_loaded_chunk(VM *vm, Chunk *chunk) {
   nf->return_reg = -1;
   nf->n_opened = 0;
   vm->depth++;
-  return cvm_dispatch(vm, target_depth);
+  return creme_dispatch(vm, target_depth);
 }
 
 /* Reentrant "call a Scheme value from C" entry point — used by builtins
@@ -2767,15 +2767,15 @@ Value cvm_run_loaded_chunk(VM *vm, Chunk *chunk) {
  * stack-relative copy assumes contiguous operand-addressed registers, which
  * doesn't fit a plain C array a builtin built on its own stack, so this
  * copies args in directly rather than reusing bind_args. */
-Value cvm_apply(VM *vm, Value fn, Value *args, int nargs) {
+Value creme_apply(VM *vm, Value fn, Value *args, int nargs) {
   if (fn.tag == T_BUILTIN) return fn.as.builtin(vm, args, nargs);
   if (fn.tag == T_RECORD_CALLABLE) return call_record_callable(fn.as.record_callable, args, nargs);
   if (fn.tag == T_PARAMETER) {
-    if (nargs != 0) cvm_abort("parameter: expected 0 arguments, got %d", nargs);
+    if (nargs != 0) creme_abort("parameter: expected 0 arguments, got %d", nargs);
     return fn.as.parameter->value;
   }
   if (fn.tag == T_CONTINUATION) {
-    if (nargs != 1) cvm_abort("continuation: expected exactly 1 argument, got %d", nargs);
+    if (nargs != 1) creme_abort("continuation: expected exactly 1 argument, got %d", nargs);
     invoke_continuation(vm, fn.as.continuation, args[0]); /* never returns */
   }
   if (fn.tag == T_CASE_CLOSURE) {
@@ -2789,31 +2789,31 @@ Value cvm_apply(VM *vm, Value fn, Value *args, int nargs) {
         break;
       }
     }
-    if (!matched) cvm_abort("case-lambda: no matching clause for %d argument(s)", nargs);
+    if (!matched) creme_abort("case-lambda: no matching clause for %d argument(s)", nargs);
     fn = v_closure(matched);
   }
-  if (fn.tag != T_CLOSURE) cvm_abort("icecreme: attempt to apply a non-procedure value");
+  if (fn.tag != T_CLOSURE) creme_abort("icecreme: attempt to apply a non-procedure value");
 
   Closure *cl = fn.as.closure;
   Frame *caller = &vm->frames[vm->depth - 1];
   int new_base = caller->base + caller->chunk->num_registers;
   if (new_base + cl->chunk->num_registers > vm->stack_cap) {
-    cvm_abort("icecreme: register stack exhausted (stack_cap=%d)", vm->stack_cap);
+    creme_abort("icecreme: register stack exhausted (stack_cap=%d)", vm->stack_cap);
   }
 
   int fixed = cl->chunk->param_count;
   if (cl->chunk->has_rest) {
-    if (nargs < fixed) cvm_abort("%s: expected at least %d argument(s), got %d", cl->chunk->name, fixed, nargs);
+    if (nargs < fixed) creme_abort("%s: expected at least %d argument(s), got %d", cl->chunk->name, fixed, nargs);
     for (int i = 0; i < fixed; i++) vm->stack[new_base + i] = args[i];
     Value rest = v_nil();
-    for (int i = nargs - 1; i >= fixed; i--) rest = cvm_cons(vm, args[i], rest);
+    for (int i = nargs - 1; i >= fixed; i--) rest = creme_cons(vm, args[i], rest);
     vm->stack[new_base + fixed] = rest;
   } else {
-    if (nargs != fixed) cvm_abort("%s: expected %d argument(s), got %d", cl->chunk->name, fixed, nargs);
+    if (nargs != fixed) creme_abort("%s: expected %d argument(s), got %d", cl->chunk->name, fixed, nargs);
     for (int i = 0; i < fixed; i++) vm->stack[new_base + i] = args[i];
   }
 
-  if (vm->depth >= vm->frames_cap) cvm_abort("icecreme: call depth exceeded (frames_cap=%d)", vm->frames_cap);
+  if (vm->depth >= vm->frames_cap) creme_abort("icecreme: call depth exceeded (frames_cap=%d)", vm->frames_cap);
   int target_depth = vm->depth;
   Frame *nf = &vm->frames[vm->depth];
   nf->chunk = cl->chunk;
@@ -2823,5 +2823,5 @@ Value cvm_apply(VM *vm, Value fn, Value *args, int nargs) {
   nf->return_reg = -1; /* unused: deliver_return signals completion by depth, not a write through this */
   nf->n_opened = 0;
   vm->depth++;
-  return cvm_dispatch(vm, target_depth);
+  return creme_dispatch(vm, target_depth);
 }

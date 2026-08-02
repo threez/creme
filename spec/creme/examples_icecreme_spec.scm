@@ -30,7 +30,7 @@
 ;; of staying excluded:
 ;;   - 26-import-generated-library.scm: CVMEmitter now retries a failed
 ;;     import once, real-running every earlier form in the script first
-;;     (src/creme/compile/cvm_emitter.cr), so a script that generates its
+;;     (src/creme/compile/creme_emitter.cr), so a script that generates its
 ;;     own library file at runtime before importing it now works.
 ;;   - 27-http-json-fetch.scm: icecreme/http.c grew a real TLS client path
 ;;     (libssl, always-on certificate + hostname verification) -- https://

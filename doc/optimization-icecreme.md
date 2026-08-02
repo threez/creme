@@ -72,7 +72,7 @@ unaffected either way.
 
 ## 2. Batch-allocating cons cells
 
-`cvm_cons` called the Boehm GC's `GC_MALLOC` once per cons cell allocated.
+`creme_cons` called the Boehm GC's `GC_MALLOC` once per cons cell allocated.
 Boehm's collector provides `GC_malloc_many` for exactly this shape of
 workload: requesting many same-size, high-churn allocations at once,
 returned as a single linked chunk, so a cons-heavy loop pays the

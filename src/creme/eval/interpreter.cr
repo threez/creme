@@ -100,7 +100,7 @@ module Creme
     # a library's body forms — maps that ONE library's own internal
     # (non-exported) top-level names to a qualified form, so icecreme's flat,
     # name-interned global table (no per-library namespacing at all — see
-    # icecreme/vm.c's cvm_global_intern) can't have two libraries' same-named
+    # icecreme/vm.c's creme_global_intern) can't have two libraries' same-named
     # private helpers silently clobber each other's slot. Consulted by
     # Analyzer's icecreme_global_name helper. nil (the default, and the state
     # for every real interpreter session/REPL) makes analysis behave

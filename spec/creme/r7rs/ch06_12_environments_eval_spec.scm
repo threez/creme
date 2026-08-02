@@ -19,7 +19,7 @@
 ;;
 ;; All of that is now fixed: `environment`/`null-environment` are backed
 ;; by a genuinely separate child VM per environment
-;; (cvm_new_empty_vm/BOX_KIND_ENVIRONMENT, icecreme/vm.c and icecreme/vm.h's own
+;; (creme_new_empty_vm/BOX_KIND_ENVIRONMENT, icecreme/vm.c and icecreme/vm.h's own
 ;; doc comments) with its own independent global table, populated (for
 ;; `environment`) by copying exactly the requested import-set's own
 ;; resolved bindings (modules/creme/compiler/compiler.sld's new

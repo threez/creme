@@ -18,7 +18,7 @@
  * the one operation, and frees it immediately.
  *
  * Same resource-cleanup discipline (creme cipher)/(creme pkey) already
- * established: cvm_abort longjmps past any C++-style RAII that doesn't
+ * established: creme_abort longjmps past any C++-style RAII that doesn't
  * exist in C, so every error branch below explicitly frees whatever
  * OpenSSL resource it opened first. */
 #include <gc.h>
@@ -84,17 +84,17 @@ static Value x509_csr_box(const char *pem, int pem_len) {
 }
 
 static const char *x509_cert_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_X509_CERT) cvm_abort("%s: expected an x509 certificate", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_X509_CERT) creme_abort("%s: expected an x509 certificate", who);
   return (const char *)v.as.ptr;
 }
 
 static const char *x509_csr_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_X509_CSR) cvm_abort("%s: expected an x509 CSR", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_X509_CSR) creme_abort("%s: expected an x509 CSR", who);
   return (const char *)v.as.ptr;
 }
 
 static PKeyBox *pkey_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_PKEY) cvm_abort("%s: expected a pkey", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_PKEY) creme_abort("%s: expected a pkey", who);
   return (PKeyBox *)v.as.ptr;
 }
 
@@ -112,10 +112,10 @@ static char *bio_to_gc_string(BIO *bio, int *len_out) {
 
 static char *x509_cert_to_pem(X509 *cert, int *len_out, const char *who) {
   BIO *bio = BIO_new(BIO_s_mem());
-  if (!bio) cvm_abort("%s: BIO_new failed", who);
+  if (!bio) creme_abort("%s: BIO_new failed", who);
   if (PEM_write_bio_X509(bio, cert) != 1) {
     BIO_free(bio);
-    cvm_abort("%s: failed to write certificate PEM", who);
+    creme_abort("%s: failed to write certificate PEM", who);
   }
   char *pem = bio_to_gc_string(bio, len_out);
   BIO_free(bio);
@@ -124,10 +124,10 @@ static char *x509_cert_to_pem(X509 *cert, int *len_out, const char *who) {
 
 static char *x509_csr_to_pem(X509_REQ *req, int *len_out, const char *who) {
   BIO *bio = BIO_new(BIO_s_mem());
-  if (!bio) cvm_abort("%s: BIO_new failed", who);
+  if (!bio) creme_abort("%s: BIO_new failed", who);
   if (PEM_write_bio_X509_REQ(bio, req) != 1) {
     BIO_free(bio);
-    cvm_abort("%s: failed to write CSR PEM", who);
+    creme_abort("%s: failed to write CSR PEM", who);
   }
   char *pem = bio_to_gc_string(bio, len_out);
   BIO_free(bio);
@@ -138,7 +138,7 @@ static X509 *x509_pem_to_cert(const char *pem, int pem_len, const char *who) {
   BIO *bio = BIO_new_mem_buf(pem, pem_len);
   X509 *cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
   BIO_free(bio);
-  if (!cert) cvm_abort("%s: not a recognizable X.509 certificate PEM", who);
+  if (!cert) creme_abort("%s: not a recognizable X.509 certificate PEM", who);
   return cert;
 }
 
@@ -146,7 +146,7 @@ static X509_REQ *x509_pem_to_csr(const char *pem, int pem_len, const char *who) 
   BIO *bio = BIO_new_mem_buf(pem, pem_len);
   X509_REQ *req = PEM_read_bio_X509_REQ(bio, NULL, NULL, NULL);
   BIO_free(bio);
-  if (!req) cvm_abort("%s: not a recognizable CSR PEM", who);
+  if (!req) creme_abort("%s: not a recognizable CSR PEM", who);
   return req;
 }
 
@@ -154,7 +154,7 @@ static RSA *pkey_pem_to_rsa(const char *pem, int pem_len, const char *who) {
   BIO *bio = BIO_new_mem_buf(pem, pem_len);
   RSA *rsa = PEM_read_bio_RSAPrivateKey(bio, NULL, NULL, NULL);
   BIO_free(bio);
-  if (!rsa) cvm_abort("%s: not a recognizable RSA private key PEM", who);
+  if (!rsa) creme_abort("%s: not a recognizable RSA private key PEM", who);
   return rsa;
 }
 
@@ -162,13 +162,13 @@ static EC_KEY *pkey_pem_to_ec(const char *pem, int pem_len, const char *who) {
   BIO *bio = BIO_new_mem_buf(pem, pem_len);
   EC_KEY *ec = PEM_read_bio_ECPrivateKey(bio, NULL, NULL, NULL);
   BIO_free(bio);
-  if (!ec) cvm_abort("%s: not a recognizable EC private key PEM", who);
+  if (!ec) creme_abort("%s: not a recognizable EC private key PEM", who);
   return ec;
 }
 
 static EVP_PKEY *pkeybox_to_evp(PKeyBox *box, const char *who) {
   EVP_PKEY *pkey = EVP_PKEY_new();
-  if (!pkey) cvm_abort("%s: EVP_PKEY_new failed", who);
+  if (!pkey) creme_abort("%s: EVP_PKEY_new failed", who);
   if (box->kind == PKEY_KIND_RSA) {
     RSA *rsa = pkey_pem_to_rsa(box->pem, box->pem_len, who);
     EVP_PKEY_set1_RSA(pkey, rsa);
@@ -196,13 +196,13 @@ static const SubjectNid SUBJECT_NIDS[] = {
 #define N_SUBJECT_NIDS (int)(sizeof(SUBJECT_NIDS) / sizeof(SUBJECT_NIDS[0]))
 
 static X509_NAME *x509_build_name(Value subject, const char *who) {
-  if (subject.tag != T_PAIR && subject.tag != T_NIL) cvm_abort("%s: expected an alist of (field . value) pairs", who);
+  if (subject.tag != T_PAIR && subject.tag != T_NIL) creme_abort("%s: expected an alist of (field . value) pairs", who);
   X509_NAME *name = X509_NAME_new();
   for (Value cur = subject; cur.tag == T_PAIR; cur = cur.as.pair->cdr) {
     Value pair = cur.as.pair->car;
     if (pair.tag != T_PAIR || pair.as.pair->car.tag != T_STR || pair.as.pair->cdr.tag != T_STR) {
       X509_NAME_free(name);
-      cvm_abort("%s: expected an alist of (field . value) pairs", who);
+      creme_abort("%s: expected an alist of (field . value) pairs", who);
     }
     Value field = pair.as.pair->car;
     Value value = pair.as.pair->cdr;
@@ -210,7 +210,7 @@ static X509_NAME *x509_build_name(Value subject, const char *who) {
     int ret = X509_NAME_add_entry_by_txt(name, field_str, MBSTRING_UTF8, (const unsigned char *)value.as.chars, value.aux, -1, 0);
     if (ret != 1) {
       X509_NAME_free(name);
-      cvm_abort("%s: invalid subject field '%s'", who, field_str);
+      creme_abort("%s: invalid subject field '%s'", who, field_str);
     }
   }
   return name;
@@ -234,7 +234,7 @@ static Value x509_name_alist(X509_NAME *name) {
 
 static void x509_add_ca_extension(X509 *cert, const char *who) {
   X509_EXTENSION *ext = X509V3_EXT_nconf_nid(NULL, NULL, NID_BASIC_CONSTRAINTS_, "critical,CA:TRUE");
-  if (!ext) cvm_abort("%s: failed to build basicConstraints extension", who);
+  if (!ext) creme_abort("%s: failed to build basicConstraints extension", who);
   X509_add_ext(cert, ext, -1);
   X509_EXTENSION_free(ext);
 }
@@ -260,7 +260,7 @@ static long long tm_to_epoch(struct tm *tm) {
 
 static long long x509_asn1_time_to_epoch(const ASN1_TIME *t, const char *who) {
   struct tm tm;
-  if (ASN1_TIME_to_tm(t, &tm) != 1) cvm_abort("%s: ASN1_TIME_to_tm failed", who);
+  if (ASN1_TIME_to_tm(t, &tm) != 1) creme_abort("%s: ASN1_TIME_to_tm failed", who);
   return tm_to_epoch(&tm);
 }
 
@@ -268,12 +268,12 @@ static long long x509_asn1_time_to_epoch(const ASN1_TIME *t, const char *who) {
 
 static Value bi_x509_self_signed_certificate(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("x509-self-signed-certificate: expected at least 2 arguments");
+  if (nargs < 2) creme_abort("x509-self-signed-certificate: expected at least 2 arguments");
   PKeyBox *key = pkey_arg(args[0], "x509-self-signed-certificate");
-  if (!key->is_private) cvm_abort("x509-self-signed-certificate: expected a private key");
+  if (!key->is_private) creme_abort("x509-self-signed-certificate: expected a private key");
   long days = 365;
   if (nargs >= 3) {
-    if (args[2].tag != T_INT) cvm_abort("x509-self-signed-certificate: expected an integer for days");
+    if (args[2].tag != T_INT) creme_abort("x509-self-signed-certificate: expected an integer for days");
     days = (long)args[2].as.i;
   }
 
@@ -294,7 +294,7 @@ static Value bi_x509_self_signed_certificate(VM *vm, Value *args, int nargs) {
   EVP_PKEY_free(pkey);
   if (ret == 0) {
     X509_free(cert);
-    cvm_abort("x509-self-signed-certificate: X509_sign failed");
+    creme_abort("x509-self-signed-certificate: X509_sign failed");
   }
   int pem_len;
   char *pem = x509_cert_to_pem(cert, &pem_len, "x509-self-signed-certificate");
@@ -304,9 +304,9 @@ static Value bi_x509_self_signed_certificate(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_create_csr(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("x509-create-csr: expected 2 arguments");
+  if (nargs < 2) creme_abort("x509-create-csr: expected 2 arguments");
   PKeyBox *key = pkey_arg(args[0], "x509-create-csr");
-  if (!key->is_private) cvm_abort("x509-create-csr: expected a private key");
+  if (!key->is_private) creme_abort("x509-create-csr: expected a private key");
 
   EVP_PKEY *pkey = pkeybox_to_evp(key, "x509-create-csr");
   X509_NAME *name = x509_build_name(args[1], "x509-create-csr");
@@ -320,7 +320,7 @@ static Value bi_x509_create_csr(VM *vm, Value *args, int nargs) {
   EVP_PKEY_free(pkey);
   if (ret == 0) {
     X509_REQ_free(req);
-    cvm_abort("x509-create-csr: X509_REQ_sign failed");
+    creme_abort("x509-create-csr: X509_REQ_sign failed");
   }
   int pem_len;
   char *pem = x509_csr_to_pem(req, &pem_len, "x509-create-csr");
@@ -330,14 +330,14 @@ static Value bi_x509_create_csr(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_sign_csr(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("x509-sign-csr: expected at least 3 arguments");
+  if (nargs < 3) creme_abort("x509-sign-csr: expected at least 3 arguments");
   const char *csr_pem = x509_csr_arg(args[0], "x509-sign-csr");
   const char *ca_cert_pem = x509_cert_arg(args[1], "x509-sign-csr");
   PKeyBox *ca_key = pkey_arg(args[2], "x509-sign-csr");
-  if (!ca_key->is_private) cvm_abort("x509-sign-csr: expected a private CA key");
+  if (!ca_key->is_private) creme_abort("x509-sign-csr: expected a private CA key");
   long days = 365;
   if (nargs >= 4) {
-    if (args[3].tag != T_INT) cvm_abort("x509-sign-csr: expected an integer for days");
+    if (args[3].tag != T_INT) creme_abort("x509-sign-csr: expected an integer for days");
     days = (long)args[3].as.i;
   }
 
@@ -349,14 +349,14 @@ static Value bi_x509_sign_csr(VM *vm, Value *args, int nargs) {
     X509_REQ_free(req);
     X509_free(ca_cert);
     EVP_PKEY_free(ca_pkey);
-    cvm_abort("x509-sign-csr: X509_REQ_get_pubkey failed");
+    creme_abort("x509-sign-csr: X509_REQ_get_pubkey failed");
   }
   if (X509_REQ_verify(req, req_pubkey) != 1) {
     X509_REQ_free(req);
     X509_free(ca_cert);
     EVP_PKEY_free(ca_pkey);
     EVP_PKEY_free(req_pubkey);
-    cvm_abort("x509-sign-csr: CSR self-signature does not verify");
+    creme_abort("x509-sign-csr: CSR self-signature does not verify");
   }
 
   X509 *cert = X509_new();
@@ -375,7 +375,7 @@ static Value bi_x509_sign_csr(VM *vm, Value *args, int nargs) {
   EVP_PKEY_free(req_pubkey);
   if (ret == 0) {
     X509_free(cert);
-    cvm_abort("x509-sign-csr: X509_sign failed");
+    creme_abort("x509-sign-csr: X509_sign failed");
   }
   int pem_len;
   char *pem = x509_cert_to_pem(cert, &pem_len, "x509-sign-csr");
@@ -387,14 +387,14 @@ static Value bi_x509_sign_csr(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_to_pem(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("x509-cert->pem: expected an argument");
+  if (nargs < 1) creme_abort("x509-cert->pem: expected an argument");
   const char *pem = x509_cert_arg(args[0], "x509-cert->pem");
   return v_str(pem, (int)strlen(pem));
 }
 
 static Value bi_pem_to_x509_cert(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("pem->x509-cert: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("pem->x509-cert: expected a string");
   X509 *cert = x509_pem_to_cert(args[0].as.chars, args[0].aux, "pem->x509-cert");
   X509_free(cert);
   return x509_cert_box(args[0].as.chars, args[0].aux);
@@ -404,7 +404,7 @@ static Value bi_pem_to_x509_cert(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_subject(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("x509-cert-subject: expected an argument");
+  if (nargs < 1) creme_abort("x509-cert-subject: expected an argument");
   const char *pem = x509_cert_arg(args[0], "x509-cert-subject");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-subject");
   Value result = x509_name_alist(X509_get_subject_name(cert));
@@ -414,7 +414,7 @@ static Value bi_x509_cert_subject(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_issuer(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("x509-cert-issuer: expected an argument");
+  if (nargs < 1) creme_abort("x509-cert-issuer: expected an argument");
   const char *pem = x509_cert_arg(args[0], "x509-cert-issuer");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-issuer");
   Value result = x509_name_alist(X509_get_issuer_name(cert));
@@ -424,25 +424,25 @@ static Value bi_x509_cert_issuer(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_public_key(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("x509-cert-public-key: expected an argument");
+  if (nargs < 1) creme_abort("x509-cert-public-key: expected an argument");
   const char *pem = x509_cert_arg(args[0], "x509-cert-public-key");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-public-key");
   EVP_PKEY *pkey = X509_get_pubkey(cert);
   X509_free(cert);
-  if (!pkey) cvm_abort("x509-cert-public-key: X509_get_pubkey failed");
+  if (!pkey) creme_abort("x509-cert-public-key: X509_get_pubkey failed");
 
   Value result;
   if (EVP_PKEY_get_id(pkey) == EVP_PKEY_RSA) {
     RSA *rsa = EVP_PKEY_get1_RSA(pkey);
     EVP_PKEY_free(pkey);
-    if (!rsa) cvm_abort("x509-cert-public-key: EVP_PKEY_get1_RSA failed");
-    result = cvm_pkey_box_public_rsa(rsa);
+    if (!rsa) creme_abort("x509-cert-public-key: EVP_PKEY_get1_RSA failed");
+    result = creme_pkey_box_public_rsa(rsa);
     RSA_free(rsa);
   } else {
     EC_KEY *ec = EVP_PKEY_get1_EC_KEY(pkey);
     EVP_PKEY_free(pkey);
-    if (!ec) cvm_abort("x509-cert-public-key: EVP_PKEY_get1_EC_KEY failed");
-    result = cvm_pkey_box_public_ec(ec);
+    if (!ec) creme_abort("x509-cert-public-key: EVP_PKEY_get1_EC_KEY failed");
+    result = creme_pkey_box_public_ec(ec);
     EC_KEY_free(ec);
   }
   return result;
@@ -450,7 +450,7 @@ static Value bi_x509_cert_public_key(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_not_before(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("x509-cert-not-before: expected an argument");
+  if (nargs < 1) creme_abort("x509-cert-not-before: expected an argument");
   const char *pem = x509_cert_arg(args[0], "x509-cert-not-before");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-not-before");
   long long epoch = x509_asn1_time_to_epoch(X509_getm_notBefore(cert), "x509-cert-not-before");
@@ -460,7 +460,7 @@ static Value bi_x509_cert_not_before(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_not_after(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("x509-cert-not-after: expected an argument");
+  if (nargs < 1) creme_abort("x509-cert-not-after: expected an argument");
   const char *pem = x509_cert_arg(args[0], "x509-cert-not-after");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-not-after");
   long long epoch = x509_asn1_time_to_epoch(X509_getm_notAfter(cert), "x509-cert-not-after");
@@ -472,16 +472,16 @@ static Value bi_x509_cert_not_after(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_verify_chain(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("x509-verify-chain: expected 2 arguments");
+  if (nargs < 2) creme_abort("x509-verify-chain: expected 2 arguments");
   const char *cert_pem = x509_cert_arg(args[0], "x509-verify-chain");
   Value ca_list = args[1];
-  if (ca_list.tag != T_PAIR && ca_list.tag != T_NIL) cvm_abort("x509-verify-chain: expected a list of x509 certificates");
+  if (ca_list.tag != T_PAIR && ca_list.tag != T_NIL) creme_abort("x509-verify-chain: expected a list of x509 certificates");
 
   X509 *cert = x509_pem_to_cert(cert_pem, (int)strlen(cert_pem), "x509-verify-chain");
   X509_STORE *store = X509_STORE_new();
   if (!store) {
     X509_free(cert);
-    cvm_abort("x509-verify-chain: X509_STORE_new failed");
+    creme_abort("x509-verify-chain: X509_STORE_new failed");
   }
   for (Value cur = ca_list; cur.tag == T_PAIR; cur = cur.as.pair->cdr) {
     const char *ca_pem = x509_cert_arg(cur.as.pair->car, "x509-verify-chain");
@@ -494,13 +494,13 @@ static Value bi_x509_verify_chain(VM *vm, Value *args, int nargs) {
   if (!ctx) {
     X509_free(cert);
     X509_STORE_free(store);
-    cvm_abort("x509-verify-chain: X509_STORE_CTX_new failed");
+    creme_abort("x509-verify-chain: X509_STORE_CTX_new failed");
   }
   if (X509_STORE_CTX_init(ctx, store, cert, NULL) != 1) {
     X509_free(cert);
     X509_STORE_free(store);
     X509_STORE_CTX_free(ctx);
-    cvm_abort("x509-verify-chain: X509_STORE_CTX_init failed");
+    creme_abort("x509-verify-chain: X509_STORE_CTX_init failed");
   }
   int ok = X509_verify_cert(ctx);
   Value result;
@@ -512,7 +512,7 @@ static Value bi_x509_verify_chain(VM *vm, Value *args, int nargs) {
     X509_free(cert);
     X509_STORE_free(store);
     X509_STORE_CTX_free(ctx);
-    cvm_abort("x509-verify-chain: %s", reason);
+    creme_abort("x509-verify-chain: %s", reason);
   }
   X509_free(cert);
   X509_STORE_free(store);
@@ -520,16 +520,16 @@ static Value bi_x509_verify_chain(VM *vm, Value *args, int nargs) {
   return result;
 }
 
-void cvm_register_x509_builtins(VM *vm) {
-  cvm_register_builtin(vm, "x509-self-signed-certificate", bi_x509_self_signed_certificate);
-  cvm_register_builtin(vm, "x509-create-csr", bi_x509_create_csr);
-  cvm_register_builtin(vm, "x509-sign-csr", bi_x509_sign_csr);
-  cvm_register_builtin(vm, "x509-cert->pem", bi_x509_cert_to_pem);
-  cvm_register_builtin(vm, "pem->x509-cert", bi_pem_to_x509_cert);
-  cvm_register_builtin(vm, "x509-cert-subject", bi_x509_cert_subject);
-  cvm_register_builtin(vm, "x509-cert-issuer", bi_x509_cert_issuer);
-  cvm_register_builtin(vm, "x509-cert-public-key", bi_x509_cert_public_key);
-  cvm_register_builtin(vm, "x509-cert-not-before", bi_x509_cert_not_before);
-  cvm_register_builtin(vm, "x509-cert-not-after", bi_x509_cert_not_after);
-  cvm_register_builtin(vm, "x509-verify-chain", bi_x509_verify_chain);
+void creme_register_x509_builtins(VM *vm) {
+  creme_register_builtin(vm, "x509-self-signed-certificate", bi_x509_self_signed_certificate);
+  creme_register_builtin(vm, "x509-create-csr", bi_x509_create_csr);
+  creme_register_builtin(vm, "x509-sign-csr", bi_x509_sign_csr);
+  creme_register_builtin(vm, "x509-cert->pem", bi_x509_cert_to_pem);
+  creme_register_builtin(vm, "pem->x509-cert", bi_pem_to_x509_cert);
+  creme_register_builtin(vm, "x509-cert-subject", bi_x509_cert_subject);
+  creme_register_builtin(vm, "x509-cert-issuer", bi_x509_cert_issuer);
+  creme_register_builtin(vm, "x509-cert-public-key", bi_x509_cert_public_key);
+  creme_register_builtin(vm, "x509-cert-not-before", bi_x509_cert_not_before);
+  creme_register_builtin(vm, "x509-cert-not-after", bi_x509_cert_not_after);
+  creme_register_builtin(vm, "x509-verify-chain", bi_x509_verify_chain);
 }

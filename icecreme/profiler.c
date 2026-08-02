@@ -1,7 +1,7 @@
 /* --profile support — see profiler.h and vm.h's Profiler/VmSample/
  * NativeSample doc comments, and icecreme/README.md's "Profiling" section for
  * scope/trade-offs (most notably: the native sampler mostly shows
- * cvm_dispatch/builtins, not per-Scheme-function detail, since this VM
+ * creme_dispatch/builtins, not per-Scheme-function detail, since this VM
  * doesn't recurse through the C stack for Scheme-level calls). */
 #include <dlfcn.h>
 #include <errno.h>
@@ -90,7 +90,7 @@ static const char *op_name(int op) {
 
 /* ---- VM-level sampler (prof-vm analog) ---- */
 
-void cvm_profiler_tick(VM *vm, Frame *frame) {
+void creme_profiler_tick(VM *vm, Frame *frame) {
   Profiler *p = &vm->profiler;
   if (--p->vm_countdown > 0) return;
 
@@ -111,7 +111,7 @@ void cvm_profiler_tick(VM *vm, Frame *frame) {
   }
   if (slot) {
     slot->count++;
-  } else if (sh->n_vm_samples < CVM_PROFILE_VM_SAMPLES_CAP) {
+  } else if (sh->n_vm_samples < CREME_PROFILE_VM_SAMPLES_CAP) {
     slot = &sh->vm_samples[sh->n_vm_samples++];
     slot->chunk = chunk;
     slot->ip = ip;
@@ -135,12 +135,12 @@ void cvm_profiler_tick(VM *vm, Frame *frame) {
 
 /* A signal handler can't be handed vm directly (its signature is fixed), so
  * this is the one piece of global state here — set only while a profiled
- * run is in flight, between cvm_profiler_start_native/_stop_native. */
+ * run is in flight, between creme_profiler_start_native/_stop_native. */
 static VM *g_profiled_vm = NULL;
 
 /* Count of sigprof_handler invocations CURRENTLY executing, across every
  * thread -- SIGPROF is process-wide, so more than one thread can be
- * inside the handler at once. cvm_profiler_stop_native spins on this
+ * inside the handler at once. creme_profiler_stop_native spins on this
  * hitting zero after disabling future deliveries (setitimer/sigaction),
  * since that teardown alone doesn't wait for one already mid-handler on
  * some OTHER thread at that exact moment -- without draining first, the
@@ -152,7 +152,7 @@ static int g_sigprof_active = 0;
  * the standard technique real sampling profilers (gperftools, etc.) use
  * from a SIGPROF handler in practice: no malloc, no symbol resolution here —
  * just a fixed-size array of return addresses, resolved to names later in
- * cvm_profiler_report (well outside signal context).
+ * creme_profiler_report (well outside signal context).
  *
  * SIGPROF is process-wide, not per-thread -- once a profiled program
  * spawns any actor or (creme mux) worker/inline VM, this handler can
@@ -174,7 +174,7 @@ static void sigprof_handler(int sig) {
   if (vm) {
     Profiler *p = &vm->profiler;
     int idx = __atomic_fetch_add(&p->n_native_samples, 1, __ATOMIC_RELAXED);
-    if (idx < CVM_PROFILE_NATIVE_SAMPLES_CAP) {
+    if (idx < CREME_PROFILE_NATIVE_SAMPLES_CAP) {
       NativeSample *s = &p->native_samples[idx];
       s->n_pcs = backtrace(s->pcs, (int)(sizeof(s->pcs) / sizeof(s->pcs[0])));
     }
@@ -183,9 +183,9 @@ static void sigprof_handler(int sig) {
   __atomic_fetch_sub(&g_sigprof_active, 1, __ATOMIC_SEQ_CST);
 }
 
-void cvm_profiler_start_native(VM *vm) {
+void creme_profiler_start_native(VM *vm) {
   Profiler *p = &vm->profiler;
-  p->native_samples = GC_MALLOC(sizeof(NativeSample) * CVM_PROFILE_NATIVE_SAMPLES_CAP);
+  p->native_samples = GC_MALLOC(sizeof(NativeSample) * CREME_PROFILE_NATIVE_SAMPLES_CAP);
   p->n_native_samples = 0;
   g_profiled_vm = vm;
 
@@ -204,7 +204,7 @@ void cvm_profiler_start_native(VM *vm) {
   setitimer(ITIMER_PROF, &timer, &p->old_itimer);
 }
 
-void cvm_profiler_stop_native(VM *vm) {
+void creme_profiler_stop_native(VM *vm) {
   Profiler *p = &vm->profiler;
   struct itimerval zero;
   memset(&zero, 0, sizeof(zero));
@@ -217,7 +217,7 @@ void cvm_profiler_stop_native(VM *vm) {
    * moment they ran keeps executing regardless -- spin until every such
    * invocation (there's essentially never more than one; this is not a
    * busy workload) has returned, so nothing is still reading/writing
-   * this vm's profiler data by the time our OWN caller (cvm_profiler_
+   * this vm's profiler data by the time our OWN caller (creme_profiler_
    * report, typically right after this returns) starts reading it. A
    * plain spin, not a condvar: the window being waited out is at most
    * sigprof_handler's own short, bounded body -- never blocked on
@@ -243,7 +243,7 @@ static void report_vm_samples(VM *vm) {
   /* Held for the whole function, not just the qsort -- a (creme mux)
    * worker pool's threads run forever (unlike a spawned actor, which
    * has usually already finished by the time a profiled script calls
-   * (exit)), so one of them can still be mid-cvm_profiler_tick, locking
+   * (exit)), so one of them can still be mid-creme_profiler_tick, locking
    * this SAME mutex, at the exact moment this read-only report runs.
    * Report-time is a one-shot, right-before-process-exit call, so
    * holding this for the whole function (rather than just around the
@@ -287,7 +287,7 @@ static int cmp_native_agg_desc(const void *a, const void *b) {
   return ca < cb ? 1 : (ca > cb ? -1 : 0);
 }
 
-#define CVM_PROFILE_NATIVE_AGG_CAP 4096
+#define CREME_PROFILE_NATIVE_AGG_CAP 4096
 
 /* Named libc/libthr signal-delivery internals to skip past when walking
  * a captured backtrace forward from the kernel trampoline -- see
@@ -305,7 +305,7 @@ static int is_signal_machinery_frame(const char *name) {
 
 static void report_native_samples(VM *vm) {
   Profiler *p = &vm->profiler;
-  NativeAgg *agg = GC_MALLOC(sizeof(NativeAgg) * CVM_PROFILE_NATIVE_AGG_CAP);
+  NativeAgg *agg = GC_MALLOC(sizeof(NativeAgg) * CREME_PROFILE_NATIVE_AGG_CAP);
   int n_agg = 0;
 
   /* sigprof_handler's own atomic fetch-add always increments, even past
@@ -313,7 +313,7 @@ static void report_native_samples(VM *vm) {
    * a reserved index lands beyond it) -- clamp here rather than trust
    * n_native_samples directly, or a concurrently-sampled run's overflow
    * would read past the fixed-size native_samples[] array. */
-  int n_samples = p->n_native_samples < CVM_PROFILE_NATIVE_SAMPLES_CAP ? p->n_native_samples : CVM_PROFILE_NATIVE_SAMPLES_CAP;
+  int n_samples = p->n_native_samples < CREME_PROFILE_NATIVE_SAMPLES_CAP ? p->n_native_samples : CREME_PROFILE_NATIVE_SAMPLES_CAP;
   for (int i = 0; i < n_samples; i++) {
     NativeSample *s = &p->native_samples[i];
     if (s->n_pcs <= 0) continue;
@@ -354,7 +354,7 @@ static void report_native_samples(VM *vm) {
     }
     if (found >= 0) {
       agg[found].count++;
-    } else if (n_agg < CVM_PROFILE_NATIVE_AGG_CAP) {
+    } else if (n_agg < CREME_PROFILE_NATIVE_AGG_CAP) {
       snprintf(agg[n_agg].name, sizeof(agg[n_agg].name), "%s", namebuf);
       agg[n_agg].count = 1;
       n_agg++;
@@ -368,7 +368,7 @@ static void report_native_samples(VM *vm) {
   printf("\nhot C frames (%ld samples, ~1ms interval)\n", total);
   printf("  note: icecreme runs Scheme calls through its own explicit Frame array,\n"
          "  not C recursion, so this mostly reflects real C time (builtins,\n"
-         "  GC, cvm_dispatch itself) rather than per-Scheme-function detail —\n"
+         "  GC, creme_dispatch itself) rather than per-Scheme-function detail —\n"
          "  see the \"hot Scheme functions\" table above for that.\n");
   printf("  %-4s %6s %8s  %s\n", "#", "%", "count", "frame");
   int shown = n_agg < 20 ? n_agg : 20;
@@ -378,7 +378,7 @@ static void report_native_samples(VM *vm) {
   }
 }
 
-void cvm_profiler_report(VM *vm) {
+void creme_profiler_report(VM *vm) {
   report_vm_samples(vm);
   report_native_samples(vm);
   printf("\n");

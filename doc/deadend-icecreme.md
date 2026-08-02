@@ -77,7 +77,7 @@ those away.
   `num_*` calls are the cold non-fixnum fallback. Switching to `const Value *`
   would touch only cold code. **No change.**
 
-- **`cvm_profiler_tick` cost when profiling is off.** Every call site guards
+- **`creme_profiler_tick` cost when profiling is off.** Every call site guards
   it behind `vm->profiler.enabled`, so with profiling off (the default) it's
   one predictably-false branch, not a call. **No change.**
 

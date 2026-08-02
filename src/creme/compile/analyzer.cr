@@ -133,7 +133,7 @@ module Creme
     # own internal (non-exported) top-level bindings so they can't collide
     # with another library's same-named internal helper in icecreme's single
     # flat, name-interned global table (icecreme has no per-library namespacing
-    # of its own — see icecreme/vm.c's cvm_global_intern). `scope.bound?(name)`
+    # of its own — see icecreme/vm.c's creme_global_intern). `scope.bound?(name)`
     # is false only for a genuinely free (library-top-level-or-outer)
     # reference — a lexically local/internal-define name (already added to
     # `scope` by whatever body prepass introduced it) must never be

@@ -78,7 +78,7 @@
 ;; `eval`'s optional second argument (an environment specifier) USED to
 ;; be accepted and ignored entirely -- icecreme/bootstrap.c's `make-
 ;; environment`/`environment-copy-global!`/`load-chunk-bytes-into` (a
-;; genuinely separate child VM per environment, see cvm_new_empty_vm's
+;; genuinely separate child VM per environment, see creme_new_empty_vm's
 ;; own doc comment, vm.c) now give this real per-environment isolation:
 ;; when `env` is supplied, the compiled form's bytecode loads and runs
 ;; against THAT environment's own global table (load-chunk-bytes-into)

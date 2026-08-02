@@ -100,7 +100,7 @@ static void varr_push(VArr *a, Value v) {
 /* ---- reader --------------------------------------------------------------
  * Always runs on an actual actor's own VM thread (json-read is a plain
  * builtin call, never invoked from a bare network I/O thread the way
- * (creme actor)'s own wire decoder is) -- cvm_abort on a malformed
+ * (creme actor)'s own wire decoder is) -- creme_abort on a malformed
  * document is correct here. */
 
 typedef struct {
@@ -125,7 +125,7 @@ static Value json_parse_string(JReader *r) {
   while (r->pos < r->len && r->s[r->pos] != '"') {
     unsigned char c = (unsigned char)r->s[r->pos++];
     if (c == '\\') {
-      if (r->pos >= r->len) cvm_abort("json-read: invalid json: unterminated string escape");
+      if (r->pos >= r->len) creme_abort("json-read: invalid json: unterminated string escape");
       char e = r->s[r->pos++];
       switch (e) {
         case '"':
@@ -153,7 +153,7 @@ static Value json_parse_string(JReader *r) {
           gbuf_putc(&b, '\f');
           break;
         case 'u': {
-          if (r->pos + 4 > r->len) cvm_abort("json-read: invalid json: truncated \\u escape");
+          if (r->pos + 4 > r->len) creme_abort("json-read: invalid json: truncated \\u escape");
           char hex[5];
           memcpy(hex, r->s + r->pos, 4);
           hex[4] = '\0';
@@ -177,13 +177,13 @@ static Value json_parse_string(JReader *r) {
           break;
         }
         default:
-          cvm_abort("json-read: invalid json: invalid escape character '\\%c'", e);
+          creme_abort("json-read: invalid json: invalid escape character '\\%c'", e);
       }
     } else {
       gbuf_putc(&b, (char)c);
     }
   }
-  if (r->pos >= r->len) cvm_abort("json-read: invalid json: unterminated string");
+  if (r->pos >= r->len) creme_abort("json-read: invalid json: unterminated string");
   r->pos++; /* closing quote */
   return v_str(b.buf, b.len);
 }
@@ -205,7 +205,7 @@ static Value json_parse_number(JReader *r) {
     while (r->pos < r->len && r->s[r->pos] >= '0' && r->s[r->pos] <= '9') r->pos++;
   }
   int tok_len = r->pos - start;
-  if (tok_len == 0 || (tok_len == 1 && r->s[start] == '-')) cvm_abort("json-read: invalid json: malformed number");
+  if (tok_len == 0 || (tok_len == 1 && r->s[start] == '-')) creme_abort("json-read: invalid json: malformed number");
   char tmp[64];
   int n = tok_len < (int)sizeof(tmp) - 1 ? tok_len : (int)sizeof(tmp) - 1;
   memcpy(tmp, r->s + start, (size_t)n);
@@ -225,10 +225,10 @@ static Value json_parse_object(JReader *r) {
   varr_init(&entries);
   for (;;) {
     jr_skip_ws(r);
-    if (r->pos >= r->len || r->s[r->pos] != '"') cvm_abort("json-read: invalid json: expected a string key");
+    if (r->pos >= r->len || r->s[r->pos] != '"') creme_abort("json-read: invalid json: expected a string key");
     Value key = json_parse_string(r);
     jr_skip_ws(r);
-    if (r->pos >= r->len || r->s[r->pos] != ':') cvm_abort("json-read: invalid json: expected ':' after object key");
+    if (r->pos >= r->len || r->s[r->pos] != ':') creme_abort("json-read: invalid json: expected ':' after object key");
     r->pos++;
     jr_skip_ws(r);
     Value val = json_parse_value(r);
@@ -245,7 +245,7 @@ static Value json_parse_object(JReader *r) {
       r->pos++;
       break;
     }
-    cvm_abort("json-read: invalid json: expected ',' or '}' in object");
+    creme_abort("json-read: invalid json: expected ',' or '}' in object");
   }
   Value result = v_nil();
   for (int i = entries.len - 1; i >= 0; i--) {
@@ -278,7 +278,7 @@ static Value json_parse_array(JReader *r) {
         r->pos++;
         break;
       }
-      cvm_abort("json-read: invalid json: expected ',' or ']' in array");
+      creme_abort("json-read: invalid json: expected ',' or ']' in array");
     }
   }
   Vector *vec = GC_MALLOC(sizeof(Vector));
@@ -290,40 +290,40 @@ static Value json_parse_array(JReader *r) {
 
 static Value json_parse_value(JReader *r) {
   jr_skip_ws(r);
-  if (r->pos >= r->len) cvm_abort("json-read: invalid json: unexpected end of input");
+  if (r->pos >= r->len) creme_abort("json-read: invalid json: unexpected end of input");
   char c = r->s[r->pos];
   if (c == '{') return json_parse_object(r);
   if (c == '[') return json_parse_array(r);
   if (c == '"') return json_parse_string(r);
   if (c == 't') {
-    if (r->pos + 4 > r->len || memcmp(r->s + r->pos, "true", 4) != 0) cvm_abort("json-read: invalid json: malformed literal");
+    if (r->pos + 4 > r->len || memcmp(r->s + r->pos, "true", 4) != 0) creme_abort("json-read: invalid json: malformed literal");
     r->pos += 4;
     return v_bool(1);
   }
   if (c == 'f') {
-    if (r->pos + 5 > r->len || memcmp(r->s + r->pos, "false", 5) != 0) cvm_abort("json-read: invalid json: malformed literal");
+    if (r->pos + 5 > r->len || memcmp(r->s + r->pos, "false", 5) != 0) creme_abort("json-read: invalid json: malformed literal");
     r->pos += 5;
     return v_bool(0);
   }
   if (c == 'n') {
-    if (r->pos + 4 > r->len || memcmp(r->s + r->pos, "null", 4) != 0) cvm_abort("json-read: invalid json: malformed literal");
+    if (r->pos + 4 > r->len || memcmp(r->s + r->pos, "null", 4) != 0) creme_abort("json-read: invalid json: malformed literal");
     r->pos += 4;
     return v_nil();
   }
   if (c == '-' || (c >= '0' && c <= '9')) return json_parse_number(r);
-  cvm_abort("json-read: invalid json: unexpected character '%c'", c);
+  creme_abort("json-read: invalid json: unexpected character '%c'", c);
 }
 
 static Value bi_json_read(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("json-read: expected string, got a non-string value");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("json-read: expected string, got a non-string value");
   JReader r;
   r.s = args[0].as.chars;
   r.pos = 0;
   r.len = args[0].aux;
   Value result = json_parse_value(&r);
   jr_skip_ws(&r);
-  if (r.pos != r.len) cvm_abort("json-read: invalid json: unexpected trailing content");
+  if (r.pos != r.len) creme_abort("json-read: invalid json: unexpected trailing content");
   return result;
 }
 
@@ -425,7 +425,7 @@ static void json_write_value(GBuf *w, Value v, const char *who) {
         }
         gbuf_putc(w, '}');
       } else {
-        if (!is_proper_list(v)) cvm_abort("%s: cannot serialize improper list", who);
+        if (!is_proper_list(v)) creme_abort("%s: cannot serialize improper list", who);
         gbuf_putc(w, '[');
         int first = 1;
         for (Value cur = v; cur.tag == T_PAIR; cur = cur.as.pair->cdr) {
@@ -437,20 +437,20 @@ static void json_write_value(GBuf *w, Value v, const char *who) {
       }
       return;
     default:
-      cvm_abort("%s: cannot serialize this value", who);
+      creme_abort("%s: cannot serialize this value", who);
   }
 }
 
 static Value bi_json_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("json-write: expected an argument");
+  if (nargs < 1) creme_abort("json-write: expected an argument");
   GBuf b;
   gbuf_init(&b);
   json_write_value(&b, args[0], "json-write");
   return v_str(b.buf, b.len);
 }
 
-void cvm_register_json_builtins(VM *vm) {
-  cvm_register_builtin(vm, "json-read", bi_json_read);
-  cvm_register_builtin(vm, "json-write", bi_json_write);
+void creme_register_json_builtins(VM *vm) {
+  creme_register_builtin(vm, "json-read", bi_json_read);
+  creme_register_builtin(vm, "json-write", bi_json_write);
 }

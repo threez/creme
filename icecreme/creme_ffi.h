@@ -5,11 +5,11 @@
  * the MVP type-marshalling scope and its deliberate non-goals. Named
  * creme_ffi.h/.c rather than ffi.h/.c to avoid colliding with system
  * libffi's own <ffi.h>, which this file includes directly. */
-#ifndef CVM_CREME_FFI_H
-#define CVM_CREME_FFI_H
+#ifndef CREME_CREME_FFI_H
+#define CREME_CREME_FFI_H
 
 #include "vm.h"
 
-void cvm_register_ffi_builtins(VM *vm);
+void creme_register_ffi_builtins(VM *vm);
 
 #endif

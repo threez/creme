@@ -5,8 +5,8 @@
  * see csv.cr's own header comment), this is a much smaller, single
  * generic row-parser (csv_parse_row below) driven through an abstract
  * CharSrc (next/peek function pointers over either a plain in-memory
- * buffer for the bulk csv-read/csv-write functions, or cvm_port_read_char/
- * cvm_port_peek_char for the streaming csv-reader/csv-writer) — no
+ * buffer for the bulk csv-read/csv-write functions, or creme_port_read_char/
+ * creme_port_peek_char for the streaming csv-reader/csv-writer) — no
  * chunked-refill/UTF-8-boundary-carry complexity, since icecreme's own
  * strings/chars are already byte-wide throughout (see string-ref's own
  * "byte-wise" comment) and this prototype has no multi-million-row CSV
@@ -39,8 +39,8 @@ static int buf_peek(void *ctx) {
   BufSrc *s = ctx;
   return s->pos < s->len ? (unsigned char)s->buf[s->pos] : -1;
 }
-static int port_next(void *ctx) { return cvm_port_read_char((Port *)ctx); }
-static int port_peek(void *ctx) { return cvm_port_peek_char((Port *)ctx); }
+static int port_next(void *ctx) { return creme_port_read_char((Port *)ctx); }
+static int port_peek(void *ctx) { return creme_port_peek_char((Port *)ctx); }
 
 /* Parses one row of cells from src. Returns 0 if there is nothing left
  * to parse (true EOF, no row at all) -- 1 otherwise, even for a blank
@@ -179,7 +179,7 @@ static void csv_cell_bytes(Value v, char **out_buf, int *out_len) {
     *out_len = n;
     return;
   default:
-    cvm_abort("csv: cannot write cell");
+    creme_abort("csv: cannot write cell");
   }
 }
 
@@ -217,17 +217,17 @@ static void csv_write_row(DynBuf *out, Value *cells, int n, char sep, char quote
 
 static char csv_char_arg(Value *args, int nargs, int idx, char default_char) {
   if (nargs <= idx) return default_char;
-  if (args[idx].tag != T_CHAR) cvm_abort("csv: expected a character");
+  if (args[idx].tag != T_CHAR) creme_abort("csv: expected a character");
   return (char)args[idx].as.i;
 }
 
 static int csv_quoting_arg(Value *args, int nargs, int idx) {
   if (nargs <= idx) return 1; /* rfc */
-  if (args[idx].tag != T_SYM) cvm_abort("csv: expected a quoting symbol");
+  if (args[idx].tag != T_SYM) creme_abort("csv: expected a quoting symbol");
   if (args[idx].aux == 4 && memcmp(args[idx].as.chars, "none", 4) == 0) return 0;
   if (args[idx].aux == 3 && memcmp(args[idx].as.chars, "rfc", 3) == 0) return 1;
   if (args[idx].aux == 3 && memcmp(args[idx].as.chars, "all", 3) == 0) return 2;
-  cvm_abort("csv: unknown quoting mode (expected none, rfc, or all)");
+  creme_abort("csv: unknown quoting mode (expected none, rfc, or all)");
 }
 
 /* Accepts a row (or the top-level list of rows) as either a proper list
@@ -253,7 +253,7 @@ static void csv_seq_to_array(Value v, Value **out, int *out_n) {
 
 static Value bi_csv_read(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("csv-read: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("csv-read: expected a string");
   char sep = csv_char_arg(args, nargs, 1, ',');
   char quote = csv_char_arg(args, nargs, 2, '"');
   BufSrc bs = {args[0].as.chars, args[0].aux, 0};
@@ -277,7 +277,7 @@ static Value bi_csv_read(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_csv_read_headers(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("csv-read-headers: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("csv-read-headers: expected a string");
   char sep = csv_char_arg(args, nargs, 1, ',');
   char quote = csv_char_arg(args, nargs, 2, '"');
   BufSrc bs = {args[0].as.chars, args[0].aux, 0};
@@ -299,7 +299,7 @@ static Value bi_csv_read_headers(VM *vm, Value *args, int nargs) {
     Value alist = v_nil();
     for (int i = n_headers - 1; i >= 0; i--) {
       Value cell = i < n ? cells[i] : v_str(GC_MALLOC(1), 0);
-      alist = cvm_cons(vm, cvm_cons(vm, headers[i], cell), alist);
+      alist = creme_cons(vm, creme_cons(vm, headers[i], cell), alist);
     }
     rows[rows_n++] = alist;
   }
@@ -311,7 +311,7 @@ static Value bi_csv_read_headers(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("csv-write: expected a sequence of rows");
+  if (nargs < 1) creme_abort("csv-write: expected a sequence of rows");
   char sep = csv_char_arg(args, nargs, 1, ',');
   int quoting = csv_quoting_arg(args, nargs, 2);
   Value *rows;
@@ -329,7 +329,7 @@ static Value bi_csv_write(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_write_headers(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("csv-write-headers: expected (headers rows)");
+  if (nargs < 2) creme_abort("csv-write-headers: expected (headers rows)");
   char sep = csv_char_arg(args, nargs, 2, ',');
   int quoting = csv_quoting_arg(args, nargs, 3);
   Value *headers;
@@ -354,39 +354,39 @@ static Value bi_csv_write_headers(VM *vm, Value *args, int nargs) {
 typedef struct {
   Port *port;
   char sep, quote;
-} CvmCsvReader;
+} CremeCsvReader;
 
 typedef struct {
   Port *port;
   char sep, quote;
   int quoting;
-} CvmCsvWriter;
+} CremeCsvWriter;
 
 static Value bi_csv_reader_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("csv-reader-open: expected an input port");
-  CvmCsvReader *r = GC_MALLOC(sizeof(CvmCsvReader));
+  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("csv-reader-open: expected an input port");
+  CremeCsvReader *r = GC_MALLOC(sizeof(CremeCsvReader));
   r->port = args[0].as.port;
   r->sep = csv_char_arg(args, nargs, 1, ',');
   r->quote = csv_char_arg(args, nargs, 2, '"');
   /* args[3] (chunk-size) is accepted for native-signature compatibility
    * but unused -- this reader has no chunked-refill strategy to size (see
-   * this file's own header comment: cvm_port_read_char already reads one
+   * this file's own header comment: creme_port_read_char already reads one
    * byte at a time through the Port abstraction regardless). */
   return v_box(r, BOX_KIND_CSV_READER);
 }
 
 static Value bi_csv_reader_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("csv-reader?: expected an argument");
+  if (nargs < 1) creme_abort("csv-reader?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_CSV_READER);
 }
 
 static Value bi_csv_reader_read_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_CSV_READER)
-    cvm_abort("csv-reader-read!: expected a csv reader");
-  CvmCsvReader *r = args[0].as.ptr;
+    creme_abort("csv-reader-read!: expected a csv reader");
+  CremeCsvReader *r = args[0].as.ptr;
   CharSrc src = {port_next, port_peek, r->port};
   Value *cells;
   int n;
@@ -399,8 +399,8 @@ static Value bi_csv_reader_read_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_writer_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("csv-writer-open: expected an output port");
-  CvmCsvWriter *w = GC_MALLOC(sizeof(CvmCsvWriter));
+  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("csv-writer-open: expected an output port");
+  CremeCsvWriter *w = GC_MALLOC(sizeof(CremeCsvWriter));
   w->port = args[0].as.port;
   w->sep = csv_char_arg(args, nargs, 1, ',');
   w->quoting = csv_quoting_arg(args, nargs, 2);
@@ -410,30 +410,30 @@ static Value bi_csv_writer_open(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_writer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("csv-writer?: expected an argument");
+  if (nargs < 1) creme_abort("csv-writer?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_CSV_WRITER);
 }
 
 static Value bi_csv_writer_row_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_CSV_WRITER)
-    cvm_abort("csv-writer-row!: expected a csv writer");
-  CvmCsvWriter *w = args[0].as.ptr;
+    creme_abort("csv-writer-row!: expected a csv writer");
+  CremeCsvWriter *w = args[0].as.ptr;
   DynBuf out = {NULL, 0, 0};
   csv_write_row(&out, args + 1, nargs - 1, w->sep, w->quote, w->quoting);
-  cvm_port_write_bytes(w->port, out.buf ? out.buf : "", out.len);
+  creme_port_write_bytes(w->port, out.buf ? out.buf : "", out.len);
   return v_nil();
 }
 
-void cvm_register_csv_builtins(VM *vm) {
-  cvm_register_builtin(vm, "csv-read", bi_csv_read);
-  cvm_register_builtin(vm, "csv-read-headers", bi_csv_read_headers);
-  cvm_register_builtin(vm, "csv-write", bi_csv_write);
-  cvm_register_builtin(vm, "csv-write-headers", bi_csv_write_headers);
-  cvm_register_builtin(vm, "csv-reader-open", bi_csv_reader_open);
-  cvm_register_builtin(vm, "csv-reader-read!", bi_csv_reader_read_bang);
-  cvm_register_builtin(vm, "csv-reader?", bi_csv_reader_p);
-  cvm_register_builtin(vm, "csv-writer-open", bi_csv_writer_open);
-  cvm_register_builtin(vm, "csv-writer-row!", bi_csv_writer_row_bang);
-  cvm_register_builtin(vm, "csv-writer?", bi_csv_writer_p);
+void creme_register_csv_builtins(VM *vm) {
+  creme_register_builtin(vm, "csv-read", bi_csv_read);
+  creme_register_builtin(vm, "csv-read-headers", bi_csv_read_headers);
+  creme_register_builtin(vm, "csv-write", bi_csv_write);
+  creme_register_builtin(vm, "csv-write-headers", bi_csv_write_headers);
+  creme_register_builtin(vm, "csv-reader-open", bi_csv_reader_open);
+  creme_register_builtin(vm, "csv-reader-read!", bi_csv_reader_read_bang);
+  creme_register_builtin(vm, "csv-reader?", bi_csv_reader_p);
+  creme_register_builtin(vm, "csv-writer-open", bi_csv_writer_open);
+  creme_register_builtin(vm, "csv-writer-row!", bi_csv_writer_row_bang);
+  creme_register_builtin(vm, "csv-writer?", bi_csv_writer_p);
 }

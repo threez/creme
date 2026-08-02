@@ -11,7 +11,7 @@
 ;; non-isolating stubs, since icecreme has exactly ONE flat global table. Now
 ;; fixed for real (a genuinely separate child VM per environment -- see
 ;; icecreme/README.md's own "environment/eval" section and icecreme/vm.c's
-;; cvm_new_empty_vm), so every isolation-dependent case this file used to
+;; creme_new_empty_vm), so every isolation-dependent case this file used to
 ;; exclude now has FULL, unweakened coverage in
 ;; spec/creme/r7rs/ch06_12_environments_eval_spec.scm instead (including
 ;; "null-environment ... has only syntax, no procedures" and "environment's

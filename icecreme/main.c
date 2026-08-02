@@ -49,13 +49,13 @@
  * `creme --profile table` itself uses for `(creme prof-vm)` (see
  * src/main.cr's handle_profile). Not currently configurable from the CLI;
  * add a `--profile=<n>` form here if a bench ever needs a different rate. */
-#define CVM_PROFILE_DEFAULT_VM_INTERVAL 200
+#define CREME_PROFILE_DEFAULT_VM_INTERVAL 200
 
 /* Repo-root-relative, matching this project's existing convention for
  * locating icecreme itself (e.g. src/main.cr's run_via_cvm hardcodes
  * "icecreme/icecreme") -- assumes icecreme is invoked from the repo root, same
  * assumption every other icecreme/creme cross-reference in this project makes. */
-#define CVM_COMPILER_DRIVER_PATH "icecreme/compiler-run.ice"
+#define CREME_COMPILER_DRIVER_PATH "icecreme/compiler-run.ice"
 
 /* A plain .scm file can never coincidentally start with the 4 bytes
  * "ICE1" (Scheme source always starts with whitespace, `(`, or `;`), so
@@ -76,7 +76,7 @@ static int is_ice1_file(const char *path) {
 /* Maps an ICE1 "required families" name (the third element of a
  * ["creme","builtin",X] library name, per icecreme_emitter.cr's `required_families`
  * computation) to the register_fn icecreme.c's builtins.c split it into --
- * see builtins.c's/vm.h's per-family cvm_register_*_builtins split and the
+ * see builtins.c's/vm.h's per-family creme_register_*_builtins split and the
  * 14 pre-existing per-file ones. "base" and "write" are deliberately absent
  * here (see register_required_builtins below) even though the compiler side
  * always lists them too (scheme/base.cr's AUTO_IMPORTED_LIBRARIES) -- they're
@@ -85,36 +85,36 @@ static const struct {
   const char *name;
   void (*register_fn)(VM *);
 } BUILTIN_FAMILIES[] = {
-    {"cxr", cvm_register_cxr_builtins},
-    {"complex", cvm_register_complex_builtins},
-    {"char", cvm_register_char_builtins},
-    {"process-context", cvm_register_process_context_builtins},
-    {"lazy", cvm_register_lazy_builtins},
-    {"math", cvm_register_math_builtins},
-    {"introspection", cvm_register_introspection_builtins},
-    {"file", cvm_register_file_builtins},
-    {"env", cvm_register_env_builtins},
-    {"hash-table", cvm_register_hashtable_builtins},
-    {"sql", cvm_register_sql_builtins},
-    {"mux", cvm_register_mux_builtins},
-    {"string", cvm_register_string_builtins},
-    {"bootstrap", cvm_register_bootstrap_builtins},
-    {"regex", cvm_register_regex_builtins},
-    {"process", cvm_register_process_builtins},
-    {"csv", cvm_register_csv_builtins},
-    {"treelist", cvm_register_treelist_builtins},
-    {"actor", cvm_register_actor_builtins},
-    {"digest", cvm_register_digest_builtins},
-    {"secure-random", cvm_register_secure_random_builtins},
-    {"cipher", cvm_register_cipher_builtins},
-    {"pkey", cvm_register_pkey_builtins},
-    {"x509", cvm_register_x509_builtins},
-    {"json", cvm_register_json_builtins},
-    {"yaml", cvm_register_yaml_builtins},
-    {"bigdecimal", cvm_register_bigdecimal_builtins},
-    {"http", cvm_register_http_builtins},
-    {"term", cvm_register_term_builtins},
-    {"ffi", cvm_register_ffi_builtins},
+    {"cxr", creme_register_cxr_builtins},
+    {"complex", creme_register_complex_builtins},
+    {"char", creme_register_char_builtins},
+    {"process-context", creme_register_process_context_builtins},
+    {"lazy", creme_register_lazy_builtins},
+    {"math", creme_register_math_builtins},
+    {"introspection", creme_register_introspection_builtins},
+    {"file", creme_register_file_builtins},
+    {"env", creme_register_env_builtins},
+    {"hash-table", creme_register_hashtable_builtins},
+    {"sql", creme_register_sql_builtins},
+    {"mux", creme_register_mux_builtins},
+    {"string", creme_register_string_builtins},
+    {"bootstrap", creme_register_bootstrap_builtins},
+    {"regex", creme_register_regex_builtins},
+    {"process", creme_register_process_builtins},
+    {"csv", creme_register_csv_builtins},
+    {"treelist", creme_register_treelist_builtins},
+    {"actor", creme_register_actor_builtins},
+    {"digest", creme_register_digest_builtins},
+    {"secure-random", creme_register_secure_random_builtins},
+    {"cipher", creme_register_cipher_builtins},
+    {"pkey", creme_register_pkey_builtins},
+    {"x509", creme_register_x509_builtins},
+    {"json", creme_register_json_builtins},
+    {"yaml", creme_register_yaml_builtins},
+    {"bigdecimal", creme_register_bigdecimal_builtins},
+    {"http", creme_register_http_builtins},
+    {"term", creme_register_term_builtins},
+    {"ffi", creme_register_ffi_builtins},
 };
 #define N_BUILTIN_FAMILIES (int)(sizeof(BUILTIN_FAMILIES) / sizeof(BUILTIN_FAMILIES[0]))
 
@@ -135,7 +135,7 @@ static const struct {
  * Non-static (declared in vm.h): also called by bootstrap.c's
  * bi_load_chunk_bytes, for exactly the case this task exists to fix --
  * icecreme's own "compiler mode" (see this file's header comment on
- * CVM_COMPILER_DRIVER_PATH) registers builtins ONCE, here, based on the
+ * CREME_COMPILER_DRIVER_PATH) registers builtins ONCE, here, based on the
  * PRECOMPILED compiler-run.ice's own required-families metadata --
  * before compiler-run.scm has even read, let alone compiled, the REAL
  * target script main() actually pointed icecreme at. compiler-run.ice's own
@@ -173,8 +173,8 @@ static const struct {
  * registers string-downcase/string-upcase/string-ci-comparisons/string-
  * foldcase under the SAME ["creme","builtin","char"] library as the
  * char-only predicates), but icecreme itself splits that same functionality
- * into TWO C functions -- builtins.c's cvm_register_char_builtins (char-
- * only) and strings.c's cvm_register_string_builtins (string-case
+ * into TWO C functions -- builtins.c's creme_register_char_builtins (char-
+ * only) and strings.c's creme_register_string_builtins (string-case
  * functions, ALSO covering (creme string)'s own unrelated string-trim/
  * split/join/etc, hence being its own separate family here too) -- so
  * requesting only "char" left string-downcase permanently unbound.
@@ -182,9 +182,9 @@ static const struct {
  * (process_context.cr) legitimately includes get-environment-variable/
  * set-environment-variable! (derived from the same underlying EnvVars
  * methods (creme env) also exposes under its own separate family), but
- * icecreme's own cvm_register_process_context_builtins (builtins.c) only ever
+ * icecreme's own creme_register_process_context_builtins (builtins.c) only ever
  * registered `exit` -- the env accessors live solely in
- * cvm_register_env_builtins. Requesting "string"/"env" directly still
+ * creme_register_env_builtins. Requesting "string"/"env" directly still
  * works unchanged (via the ordinary BUILTIN_FAMILIES lookup); these two
  * extra bits (beyond one per BUILTIN_FAMILIES entry) just add the
  * implied registration so "char"/"process-context" alone are enough
@@ -195,22 +195,22 @@ static const struct {
  * delete-file under family "file" alongside file-exists?/open-input-
  * file/etc, but icecreme's own file-write/delete-file (bi_file_write/
  * bi_delete_file) are implemented in bootstrap.c and registered only by
- * cvm_register_bootstrap_builtins, gated on family "bootstrap" --
+ * creme_register_bootstrap_builtins, gated on family "bootstrap" --
  * requesting only "file" left them permanently unbound. Requesting
  * "bootstrap" directly still works unchanged (via the ordinary
  * BUILTIN_FAMILIES lookup); this third extra bit adds the implied
- * registration so "file" alone is enough too. (cvm_register_bootstrap_
+ * registration so "file" alone is enough too. (creme_register_bootstrap_
  * builtins also registers several compiler/REPL-only builtins --
  * import!/load-chunk-bytes/etc -- that a plain "file"-only program will
  * simply never call; harmless extra bindings, not a behavior change.) */
-#define CVM_EXTRA_BIT_STRING_VIA_CHAR ((uint64_t)1 << N_BUILTIN_FAMILIES)
-#define CVM_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT ((uint64_t)1 << (N_BUILTIN_FAMILIES + 1))
-#define CVM_EXTRA_BIT_BOOTSTRAP_VIA_FILE ((uint64_t)1 << (N_BUILTIN_FAMILIES + 2))
+#define CREME_EXTRA_BIT_STRING_VIA_CHAR ((uint64_t)1 << N_BUILTIN_FAMILIES)
+#define CREME_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT ((uint64_t)1 << (N_BUILTIN_FAMILIES + 1))
+#define CREME_EXTRA_BIT_BOOTSTRAP_VIA_FILE ((uint64_t)1 << (N_BUILTIN_FAMILIES + 2))
 
-void cvm_register_required_builtins(VM *vm, char **families, int n_families) {
+void creme_register_required_builtins(VM *vm, char **families, int n_families) {
   if (!vm->base_write_registered) {
-    cvm_register_base_builtins(vm);
-    cvm_register_write_builtins(vm);
+    creme_register_base_builtins(vm);
+    creme_register_write_builtins(vm);
     vm->base_write_registered = 1;
   }
 
@@ -229,17 +229,17 @@ void cvm_register_required_builtins(VM *vm, char **families, int n_families) {
       }
     }
 
-    if (strcmp(name, "char") == 0 && !(vm->registered_family_mask & CVM_EXTRA_BIT_STRING_VIA_CHAR)) {
-      cvm_register_string_builtins(vm);
-      vm->registered_family_mask |= CVM_EXTRA_BIT_STRING_VIA_CHAR;
+    if (strcmp(name, "char") == 0 && !(vm->registered_family_mask & CREME_EXTRA_BIT_STRING_VIA_CHAR)) {
+      creme_register_string_builtins(vm);
+      vm->registered_family_mask |= CREME_EXTRA_BIT_STRING_VIA_CHAR;
     }
-    if (strcmp(name, "process-context") == 0 && !(vm->registered_family_mask & CVM_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT)) {
-      cvm_register_env_builtins(vm);
-      vm->registered_family_mask |= CVM_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT;
+    if (strcmp(name, "process-context") == 0 && !(vm->registered_family_mask & CREME_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT)) {
+      creme_register_env_builtins(vm);
+      vm->registered_family_mask |= CREME_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT;
     }
-    if (strcmp(name, "file") == 0 && !(vm->registered_family_mask & CVM_EXTRA_BIT_BOOTSTRAP_VIA_FILE)) {
-      cvm_register_bootstrap_builtins(vm);
-      vm->registered_family_mask |= CVM_EXTRA_BIT_BOOTSTRAP_VIA_FILE;
+    if (strcmp(name, "file") == 0 && !(vm->registered_family_mask & CREME_EXTRA_BIT_BOOTSTRAP_VIA_FILE)) {
+      creme_register_bootstrap_builtins(vm);
+      vm->registered_family_mask |= CREME_EXTRA_BIT_BOOTSTRAP_VIA_FILE;
     }
   }
 }
@@ -267,14 +267,14 @@ static void gmp_gc_free(void *ptr, size_t size) {
   (void)size;
 }
 
-/* Reads an environment variable as a positive int, for cvm_alloc_vm's
+/* Reads an environment variable as a positive int, for creme_alloc_vm's
  * own stack_cap/frames_cap resource-limit overrides below. Unset,
- * empty, non-numeric, or non-positive all fall through to 0 (cvm_alloc_
+ * empty, non-numeric, or non-positive all fall through to 0 (creme_alloc_
  * vm's own "use the default" sentinel) -- this is a best-effort CLI
  * convenience, not a validated embedding API, so silently ignoring a
  * malformed value rather than erroring out of the whole run is the
  * right call here. */
-static int cvm_getenv_int(const char *name) {
+static int creme_getenv_int(const char *name) {
   const char *s = getenv(name);
   if (!s || !*s) return 0;
   char *end;
@@ -288,7 +288,7 @@ int main(int argc, char **argv) {
   const char *path = NULL;
   /* The target path and everything after it (contiguous in argv, since
    * --profile can only appear before it) becomes the running script's
-   * own (command-line) tail -- see cvm_set_command_line_args below --
+   * own (command-line) tail -- see creme_set_command_line_args below --
    * mirroring native's own (command-line) contract exactly: [PROGRAM_
    * NAME] + ARGV, where Crystal's ARGV still includes the script's own
    * path as its first element (process_context.cr/`command_line` never
@@ -310,7 +310,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "usage: %s [--profile] <file.ice> [script-args...]\n", argv[0]);
     return 1;
   }
-  cvm_set_command_line_args(argv[0], script_argc, script_argv);
+  creme_set_command_line_args(argv[0], script_argc, script_argv);
 
   GC_INIT();
   /* Boehm's own env-var handling inside GC_INIT() already honors an
@@ -330,22 +330,22 @@ int main(int argc, char **argv) {
     size_t heap_size = GC_get_heap_size();
     if (heap_size < default_heap) GC_expand_hp(default_heap - heap_size);
   }
-  GC_set_oom_fn(cvm_gc_oom_handler); /* see vm.h's own doc comment */
+  GC_set_oom_fn(creme_gc_oom_handler); /* see vm.h's own doc comment */
   mp_set_memory_functions(gmp_gc_alloc, gmp_gc_realloc, gmp_gc_free);
   /* ICECREME_STACK_CAP/ICECREME_FRAMES_CAP: optional resource-limit overrides for
    * this run, read here rather than baked into a recompile -- the
-   * concrete, exercisable-today form of cvm_alloc_vm's own embedder-
+   * concrete, exercisable-today form of creme_alloc_vm's own embedder-
    * configurable resource limits (see vm.h's doc comment there) until a
    * real embedding API (a linked-in caller passing its own values
    * directly) exists. Unset, empty, or non-positive falls through to
-   * cvm_alloc_vm's own CVM_DEFAULT_STACK_CAP/CVM_DEFAULT_FRAMES_CAP
+   * creme_alloc_vm's own CREME_DEFAULT_STACK_CAP/CREME_DEFAULT_FRAMES_CAP
    * default, same as passing 0 directly. */
-  VM *vm = cvm_alloc_vm(cvm_getenv_int("ICECREME_STACK_CAP"), cvm_getenv_int("ICECREME_FRAMES_CAP"));
+  VM *vm = creme_alloc_vm(creme_getenv_int("ICECREME_STACK_CAP"), creme_getenv_int("ICECREME_FRAMES_CAP"));
   if (!vm) {
     fprintf(stderr, "icecreme: out of memory allocating VM state\n");
     return 1;
   }
-  cvm_set_current_vm(vm); /* lets cvm_abort reach this VM's guard-handler stack */
+  creme_set_current_vm(vm); /* lets creme_abort reach this VM's guard-handler stack */
 
   /* Compiler mode: `path` isn't a compiled ICE1 binary at all -- it's the
    * plain Scheme source icecreme should compile-and-run, entirely via the
@@ -355,46 +355,46 @@ int main(int argc, char **argv) {
    * compiles it (expanding any `include`s itself), and runs the result. */
   const char *load_path = path;
   if (!is_ice1_file(path)) {
-    cvm_set_target_path(path);
-    load_path = CVM_COMPILER_DRIVER_PATH;
+    creme_set_target_path(path);
+    load_path = CREME_COMPILER_DRIVER_PATH;
   }
 
   /* Peek the required-families metadata BEFORE the real load: builtins must
-   * be registered before cvm_load's resolve_globals pass runs (it needs
-   * cvm_global_intern to see already-registered globals -- see
+   * be registered before creme_load's resolve_globals pass runs (it needs
+   * creme_global_intern to see already-registered globals -- see
    * resolve_globals's own doc comment in loader.c), but the family list
-   * itself only becomes known by parsing the file. cvm_load re-reads (and,
+   * itself only becomes known by parsing the file. creme_load re-reads (and,
    * since NULL/NULL is passed below, discards) this same section again
-   * right after -- see cvm_peek_required_families's doc comment in vm.h/
+   * right after -- see creme_peek_required_families's doc comment in vm.h/
    * loader.c for why this is a second, separate open rather than sharing a
    * Reader across both calls. */
   char **families = NULL;
   int n_families = 0;
-  cvm_peek_required_families(load_path, &families, &n_families);
-  cvm_register_required_builtins(vm, families, n_families);
+  creme_peek_required_families(load_path, &families, &n_families);
+  creme_register_required_builtins(vm, families, n_families);
 
   vm->source_file = load_path;
-  Chunk *chunk = cvm_load(load_path, vm, NULL, NULL);
+  Chunk *chunk = creme_load(load_path, vm, NULL, NULL);
 
   if (profile) {
     vm->profiler.enabled = 1;
-    vm->profiler.vm_interval = CVM_PROFILE_DEFAULT_VM_INTERVAL;
-    vm->profiler.vm_countdown = 1 + rand() % (2 * CVM_PROFILE_DEFAULT_VM_INTERVAL);
-    /* Shared with every child VM cvm_new_child_vm ever creates from this
+    vm->profiler.vm_interval = CREME_PROFILE_DEFAULT_VM_INTERVAL;
+    vm->profiler.vm_countdown = 1 + rand() % (2 * CREME_PROFILE_DEFAULT_VM_INTERVAL);
+    /* Shared with every child VM creme_new_child_vm ever creates from this
      * one (a spawned actor, or one of (creme mux)'s worker-pool/inline
      * dispatch VMs) -- see SharedVmSamples's own doc comment (vm.h) for
      * why a profiled program's "hot Scheme functions" report needs this
      * to reflect work done on threads other than this exact one. */
     vm->profiler.shared_vm_samples = GC_MALLOC(sizeof(SharedVmSamples));
     pthread_mutex_init(&vm->profiler.shared_vm_samples->mu, NULL);
-    cvm_profiler_start_native(vm);
+    creme_profiler_start_native(vm);
   }
 
-  cvm_run_chunk(vm, chunk);
+  creme_run_chunk(vm, chunk);
 
   if (profile) {
-    cvm_profiler_stop_native(vm);
-    cvm_profiler_report(vm);
+    creme_profiler_stop_native(vm);
+    creme_profiler_report(vm);
   }
 
   return 0;

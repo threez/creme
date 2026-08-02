@@ -316,7 +316,7 @@
     ;; already knows the chunk transitively depends on (e.g. compiler.sld's
     ;; own required-native-families-list) -- written into the
     ;; required-families section right after the ICE1 magic, so icecreme's
-    ;; main.c can decide which cvm_register_*_builtins functions to call
+    ;; main.c can decide which creme_register_*_builtins functions to call
     ;; before running this chunk (see that file's own header comment on
     ;; import-gated native builtin registration). Most callers (bytecode_
     ;; spec.scm's own direct chunk->bytes tests, spec-helper.sld's native-

@@ -56,7 +56,7 @@ static int find_substring(Value hay, Value needle) {
 
 static Value bi_string_upcase(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string-upcase: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-upcase: expected a string");
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)args[0].aux);
   for (int i = 0; i < args[0].aux; i++) {
     char c = args[0].as.chars[i];
@@ -68,7 +68,7 @@ static Value bi_string_upcase(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_downcase(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string-downcase: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-downcase: expected a string");
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)args[0].aux);
   for (int i = 0; i < args[0].aux; i++) {
     char c = args[0].as.chars[i];
@@ -80,7 +80,7 @@ static Value bi_string_downcase(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_trim(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string-trim: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-trim: expected a string");
   const char *s = args[0].as.chars;
   int len = args[0].aux, start = 0, end = len;
   while (start < end && is_ws(s[start])) start++;
@@ -95,7 +95,7 @@ static Value bi_string_trim(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_reverse(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string-reverse: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-reverse: expected a string");
   int len = args[0].aux;
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)len);
   for (int i = len - 1; i >= 0; i--) buf = sdscatlen(buf, args[0].as.chars + i, 1);
@@ -103,7 +103,7 @@ static Value bi_string_reverse(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_string_split(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("string-split: expected (string sep)");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("string-split: expected (string sep)");
   const char *s = args[0].as.chars;
   int slen = args[0].aux;
   const char *sep = args[1].as.chars;
@@ -131,18 +131,18 @@ static Value bi_string_split(VM *vm, Value *args, int nargs) {
     parts[n++] = v_gcstr(s + start, (size_t)(slen - start));
   }
   Value result = v_nil();
-  for (int i = n - 1; i >= 0; i--) result = cvm_cons(vm, parts[i], result);
+  for (int i = n - 1; i >= 0; i--) result = creme_cons(vm, parts[i], result);
   return result;
 }
 
 static Value bi_string_join(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[1].tag != T_STR) cvm_abort("string-join: expected (list sep)");
+  if (nargs < 2 || args[1].tag != T_STR) creme_abort("string-join: expected (list sep)");
   sds buf = sdsMakeRoomFor(sdsempty(), 64);
   Value cur = args[0];
   int first = 1;
   while (cur.tag == T_PAIR) {
-    if (cur.as.pair->car.tag != T_STR) cvm_abort("string-join: expected a list of strings");
+    if (cur.as.pair->car.tag != T_STR) creme_abort("string-join: expected a list of strings");
     if (!first) buf = sdscatlen(buf, args[1].as.chars, (size_t)args[1].aux);
     first = 0;
     buf = sdscatlen(buf, cur.as.pair->car.as.chars, (size_t)cur.as.pair->car.aux);
@@ -154,7 +154,7 @@ static Value bi_string_join(VM *vm, Value *args, int nargs) {
 static Value bi_string_replace(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 3 || args[0].tag != T_STR || args[1].tag != T_STR || args[2].tag != T_STR) {
-    cvm_abort("string-replace: expected (string from to)");
+    creme_abort("string-replace: expected (string from to)");
   }
   const char *s = args[0].as.chars;
   int slen = args[0].aux;
@@ -180,7 +180,7 @@ static Value bi_string_replace(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_translate(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("string-translate: expected (string alist)");
+  if (nargs < 2 || args[0].tag != T_STR) creme_abort("string-translate: expected (string alist)");
   const char *s = args[0].as.chars;
   int slen = args[0].aux;
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)slen);
@@ -210,35 +210,35 @@ static Value bi_string_translate(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_contains_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("string-contains?: expected two strings");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("string-contains?: expected two strings");
   return v_bool(find_substring(args[0], args[1]) >= 0);
 }
 
 static Value bi_string_prefix_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("string-prefix?: expected two strings");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("string-prefix?: expected two strings");
   int hlen = args[0].aux, nlen = args[1].aux;
   return v_bool(hlen >= nlen && memcmp(args[0].as.chars, args[1].as.chars, (size_t)nlen) == 0);
 }
 
 static Value bi_string_suffix_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("string-suffix?: expected two strings");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("string-suffix?: expected two strings");
   int hlen = args[0].aux, nlen = args[1].aux;
   return v_bool(hlen >= nlen && memcmp(args[0].as.chars + (hlen - nlen), args[1].as.chars, (size_t)nlen) == 0);
 }
 
 static Value bi_string_index_of(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("string-index-of: expected two strings");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("string-index-of: expected two strings");
   int idx = find_substring(args[0], args[1]);
   return idx >= 0 ? v_int(idx) : v_bool(0);
 }
 
 static Value bi_string_repeat(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_INT) cvm_abort("string-repeat: expected (string n)");
-  if (args[1].as.i < 0) cvm_abort("string-repeat: count must be non-negative");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_INT) creme_abort("string-repeat: expected (string n)");
+  if (args[1].as.i < 0) creme_abort("string-repeat: count must be non-negative");
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)args[0].aux * (size_t)(args[1].as.i > 0 ? args[1].as.i : 1));
   for (int64_t i = 0; i < args[1].as.i; i++) buf = sdscatlen(buf, args[0].as.chars, (size_t)args[0].aux);
   return sds_to_value(buf);
@@ -247,9 +247,9 @@ static Value bi_string_repeat(VM *vm, Value *args, int nargs) {
 static Value bi_string_pad(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR) {
-    cvm_abort("string-pad: expected (string len pad)");
+    creme_abort("string-pad: expected (string len pad)");
   }
-  if (args[2].aux != 1) cvm_abort("string-pad: pad string must be exactly 1 char");
+  if (args[2].aux != 1) creme_abort("string-pad: pad string must be exactly 1 char");
   int64_t target = args[1].as.i;
   int slen = args[0].aux;
   if (slen >= target) return args[0];
@@ -263,9 +263,9 @@ static Value bi_string_pad(VM *vm, Value *args, int nargs) {
 static Value bi_string_pad_right(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR) {
-    cvm_abort("string-pad-right: expected (string len pad)");
+    creme_abort("string-pad-right: expected (string len pad)");
   }
-  if (args[2].aux != 1) cvm_abort("string-pad-right: pad string must be exactly 1 char");
+  if (args[2].aux != 1) creme_abort("string-pad-right: pad string must be exactly 1 char");
   int64_t target = args[1].as.i;
   int slen = args[0].aux;
   if (slen >= target) return args[0];
@@ -330,9 +330,9 @@ static void format_int_radix(int64_t n, int radix, char *out, size_t cap) {
  * falls back to ~a's own display rendering), ~c, ~%, ~~, ~d/~x/~o/~b. */
 static Value bi_format(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("format: expected (dest fmt . args)");
-  if (args[0].tag != T_BOOL) cvm_abort("format: expected #t or #f as destination");
-  if (args[1].tag != T_STR) cvm_abort("format: expected a format string");
+  if (nargs < 2) creme_abort("format: expected (dest fmt . args)");
+  if (args[0].tag != T_BOOL) creme_abort("format: expected #t or #f as destination");
+  if (args[1].tag != T_STR) creme_abort("format: expected a format string");
   const char *fmt = args[1].as.chars;
   int fmtlen = args[1].aux;
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)fmtlen);
@@ -345,7 +345,7 @@ static Value bi_format(VM *vm, Value *args, int nargs) {
       i++;
       continue;
     }
-    if (i + 1 >= fmtlen) cvm_abort("format: dangling '~' at end of format string");
+    if (i + 1 >= fmtlen) creme_abort("format: dangling '~' at end of format string");
     char directive = fmt[i + 1];
     char lower = (directive >= 'A' && directive <= 'Z') ? (char)(directive - 'A' + 'a') : directive;
     i += 2;
@@ -358,13 +358,13 @@ static Value bi_format(VM *vm, Value *args, int nargs) {
       break;
     case 'a':
     case 's':
-      if (argi >= nargs) cvm_abort("format: not enough arguments for format string");
+      if (argi >= nargs) creme_abort("format: not enough arguments for format string");
       buf = format_write_display(buf, args[argi]);
       argi++;
       break;
     case 'c':
-      if (argi >= nargs) cvm_abort("format: not enough arguments for format string");
-      if (args[argi].tag != T_CHAR) cvm_abort("format: ~c expected a char");
+      if (argi >= nargs) creme_abort("format: not enough arguments for format string");
+      if (args[argi].tag != T_CHAR) creme_abort("format: ~c expected a char");
       {
         char ch = (char)args[argi].as.i;
         buf = sdscatlen(buf, &ch, 1);
@@ -375,8 +375,8 @@ static Value bi_format(VM *vm, Value *args, int nargs) {
     case 'x':
     case 'o':
     case 'b': {
-      if (argi >= nargs) cvm_abort("format: not enough arguments for format string");
-      if (args[argi].tag != T_INT) cvm_abort("format: expected an integer");
+      if (argi >= nargs) creme_abort("format: not enough arguments for format string");
+      if (args[argi].tag != T_INT) creme_abort("format: expected an integer");
       int base = lower == 'd' ? 10 : lower == 'x' ? 16 : lower == 'o' ? 8 : 2;
       char numbuf[80];
       format_int_radix(args[argi].as.i, base, numbuf, sizeof(numbuf));
@@ -385,7 +385,7 @@ static Value bi_format(VM *vm, Value *args, int nargs) {
       break;
     }
     default:
-      cvm_abort("format: unknown format directive '~%c'", directive);
+      creme_abort("format: unknown format directive '~%c'", directive);
     }
   }
   if (!args[0].as.b) {
@@ -396,25 +396,25 @@ static Value bi_format(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 
-void cvm_register_string_builtins(VM *vm) {
-  cvm_register_builtin(vm, "string-upcase", bi_string_upcase);
-  cvm_register_builtin(vm, "string-downcase", bi_string_downcase);
+void creme_register_string_builtins(VM *vm) {
+  creme_register_builtin(vm, "string-upcase", bi_string_upcase);
+  creme_register_builtin(vm, "string-downcase", bi_string_downcase);
   /* (scheme char)'s string-foldcase is literally the same as string-downcase
    * (native's own comment: "correct for the ASCII/simple-Unicode range
    * this interpreter otherwise handles") -- same function, second name. */
-  cvm_register_builtin(vm, "string-foldcase", bi_string_downcase);
-  cvm_register_builtin(vm, "string-trim", bi_string_trim);
-  cvm_register_builtin(vm, "string-reverse", bi_string_reverse);
-  cvm_register_builtin(vm, "string-split", bi_string_split);
-  cvm_register_builtin(vm, "string-join", bi_string_join);
-  cvm_register_builtin(vm, "string-replace", bi_string_replace);
-  cvm_register_builtin(vm, "string-translate", bi_string_translate);
-  cvm_register_builtin(vm, "string-contains?", bi_string_contains_p);
-  cvm_register_builtin(vm, "string-prefix?", bi_string_prefix_p);
-  cvm_register_builtin(vm, "string-suffix?", bi_string_suffix_p);
-  cvm_register_builtin(vm, "string-index-of", bi_string_index_of);
-  cvm_register_builtin(vm, "string-repeat", bi_string_repeat);
-  cvm_register_builtin(vm, "string-pad", bi_string_pad);
-  cvm_register_builtin(vm, "string-pad-right", bi_string_pad_right);
-  cvm_register_builtin(vm, "format", bi_format);
+  creme_register_builtin(vm, "string-foldcase", bi_string_downcase);
+  creme_register_builtin(vm, "string-trim", bi_string_trim);
+  creme_register_builtin(vm, "string-reverse", bi_string_reverse);
+  creme_register_builtin(vm, "string-split", bi_string_split);
+  creme_register_builtin(vm, "string-join", bi_string_join);
+  creme_register_builtin(vm, "string-replace", bi_string_replace);
+  creme_register_builtin(vm, "string-translate", bi_string_translate);
+  creme_register_builtin(vm, "string-contains?", bi_string_contains_p);
+  creme_register_builtin(vm, "string-prefix?", bi_string_prefix_p);
+  creme_register_builtin(vm, "string-suffix?", bi_string_suffix_p);
+  creme_register_builtin(vm, "string-index-of", bi_string_index_of);
+  creme_register_builtin(vm, "string-repeat", bi_string_repeat);
+  creme_register_builtin(vm, "string-pad", bi_string_pad);
+  creme_register_builtin(vm, "string-pad-right", bi_string_pad_right);
+  creme_register_builtin(vm, "format", bi_format);
 }

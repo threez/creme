@@ -10,7 +10,7 @@
 #include "sql.h"
 
 static sqlite3 *as_sql(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_SQL) cvm_abort("%s: expected a sql connection", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_SQL) creme_abort("%s: expected a sql connection", who);
   return (sqlite3 *)v.as.ptr;
 }
 
@@ -48,7 +48,7 @@ static void bind_param(sqlite3_stmt *stmt, int idx, Value v) {
     sqlite3_bind_null(stmt, idx);
     break;
   default:
-    cvm_abort("sql: unsupported parameter value type");
+    creme_abort("sql: unsupported parameter value type");
   }
 }
 
@@ -72,10 +72,10 @@ static Value column_to_value(sqlite3_stmt *stmt, int col) {
 }
 
 static sqlite3_stmt *prepare_and_bind(sqlite3 *db, Value sql_val, Value *params, int n_params) {
-  if (sql_val.tag != T_STR) cvm_abort("sql: expected a SQL string");
+  if (sql_val.tag != T_STR) creme_abort("sql: expected a SQL string");
   sqlite3_stmt *stmt;
   if (sqlite3_prepare_v2(db, sql_val.as.chars, sql_val.aux, &stmt, NULL) != SQLITE_OK) {
-    cvm_abort("sql: prepare failed: %s", sqlite3_errmsg(db));
+    creme_abort("sql: prepare failed: %s", sqlite3_errmsg(db));
   }
   for (int i = 0; i < n_params; i++) bind_param(stmt, i + 1, params[i]);
   return stmt;
@@ -83,51 +83,51 @@ static sqlite3_stmt *prepare_and_bind(sqlite3 *db, Value sql_val, Value *params,
 
 static Value bi_sql_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("sql-open: expected a path string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("sql-open: expected a path string");
   char *path = malloc((size_t)args[0].aux + 1);
   memcpy(path, args[0].as.chars, (size_t)args[0].aux);
   path[args[0].aux] = 0;
   sqlite3 *db;
   int rc = sqlite3_open(path, &db);
   free(path);
-  if (rc != SQLITE_OK) cvm_abort("sql-open: %s", sqlite3_errmsg(db));
+  if (rc != SQLITE_OK) creme_abort("sql-open: %s", sqlite3_errmsg(db));
   return v_box(db, BOX_KIND_SQL);
 }
 
 static Value bi_sql_close(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("sql-close: expected a connection");
+  if (nargs < 1) creme_abort("sql-close: expected a connection");
   sqlite3_close(as_sql(args[0], "sql-close"));
   return v_nil();
 }
 
 static Value bi_sql_connection_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("sql-connection?: expected an argument");
+  if (nargs < 1) creme_abort("sql-connection?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_SQL);
 }
 
 static Value bi_sql_execute(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("sql-execute: expected (conn sql . params)");
+  if (nargs < 2) creme_abort("sql-execute: expected (conn sql . params)");
   sqlite3 *db = as_sql(args[0], "sql-execute");
   sqlite3_stmt *stmt = prepare_and_bind(db, args[1], args + 2, nargs - 2);
   int rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
     const char *msg = sqlite3_errmsg(db);
     sqlite3_finalize(stmt);
-    cvm_abort("sql-execute: %s", msg);
+    creme_abort("sql-execute: %s", msg);
   }
   sqlite3_finalize(stmt);
   int64_t rows_affected = sqlite3_changes(db);
   int64_t last_id = sqlite3_last_insert_rowid(db);
   Value alist = v_nil();
-  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("last-insert-id"), v_int(last_id)), alist);
-  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("rows-affected"), v_int(rows_affected)), alist);
+  alist = creme_cons(vm, creme_cons(vm, v_litstr("last-insert-id"), v_int(last_id)), alist);
+  alist = creme_cons(vm, creme_cons(vm, v_litstr("rows-affected"), v_int(rows_affected)), alist);
   return alist;
 }
 
 static Value bi_sql_query(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("sql-query: expected (conn sql . params)");
+  if (nargs < 2) creme_abort("sql-query: expected (conn sql . params)");
   sqlite3 *db = as_sql(args[0], "sql-query");
   sqlite3_stmt *stmt = prepare_and_bind(db, args[1], args + 2, nargs - 2);
   int ncols = sqlite3_column_count(stmt);
@@ -153,7 +153,7 @@ static Value bi_sql_query(VM *vm, Value *args, int nargs) {
   while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
     Value row = v_nil();
     for (int i = ncols - 1; i >= 0; i--) {
-      row = cvm_cons(vm, cvm_cons(vm, colnames[i], column_to_value(stmt, i)), row);
+      row = creme_cons(vm, creme_cons(vm, colnames[i], column_to_value(stmt, i)), row);
     }
     if (n_rows >= cap_rows) {
       cap_rows = cap_rows ? cap_rows * 2 : 8;
@@ -164,7 +164,7 @@ static Value bi_sql_query(VM *vm, Value *args, int nargs) {
   if (rc != SQLITE_DONE) {
     const char *msg = sqlite3_errmsg(db);
     sqlite3_finalize(stmt);
-    cvm_abort("sql-query: %s", msg);
+    creme_abort("sql-query: %s", msg);
   }
   sqlite3_finalize(stmt);
 
@@ -176,7 +176,7 @@ static Value bi_sql_query(VM *vm, Value *args, int nargs) {
 
 static Value bi_sql_scalar(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("sql-scalar: expected (conn sql . params)");
+  if (nargs < 2) creme_abort("sql-scalar: expected (conn sql . params)");
   sqlite3 *db = as_sql(args[0], "sql-scalar");
   sqlite3_stmt *stmt = prepare_and_bind(db, args[1], args + 2, nargs - 2);
   Value result = v_nil();
@@ -185,11 +185,11 @@ static Value bi_sql_scalar(VM *vm, Value *args, int nargs) {
   return result;
 }
 
-void cvm_register_sql_builtins(VM *vm) {
-  cvm_register_builtin(vm, "sql-open", bi_sql_open);
-  cvm_register_builtin(vm, "sql-close", bi_sql_close);
-  cvm_register_builtin(vm, "sql-connection?", bi_sql_connection_p);
-  cvm_register_builtin(vm, "sql-execute", bi_sql_execute);
-  cvm_register_builtin(vm, "sql-query", bi_sql_query);
-  cvm_register_builtin(vm, "sql-scalar", bi_sql_scalar);
+void creme_register_sql_builtins(VM *vm) {
+  creme_register_builtin(vm, "sql-open", bi_sql_open);
+  creme_register_builtin(vm, "sql-close", bi_sql_close);
+  creme_register_builtin(vm, "sql-connection?", bi_sql_connection_p);
+  creme_register_builtin(vm, "sql-execute", bi_sql_execute);
+  creme_register_builtin(vm, "sql-query", bi_sql_query);
+  creme_register_builtin(vm, "sql-scalar", bi_sql_scalar);
 }

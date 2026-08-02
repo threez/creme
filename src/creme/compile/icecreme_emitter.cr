@@ -86,7 +86,7 @@ module Creme
           body_forms = interp.library_body_forms_for_icecreme(name)
           next unless body_forms
           # icecreme's global table is one flat, name-interned array with no
-          # per-library namespacing at all (icecreme/vm.c's cvm_global_intern) —
+          # per-library namespacing at all (icecreme/vm.c's creme_global_intern) —
           # two libraries each defining an internal (non-exported) helper of
           # the same name would otherwise silently clobber each other's
           # slot (last DefGlobal wins). Only a library's OWN internal names

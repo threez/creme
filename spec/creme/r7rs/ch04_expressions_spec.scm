@@ -42,7 +42,7 @@
 ;;   that hadn't been filled in yet) are now all fixed, so those cases
 ;;   run unconditionally:
 ;;   - `equal?` on two distinct-but-content-equal bytevectors used to
-;;     return `#f` under `./icecreme/icecreme` -- fixed (cvm_equal now has a real
+;;     return `#f` under `./icecreme/icecreme` -- fixed (creme_equal now has a real
 ;;     T_BYTEVECTOR byte-compare case).
 ;;   - `number->string`'s optional radix argument used to be silently
 ;;     ignored under `./icecreme/icecreme` (always base 10) -- fixed, which is what

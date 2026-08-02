@@ -266,7 +266,7 @@ describe "main.cr (CLI)" do
 
     if icecreme_available
       # Regression test for a real bug: icecreme/hashtable.c's hash-table-ref
-      # unconditionally cvm_apply'd its third argument as a thunk, but this
+      # unconditionally creme_apply'd its third argument as a thunk, but this
       # project's own hash-table-ref contract (src/creme/modules/creme/
       # hash_table.cr) allows a plain, non-procedure default too -- (creme
       # dao)'s dao-ref-keyword relies on exactly that (a plain #f default),
@@ -435,7 +435,7 @@ describe "main.cr (CLI)" do
       end
 
       # Regression test: icecreme's global table is one flat, name-interned array
-      # with no per-library namespacing (icecreme/vm.c's cvm_global_intern) --
+      # with no per-library namespacing (icecreme/vm.c's creme_global_intern) --
       # before icecreme_emitter.cr qualified a library's own internal
       # (non-exported) top-level names, two libraries each defining a
       # private helper of the same name would silently clobber each

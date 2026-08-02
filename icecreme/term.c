@@ -62,17 +62,17 @@ static Value term_lit_sym(const char *s) { return v_sym(s, (int)strlen(s)); }
 
 /* ((kind . "<kind>")) -- every non-char key event's alist shape. */
 static Value kind_alist(VM *vm, const char *kind) {
-  Value pair = cvm_cons(vm, term_lit_sym("kind"), term_lit_str(kind));
-  return cvm_cons(vm, pair, v_nil());
+  Value pair = creme_cons(vm, term_lit_sym("kind"), term_lit_str(kind));
+  return creme_cons(vm, pair, v_nil());
 }
 
 /* ((kind . "char") (char . #\<byte>)) -- the one kind that carries a
  * payload; `byte` is treated as its own Latin-1-ish codepoint (see this
  * file's header comment on the UTF-8 limitation). */
 static Value char_alist(VM *vm, int byte) {
-  Value kind_pair = cvm_cons(vm, term_lit_sym("kind"), term_lit_str("char"));
-  Value char_pair = cvm_cons(vm, term_lit_sym("char"), v_char(byte));
-  return cvm_cons(vm, kind_pair, cvm_cons(vm, char_pair, v_nil()));
+  Value kind_pair = creme_cons(vm, term_lit_sym("kind"), term_lit_str("char"));
+  Value char_pair = creme_cons(vm, term_lit_sym("char"), v_char(byte));
+  return creme_cons(vm, kind_pair, creme_cons(vm, char_pair, v_nil()));
 }
 
 /* (term-raw-mode-enter!) */
@@ -221,7 +221,7 @@ static Value bi_term_read_key(VM *vm, Value *args, int nargs) {
 static Value bi_term_move_cursor(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2 || args[0].tag != T_INT || args[1].tag != T_INT) {
-    cvm_abort("term-move-cursor!: expected two integers");
+    creme_abort("term-move-cursor!: expected two integers");
   }
   int64_t rows = args[0].as.i;
   int64_t cols = args[1].as.i;
@@ -249,7 +249,7 @@ static Value bi_term_clear_to_eol(VM *vm, Value *args, int nargs) {
  * flush-on-newline. */
 static Value bi_term_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("term-write!: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("term-write!: expected a string");
   fwrite(args[0].as.chars, 1, (size_t)args[0].aux, stdout);
   fflush(stdout);
   return v_nil();
@@ -274,13 +274,13 @@ static Value bi_stdin_tty(VM *vm, Value *args, int nargs) {
   return v_bool(isatty(STDIN_FILENO));
 }
 
-void cvm_register_term_builtins(VM *vm) {
-  cvm_register_builtin(vm, "term-raw-mode-enter!", bi_term_raw_mode_enter);
-  cvm_register_builtin(vm, "term-raw-mode-exit!", bi_term_raw_mode_exit);
-  cvm_register_builtin(vm, "term-read-key", bi_term_read_key);
-  cvm_register_builtin(vm, "term-move-cursor!", bi_term_move_cursor);
-  cvm_register_builtin(vm, "term-clear-to-eol!", bi_term_clear_to_eol);
-  cvm_register_builtin(vm, "term-write!", bi_term_write);
-  cvm_register_builtin(vm, "stdout-tty?", bi_stdout_tty);
-  cvm_register_builtin(vm, "stdin-tty?", bi_stdin_tty);
+void creme_register_term_builtins(VM *vm) {
+  creme_register_builtin(vm, "term-raw-mode-enter!", bi_term_raw_mode_enter);
+  creme_register_builtin(vm, "term-raw-mode-exit!", bi_term_raw_mode_exit);
+  creme_register_builtin(vm, "term-read-key", bi_term_read_key);
+  creme_register_builtin(vm, "term-move-cursor!", bi_term_move_cursor);
+  creme_register_builtin(vm, "term-clear-to-eol!", bi_term_clear_to_eol);
+  creme_register_builtin(vm, "term-write!", bi_term_write);
+  creme_register_builtin(vm, "stdout-tty?", bi_stdout_tty);
+  creme_register_builtin(vm, "stdin-tty?", bi_stdin_tty);
 }

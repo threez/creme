@@ -97,7 +97,7 @@ static RRBNode *rrb_make_leaf(Value *items, int n) {
 static int rrb_height_of(RRBNode *n) { return n->is_branch ? n->height : 0; }
 
 static RRBNode *rrb_as_branch(RRBNode *n) {
-  if (!n->is_branch) cvm_abort("RRB: expected a branch node");
+  if (!n->is_branch) creme_abort("RRB: expected a branch node");
   return n;
 }
 
@@ -445,47 +445,47 @@ static Value v_mutable_treelist(RRBNode *root) {
 }
 
 static RRBNode *tl_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_TREELIST) cvm_abort("%s: expected a treelist", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_TREELIST) creme_abort("%s: expected a treelist", who);
   return (RRBNode *)v.as.ptr;
 }
 
 static MutableTreelistState *mtl_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_MUTABLE_TREELIST) cvm_abort("%s: expected a mutable treelist", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_MUTABLE_TREELIST) creme_abort("%s: expected a mutable treelist", who);
   return (MutableTreelistState *)v.as.ptr;
 }
 
 static RRBNode *any_tree_arg(Value v, const char *who) {
   if (v.tag == T_BOX && v.aux == BOX_KIND_TREELIST) return (RRBNode *)v.as.ptr;
   if (v.tag == T_BOX && v.aux == BOX_KIND_MUTABLE_TREELIST) return ((MutableTreelistState *)v.as.ptr)->root;
-  cvm_abort("%s: expected a treelist", who);
+  creme_abort("%s: expected a treelist", who);
 }
 
 static int tl_size_arg(Value v, const char *who) {
-  if (v.tag != T_INT || v.as.i < 0) cvm_abort("%s: size must be a non-negative integer", who);
+  if (v.tag != T_INT || v.as.i < 0) creme_abort("%s: size must be a non-negative integer", who);
   return (int)v.as.i;
 }
 
 /* Index that must be within [0, size). */
 static int tl_bounds(Value v, int size, const char *who) {
-  if (v.tag != T_INT) cvm_abort("%s: expected an integer index", who);
+  if (v.tag != T_INT) creme_abort("%s: expected an integer index", who);
   int64_t i = v.as.i;
-  if (i < 0 || i >= size) cvm_abort("%s: index out of range for treelist of length %d", who, size);
+  if (i < 0 || i >= size) creme_abort("%s: index out of range for treelist of length %d", who, size);
   return (int)i;
 }
 
 /* Position that must be within [0, size] (insertion/boundary). */
 static int tl_bounds_incl(Value v, int size, const char *who) {
-  if (v.tag != T_INT) cvm_abort("%s: expected an integer position", who);
+  if (v.tag != T_INT) creme_abort("%s: expected an integer position", who);
   int64_t i = v.as.i;
-  if (i < 0 || i > size) cvm_abort("%s: position out of range for treelist of length %d", who, size);
+  if (i < 0 || i > size) creme_abort("%s: position out of range for treelist of length %d", who, size);
   return (int)i;
 }
 
 /* Count that must be within [0, size] (take/drop lengths). */
 static int tl_count(Value v, int size, const char *who) {
-  if (v.tag != T_INT) cvm_abort("%s: expected an integer count", who);
+  if (v.tag != T_INT) creme_abort("%s: expected an integer count", who);
   int64_t i = v.as.i;
-  if (i < 0 || i > size) cvm_abort("%s: count out of range for treelist of length %d", who, size);
+  if (i < 0 || i > size) creme_abort("%s: count out of range for treelist of length %d", who, size);
   return (int)i;
 }
 
@@ -498,10 +498,10 @@ static int find_index(VM *vm, RRBNode *root, Value needle, Value *eql) {
       Value call_args[2];
       call_args[0] = needle;
       call_args[1] = arr[i];
-      Value result = cvm_apply(vm, *eql, call_args, 2);
+      Value result = creme_apply(vm, *eql, call_args, 2);
       match = !v_falsy(result);
     } else {
-      match = cvm_equal(needle, arr[i]);
+      match = creme_equal(needle, arr[i]);
     }
     if (match) return i;
   }
@@ -517,7 +517,7 @@ static Value bi_treelist(VM *vm, Value *args, int nargs) {
 
 static Value bi_make_treelist(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("make-treelist: expected (size fill)");
+  if (nargs < 2) creme_abort("make-treelist: expected (size fill)");
   int n = tl_size_arg(args[0], "make-treelist");
   Value *items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
   for (int i = 0; i < n; i++) items[i] = args[1];
@@ -537,31 +537,31 @@ static Value *list_to_value_array(Value list, int *out_n) {
 
 static Value bi_list_to_treelist(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("list->treelist: expected a list");
+  if (nargs < 1) creme_abort("list->treelist: expected a list");
   int n;
   Value *arr = list_to_value_array(args[0], &n);
   return v_treelist(rrb_from_array(arr, n));
 }
 
 static Value bi_treelist_to_list(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("treelist->list: expected a treelist");
+  if (nargs < 1) creme_abort("treelist->list: expected a treelist");
   RRBNode *root = tl_arg(args[0], "treelist->list");
   Value *arr = rrb_to_array(root);
   Value r = v_nil();
-  for (int i = root->size - 1; i >= 0; i--) r = cvm_cons(vm, arr[i], r);
+  for (int i = root->size - 1; i >= 0; i--) r = creme_cons(vm, arr[i], r);
   return r;
 }
 
 static Value bi_vector_to_treelist(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_VECTOR) cvm_abort("vector->treelist: expected a vector");
+  if (nargs < 1 || args[0].tag != T_VECTOR) creme_abort("vector->treelist: expected a vector");
   Vector *vec = args[0].as.vec;
   return v_treelist(rrb_from_array(value_array_copy(vec->items, vec->len), vec->len));
 }
 
 static Value bi_treelist_to_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist->vector: expected a treelist");
+  if (nargs < 1) creme_abort("treelist->vector: expected a treelist");
   RRBNode *root = tl_arg(args[0], "treelist->vector");
   Vector *vec = GC_MALLOC(sizeof(Vector));
   vec->len = root->size;
@@ -571,95 +571,95 @@ static Value bi_treelist_to_vector(VM *vm, Value *args, int nargs) {
 
 static Value bi_treelist_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist?: expected an argument");
+  if (nargs < 1) creme_abort("treelist?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_TREELIST);
 }
 
 static Value bi_treelist_empty_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist-empty?: expected a treelist");
+  if (nargs < 1) creme_abort("treelist-empty?: expected a treelist");
   return v_bool(tl_arg(args[0], "treelist-empty?")->size == 0);
 }
 
 static Value bi_treelist_length(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist-length: expected a treelist");
+  if (nargs < 1) creme_abort("treelist-length: expected a treelist");
   return v_int(tl_arg(args[0], "treelist-length")->size);
 }
 
 static Value bi_treelist_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-ref: expected (treelist index)");
+  if (nargs < 2) creme_abort("treelist-ref: expected (treelist index)");
   RRBNode *t = tl_arg(args[0], "treelist-ref");
   return rrb_node_ref(t, tl_bounds(args[1], t->size, "treelist-ref"));
 }
 
 static Value bi_treelist_first(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist-first: expected a treelist");
+  if (nargs < 1) creme_abort("treelist-first: expected a treelist");
   RRBNode *t = tl_arg(args[0], "treelist-first");
-  if (t->size == 0) cvm_abort("treelist-first: empty treelist");
+  if (t->size == 0) creme_abort("treelist-first: empty treelist");
   return rrb_node_ref(t, 0);
 }
 
 static Value bi_treelist_last(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist-last: expected a treelist");
+  if (nargs < 1) creme_abort("treelist-last: expected a treelist");
   RRBNode *t = tl_arg(args[0], "treelist-last");
-  if (t->size == 0) cvm_abort("treelist-last: empty treelist");
+  if (t->size == 0) creme_abort("treelist-last: empty treelist");
   return rrb_node_ref(t, t->size - 1);
 }
 
 static Value bi_treelist_add(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-add: expected (treelist value)");
+  if (nargs < 2) creme_abort("treelist-add: expected (treelist value)");
   return v_treelist(tree_add(tl_arg(args[0], "treelist-add"), args[1]));
 }
 
 static Value bi_treelist_cons(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-cons: expected (treelist value)");
+  if (nargs < 2) creme_abort("treelist-cons: expected (treelist value)");
   return v_treelist(tree_cons(tl_arg(args[0], "treelist-cons"), args[1]));
 }
 
 static Value bi_treelist_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("treelist-set: expected (treelist index value)");
+  if (nargs < 3) creme_abort("treelist-set: expected (treelist index value)");
   RRBNode *t = tl_arg(args[0], "treelist-set");
   return v_treelist(rrb_node_set(t, tl_bounds(args[1], t->size, "treelist-set"), args[2]));
 }
 
 static Value bi_treelist_insert(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("treelist-insert: expected (treelist index value)");
+  if (nargs < 3) creme_abort("treelist-insert: expected (treelist index value)");
   RRBNode *t = tl_arg(args[0], "treelist-insert");
   return v_treelist(tree_insert(t, tl_bounds_incl(args[1], t->size, "treelist-insert"), args[2]));
 }
 
 static Value bi_treelist_delete(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-delete: expected (treelist index)");
+  if (nargs < 2) creme_abort("treelist-delete: expected (treelist index)");
   RRBNode *t = tl_arg(args[0], "treelist-delete");
   return v_treelist(tree_delete(t, tl_bounds(args[1], t->size, "treelist-delete")));
 }
 
 static Value bi_treelist_take(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-take: expected (treelist count)");
+  if (nargs < 2) creme_abort("treelist-take: expected (treelist count)");
   RRBNode *t = tl_arg(args[0], "treelist-take");
   return v_treelist(tree_take(t, tl_count(args[1], t->size, "treelist-take")));
 }
 
 static Value bi_treelist_drop(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-drop: expected (treelist count)");
+  if (nargs < 2) creme_abort("treelist-drop: expected (treelist count)");
   RRBNode *t = tl_arg(args[0], "treelist-drop");
   return v_treelist(tree_drop(t, tl_count(args[1], t->size, "treelist-drop")));
 }
 
 static Value bi_treelist_take_right(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-take-right: expected (treelist count)");
+  if (nargs < 2) creme_abort("treelist-take-right: expected (treelist count)");
   RRBNode *t = tl_arg(args[0], "treelist-take-right");
   int n = tl_count(args[1], t->size, "treelist-take-right");
   return v_treelist(tree_drop(t, t->size - n));
@@ -667,7 +667,7 @@ static Value bi_treelist_take_right(VM *vm, Value *args, int nargs) {
 
 static Value bi_treelist_drop_right(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("treelist-drop-right: expected (treelist count)");
+  if (nargs < 2) creme_abort("treelist-drop-right: expected (treelist count)");
   RRBNode *t = tl_arg(args[0], "treelist-drop-right");
   int n = tl_count(args[1], t->size, "treelist-drop-right");
   return v_treelist(tree_take(t, t->size - n));
@@ -675,19 +675,19 @@ static Value bi_treelist_drop_right(VM *vm, Value *args, int nargs) {
 
 static Value bi_treelist_sublist(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("treelist-sublist: expected (treelist from to)");
+  if (nargs < 3) creme_abort("treelist-sublist: expected (treelist from to)");
   RRBNode *t = tl_arg(args[0], "treelist-sublist");
   int from = tl_count(args[1], t->size, "treelist-sublist");
   int to = tl_count(args[2], t->size, "treelist-sublist");
-  if (from > to) cvm_abort("treelist-sublist: bad range");
+  if (from > to) creme_abort("treelist-sublist: bad range");
   return v_treelist(tree_sublist(t, from, to));
 }
 
 static Value bi_treelist_rest(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist-rest: expected a treelist");
+  if (nargs < 1) creme_abort("treelist-rest: expected a treelist");
   RRBNode *t = tl_arg(args[0], "treelist-rest");
-  if (t->size == 0) cvm_abort("treelist-rest: empty treelist");
+  if (t->size == 0) creme_abort("treelist-rest: empty treelist");
   return v_treelist(tree_drop(t, 1));
 }
 
@@ -700,16 +700,16 @@ static Value bi_treelist_append(VM *vm, Value *args, int nargs) {
 
 static Value bi_treelist_reverse(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist-reverse: expected a treelist");
+  if (nargs < 1) creme_abort("treelist-reverse: expected a treelist");
   return v_treelist(tree_reverse(tl_arg(args[0], "treelist-reverse")));
 }
 
 static Value bi_treelist_map(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("treelist-map: expected (treelist proc)");
+  if (nargs < 2) creme_abort("treelist-map: expected (treelist proc)");
   RRBNode *t = tl_arg(args[0], "treelist-map");
   Value *arr = rrb_to_array(t);
   Value *mapped = GC_MALLOC(sizeof(Value) * (size_t)(t->size ? t->size : 1));
-  for (int i = 0; i < t->size; i++) mapped[i] = cvm_apply(vm, args[1], arr + i, 1);
+  for (int i = 0; i < t->size; i++) mapped[i] = creme_apply(vm, args[1], arr + i, 1);
   return v_treelist(rrb_from_array(mapped, t->size));
 }
 
@@ -718,22 +718,22 @@ static Value bi_treelist_map(VM *vm, Value *args, int nargs) {
  * native's own arg order exactly (base treelist.cr's own
  * treelist_filter: `keep = proc_arg(args[0]...); t = tl_arg(args[1]...)`). */
 static Value bi_treelist_filter(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("treelist-filter: expected (proc treelist)");
+  if (nargs < 2) creme_abort("treelist-filter: expected (proc treelist)");
   RRBNode *t = tl_arg(args[1], "treelist-filter");
   Value *arr = rrb_to_array(t);
   Value *kept = GC_MALLOC(sizeof(Value) * (size_t)(t->size ? t->size : 1));
   int n = 0;
   for (int i = 0; i < t->size; i++) {
-    if (!v_falsy(cvm_apply(vm, args[0], arr + i, 1))) kept[n++] = arr[i];
+    if (!v_falsy(creme_apply(vm, args[0], arr + i, 1))) kept[n++] = arr[i];
   }
   return v_treelist(rrb_from_array(kept, n));
 }
 
 static Value bi_treelist_for_each(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("treelist-for-each: expected (treelist proc)");
+  if (nargs < 2) creme_abort("treelist-for-each: expected (treelist proc)");
   RRBNode *t = tl_arg(args[0], "treelist-for-each");
   Value *arr = rrb_to_array(t);
-  for (int i = 0; i < t->size; i++) cvm_apply(vm, args[1], arr + i, 1);
+  for (int i = 0; i < t->size; i++) creme_apply(vm, args[1], arr + i, 1);
   return v_nil();
 }
 
@@ -751,7 +751,7 @@ static void tl_insertion_sort(VM *vm, Value *arr, int n, Value less) {
       Value cmp_args[2];
       cmp_args[0] = key;
       cmp_args[1] = arr[j];
-      if (v_falsy(cvm_apply(vm, less, cmp_args, 2))) break;
+      if (v_falsy(creme_apply(vm, less, cmp_args, 2))) break;
       arr[j + 1] = arr[j];
       j--;
     }
@@ -760,7 +760,7 @@ static void tl_insertion_sort(VM *vm, Value *arr, int n, Value less) {
 }
 
 static Value bi_treelist_sort(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("treelist-sort: expected (treelist less)");
+  if (nargs < 2) creme_abort("treelist-sort: expected (treelist less)");
   RRBNode *t = tl_arg(args[0], "treelist-sort");
   Value *arr = value_array_copy(rrb_to_array(t), t->size);
   tl_insertion_sort(vm, arr, t->size, args[1]);
@@ -768,14 +768,14 @@ static Value bi_treelist_sort(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_treelist_member_p(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("treelist-member?: expected (treelist needle [eql])");
+  if (nargs < 2) creme_abort("treelist-member?: expected (treelist needle [eql])");
   RRBNode *t = tl_arg(args[0], "treelist-member?");
   Value *eql = nargs >= 3 ? &args[2] : NULL;
   return v_bool(find_index(vm, t, args[1], eql) >= 0);
 }
 
 static Value bi_treelist_index_of(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("treelist-index-of: expected (treelist needle [eql])");
+  if (nargs < 2) creme_abort("treelist-index-of: expected (treelist needle [eql])");
   RRBNode *t = tl_arg(args[0], "treelist-index-of");
   Value *eql = nargs >= 3 ? &args[2] : NULL;
   int idx = find_index(vm, t, args[1], eql);
@@ -783,11 +783,11 @@ static Value bi_treelist_index_of(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_treelist_find(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("treelist-find: expected (treelist pred)");
+  if (nargs < 2) creme_abort("treelist-find: expected (treelist pred)");
   RRBNode *t = tl_arg(args[0], "treelist-find");
   Value *arr = rrb_to_array(t);
   for (int i = 0; i < t->size; i++) {
-    if (!v_falsy(cvm_apply(vm, args[1], arr + i, 1))) return arr[i];
+    if (!v_falsy(creme_apply(vm, args[1], arr + i, 1))) return arr[i];
   }
   return v_bool(0);
 }
@@ -801,7 +801,7 @@ static Value bi_mutable_treelist(VM *vm, Value *args, int nargs) {
 
 static Value bi_make_mutable_treelist(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("make-mutable-treelist: expected a size");
+  if (nargs < 1) creme_abort("make-mutable-treelist: expected a size");
   int n = tl_size_arg(args[0], "make-mutable-treelist");
   Value fill = nargs >= 2 ? args[1] : v_bool(0);
   Value *items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
@@ -811,7 +811,7 @@ static Value bi_make_mutable_treelist(VM *vm, Value *args, int nargs) {
 
 static Value bi_list_to_mutable_treelist(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("list->mutable-treelist: expected a list");
+  if (nargs < 1) creme_abort("list->mutable-treelist: expected a list");
   int n;
   Value *arr = list_to_value_array(args[0], &n);
   return v_mutable_treelist(rrb_from_array(arr, n));
@@ -819,7 +819,7 @@ static Value bi_list_to_mutable_treelist(VM *vm, Value *args, int nargs) {
 
 static Value bi_vector_to_mutable_treelist(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_VECTOR) cvm_abort("vector->mutable-treelist: expected a vector");
+  if (nargs < 1 || args[0].tag != T_VECTOR) creme_abort("vector->mutable-treelist: expected a vector");
   Vector *vec = args[0].as.vec;
   return v_mutable_treelist(rrb_from_array(value_array_copy(vec->items, vec->len), vec->len));
 }
@@ -828,34 +828,34 @@ static Value bi_vector_to_mutable_treelist(VM *vm, Value *args, int nargs) {
  * share the same root (persistent/immutable), matching native exactly. */
 static Value bi_treelist_copy(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("treelist-copy: expected a treelist");
+  if (nargs < 1) creme_abort("treelist-copy: expected a treelist");
   return v_mutable_treelist(tl_arg(args[0], "treelist-copy"));
 }
 
 static Value bi_mutable_treelist_copy(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist-copy: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist-copy: expected a mutable treelist");
   return v_mutable_treelist(mtl_arg(args[0], "mutable-treelist-copy")->root);
 }
 
 static Value bi_mutable_treelist_snapshot(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist-snapshot: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist-snapshot: expected a mutable treelist");
   return v_treelist(mtl_arg(args[0], "mutable-treelist-snapshot")->root);
 }
 
 static Value bi_mutable_treelist_to_list(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("mutable-treelist->list: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist->list: expected a mutable treelist");
   RRBNode *root = mtl_arg(args[0], "mutable-treelist->list")->root;
   Value *arr = rrb_to_array(root);
   Value r = v_nil();
-  for (int i = root->size - 1; i >= 0; i--) r = cvm_cons(vm, arr[i], r);
+  for (int i = root->size - 1; i >= 0; i--) r = creme_cons(vm, arr[i], r);
   return r;
 }
 
 static Value bi_mutable_treelist_to_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist->vector: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist->vector: expected a mutable treelist");
   RRBNode *root = mtl_arg(args[0], "mutable-treelist->vector")->root;
   Vector *vec = GC_MALLOC(sizeof(Vector));
   vec->len = root->size;
@@ -865,48 +865,48 @@ static Value bi_mutable_treelist_to_vector(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist?: expected an argument");
+  if (nargs < 1) creme_abort("mutable-treelist?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_MUTABLE_TREELIST);
 }
 
 static Value bi_mutable_treelist_empty_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist-empty?: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist-empty?: expected a mutable treelist");
   return v_bool(mtl_arg(args[0], "mutable-treelist-empty?")->root->size == 0);
 }
 
 static Value bi_mutable_treelist_length(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist-length: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist-length: expected a mutable treelist");
   return v_int(mtl_arg(args[0], "mutable-treelist-length")->root->size);
 }
 
 static Value bi_mutable_treelist_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-ref: expected (treelist index)");
+  if (nargs < 2) creme_abort("mutable-treelist-ref: expected (treelist index)");
   RRBNode *t = mtl_arg(args[0], "mutable-treelist-ref")->root;
   return rrb_node_ref(t, tl_bounds(args[1], t->size, "mutable-treelist-ref"));
 }
 
 static Value bi_mutable_treelist_first(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist-first: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist-first: expected a mutable treelist");
   RRBNode *t = mtl_arg(args[0], "mutable-treelist-first")->root;
-  if (t->size == 0) cvm_abort("mutable-treelist-first: empty treelist");
+  if (t->size == 0) creme_abort("mutable-treelist-first: empty treelist");
   return rrb_node_ref(t, 0);
 }
 
 static Value bi_mutable_treelist_last(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist-last: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist-last: expected a mutable treelist");
   RRBNode *t = mtl_arg(args[0], "mutable-treelist-last")->root;
-  if (t->size == 0) cvm_abort("mutable-treelist-last: empty treelist");
+  if (t->size == 0) creme_abort("mutable-treelist-last: empty treelist");
   return rrb_node_ref(t, t->size - 1);
 }
 
 static Value bi_mutable_treelist_add_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-add!: expected (treelist value)");
+  if (nargs < 2) creme_abort("mutable-treelist-add!: expected (treelist value)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-add!");
   m->root = tree_add(m->root, args[1]);
   return v_nil();
@@ -914,7 +914,7 @@ static Value bi_mutable_treelist_add_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_cons_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-cons!: expected (treelist value)");
+  if (nargs < 2) creme_abort("mutable-treelist-cons!: expected (treelist value)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-cons!");
   m->root = tree_cons(m->root, args[1]);
   return v_nil();
@@ -922,7 +922,7 @@ static Value bi_mutable_treelist_cons_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_set_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("mutable-treelist-set!: expected (treelist index value)");
+  if (nargs < 3) creme_abort("mutable-treelist-set!: expected (treelist index value)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-set!");
   m->root = rrb_node_set(m->root, tl_bounds(args[1], m->root->size, "mutable-treelist-set!"), args[2]);
   return v_nil();
@@ -930,7 +930,7 @@ static Value bi_mutable_treelist_set_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_insert_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("mutable-treelist-insert!: expected (treelist index value)");
+  if (nargs < 3) creme_abort("mutable-treelist-insert!: expected (treelist index value)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-insert!");
   m->root = tree_insert(m->root, tl_bounds_incl(args[1], m->root->size, "mutable-treelist-insert!"), args[2]);
   return v_nil();
@@ -938,7 +938,7 @@ static Value bi_mutable_treelist_insert_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_delete_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-delete!: expected (treelist index)");
+  if (nargs < 2) creme_abort("mutable-treelist-delete!: expected (treelist index)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-delete!");
   m->root = tree_delete(m->root, tl_bounds(args[1], m->root->size, "mutable-treelist-delete!"));
   return v_nil();
@@ -946,7 +946,7 @@ static Value bi_mutable_treelist_delete_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_append_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-append!: expected (treelist other)");
+  if (nargs < 2) creme_abort("mutable-treelist-append!: expected (treelist other)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-append!");
   m->root = tree_concat(m->root, any_tree_arg(args[1], "mutable-treelist-append!"));
   return v_nil();
@@ -954,7 +954,7 @@ static Value bi_mutable_treelist_append_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_prepend_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-prepend!: expected (treelist other)");
+  if (nargs < 2) creme_abort("mutable-treelist-prepend!: expected (treelist other)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-prepend!");
   m->root = tree_concat(any_tree_arg(args[1], "mutable-treelist-prepend!"), m->root);
   return v_nil();
@@ -962,7 +962,7 @@ static Value bi_mutable_treelist_prepend_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_take_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-take!: expected (treelist count)");
+  if (nargs < 2) creme_abort("mutable-treelist-take!: expected (treelist count)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-take!");
   m->root = tree_take(m->root, tl_count(args[1], m->root->size, "mutable-treelist-take!"));
   return v_nil();
@@ -970,7 +970,7 @@ static Value bi_mutable_treelist_take_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_drop_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-drop!: expected (treelist count)");
+  if (nargs < 2) creme_abort("mutable-treelist-drop!: expected (treelist count)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-drop!");
   m->root = tree_drop(m->root, tl_count(args[1], m->root->size, "mutable-treelist-drop!"));
   return v_nil();
@@ -978,7 +978,7 @@ static Value bi_mutable_treelist_drop_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_mutable_treelist_take_right_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-take-right!: expected (treelist count)");
+  if (nargs < 2) creme_abort("mutable-treelist-take-right!: expected (treelist count)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-take-right!");
   int n = tl_count(args[1], m->root->size, "mutable-treelist-take-right!");
   m->root = tree_drop(m->root, m->root->size - n);
@@ -987,7 +987,7 @@ static Value bi_mutable_treelist_take_right_bang(VM *vm, Value *args, int nargs)
 
 static Value bi_mutable_treelist_drop_right_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mutable-treelist-drop-right!: expected (treelist count)");
+  if (nargs < 2) creme_abort("mutable-treelist-drop-right!: expected (treelist count)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-drop-right!");
   int n = tl_count(args[1], m->root->size, "mutable-treelist-drop-right!");
   m->root = tree_take(m->root, m->root->size - n);
@@ -996,36 +996,36 @@ static Value bi_mutable_treelist_drop_right_bang(VM *vm, Value *args, int nargs)
 
 static Value bi_mutable_treelist_sublist_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("mutable-treelist-sublist!: expected (treelist from to)");
+  if (nargs < 3) creme_abort("mutable-treelist-sublist!: expected (treelist from to)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-sublist!");
   int from = tl_count(args[1], m->root->size, "mutable-treelist-sublist!");
   int to = tl_count(args[2], m->root->size, "mutable-treelist-sublist!");
-  if (from > to) cvm_abort("mutable-treelist-sublist!: bad range");
+  if (from > to) creme_abort("mutable-treelist-sublist!: bad range");
   m->root = tree_sublist(m->root, from, to);
   return v_nil();
 }
 
 static Value bi_mutable_treelist_reverse_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mutable-treelist-reverse!: expected a mutable treelist");
+  if (nargs < 1) creme_abort("mutable-treelist-reverse!: expected a mutable treelist");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-reverse!");
   m->root = tree_reverse(m->root);
   return v_nil();
 }
 
 static Value bi_mutable_treelist_map_bang(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("mutable-treelist-map!: expected (treelist proc)");
+  if (nargs < 2) creme_abort("mutable-treelist-map!: expected (treelist proc)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-map!");
   Value *arr = rrb_to_array(m->root);
   int n = m->root->size;
   Value *mapped = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-  for (int i = 0; i < n; i++) mapped[i] = cvm_apply(vm, args[1], arr + i, 1);
+  for (int i = 0; i < n; i++) mapped[i] = creme_apply(vm, args[1], arr + i, 1);
   m->root = rrb_from_array(mapped, n);
   return v_nil();
 }
 
 static Value bi_mutable_treelist_sort_bang(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("mutable-treelist-sort!: expected (treelist less)");
+  if (nargs < 2) creme_abort("mutable-treelist-sort!: expected (treelist less)");
   MutableTreelistState *m = mtl_arg(args[0], "mutable-treelist-sort!");
   Value *arr = value_array_copy(rrb_to_array(m->root), m->root->size);
   tl_insertion_sort(vm, arr, m->root->size, args[1]);
@@ -1037,102 +1037,102 @@ static Value bi_mutable_treelist_sort_bang(VM *vm, Value *args, int nargs) {
  * read-only traversal, so it's not a destructive op despite living
  * alongside the `!`-suffixed mutable ops here). */
 static Value bi_mutable_treelist_for_each(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("mutable-treelist-for-each: expected (treelist proc)");
+  if (nargs < 2) creme_abort("mutable-treelist-for-each: expected (treelist proc)");
   RRBNode *t = mtl_arg(args[0], "mutable-treelist-for-each")->root;
   Value *arr = rrb_to_array(t);
-  for (int i = 0; i < t->size; i++) cvm_apply(vm, args[1], arr + i, 1);
+  for (int i = 0; i < t->size; i++) creme_apply(vm, args[1], arr + i, 1);
   return v_nil();
 }
 
 static Value bi_mutable_treelist_member_p(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("mutable-treelist-member?: expected (treelist needle [eql])");
+  if (nargs < 2) creme_abort("mutable-treelist-member?: expected (treelist needle [eql])");
   RRBNode *t = mtl_arg(args[0], "mutable-treelist-member?")->root;
   Value *eql = nargs >= 3 ? &args[2] : NULL;
   return v_bool(find_index(vm, t, args[1], eql) >= 0);
 }
 
 static Value bi_mutable_treelist_find(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("mutable-treelist-find: expected (treelist pred)");
+  if (nargs < 2) creme_abort("mutable-treelist-find: expected (treelist pred)");
   RRBNode *t = mtl_arg(args[0], "mutable-treelist-find")->root;
   Value *arr = rrb_to_array(t);
   for (int i = 0; i < t->size; i++) {
-    if (!v_falsy(cvm_apply(vm, args[1], arr + i, 1))) return arr[i];
+    if (!v_falsy(creme_apply(vm, args[1], arr + i, 1))) return arr[i];
   }
   return v_bool(0);
 }
 
-void cvm_register_treelist_builtins(VM *vm) {
-  cvm_register_builtin(vm, "treelist", bi_treelist);
-  cvm_register_builtin(vm, "make-treelist", bi_make_treelist);
-  cvm_register_builtin(vm, "list->treelist", bi_list_to_treelist);
-  cvm_register_builtin(vm, "treelist->list", bi_treelist_to_list);
-  cvm_register_builtin(vm, "vector->treelist", bi_vector_to_treelist);
-  cvm_register_builtin(vm, "treelist->vector", bi_treelist_to_vector);
-  cvm_register_builtin(vm, "treelist?", bi_treelist_p);
-  cvm_register_builtin(vm, "treelist-empty?", bi_treelist_empty_p);
-  cvm_register_builtin(vm, "treelist-length", bi_treelist_length);
-  cvm_register_builtin(vm, "treelist-ref", bi_treelist_ref);
-  cvm_register_builtin(vm, "treelist-first", bi_treelist_first);
-  cvm_register_builtin(vm, "treelist-last", bi_treelist_last);
-  cvm_register_builtin(vm, "treelist-add", bi_treelist_add);
-  cvm_register_builtin(vm, "treelist-cons", bi_treelist_cons);
-  cvm_register_builtin(vm, "treelist-set", bi_treelist_set);
-  cvm_register_builtin(vm, "treelist-insert", bi_treelist_insert);
-  cvm_register_builtin(vm, "treelist-delete", bi_treelist_delete);
-  cvm_register_builtin(vm, "treelist-take", bi_treelist_take);
-  cvm_register_builtin(vm, "treelist-drop", bi_treelist_drop);
-  cvm_register_builtin(vm, "treelist-take-right", bi_treelist_take_right);
-  cvm_register_builtin(vm, "treelist-drop-right", bi_treelist_drop_right);
-  cvm_register_builtin(vm, "treelist-sublist", bi_treelist_sublist);
-  cvm_register_builtin(vm, "treelist-rest", bi_treelist_rest);
-  cvm_register_builtin(vm, "treelist-append", bi_treelist_append);
-  cvm_register_builtin(vm, "treelist-reverse", bi_treelist_reverse);
-  cvm_register_builtin(vm, "treelist-map", bi_treelist_map);
-  cvm_register_builtin(vm, "treelist-filter", bi_treelist_filter);
-  cvm_register_builtin(vm, "treelist-for-each", bi_treelist_for_each);
-  cvm_register_builtin(vm, "treelist-sort", bi_treelist_sort);
-  cvm_register_builtin(vm, "treelist-member?", bi_treelist_member_p);
-  cvm_register_builtin(vm, "treelist-index-of", bi_treelist_index_of);
-  cvm_register_builtin(vm, "treelist-find", bi_treelist_find);
+void creme_register_treelist_builtins(VM *vm) {
+  creme_register_builtin(vm, "treelist", bi_treelist);
+  creme_register_builtin(vm, "make-treelist", bi_make_treelist);
+  creme_register_builtin(vm, "list->treelist", bi_list_to_treelist);
+  creme_register_builtin(vm, "treelist->list", bi_treelist_to_list);
+  creme_register_builtin(vm, "vector->treelist", bi_vector_to_treelist);
+  creme_register_builtin(vm, "treelist->vector", bi_treelist_to_vector);
+  creme_register_builtin(vm, "treelist?", bi_treelist_p);
+  creme_register_builtin(vm, "treelist-empty?", bi_treelist_empty_p);
+  creme_register_builtin(vm, "treelist-length", bi_treelist_length);
+  creme_register_builtin(vm, "treelist-ref", bi_treelist_ref);
+  creme_register_builtin(vm, "treelist-first", bi_treelist_first);
+  creme_register_builtin(vm, "treelist-last", bi_treelist_last);
+  creme_register_builtin(vm, "treelist-add", bi_treelist_add);
+  creme_register_builtin(vm, "treelist-cons", bi_treelist_cons);
+  creme_register_builtin(vm, "treelist-set", bi_treelist_set);
+  creme_register_builtin(vm, "treelist-insert", bi_treelist_insert);
+  creme_register_builtin(vm, "treelist-delete", bi_treelist_delete);
+  creme_register_builtin(vm, "treelist-take", bi_treelist_take);
+  creme_register_builtin(vm, "treelist-drop", bi_treelist_drop);
+  creme_register_builtin(vm, "treelist-take-right", bi_treelist_take_right);
+  creme_register_builtin(vm, "treelist-drop-right", bi_treelist_drop_right);
+  creme_register_builtin(vm, "treelist-sublist", bi_treelist_sublist);
+  creme_register_builtin(vm, "treelist-rest", bi_treelist_rest);
+  creme_register_builtin(vm, "treelist-append", bi_treelist_append);
+  creme_register_builtin(vm, "treelist-reverse", bi_treelist_reverse);
+  creme_register_builtin(vm, "treelist-map", bi_treelist_map);
+  creme_register_builtin(vm, "treelist-filter", bi_treelist_filter);
+  creme_register_builtin(vm, "treelist-for-each", bi_treelist_for_each);
+  creme_register_builtin(vm, "treelist-sort", bi_treelist_sort);
+  creme_register_builtin(vm, "treelist-member?", bi_treelist_member_p);
+  creme_register_builtin(vm, "treelist-index-of", bi_treelist_index_of);
+  creme_register_builtin(vm, "treelist-find", bi_treelist_find);
 
-  cvm_register_builtin(vm, "mutable-treelist", bi_mutable_treelist);
-  cvm_register_builtin(vm, "make-mutable-treelist", bi_make_mutable_treelist);
-  cvm_register_builtin(vm, "list->mutable-treelist", bi_list_to_mutable_treelist);
-  cvm_register_builtin(vm, "vector->mutable-treelist", bi_vector_to_mutable_treelist);
-  cvm_register_builtin(vm, "treelist-copy", bi_treelist_copy);
-  cvm_register_builtin(vm, "mutable-treelist-copy", bi_mutable_treelist_copy);
-  cvm_register_builtin(vm, "mutable-treelist-snapshot", bi_mutable_treelist_snapshot);
-  cvm_register_builtin(vm, "mutable-treelist->list", bi_mutable_treelist_to_list);
-  cvm_register_builtin(vm, "mutable-treelist->vector", bi_mutable_treelist_to_vector);
-  cvm_register_builtin(vm, "mutable-treelist?", bi_mutable_treelist_p);
-  cvm_register_builtin(vm, "mutable-treelist-empty?", bi_mutable_treelist_empty_p);
-  cvm_register_builtin(vm, "mutable-treelist-length", bi_mutable_treelist_length);
-  cvm_register_builtin(vm, "mutable-treelist-ref", bi_mutable_treelist_ref);
-  cvm_register_builtin(vm, "mutable-treelist-first", bi_mutable_treelist_first);
-  cvm_register_builtin(vm, "mutable-treelist-last", bi_mutable_treelist_last);
-  cvm_register_builtin(vm, "mutable-treelist-add!", bi_mutable_treelist_add_bang);
-  cvm_register_builtin(vm, "mutable-treelist-cons!", bi_mutable_treelist_cons_bang);
-  cvm_register_builtin(vm, "mutable-treelist-set!", bi_mutable_treelist_set_bang);
-  cvm_register_builtin(vm, "mutable-treelist-insert!", bi_mutable_treelist_insert_bang);
-  cvm_register_builtin(vm, "mutable-treelist-delete!", bi_mutable_treelist_delete_bang);
-  cvm_register_builtin(vm, "mutable-treelist-append!", bi_mutable_treelist_append_bang);
-  cvm_register_builtin(vm, "mutable-treelist-prepend!", bi_mutable_treelist_prepend_bang);
-  cvm_register_builtin(vm, "mutable-treelist-take!", bi_mutable_treelist_take_bang);
-  cvm_register_builtin(vm, "mutable-treelist-drop!", bi_mutable_treelist_drop_bang);
-  cvm_register_builtin(vm, "mutable-treelist-take-right!", bi_mutable_treelist_take_right_bang);
-  cvm_register_builtin(vm, "mutable-treelist-drop-right!", bi_mutable_treelist_drop_right_bang);
-  cvm_register_builtin(vm, "mutable-treelist-sublist!", bi_mutable_treelist_sublist_bang);
-  cvm_register_builtin(vm, "mutable-treelist-reverse!", bi_mutable_treelist_reverse_bang);
-  cvm_register_builtin(vm, "mutable-treelist-map!", bi_mutable_treelist_map_bang);
-  cvm_register_builtin(vm, "mutable-treelist-sort!", bi_mutable_treelist_sort_bang);
-  cvm_register_builtin(vm, "mutable-treelist-for-each", bi_mutable_treelist_for_each);
-  cvm_register_builtin(vm, "mutable-treelist-member?", bi_mutable_treelist_member_p);
-  cvm_register_builtin(vm, "mutable-treelist-find", bi_mutable_treelist_find);
+  creme_register_builtin(vm, "mutable-treelist", bi_mutable_treelist);
+  creme_register_builtin(vm, "make-mutable-treelist", bi_make_mutable_treelist);
+  creme_register_builtin(vm, "list->mutable-treelist", bi_list_to_mutable_treelist);
+  creme_register_builtin(vm, "vector->mutable-treelist", bi_vector_to_mutable_treelist);
+  creme_register_builtin(vm, "treelist-copy", bi_treelist_copy);
+  creme_register_builtin(vm, "mutable-treelist-copy", bi_mutable_treelist_copy);
+  creme_register_builtin(vm, "mutable-treelist-snapshot", bi_mutable_treelist_snapshot);
+  creme_register_builtin(vm, "mutable-treelist->list", bi_mutable_treelist_to_list);
+  creme_register_builtin(vm, "mutable-treelist->vector", bi_mutable_treelist_to_vector);
+  creme_register_builtin(vm, "mutable-treelist?", bi_mutable_treelist_p);
+  creme_register_builtin(vm, "mutable-treelist-empty?", bi_mutable_treelist_empty_p);
+  creme_register_builtin(vm, "mutable-treelist-length", bi_mutable_treelist_length);
+  creme_register_builtin(vm, "mutable-treelist-ref", bi_mutable_treelist_ref);
+  creme_register_builtin(vm, "mutable-treelist-first", bi_mutable_treelist_first);
+  creme_register_builtin(vm, "mutable-treelist-last", bi_mutable_treelist_last);
+  creme_register_builtin(vm, "mutable-treelist-add!", bi_mutable_treelist_add_bang);
+  creme_register_builtin(vm, "mutable-treelist-cons!", bi_mutable_treelist_cons_bang);
+  creme_register_builtin(vm, "mutable-treelist-set!", bi_mutable_treelist_set_bang);
+  creme_register_builtin(vm, "mutable-treelist-insert!", bi_mutable_treelist_insert_bang);
+  creme_register_builtin(vm, "mutable-treelist-delete!", bi_mutable_treelist_delete_bang);
+  creme_register_builtin(vm, "mutable-treelist-append!", bi_mutable_treelist_append_bang);
+  creme_register_builtin(vm, "mutable-treelist-prepend!", bi_mutable_treelist_prepend_bang);
+  creme_register_builtin(vm, "mutable-treelist-take!", bi_mutable_treelist_take_bang);
+  creme_register_builtin(vm, "mutable-treelist-drop!", bi_mutable_treelist_drop_bang);
+  creme_register_builtin(vm, "mutable-treelist-take-right!", bi_mutable_treelist_take_right_bang);
+  creme_register_builtin(vm, "mutable-treelist-drop-right!", bi_mutable_treelist_drop_right_bang);
+  creme_register_builtin(vm, "mutable-treelist-sublist!", bi_mutable_treelist_sublist_bang);
+  creme_register_builtin(vm, "mutable-treelist-reverse!", bi_mutable_treelist_reverse_bang);
+  creme_register_builtin(vm, "mutable-treelist-map!", bi_mutable_treelist_map_bang);
+  creme_register_builtin(vm, "mutable-treelist-sort!", bi_mutable_treelist_sort_bang);
+  creme_register_builtin(vm, "mutable-treelist-for-each", bi_mutable_treelist_for_each);
+  creme_register_builtin(vm, "mutable-treelist-member?", bi_mutable_treelist_member_p);
+  creme_register_builtin(vm, "mutable-treelist-find", bi_mutable_treelist_find);
 
   /* empty-treelist is a value constant, not a procedure -- interned
    * directly into the global table, mirroring (creme math)'s own pi/e
    * (builtins.c) rather than a BuiltinFn. */
-  int slot = cvm_global_intern(vm, "empty-treelist", 14);
+  int slot = creme_global_intern(vm, "empty-treelist", 14);
   vm->globals[slot].value = v_treelist(rrb_empty_leaf());
   vm->globals[slot].bound = 1;
 }

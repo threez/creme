@@ -6,11 +6,11 @@
  * loop can call these regardless of which backend (icecreme or native/
  * self-hosted Crystal) it's running under. See term.c's own header
  * comment for implementation notes. */
-#ifndef CVM_TERM_H
-#define CVM_TERM_H
+#ifndef CREME_TERM_H
+#define CREME_TERM_H
 
 #include "vm.h"
 
-void cvm_register_term_builtins(VM *vm);
+void creme_register_term_builtins(VM *vm);
 
 #endif

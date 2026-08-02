@@ -34,12 +34,12 @@
  * allocation failure instead of an unchecked NULL deref. */
 static void *xmalloc(size_t n) {
   void *p = malloc(n);
-  if (!p) cvm_abort("out of memory (requested %zu bytes)", n);
+  if (!p) creme_abort("out of memory (requested %zu bytes)", n);
   return p;
 }
 static void *xrealloc(void *old, size_t n) {
   void *p = realloc(old, n);
-  if (!p) cvm_abort("out of memory (requested %zu bytes)", n);
+  if (!p) creme_abort("out of memory (requested %zu bytes)", n);
   return p;
 }
 
@@ -53,7 +53,7 @@ static void port_buf_grow(Port *p, int extra) {
 
 static Value bi_make_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("make-vector: expected a length");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-vector: expected a length");
   int64_t n = args[0].as.i;
   Value fill = nargs >= 2 ? args[1] : v_bool(0);
   Vector *vec = GC_MALLOC(sizeof(Vector));
@@ -65,10 +65,10 @@ static Value bi_make_vector(VM *vm, Value *args, int nargs) {
 
 static Value bi_make_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("make-bytevector: expected a length");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-bytevector: expected a length");
   int64_t n = args[0].as.i;
   int64_t fill = nargs >= 2 && args[1].tag == T_INT ? args[1].as.i : 0;
-  if (fill < 0 || fill > 255) cvm_abort("make-bytevector: fill value out of byte range");
+  if (fill < 0 || fill > 255) creme_abort("make-bytevector: fill value out of byte range");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
   bv->len = (int)n;
   bv->bytes = GC_MALLOC((size_t)(n ? n : 1));
@@ -82,7 +82,7 @@ static Value bi_bytevector(VM *vm, Value *args, int nargs) {
   bv->len = nargs;
   bv->bytes = GC_MALLOC((size_t)(nargs ? nargs : 1));
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_INT || args[i].as.i < 0 || args[i].as.i > 255) cvm_abort("bytevector: byte out of range");
+    if (args[i].tag != T_INT || args[i].as.i < 0 || args[i].as.i > 255) creme_abort("bytevector: byte out of range");
     bv->bytes[i] = (unsigned char)args[i].as.i;
   }
   return v_bytevector(bv);
@@ -91,7 +91,7 @@ static Value bi_bytevector(VM *vm, Value *args, int nargs) {
 static Value bi_bytevector_length(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)nargs;
-  if (args[0].tag != T_BYTEVECTOR) cvm_abort("bytevector-length: not a bytevector");
+  if (args[0].tag != T_BYTEVECTOR) creme_abort("bytevector-length: not a bytevector");
   return v_int(args[0].as.bv->len);
 }
 
@@ -108,12 +108,12 @@ static Value bi_bytevector_p(VM *vm, Value *args, int nargs) {
 static void byte_range_args(Value *args, int nargs, int start_idx, int len, int *first, int *last) {
   *first = (nargs > start_idx && args[start_idx].tag == T_INT) ? (int)args[start_idx].as.i : 0;
   *last = (nargs > start_idx + 1 && args[start_idx + 1].tag == T_INT) ? (int)args[start_idx + 1].as.i : len;
-  if (*first < 0 || *last > len || *first > *last) cvm_abort("byte range out of bounds");
+  if (*first < 0 || *last > len || *first > *last) creme_abort("byte range out of bounds");
 }
 
 static Value bi_bytevector_copy(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("bytevector-copy: expected a bytevector");
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) creme_abort("bytevector-copy: expected a bytevector");
   Bytevector *src = args[0].as.bv;
   int first, last;
   byte_range_args(args, nargs, 1, src->len, &first, &last);
@@ -127,14 +127,14 @@ static Value bi_bytevector_copy(VM *vm, Value *args, int nargs) {
 static Value bi_bytevector_copy_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 3 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT || args[2].tag != T_BYTEVECTOR)
-    cvm_abort("bytevector-copy!: expected (to at from [start [end]])");
+    creme_abort("bytevector-copy!: expected (to at from [start [end]])");
   Bytevector *to = args[0].as.bv;
   int at = (int)args[1].as.i;
   Bytevector *from = args[2].as.bv;
   int first, last;
   byte_range_args(args, nargs, 3, from->len, &first, &last);
   int count = last - first;
-  if (at < 0 || at + count > to->len) cvm_abort("bytevector-copy!: destination too small");
+  if (at < 0 || at + count > to->len) creme_abort("bytevector-copy!: destination too small");
   memmove(to->bytes + at, from->bytes + first, (size_t)count);
   return v_nil();
 }
@@ -143,7 +143,7 @@ static Value bi_bytevector_append(VM *vm, Value *args, int nargs) {
   (void)vm;
   int total = 0;
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_BYTEVECTOR) cvm_abort("bytevector-append: expected bytevectors");
+    if (args[i].tag != T_BYTEVECTOR) creme_abort("bytevector-append: expected bytevectors");
     total += args[i].as.bv->len;
   }
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
@@ -163,7 +163,7 @@ static Value bi_bytevector_append(VM *vm, Value *args, int nargs) {
  * UTF-8 byte sequence isn't rejected the way native's utf8->string does. */
 static Value bi_utf8_to_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("utf8->string: expected a bytevector");
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) creme_abort("utf8->string: expected a bytevector");
   Bytevector *bv = args[0].as.bv;
   int first, last;
   byte_range_args(args, nargs, 1, bv->len, &first, &last);
@@ -175,7 +175,7 @@ static Value bi_utf8_to_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_to_utf8(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->utf8: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->utf8: expected a string");
   int first, last;
   byte_range_args(args, nargs, 1, args[0].aux, &first, &last);
   int len = last - first;
@@ -201,7 +201,7 @@ static Value bi_force(VM *vm, Value *args, int nargs) {
   if (args[0].tag != T_PROMISE) return args[0];
   Promise *p = args[0].as.promise;
   if (!p->forced) {
-    p->cached = cvm_apply(vm, p->thunk, NULL, 0);
+    p->cached = creme_apply(vm, p->thunk, NULL, 0);
     p->forced = 1;
   }
   return p->cached;
@@ -218,7 +218,7 @@ static Value bi_promise_p(VM *vm, Value *args, int nargs) {
  * (forcing it never touches `thunk`, so leaving it v_nil() is fine). */
 static Value bi_make_promise(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("make-promise: expected an argument");
+  if (nargs < 1) creme_abort("make-promise: expected an argument");
   if (args[0].tag == T_PROMISE) return args[0];
   Promise *p = GC_MALLOC(sizeof(Promise));
   p->thunk = v_nil();
@@ -247,7 +247,7 @@ Value bi_plus(VM *vm, Value *args, int nargs) {
 
 Value bi_minus(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("-: expected at least 1 argument");
+  if (nargs < 1) creme_abort("-: expected at least 1 argument");
   if (nargs == 1) return num_sub(v_int(0), args[0]);
   Value acc = args[0];
   for (int i = 1; i < nargs; i++) acc = num_sub(acc, args[i]);
@@ -269,7 +269,7 @@ Value bi_star(VM *vm, Value *args, int nargs) {
  * num_add/num_sub/num_mul. */
 static Value bi_slash(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("/: expected at least 1 argument");
+  if (nargs < 1) creme_abort("/: expected at least 1 argument");
   if (nargs == 1) return num_div(v_int(1), args[0]);
   Value acc = args[0];
   for (int i = 1; i < nargs; i++) acc = num_div(acc, args[i]);
@@ -278,7 +278,7 @@ static Value bi_slash(VM *vm, Value *args, int nargs) {
 
 static Value bi_num_lt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("<: expected at least 1 argument");
+  if (nargs < 1) creme_abort("<: expected at least 1 argument");
   for (int i = 1; i < nargs; i++)
     if (!num_lt(args[i - 1], args[i])) return v_bool(0);
   return v_bool(1);
@@ -286,7 +286,7 @@ static Value bi_num_lt(VM *vm, Value *args, int nargs) {
 
 static Value bi_num_gt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort(">: expected at least 1 argument");
+  if (nargs < 1) creme_abort(">: expected at least 1 argument");
   for (int i = 1; i < nargs; i++)
     if (!num_gt(args[i - 1], args[i])) return v_bool(0);
   return v_bool(1);
@@ -294,7 +294,7 @@ static Value bi_num_gt(VM *vm, Value *args, int nargs) {
 
 static Value bi_num_le(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("<=: expected at least 1 argument");
+  if (nargs < 1) creme_abort("<=: expected at least 1 argument");
   for (int i = 1; i < nargs; i++)
     if (!num_le(args[i - 1], args[i])) return v_bool(0);
   return v_bool(1);
@@ -302,7 +302,7 @@ static Value bi_num_le(VM *vm, Value *args, int nargs) {
 
 static Value bi_num_ge(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort(">=: expected at least 1 argument");
+  if (nargs < 1) creme_abort(">=: expected at least 1 argument");
   for (int i = 1; i < nargs; i++)
     if (!num_ge(args[i - 1], args[i])) return v_bool(0);
   return v_bool(1);
@@ -310,7 +310,7 @@ static Value bi_num_ge(VM *vm, Value *args, int nargs) {
 
 static Value bi_num_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("=: expected at least 1 argument");
+  if (nargs < 1) creme_abort("=: expected at least 1 argument");
   for (int i = 1; i < nargs; i++)
     if (!num_eq(args[i - 1], args[i])) return v_bool(0);
   return v_bool(1);
@@ -325,23 +325,23 @@ static Value bi_num_eq(VM *vm, Value *args, int nargs) {
  * comment on exactly this). */
 static Value bi_quotient(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("quotient: expected two integers");
-  if (args[1].as.i == 0) cvm_abort("quotient: division by zero");
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("quotient: expected two integers");
+  if (args[1].as.i == 0) creme_abort("quotient: division by zero");
   return v_int(args[0].as.i / args[1].as.i);
 }
 
 static Value bi_remainder(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("remainder: expected two integers");
-  if (args[1].as.i == 0) cvm_abort("remainder: division by zero");
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("remainder: expected two integers");
+  if (args[1].as.i == 0) creme_abort("remainder: division by zero");
   return v_int(args[0].as.i % args[1].as.i);
 }
 
 Value bi_modulo(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("modulo: expected two integers");
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("modulo: expected two integers");
   int64_t b = args[1].as.i;
-  if (b == 0) cvm_abort("modulo: division by zero");
+  if (b == 0) creme_abort("modulo: division by zero");
   int64_t r = args[0].as.i % b;
   if (r != 0 && ((r < 0) != (b < 0))) r += b;
   return v_int(r);
@@ -357,9 +357,9 @@ Value bi_modulo(VM *vm, Value *args, int nargs) {
  * names below). */
 static Value bi_floor_quotient(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) cvm_abort("floor-quotient: expected two integers");
+  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("floor-quotient: expected two integers");
   int64_t a = args[0].as.i, b = args[1].as.i;
-  if (b == 0) cvm_abort("floor-quotient: division by zero");
+  if (b == 0) creme_abort("floor-quotient: division by zero");
   int64_t q = a / b, r = a % b;
   if (r != 0 && ((r < 0) != (b < 0))) q -= 1;
   return v_int(q);
@@ -402,7 +402,7 @@ static Value bi_gcd(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t acc = 0;
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_INT) cvm_abort("gcd: expected an integer");
+    if (args[i].tag != T_INT) creme_abort("gcd: expected an integer");
     acc = i64_gcd(acc, args[i].as.i);
   }
   return v_int(acc);
@@ -412,7 +412,7 @@ static Value bi_lcm(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t acc = 1;
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_INT) cvm_abort("lcm: expected an integer");
+    if (args[i].tag != T_INT) creme_abort("lcm: expected an integer");
     int64_t v = args[i].as.i < 0 ? -args[i].as.i : args[i].as.i;
     if (v == 0) { acc = 0; continue; }
     int64_t g = i64_gcd(acc, v);
@@ -435,7 +435,7 @@ static int64_t i64_pow(int64_t base, int64_t exp) {
  * inexact 0.5). Everything else falls back to a float pow via as_double. */
 static Value bi_expt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2) cvm_abort("expt: expected two arguments");
+  if (nargs != 2) creme_abort("expt: expected two arguments");
   Value base = args[0], ex = args[1];
   if (base.tag == T_INT && ex.tag == T_INT) {
     if (ex.as.i >= 0) return v_int(i64_pow(base.as.i, ex.as.i));
@@ -454,7 +454,7 @@ static Value bi_expt(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_exact_integer_sqrt(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_INT || args[0].as.i < 0) cvm_abort("exact-integer-sqrt: expected a non-negative integer");
+  if (nargs < 1 || args[0].tag != T_INT || args[0].as.i < 0) creme_abort("exact-integer-sqrt: expected a non-negative integer");
   int64_t n = args[0].as.i;
   int64_t root = (int64_t)sqrt((double)n);
   while (root > 0 && root * root > n) root--;
@@ -491,7 +491,7 @@ static Value bi_current_second(VM *vm, Value *args, int nargs) {
  * literal ran under icecreme's compiler mode. */
 static Value bi_flonum_to_bits(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_FLOAT) cvm_abort("flonum->bits: expected a float");
+  if (nargs < 1 || args[0].tag != T_FLOAT) creme_abort("flonum->bits: expected a float");
   int64_t bits;
   double f = args[0].as.f;
   memcpy(&bits, &f, sizeof(bits));
@@ -499,7 +499,7 @@ static Value bi_flonum_to_bits(VM *vm, Value *args, int nargs) {
 }
 static Value bi_bits_to_flonum(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("bits->flonum: expected an exact integer");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("bits->flonum: expected an exact integer");
   double f;
   int64_t bits = args[0].as.i;
   memcpy(&f, &bits, sizeof(f));
@@ -510,24 +510,24 @@ static Value bi_bits_to_flonum(VM *vm, Value *args, int nargs) {
  * wrappers over as_double (already used by abs/magnitude/etc., accepts
  * T_INT/T_RATIONAL/T_FLOAT), same "always returns a float" contract as
  * native's own Math.sin/cos/etc.-based implementation. */
-static Value bi_sin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("sin: expected an argument"); return v_float(sin(as_double(args[0], "sin"))); }
-static Value bi_cos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("cos: expected an argument"); return v_float(cos(as_double(args[0], "cos"))); }
-static Value bi_tan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("tan: expected an argument"); return v_float(tan(as_double(args[0], "tan"))); }
-static Value bi_asin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("asin: expected an argument"); return v_float(asin(as_double(args[0], "asin"))); }
-static Value bi_acos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("acos: expected an argument"); return v_float(acos(as_double(args[0], "acos"))); }
-static Value bi_atan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("atan: expected an argument"); return v_float(atan(as_double(args[0], "atan"))); }
-static Value bi_exp(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("exp: expected an argument"); return v_float(exp(as_double(args[0], "exp"))); }
-static Value bi_log2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("log2: expected an argument"); return v_float(log2(as_double(args[0], "log2"))); }
-static Value bi_log10(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("log10: expected an argument"); return v_float(log10(as_double(args[0], "log10"))); }
-static Value bi_atan2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("atan2: expected two arguments"); return v_float(atan2(as_double(args[0], "atan2"), as_double(args[1], "atan2"))); }
-static Value bi_pow(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("pow: expected two arguments"); return v_float(pow(as_double(args[0], "pow"), as_double(args[1], "pow"))); }
-static Value bi_hypot(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("hypot: expected two arguments"); return v_float(hypot(as_double(args[0], "hypot"), as_double(args[1], "hypot"))); }
+static Value bi_sin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("sin: expected an argument"); return v_float(sin(as_double(args[0], "sin"))); }
+static Value bi_cos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("cos: expected an argument"); return v_float(cos(as_double(args[0], "cos"))); }
+static Value bi_tan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("tan: expected an argument"); return v_float(tan(as_double(args[0], "tan"))); }
+static Value bi_asin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("asin: expected an argument"); return v_float(asin(as_double(args[0], "asin"))); }
+static Value bi_acos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("acos: expected an argument"); return v_float(acos(as_double(args[0], "acos"))); }
+static Value bi_atan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("atan: expected an argument"); return v_float(atan(as_double(args[0], "atan"))); }
+static Value bi_exp(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("exp: expected an argument"); return v_float(exp(as_double(args[0], "exp"))); }
+static Value bi_log2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("log2: expected an argument"); return v_float(log2(as_double(args[0], "log2"))); }
+static Value bi_log10(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("log10: expected an argument"); return v_float(log10(as_double(args[0], "log10"))); }
+static Value bi_atan2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("atan2: expected two arguments"); return v_float(atan2(as_double(args[0], "atan2"), as_double(args[1], "atan2"))); }
+static Value bi_pow(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("pow: expected two arguments"); return v_float(pow(as_double(args[0], "pow"), as_double(args[1], "pow"))); }
+static Value bi_hypot(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("hypot: expected two arguments"); return v_float(hypot(as_double(args[0], "hypot"), as_double(args[1], "hypot"))); }
 
 /* log's optional 2nd argument is an explicit base, computed as log(x)/
  * log(base) -- matches native's own MathLibrary#log exactly. */
 static Value bi_log(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("log: expected an argument");
+  if (nargs < 1) creme_abort("log: expected an argument");
   double x = log(as_double(args[0], "log"));
   return nargs >= 2 ? v_float(x / log(as_double(args[1], "log"))) : v_float(x);
 }
@@ -542,7 +542,7 @@ static Value bi_log(VM *vm, Value *args, int nargs) {
  * complex input either. */
 static Value bi_sqrt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("sqrt: expected an argument");
+  if (nargs < 1) creme_abort("sqrt: expected an argument");
   Value v = args[0];
   if (v.tag == T_INT && v.as.i >= 0) {
     int64_t n = v.as.i;
@@ -559,19 +559,19 @@ static Value bi_sqrt(VM *vm, Value *args, int nargs) {
 
 static Value bi_nan_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("nan?: expected an argument");
+  if (nargs < 1) creme_abort("nan?: expected an argument");
   return v_bool(args[0].tag == T_FLOAT && isnan(args[0].as.f));
 }
 
 static Value bi_infinite_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("infinite?: expected an argument");
+  if (nargs < 1) creme_abort("infinite?: expected an argument");
   return v_bool(args[0].tag == T_FLOAT && isinf(args[0].as.f));
 }
 
 static Value bi_finite_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("finite?: expected an argument");
+  if (nargs < 1) creme_abort("finite?: expected an argument");
   return v_bool(args[0].tag != T_FLOAT || isfinite(args[0].as.f));
 }
 
@@ -604,26 +604,26 @@ static Value bi_random_real(VM *vm, Value *args, int nargs) {
 
 static Value bi_random_integer(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("random-integer: expected an integer");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("random-integer: expected an integer");
   int64_t n = args[0].as.i;
-  if (n <= 0) cvm_abort("random-integer: n must be positive");
+  if (n <= 0) creme_abort("random-integer: n must be positive");
   return v_int((int64_t)(rng_next() % (uint64_t)n));
 }
 
 static Value bi_random_seed_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("random-seed!: expected an integer");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("random-seed!: expected an integer");
   rng_state = (uint64_t)args[0].as.i;
   return v_nil();
 }
 
 static Value bi_random_choice(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("random-choice: expects a list");
+  if (nargs < 1) creme_abort("random-choice: expects a list");
   int n = 0;
   Value cur = args[0];
   while (cur.tag == T_PAIR) { n++; cur = cur.as.pair->cdr; }
-  if (n == 0) cvm_abort("random-choice: expects a non-empty list");
+  if (n == 0) creme_abort("random-choice: expects a non-empty list");
   int idx = (int)(rng_next() % (uint64_t)n);
   cur = args[0];
   for (int i = 0; i < idx; i++) cur = cur.as.pair->cdr;
@@ -631,7 +631,7 @@ static Value bi_random_choice(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_random_shuffle(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("random-shuffle: expects a list");
+  if (nargs < 1) creme_abort("random-shuffle: expects a list");
   int n = 0;
   Value cur = args[0];
   while (cur.tag == T_PAIR) { n++; cur = cur.as.pair->cdr; }
@@ -646,7 +646,7 @@ static Value bi_random_shuffle(VM *vm, Value *args, int nargs) {
     arr[j] = tmp;
   }
   Value result = v_nil();
-  for (int i = n - 1; i >= 0; i--) result = cvm_cons(vm, arr[i], result);
+  for (int i = n - 1; i >= 0; i--) result = creme_cons(vm, arr[i], result);
   return result;
 }
 
@@ -804,7 +804,7 @@ static void print_value(FILE *out, Value v) {
     break;
   }
   default:
-    cvm_abort("display: unsupported value type in this prototype");
+    creme_abort("display: unsupported value type in this prototype");
   }
 }
 
@@ -825,9 +825,9 @@ static Value bi_open_output_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_get_output_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("get-output-string: expected a port");
+  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("get-output-string: expected a port");
   Port *p = args[0].as.port;
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("get-output-string: expected a string output port");
+  if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("get-output-string: expected a string output port");
   /* Copies out (matches SchemeStr's own value-semantics — a fresh immutable
    * string each call), even though nothing in this bench mutates the port
    * afterward. GC_MALLOC'd like every other heap value here. */
@@ -838,7 +838,7 @@ static Value bi_get_output_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_length(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string-length: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-length: expected a string");
   return v_int(args[0].aux);
 }
 
@@ -863,13 +863,13 @@ static Port stdin_port_sentinel = {.kind = PORT_KIND_STDIN};
  * gap). Stored as a field on the VM struct itself, one per VM instance,
  * rather than a `_Thread_local` C global the way this used to work:
  * icecreme/vm.h's own VM struct is ALREADY effectively one-VM-per-thread
- * (see cvm_new_child_vm's own doc comment -- an actor spawn builds a
+ * (see creme_new_child_vm's own doc comment -- an actor spawn builds a
  * genuinely separate VM for its own dedicated pthread), so a VM-struct
  * field gives the exact same per-thread independence a `_Thread_local`
  * global did, with no extra machinery -- and, critically, makes the
  * value reachable through the ordinary `vm->globals` global table too
- * (cvm_init_current_ports interns it directly, pi/e-style), which a
- * `_Thread_local` C static never could be. cvm_new_child_vm calls this
+ * (creme_init_current_ports interns it directly, pi/e-style), which a
+ * `_Thread_local` C static never could be. creme_new_child_vm calls this
  * again for every freshly spawned VM (giving it its OWN fresh Parameter
  * objects, not ones inherited via its wholesale `globals` memcpy from
  * the parent -- sharing the parent's Parameter would let one actor's
@@ -883,7 +883,7 @@ static Port stdin_port_sentinel = {.kind = PORT_KIND_STDIN};
  * to a valid lvalue through whichever `vm` is in scope at each call
  * site (every builtin receives one), so no other call site needed to
  * change at all. */
-void cvm_init_current_ports(VM *vm) {
+void creme_init_current_ports(VM *vm) {
   Parameter *out = GC_MALLOC(sizeof(Parameter));
   out->value = v_port(&stdout_port_sentinel);
   out->converter = v_nil();
@@ -907,7 +907,7 @@ static void write_bytes_to_port(Port *p, const char *bytes, size_t len, const ch
     fwrite(bytes, 1, len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return;
   }
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("%s: expected an output port", who);
+  if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("%s: expected an output port", who);
   port_buf_grow(p, (int)len);
   memcpy(p->buf + p->len, bytes, len);
   p->len += (int)len;
@@ -923,8 +923,8 @@ static void write_bytes_to_port(Port *p, const char *bytes, size_t len, const ch
  * traversal. */
 static Value bi_display(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("display: expected an argument");
-  if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("display: expected a port");
+  if (nargs < 1) creme_abort("display: expected an argument");
+  if (nargs >= 2 && args[1].tag != T_PORT) creme_abort("display: expected a port");
   Port *p = (nargs >= 2) ? args[1].as.port : g_current_output_port;
   char *buf = NULL;
   size_t size = 0;
@@ -938,7 +938,7 @@ static Value bi_display(VM *vm, Value *args, int nargs) {
 
 static Value bi_newline(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs >= 1 && args[0].tag != T_PORT) cvm_abort("newline: expected a port");
+  if (nargs >= 1 && args[0].tag != T_PORT) creme_abort("newline: expected a port");
   Port *p = (nargs >= 1) ? args[0].as.port : g_current_output_port;
   write_bytes_to_port(p, "\n", 1, "newline");
   return v_nil();
@@ -946,13 +946,13 @@ static Value bi_newline(VM *vm, Value *args, int nargs) {
 
 static Value bi_write_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_PORT) cvm_abort("write-string: expected (string port)");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_PORT) creme_abort("write-string: expected (string port)");
   Port *p = args[1].as.port;
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fwrite(args[0].as.chars, 1, (size_t)args[0].aux, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
   }
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-string: expected an output port");
+  if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("write-string: expected an output port");
   port_buf_grow(p, args[0].aux);
   memcpy(p->buf + p->len, args[0].as.chars, (size_t)args[0].aux);
   p->len += args[0].aux;
@@ -965,8 +965,8 @@ static Value bi_write_string(VM *vm, Value *args, int nargs) {
  * append/fputc mirrors that scope exactly. */
 static Value bi_write_char(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("write-char: expected a char");
-  if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("write-char: expected a port");
+  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("write-char: expected a char");
+  if (nargs >= 2 && args[1].tag != T_PORT) creme_abort("write-char: expected a port");
   Port *p = (nargs >= 2) ? args[1].as.port : g_current_output_port;
   char c = (char)args[0].as.i;
   write_bytes_to_port(p, &c, 1, "write-char");
@@ -980,7 +980,7 @@ static Value bi_write_char(VM *vm, Value *args, int nargs) {
 
 static Value bi_open_input_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-input-string: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("open-input-string: expected a string");
   Port *p = GC_MALLOC(sizeof(Port));
   p->kind = PORT_KIND_INPUT_STRING;
   p->len = args[0].aux;
@@ -992,7 +992,7 @@ static Value bi_open_input_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_port_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("port?: expected an argument");
+  if (nargs < 1) creme_abort("port?: expected an argument");
   return v_bool(args[0].tag == T_PORT);
 }
 
@@ -1001,13 +1001,13 @@ static int port_is_output(Port *p) { return p->kind == PORT_KIND_OUTPUT_STRING |
 
 static Value bi_input_port_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("input-port?: expected an argument");
+  if (nargs < 1) creme_abort("input-port?: expected an argument");
   return v_bool(args[0].tag == T_PORT && port_is_input(args[0].as.port));
 }
 
 static Value bi_output_port_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("output-port?: expected an argument");
+  if (nargs < 1) creme_abort("output-port?: expected an argument");
   return v_bool(args[0].tag == T_PORT && port_is_output(args[0].as.port));
 }
 
@@ -1020,13 +1020,13 @@ static Value bi_eof_object(VM *vm, Value *args, int nargs) {
 
 static Value bi_eof_object_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("eof-object?: expected an argument");
+  if (nargs < 1) creme_abort("eof-object?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_EOF);
 }
 
 static Value bi_close_port(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("close-port: expected a port");
+  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("close-port: expected a port");
   Port *p = args[0].as.port;
   if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
   p->closed = 1;
@@ -1041,7 +1041,7 @@ static Value bi_close_port(VM *vm, Value *args, int nargs) {
 static Value bi_flush_output_port(VM *vm, Value *args, int nargs) {
   (void)vm;
   Port *p = (nargs >= 1) ? (args[0].tag == T_PORT ? args[0].as.port : NULL) : g_current_output_port;
-  if (!p) cvm_abort("flush-output-port: expected a port");
+  if (!p) creme_abort("flush-output-port: expected a port");
   if (p->kind == PORT_KIND_STDOUT) fflush(stdout);
   else if (p->kind == PORT_KIND_OUTPUT_FILE && p->file) fflush(p->file);
   return v_nil();
@@ -1063,7 +1063,7 @@ static char *value_str_to_cstr(Value s) {
 
 static Value bi_file_exists_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("file-exists?: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("file-exists?: expected a string");
   char *path = value_str_to_cstr(args[0]);
   int exists = access(path, F_OK) == 0;
   free(path);
@@ -1072,10 +1072,10 @@ static Value bi_file_exists_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_open_input_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-input-file: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("open-input-file: expected a string");
   char *path = value_str_to_cstr(args[0]);
   FILE *f = fopen(path, "r");
-  if (!f) cvm_abort("open-input-file: file not found: %s", path);
+  if (!f) creme_abort("open-input-file: file not found: %s", path);
   free(path);
   Port *p = GC_MALLOC(sizeof(Port));
   p->kind = PORT_KIND_INPUT_FILE;
@@ -1085,10 +1085,10 @@ static Value bi_open_input_file(VM *vm, Value *args, int nargs) {
 
 static Value bi_open_output_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-output-file: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("open-output-file: expected a string");
   char *path = value_str_to_cstr(args[0]);
   FILE *f = fopen(path, "w");
-  if (!f) cvm_abort("open-output-file: could not open: %s", path);
+  if (!f) creme_abort("open-output-file: could not open: %s", path);
   free(path);
   Port *p = GC_MALLOC(sizeof(Port));
   p->kind = PORT_KIND_OUTPUT_FILE;
@@ -1101,9 +1101,9 @@ static Value bi_open_output_file(VM *vm, Value *args, int nargs) {
  * itself already closed it (bi_close_port/fclose are idempotent-safe
  * here since `closed` is checked first). */
 static Value bi_call_with_input_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("call-with-input-file: expected (string proc)");
+  if (nargs < 2 || args[0].tag != T_STR) creme_abort("call-with-input-file: expected (string proc)");
   Value port_val = bi_open_input_file(vm, args, 1);
-  Value result = cvm_apply(vm, args[1], &port_val, 1);
+  Value result = creme_apply(vm, args[1], &port_val, 1);
   Port *p = port_val.as.port;
   if (!p->closed) fclose(p->file);
   p->closed = 1;
@@ -1111,9 +1111,9 @@ static Value bi_call_with_input_file(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_call_with_output_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("call-with-output-file: expected (string proc)");
+  if (nargs < 2 || args[0].tag != T_STR) creme_abort("call-with-output-file: expected (string proc)");
   Value port_val = bi_open_output_file(vm, args, 1);
-  Value result = cvm_apply(vm, args[1], &port_val, 1);
+  Value result = creme_apply(vm, args[1], &port_val, 1);
   Port *p = port_val.as.port;
   if (!p->closed) fclose(p->file);
   p->closed = 1;
@@ -1127,10 +1127,10 @@ static Value bi_call_with_output_file(VM *vm, Value *args, int nargs) {
  * for read-u8/write-u8/etc. -- see value.h's own Port doc comment). */
 static Value bi_open_binary_input_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-binary-input-file: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("open-binary-input-file: expected a string");
   char *path = value_str_to_cstr(args[0]);
   FILE *f = fopen(path, "rb");
-  if (!f) cvm_abort("open-binary-input-file: file not found: %s", path);
+  if (!f) creme_abort("open-binary-input-file: file not found: %s", path);
   free(path);
   Port *p = GC_MALLOC(sizeof(Port));
   p->kind = PORT_KIND_INPUT_FILE;
@@ -1141,10 +1141,10 @@ static Value bi_open_binary_input_file(VM *vm, Value *args, int nargs) {
 
 static Value bi_open_binary_output_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("open-binary-output-file: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("open-binary-output-file: expected a string");
   char *path = value_str_to_cstr(args[0]);
   FILE *f = fopen(path, "wb");
-  if (!f) cvm_abort("open-binary-output-file: could not open: %s", path);
+  if (!f) creme_abort("open-binary-output-file: could not open: %s", path);
   free(path);
   Port *p = GC_MALLOC(sizeof(Port));
   p->kind = PORT_KIND_OUTPUT_FILE;
@@ -1185,7 +1185,7 @@ static Value bi_restore_input_port(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
-  if (g_input_restore_depth <= 0) cvm_abort("with-input-from-file: internal restore-stack underflow");
+  if (g_input_restore_depth <= 0) creme_abort("with-input-from-file: internal restore-stack underflow");
   PortRestoreFrame f = g_input_restore_stack[--g_input_restore_depth];
   fclose(f.to_close);
   g_current_input_port = f.prev;
@@ -1196,7 +1196,7 @@ static Value bi_restore_output_port(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
-  if (g_output_restore_depth <= 0) cvm_abort("with-output-to-file: internal restore-stack underflow");
+  if (g_output_restore_depth <= 0) creme_abort("with-output-to-file: internal restore-stack underflow");
   PortRestoreFrame f = g_output_restore_stack[--g_output_restore_depth];
   fclose(f.to_close);
   g_current_output_port = f.prev;
@@ -1204,44 +1204,44 @@ static Value bi_restore_output_port(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_with_input_from_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("with-input-from-file: expected (string thunk)");
+  if (nargs < 2 || args[0].tag != T_STR) creme_abort("with-input-from-file: expected (string thunk)");
   Value port_val = bi_open_input_file(vm, args, 1); /* aborts on a missing file, matching native */
   Port *new_port = port_val.as.port;
 
-  if (g_input_restore_depth >= PORT_RESTORE_CAP) cvm_abort("with-input-from-file: nesting too deep (%d levels)", PORT_RESTORE_CAP);
+  if (g_input_restore_depth >= PORT_RESTORE_CAP) creme_abort("with-input-from-file: nesting too deep (%d levels)", PORT_RESTORE_CAP);
   g_input_restore_stack[g_input_restore_depth].prev = g_current_input_port;
   g_input_restore_stack[g_input_restore_depth].to_close = new_port->file;
   g_input_restore_depth++;
   g_current_input_port = new_port;
 
-  if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("icecreme: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+  if (vm->n_unwind >= CREME_UNWIND_CAP) creme_abort("icecreme: parameterize/dynamic-wind unwind stack full (CREME_UNWIND_CAP=%d)", CREME_UNWIND_CAP);
   UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
   ua->kind = UNWIND_DYNAMIC_WIND;
   ua->after = v_builtin(bi_restore_input_port);
 
-  Value result = cvm_apply(vm, args[1], NULL, 0);
+  Value result = creme_apply(vm, args[1], NULL, 0);
   vm->n_unwind--;
   bi_restore_input_port(vm, NULL, 0);
   return result;
 }
 
 static Value bi_with_output_to_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("with-output-to-file: expected (string thunk)");
+  if (nargs < 2 || args[0].tag != T_STR) creme_abort("with-output-to-file: expected (string thunk)");
   Value port_val = bi_open_output_file(vm, args, 1);
   Port *new_port = port_val.as.port;
 
-  if (g_output_restore_depth >= PORT_RESTORE_CAP) cvm_abort("with-output-to-file: nesting too deep (%d levels)", PORT_RESTORE_CAP);
+  if (g_output_restore_depth >= PORT_RESTORE_CAP) creme_abort("with-output-to-file: nesting too deep (%d levels)", PORT_RESTORE_CAP);
   g_output_restore_stack[g_output_restore_depth].prev = g_current_output_port;
   g_output_restore_stack[g_output_restore_depth].to_close = new_port->file;
   g_output_restore_depth++;
   g_current_output_port = new_port;
 
-  if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("icecreme: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+  if (vm->n_unwind >= CREME_UNWIND_CAP) creme_abort("icecreme: parameterize/dynamic-wind unwind stack full (CREME_UNWIND_CAP=%d)", CREME_UNWIND_CAP);
   UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
   ua->kind = UNWIND_DYNAMIC_WIND;
   ua->after = v_builtin(bi_restore_output_port);
 
-  Value result = cvm_apply(vm, args[1], NULL, 0);
+  Value result = creme_apply(vm, args[1], NULL, 0);
   vm->n_unwind--;
   bi_restore_output_port(vm, NULL, 0);
   return result;
@@ -1253,11 +1253,11 @@ static Value bi_with_output_to_file(VM *vm, Value *args, int nargs) {
  * bootstrap.c -- see that file's own header comment.) */
 static Value bi_file_append(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("file-append: expected (string string)");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("file-append: expected (string string)");
   char *path = value_str_to_cstr(args[0]);
   FILE *f = fopen(path, "a");
   if (!f) {
-    cvm_abort("file-append: could not open: %s", path);
+    creme_abort("file-append: could not open: %s", path);
   }
   free(path);
   fwrite(args[1].as.chars, 1, (size_t)args[1].aux, f);
@@ -1266,10 +1266,10 @@ static Value bi_file_append(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_file_lines(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("file-lines: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("file-lines: expected a string");
   char *path = value_str_to_cstr(args[0]);
   FILE *f = fopen(path, "r");
-  if (!f) cvm_abort("file-lines: file not found: %s", path);
+  if (!f) creme_abort("file-lines: file not found: %s", path);
   free(path);
 
   Value lines = v_nil();
@@ -1292,17 +1292,17 @@ static Value bi_file_lines(VM *vm, Value *args, int nargs) {
   }
   free(line);
   fclose(f);
-  for (int i = n - 1; i >= 0; i--) lines = cvm_cons(vm, collected[i], lines);
+  for (int i = n - 1; i >= 0; i--) lines = creme_cons(vm, collected[i], lines);
   return lines;
 }
 
 static Value bi_file_size(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("file-size: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("file-size: expected a string");
   char *path = value_str_to_cstr(args[0]);
   struct stat st;
   int rc = stat(path, &st);
-  if (rc != 0) cvm_abort("file-size: file not found: %s", path);
+  if (rc != 0) creme_abort("file-size: file not found: %s", path);
   free(path);
   return v_int((int64_t)st.st_size);
 }
@@ -1312,7 +1312,7 @@ static Value bi_current_directory(VM *vm, Value *args, int nargs) {
   (void)args;
   (void)nargs;
   char buf[4096];
-  if (!getcwd(buf, sizeof(buf))) cvm_abort("current-directory: getcwd failed");
+  if (!getcwd(buf, sizeof(buf))) creme_abort("current-directory: getcwd failed");
   int len = (int)strlen(buf);
   char *copy = GC_MALLOC((size_t)(len ? len : 1));
   memcpy(copy, buf, (size_t)len);
@@ -1324,9 +1324,9 @@ static Value bi_current_directory(VM *vm, Value *args, int nargs) {
  * interpreter's own input_port_arg (base/io.cr). */
 static Port *input_port_arg(VM *vm, Value *args, int nargs, int port_argidx, const char *who) {
   Port *p = (nargs > port_argidx) ? (args[port_argidx].tag == T_PORT ? args[port_argidx].as.port : NULL) : g_current_input_port;
-  if (!p) cvm_abort("%s: expected a port", who);
-  if (!port_is_input(p)) cvm_abort("%s: expected an input port", who);
-  if (p->closed) cvm_abort("%s: port is closed", who);
+  if (!p) creme_abort("%s: expected a port", who);
+  if (!port_is_input(p)) creme_abort("%s: expected an input port", who);
+  if (p->closed) creme_abort("%s: port is closed", who);
   return p;
 }
 
@@ -1378,7 +1378,7 @@ static Value bi_char_ready_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_open_input_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("open-input-bytevector: expected a bytevector");
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) creme_abort("open-input-bytevector: expected a bytevector");
   Bytevector *bv = args[0].as.bv;
   Port *p = GC_MALLOC(sizeof(Port));
   p->kind = PORT_KIND_INPUT_STRING;
@@ -1402,9 +1402,9 @@ static Value bi_open_output_bytevector(VM *vm, Value *args, int nargs) {
 
 static Value bi_get_output_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("get-output-bytevector: expected a port");
+  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("get-output-bytevector: expected a port");
   Port *p = args[0].as.port;
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("get-output-bytevector: expected a bytevector output port");
+  if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("get-output-bytevector: expected a bytevector output port");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
   bv->len = p->len;
   bv->bytes = GC_MALLOC((size_t)(p->len ? p->len : 1));
@@ -1414,26 +1414,26 @@ static Value bi_get_output_bytevector(VM *vm, Value *args, int nargs) {
 
 static Value bi_binary_port_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("binary-port?: expected an argument");
+  if (nargs < 1) creme_abort("binary-port?: expected an argument");
   return v_bool(args[0].tag == T_PORT && args[0].as.port->binary);
 }
 
 static Value bi_textual_port_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("textual-port?: expected an argument");
+  if (nargs < 1) creme_abort("textual-port?: expected an argument");
   return v_bool(args[0].tag == T_PORT && !args[0].as.port->binary);
 }
 
 static Value bi_input_port_open_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("input-port-open?: expected a port");
+  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("input-port-open?: expected a port");
   Port *p = args[0].as.port;
   return v_bool(port_is_input(p) && !p->closed);
 }
 
 static Value bi_output_port_open_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) cvm_abort("output-port-open?: expected a port");
+  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("output-port-open?: expected a port");
   Port *p = args[0].as.port;
   return v_bool(port_is_output(p) && !p->closed);
 }
@@ -1468,15 +1468,15 @@ static Value bi_peek_u8(VM *vm, Value *args, int nargs) {
 
 static Value bi_write_u8(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("write-u8: expected a byte");
-  if (nargs < 2 || args[1].tag != T_PORT) cvm_abort("write-u8: expects a port");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("write-u8: expected a byte");
+  if (nargs < 2 || args[1].tag != T_PORT) creme_abort("write-u8: expects a port");
   Port *p = args[1].as.port;
   char c = (char)args[0].as.i;
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fputc((int)(unsigned char)c, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
   }
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-u8: expected an output port");
+  if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("write-u8: expected an output port");
   port_buf_grow(p, 1);
   p->buf[p->len] = c;
   p->len += 1;
@@ -1485,9 +1485,9 @@ static Value bi_write_u8(VM *vm, Value *args, int nargs) {
 
 static Value bi_read_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("read-bytevector: expected a count");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("read-bytevector: expected a count");
   int n = (int)args[0].as.i;
-  if (n < 0) cvm_abort("read-bytevector: count must be non-negative");
+  if (n < 0) creme_abort("read-bytevector: count must be non-negative");
   Port *p = input_port_arg(vm, args, nargs, 1, "read-bytevector");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
   bv->bytes = GC_MALLOC((size_t)(n ? n : 1));
@@ -1508,7 +1508,7 @@ static Value bi_read_bytevector(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_read_bytevector_bang(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("read-bytevector!: expected a bytevector");
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) creme_abort("read-bytevector!: expected a bytevector");
   Bytevector *bv = args[0].as.bv;
   Port *p = input_port_arg(vm, args, nargs, 1, "read-bytevector!");
   int first, last;
@@ -1531,8 +1531,8 @@ static Value bi_read_bytevector_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_write_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) cvm_abort("write-bytevector: expected a bytevector");
-  if (nargs < 2 || args[1].tag != T_PORT) cvm_abort("write-bytevector: expects a port");
+  if (nargs < 1 || args[0].tag != T_BYTEVECTOR) creme_abort("write-bytevector: expected a bytevector");
+  if (nargs < 2 || args[1].tag != T_PORT) creme_abort("write-bytevector: expects a port");
   Bytevector *bv = args[0].as.bv;
   Port *p = args[1].as.port;
   int first, last;
@@ -1542,7 +1542,7 @@ static Value bi_write_bytevector(VM *vm, Value *args, int nargs) {
     fwrite(bv->bytes + first, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
   }
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write-bytevector: expected an output port");
+  if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("write-bytevector: expected an output port");
   port_buf_grow(p, len);
   memcpy(p->buf + p->len, bv->bytes + first, (size_t)len);
   p->len += len;
@@ -1554,36 +1554,36 @@ static Value bi_write_bytevector(VM *vm, Value *args, int nargs) {
  * with-output-file's own unconditional-close pattern above, just for an
  * already-open port instead of one this function opens itself. */
 static Value bi_call_with_port(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_PORT) cvm_abort("call-with-port: expected (port proc)");
+  if (nargs < 2 || args[0].tag != T_PORT) creme_abort("call-with-port: expected (port proc)");
   Port *p = args[0].as.port;
-  Value result = cvm_apply(vm, args[1], args, 1);
+  Value result = creme_apply(vm, args[1], args, 1);
   if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
   p->closed = 1;
   return result;
 }
 
-/* Shared kind-dispatched Port write, exposed via vm.h (cvm_port_write_bytes)
+/* Shared kind-dispatched Port write, exposed via vm.h (creme_port_write_bytes)
  * for a module outside this file (csv.c's streaming writer) to reuse
  * without duplicating the STDOUT/OUTPUT_FILE/OUTPUT_STRING dispatch
  * bi_write_string/bi_write_char/bi_write already do inline. */
-void cvm_port_write_bytes(Port *p, const char *bytes, int len) {
+void creme_port_write_bytes(Port *p, const char *bytes, int len) {
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fwrite(bytes, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return;
   }
-  if (p->kind != PORT_KIND_OUTPUT_STRING) cvm_abort("write: expected an output port");
+  if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("write: expected an output port");
   port_buf_grow(p, len);
   memcpy(p->buf + p->len, bytes, (size_t)len);
   p->len += len;
 }
 
-/* Shared kind-dispatched Port read, exposed via vm.h (cvm_port_read_char/
- * cvm_port_peek_char) for csv.c's streaming reader to reuse instead of
+/* Shared kind-dispatched Port read, exposed via vm.h (creme_port_read_char/
+ * creme_port_peek_char) for csv.c's streaming reader to reuse instead of
  * duplicating read-char/peek-char's own STDIN/INPUT_FILE/INPUT_STRING
  * dispatch. Returns -1 at EOF, else a byte 0-255 -- caller-side EOF
  * checks stay simple ints rather than round-tripping through the
  * BOX_KIND_EOF Value the Scheme-visible read-char/peek-char return. */
-int cvm_port_read_char(Port *p) {
+int creme_port_read_char(Port *p) {
   if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
     FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
     int c = fgetc(stream);
@@ -1593,7 +1593,7 @@ int cvm_port_read_char(Port *p) {
   return (unsigned char)p->buf[p->pos++];
 }
 
-int cvm_port_peek_char(Port *p) {
+int creme_port_peek_char(Port *p) {
   if (p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE) {
     FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
     int c = fgetc(stream);
@@ -1639,9 +1639,9 @@ static Value bi_read_line(VM *vm, Value *args, int nargs) {
  * this edge case (confirmed by direct comparison: native's own
  * `(read-string 10 (open-input-string "hi"))` is `#<eof>`, not "hi"). */
 static Value bi_read_string(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("read-string: expected (k [port])");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("read-string: expected (k [port])");
   int64_t k = args[0].as.i;
-  if (k < 0) cvm_abort("read-string: count must be non-negative");
+  if (k < 0) creme_abort("read-string: count must be non-negative");
   Port *p = input_port_arg(vm, args, nargs, 1, "read-string");
   char *buf = GC_MALLOC((size_t)(k ? k : 1));
   int64_t n = 0;
@@ -1706,7 +1706,7 @@ static void read_skip_ws(VM *vm, Port *p) {
       int depth = 1;
       while (depth > 0) {
         int d = read_next(p);
-        if (d < 0) cvm_abort("read: unterminated #| block comment");
+        if (d < 0) creme_abort("read: unterminated #| block comment");
         if (d == '#' && read_peek(p) == '|') { read_next(p); depth++; }
         else if (d == '|' && read_peek(p) == '#') { read_next(p); depth--; }
       }
@@ -1726,18 +1726,18 @@ static Value read_list(VM *vm, Port *p, int close) {
   read_skip_ws(vm, p);
   int c = read_peek(p);
   if (c == close) { read_next(p); return v_nil(); }
-  if (c < 0) cvm_abort("read: unterminated list");
+  if (c < 0) creme_abort("read: unterminated list");
   if (c == '.' && p->pos + 1 < p->len && read_is_delim((unsigned char)p->buf[p->pos + 1])) {
     read_next(p);
     Value tail = read_datum(vm, p);
     read_skip_ws(vm, p);
-    if (read_peek(p) != close) cvm_abort("read: malformed dotted list");
+    if (read_peek(p) != close) creme_abort("read: malformed dotted list");
     read_next(p);
     return tail;
   }
   Value head = read_datum(vm, p);
   Value rest = read_list(vm, p, close);
-  return cvm_cons(vm, head, rest);
+  return creme_cons(vm, head, rest);
 }
 
 static Value read_string_literal(Port *p) {
@@ -1747,7 +1747,7 @@ static Value read_string_literal(Port *p) {
   for (;;) {
     int c = read_next(p);
     int d;
-    if (c < 0) cvm_abort("read: unterminated string literal");
+    if (c < 0) creme_abort("read: unterminated string literal");
     if (c == '"') break;
     if (c == '\\') {
       int e = read_next(p);
@@ -1786,7 +1786,7 @@ static Value read_char_literal(Port *p) {
   char name[32];
   int nlen = 0;
   int first = read_next(p);
-  if (first < 0) cvm_abort("read: unterminated char literal");
+  if (first < 0) creme_abort("read: unterminated char literal");
   name[nlen++] = (char)first;
   while (nlen < (int)sizeof(name) - 1 && !read_is_delim(read_peek(p))) name[nlen++] = (char)read_next(p);
   name[nlen] = 0;
@@ -1803,7 +1803,7 @@ static Value read_char_literal(Port *p) {
     long v = strtol(name + 1, NULL, 16);
     return v_char(v);
   }
-  cvm_abort("read: unknown char literal #\\%s", name);
+  creme_abort("read: unknown char literal #\\%s", name);
 }
 
 /* #b/#o/#d/#x-prefixed exact integer, or a plain token starting past
@@ -1815,7 +1815,7 @@ static Value read_radix_number(Port *p, int radix) {
   buf[len] = 0;
   char *endptr;
   long long iv = strtoll(buf, &endptr, radix);
-  if (endptr == buf || *endptr != 0) cvm_abort("read: malformed #%c number literal '%s'", radix == 16 ? 'x' : radix == 8 ? 'o' : radix == 2 ? 'b' : 'd', buf);
+  if (endptr == buf || *endptr != 0) creme_abort("read: malformed #%c number literal '%s'", radix == 16 ? 'x' : radix == 8 ? 'o' : radix == 2 ? 'b' : 'd', buf);
   return v_int(iv);
 }
 
@@ -1848,7 +1848,7 @@ static Value read_hash(VM *vm, Port *p) {
     Value it = list;
     for (int i = 0; i < n; i++) {
       Pair *pr = it.as.pair;
-      if (pr->car.tag != T_INT || pr->car.as.i < 0 || pr->car.as.i > 255) cvm_abort("read: bytevector literal element out of byte range");
+      if (pr->car.tag != T_INT || pr->car.as.i < 0 || pr->car.as.i > 255) creme_abort("read: bytevector literal element out of byte range");
       bv->bytes[i] = (unsigned char)pr->car.as.i;
       it = pr->cdr;
     }
@@ -1858,7 +1858,7 @@ static Value read_hash(VM *vm, Port *p) {
   if (c == 'o' || c == 'O') { read_next(p); return read_radix_number(p, 8); }
   if (c == 'b' || c == 'B') { read_next(p); return read_radix_number(p, 2); }
   if (c == 'd' || c == 'D') { read_next(p); return read_radix_number(p, 10); }
-  cvm_abort("read: unsupported '#%c' syntax", c < 0 ? '?' : c);
+  creme_abort("read: unsupported '#%c' syntax", c < 0 ? '?' : c);
 }
 
 /* A bare (non-#-prefixed) token: a number if it parses as one in its
@@ -1898,22 +1898,22 @@ static Value read_datum(VM *vm, Port *p) {
   int c = read_peek(p);
   if (c < 0) return bi_eof_object(vm, NULL, 0);
   if (c == '(' || c == '[') { read_next(p); return read_list(vm, p, c == '(' ? ')' : ']'); }
-  if (c == ')' || c == ']') cvm_abort("read: unexpected '%c'", c);
+  if (c == ')' || c == ']') creme_abort("read: unexpected '%c'", c);
   if (c == '"') return read_string_literal(p);
   if (c == '#') return read_hash(vm, p);
-  if (c == '\'') { read_next(p); return cvm_cons(vm, v_sym("quote", 5), cvm_cons(vm, read_datum(vm, p), v_nil())); }
-  if (c == '`') { read_next(p); return cvm_cons(vm, v_sym("quasiquote", 10), cvm_cons(vm, read_datum(vm, p), v_nil())); }
+  if (c == '\'') { read_next(p); return creme_cons(vm, v_sym("quote", 5), creme_cons(vm, read_datum(vm, p), v_nil())); }
+  if (c == '`') { read_next(p); return creme_cons(vm, v_sym("quasiquote", 10), creme_cons(vm, read_datum(vm, p), v_nil())); }
   if (c == ',') {
     read_next(p);
-    if (read_peek(p) == '@') { read_next(p); return cvm_cons(vm, v_sym("unquote-splicing", 16), cvm_cons(vm, read_datum(vm, p), v_nil())); }
-    return cvm_cons(vm, v_sym("unquote", 7), cvm_cons(vm, read_datum(vm, p), v_nil()));
+    if (read_peek(p) == '@') { read_next(p); return creme_cons(vm, v_sym("unquote-splicing", 16), creme_cons(vm, read_datum(vm, p), v_nil())); }
+    return creme_cons(vm, v_sym("unquote", 7), creme_cons(vm, read_datum(vm, p), v_nil()));
   }
   return read_token(p);
 }
 
 static Value bi_read(VM *vm, Value *args, int nargs) {
   Port *p = input_port_arg(vm, args, nargs, 0, "read");
-  if (!(p->kind == PORT_KIND_INPUT_STRING)) cvm_abort("read: only input-string ports are supported by this icecreme build");
+  if (!(p->kind == PORT_KIND_INPUT_STRING)) creme_abort("read: only input-string ports are supported by this icecreme build");
   return read_datum(vm, p);
 }
 
@@ -2051,8 +2051,8 @@ static void write_value(FILE *out, Value v) {
  * second, buffer-specific traversal. */
 static Value bi_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("write: expected an argument");
-  if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("write: expected a port");
+  if (nargs < 1) creme_abort("write: expected an argument");
+  if (nargs >= 2 && args[1].tag != T_PORT) creme_abort("write: expected a port");
   char *buf = NULL;
   size_t size = 0;
   FILE *ms = open_memstream(&buf, &size);
@@ -2068,7 +2068,7 @@ static Value bi_write(VM *vm, Value *args, int nargs) {
  * write-shared MUST be genuinely cycle-safe -- naively aliasing it to
  * plain `write` (as write-simple does, see below) would infinite-loop
  * on a circular argument, since write_value's T_PAIR case has no cycle
- * guard at all (unlike cvm_equal, which needed the same fix earlier).
+ * guard at all (unlike creme_equal, which needed the same fix earlier).
  * This does NOT need real datum-label READER support (icecreme/README.md's
  * documented, much larger gap) -- only the writer side, entirely
  * self-contained here.
@@ -2078,7 +2078,7 @@ static Value bi_write(VM *vm, Value *args, int nargs) {
  * reached -- re-entering a pointer already in the table (whether via a
  * genuine cycle mid-traversal, or a separate later reference to the
  * same shared object) stops further descent there, so this terminates
- * on cycles the same way cvm_equal's ancestor-tracking does, just with
+ * on cycles the same way creme_equal's ancestor-tracking does, just with
  * a whole-traversal "seen" set instead of an ancestor-only one (since
  * write-shared cares about ALL sharing, not just cycles). Any pointer
  * with count >= 2 needs a label. `write_value_shared` then walks it
@@ -2200,8 +2200,8 @@ static void write_value_shared(FILE *out, Value v, ShareTable *t) {
 
 static Value bi_write_shared(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("write-shared: expected an argument");
-  if (nargs >= 2 && args[1].tag != T_PORT) cvm_abort("write-shared: expected a port");
+  if (nargs < 1) creme_abort("write-shared: expected an argument");
+  if (nargs >= 2 && args[1].tag != T_PORT) creme_abort("write-shared: expected a port");
   ShareTable t = {NULL, 0, 0, 0};
   share_mark(&t, args[0]);
   char *buf = NULL;
@@ -2216,32 +2216,32 @@ static Value bi_write_shared(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_reverse(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("reverse: expected a list");
+  if (nargs < 1) creme_abort("reverse: expected a list");
   Value result = v_nil();
   Value cur = args[0];
   while (cur.tag == T_PAIR) {
-    result = cvm_cons(vm, cur.as.pair->car, result);
+    result = creme_cons(vm, cur.as.pair->car, result);
     cur = cur.as.pair->cdr;
   }
-  if (cur.tag != T_NIL) cvm_abort("reverse: improper list");
+  if (cur.tag != T_NIL) creme_abort("reverse: improper list");
   return result;
 }
 
 static Value bi_length(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("length: expected a list");
+  if (nargs < 1) creme_abort("length: expected a list");
   int64_t n = 0;
   Value cur = args[0];
   while (cur.tag == T_PAIR) {
     n++;
     cur = cur.as.pair->cdr;
   }
-  if (cur.tag != T_NIL) cvm_abort("length: improper list");
+  if (cur.tag != T_NIL) creme_abort("length: improper list");
   return v_int(n);
 }
 
 /* ---- equal? ----
- * cvm_eqv (vm.c) already handles every scalar/identity-compared tag;
+ * creme_eqv (vm.c) already handles every scalar/identity-compared tag;
  * equal? only adds structural recursion for pairs/vectors/bytevectors.
  * Not static: exposed via vm.h so treelist.c's find_index (treelist-
  * member?/treelist-index-of's default equality) can reuse it instead of
@@ -2253,7 +2253,7 @@ static Value bi_length(VM *vm, Value *args, int nargs) {
  * combination reappears while it's still an ancestor of itself, that's
  * a cycle: R7RS only requires equal? to TERMINATE on circular input, so
  * treating an already-in-progress pair as equal (rather than infinitely
- * re-descending into it) is a legal, minimal fix -- cvm_equal used to
+ * re-descending into it) is a legal, minimal fix -- creme_equal used to
  * recurse unconditionally here and would stack-overflow on e.g. a list
  * built via set-cdr! into a cycle. */
 typedef struct {
@@ -2279,40 +2279,40 @@ static int equal_seen_push(EqualSeen *seen, Pair *a, Pair *b) {
   return 1;
 }
 
-static int cvm_equal_rec(Value a, Value b, EqualSeen *seen) {
+static int creme_equal_rec(Value a, Value b, EqualSeen *seen) {
   if (a.tag != b.tag) return 0;
   switch (a.tag) {
   case T_PAIR: {
     int mark = seen->n;
     if (!equal_seen_push(seen, a.as.pair, b.as.pair)) return 1;
-    int ok = cvm_equal_rec(a.as.pair->car, b.as.pair->car, seen) && cvm_equal_rec(a.as.pair->cdr, b.as.pair->cdr, seen);
+    int ok = creme_equal_rec(a.as.pair->car, b.as.pair->car, seen) && creme_equal_rec(a.as.pair->cdr, b.as.pair->cdr, seen);
     seen->n = mark;
     return ok;
   }
   case T_VECTOR:
     if (a.as.vec->len != b.as.vec->len) return 0;
     for (int i = 0; i < a.as.vec->len; i++) {
-      if (!cvm_equal_rec(a.as.vec->items[i], b.as.vec->items[i], seen)) return 0;
+      if (!creme_equal_rec(a.as.vec->items[i], b.as.vec->items[i], seen)) return 0;
     }
     return 1;
   case T_BYTEVECTOR:
     return a.as.bv->len == b.as.bv->len && memcmp(a.as.bv->bytes, b.as.bv->bytes, (size_t)a.as.bv->len) == 0;
   default:
-    return cvm_eqv(a, b);
+    return creme_eqv(a, b);
   }
 }
 
-int cvm_equal(Value a, Value b) {
+int creme_equal(Value a, Value b) {
   EqualSeen seen = {NULL, NULL, 0, 0};
-  return cvm_equal_rec(a, b, &seen);
+  return creme_equal_rec(a, b, &seen);
 }
 
-/* ---- cvm_hash_value ----
- * A hash consistent with cvm_equal, for hashtable.c's Verstable-backed
- * hash-table type. Mirrors cvm_equal_rec/cvm_eqv tag-for-tag: pair/
- * vector/bytevector get the same structural recursion cvm_equal_rec
+/* ---- creme_hash_value ----
+ * A hash consistent with creme_equal, for hashtable.c's Verstable-backed
+ * hash-table type. Mirrors creme_equal_rec/creme_eqv tag-for-tag: pair/
+ * vector/bytevector get the same structural recursion creme_equal_rec
  * does, everything else falls back to the same by-value/by-content/by-
- * identity treatment cvm_eqv does. Every branch mixes in the tag itself
+ * identity treatment creme_eqv does. Every branch mixes in the tag itself
  * (fnv1a_u64's tag_salt) so distinct tags never collide. */
 
 static uint64_t hash_combine(uint64_t h, uint64_t x) {
@@ -2352,7 +2352,7 @@ static int hash_seen_push(HashSeen *seen, Pair *p) {
   return 1;
 }
 
-static uint64_t cvm_hash_value_rec(Value v, HashSeen *seen) {
+static uint64_t creme_hash_value_rec(Value v, HashSeen *seen) {
   uint64_t tag_salt = ((uint64_t)v.tag + 1) * 0x2545f4914f6cdd1dULL;
   switch (v.tag) {
   case T_NIL:
@@ -2372,20 +2372,20 @@ static uint64_t cvm_hash_value_rec(Value v, HashSeen *seen) {
   case T_PAIR: {
     int mark = seen->n;
     if (!hash_seen_push(seen, v.as.pair)) return tag_salt; /* cycle: terminate */
-    uint64_t h = hash_combine(cvm_hash_value_rec(v.as.pair->car, seen), cvm_hash_value_rec(v.as.pair->cdr, seen));
+    uint64_t h = hash_combine(creme_hash_value_rec(v.as.pair->car, seen), creme_hash_value_rec(v.as.pair->cdr, seen));
     seen->n = mark;
     return tag_salt ^ h;
   }
   case T_VECTOR: {
     uint64_t h = (uint64_t)v.as.vec->len;
-    for (int i = 0; i < v.as.vec->len; i++) h = hash_combine(h, cvm_hash_value_rec(v.as.vec->items[i], seen));
+    for (int i = 0; i < v.as.vec->len; i++) h = hash_combine(h, creme_hash_value_rec(v.as.vec->items[i], seen));
     return tag_salt ^ h;
   }
   case T_BYTEVECTOR:
     return tag_salt ^ fnv1a(v.as.bv->bytes, (size_t)v.as.bv->len);
   case T_RATIONAL: {
     /* Hash the canonicalized numerator/denominator's decimal digits --
-     * exactly the state mpq_equal (cvm_eqv's own T_RATIONAL comparison)
+     * exactly the state mpq_equal (creme_eqv's own T_RATIONAL comparison)
      * compares. mpz_get_str's returned buffer is GMP-allocated, which
      * main.c redirects to GC_MALLOC/GC_REALLOC with a no-op free (see
      * value.h's own Rational doc comment) -- no explicit free needed,
@@ -2395,7 +2395,7 @@ static uint64_t cvm_hash_value_rec(Value v, HashSeen *seen) {
     return tag_salt ^ hash_combine(fnv1a(n_str, strlen(n_str)), fnv1a(d_str, strlen(d_str)));
   }
   case T_COMPLEX:
-    return tag_salt ^ hash_combine(cvm_hash_value_rec(v.as.cplx->real, seen), cvm_hash_value_rec(v.as.cplx->imag, seen));
+    return tag_salt ^ hash_combine(creme_hash_value_rec(v.as.cplx->real, seen), creme_hash_value_rec(v.as.cplx->imag, seen));
   case T_BUILTIN:
     /* A function pointer, not an object pointer -- kept separate from the
      * generic `as.ptr` default branch below, since punning a function
@@ -2406,23 +2406,23 @@ static uint64_t cvm_hash_value_rec(Value v, HashSeen *seen) {
      * T_CLOSURE, T_CASE_CLOSURE, T_RECORD_TYPE, T_RECORD,
      * T_RECORD_CALLABLE, T_PARAMETER, T_BOX, T_CONTINUATION, T_MACRO) --
      * `as.ptr` reads the same bits as whichever object-pointer member is
-     * actually set, same as cvm_eqv's own by-identity comparisons. */
+     * actually set, same as creme_eqv's own by-identity comparisons. */
     return tag_salt ^ (uint64_t)(uintptr_t)v.as.ptr;
   }
 }
 
-uint64_t cvm_hash_value(Value v) {
+uint64_t creme_hash_value(Value v) {
   HashSeen seen = {NULL, 0, 0};
-  return cvm_hash_value_rec(v, &seen);
+  return creme_hash_value_rec(v, &seen);
 }
 
 /* ---- predicates / eq-family (also registered as ordinary procedures for
  * higher-order use, e.g. (map pair? lst) — most of these are normally
  * fused into their own op by the compiler, but a bare reference to the
  * name as a value still needs a real global binding). ---- */
-static Value bi_not(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("not: expected an argument"); return v_bool(v_falsy(args[0])); }
-static Value bi_pair_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("pair?: expected an argument"); return v_bool(args[0].tag == T_PAIR); }
-static Value bi_null_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("null?: expected an argument"); return v_bool(args[0].tag == T_NIL); }
+static Value bi_not(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("not: expected an argument"); return v_bool(v_falsy(args[0])); }
+static Value bi_pair_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("pair?: expected an argument"); return v_bool(args[0].tag == T_PAIR); }
+static Value bi_null_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("null?: expected an argument"); return v_bool(args[0].tag == T_NIL); }
 /* Walks cdr's until a non-pair; #t iff that's T_NIL -- mirrors the real
  * interpreter's own Creme.proper_list? (helpers.cr) exactly, including
  * NOT being cycle-safe (a genuinely circular list would infinite-loop
@@ -2437,7 +2437,7 @@ static Value bi_null_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1
  * proper_list? fix exactly. */
 static Value bi_list_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("list?: expected an argument");
+  if (nargs < 1) creme_abort("list?: expected an argument");
   Value slow = args[0];
   Value fast = args[0];
   for (;;) {
@@ -2451,10 +2451,10 @@ static Value bi_list_p(VM *vm, Value *args, int nargs) {
     if (fast.tag == T_PAIR && slow.tag == T_PAIR && fast.as.pair == slow.as.pair) return v_bool(0);
   }
 }
-static Value bi_boolean_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("boolean?: expected an argument"); return v_bool(args[0].tag == T_BOOL); }
-static Value bi_symbol_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("symbol?: expected an argument"); return v_bool(args[0].tag == T_SYM); }
-static Value bi_string_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("string?: expected an argument"); return v_bool(args[0].tag == T_STR); }
-static Value bi_vector_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("vector?: expected an argument"); return v_bool(args[0].tag == T_VECTOR); }
+static Value bi_boolean_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("boolean?: expected an argument"); return v_bool(args[0].tag == T_BOOL); }
+static Value bi_symbol_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("symbol?: expected an argument"); return v_bool(args[0].tag == T_SYM); }
+static Value bi_string_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("string?: expected an argument"); return v_bool(args[0].tag == T_STR); }
+static Value bi_vector_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("vector?: expected an argument"); return v_bool(args[0].tag == T_VECTOR); }
 
 /* vector-ref/-set!/-length, string-ref/-set!, bytevector-u8-ref/-set! as
  * REAL global procedures -- same story as +/-/cadr/etc. above: a program
@@ -2465,24 +2465,24 @@ static Value bi_vector_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs <
  * checks exactly (vm.c's OP_VECREF/OP_VECSET/etc.). */
 static Value bi_vector_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_VECTOR || args[1].tag != T_INT) cvm_abort("vector-ref: expected (vector index)");
+  if (nargs != 2 || args[0].tag != T_VECTOR || args[1].tag != T_INT) creme_abort("vector-ref: expected (vector index)");
   int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.vec->len) cvm_abort("vector-ref: index %d out of range", idx);
+  if (idx < 0 || idx >= args[0].as.vec->len) creme_abort("vector-ref: index %d out of range", idx);
   return args[0].as.vec->items[idx];
 }
 
 static Value bi_vector_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 3 || args[0].tag != T_VECTOR || args[1].tag != T_INT) cvm_abort("vector-set!: expected (vector index value)");
+  if (nargs != 3 || args[0].tag != T_VECTOR || args[1].tag != T_INT) creme_abort("vector-set!: expected (vector index value)");
   int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.vec->len) cvm_abort("vector-set!: index %d out of range", idx);
+  if (idx < 0 || idx >= args[0].as.vec->len) creme_abort("vector-set!: index %d out of range", idx);
   args[0].as.vec->items[idx] = args[2];
   return v_nil();
 }
 
 static Value bi_vector_length(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_VECTOR) cvm_abort("vector-length: expected a vector");
+  if (nargs != 1 || args[0].tag != T_VECTOR) creme_abort("vector-length: expected a vector");
   return v_int(args[0].as.vec->len);
 }
 
@@ -2492,12 +2492,12 @@ static Value bi_vector_length(VM *vm, Value *args, int nargs) {
 static void vector_range_args(int len, Value *args, int nargs, int start_idx, int *first, int *last) {
   *first = (nargs > start_idx && args[start_idx].tag == T_INT) ? (int)args[start_idx].as.i : 0;
   *last = (nargs > start_idx + 1 && args[start_idx + 1].tag == T_INT) ? (int)args[start_idx + 1].as.i : len;
-  if (*first < 0 || *last > len || *first > *last) cvm_abort("vector: start/end out of range");
+  if (*first < 0 || *last > len || *first > *last) creme_abort("vector: start/end out of range");
 }
 
 static Value bi_vector_copy(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_VECTOR) cvm_abort("vector-copy: expected a vector");
+  if (nargs < 1 || args[0].tag != T_VECTOR) creme_abort("vector-copy: expected a vector");
   Vector *src = args[0].as.vec;
   int first, last;
   vector_range_args(src->len, args, nargs, 1, &first, &last);
@@ -2512,14 +2512,14 @@ static Value bi_vector_copy(VM *vm, Value *args, int nargs) {
 static Value bi_vector_copy_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 3 || args[0].tag != T_VECTOR || args[1].tag != T_INT || args[2].tag != T_VECTOR)
-    cvm_abort("vector-copy!: expected (to at from ...)");
+    creme_abort("vector-copy!: expected (to at from ...)");
   Vector *to = args[0].as.vec;
   int at = (int)args[1].as.i;
   Vector *from = args[2].as.vec;
   int first, last;
   vector_range_args(from->len, args, nargs, 3, &first, &last);
   int n = last - first;
-  if (at < 0 || at + n > to->len) cvm_abort("vector-copy!: destination range out of bounds");
+  if (at < 0 || at + n > to->len) creme_abort("vector-copy!: destination range out of bounds");
   if (to == from && at > first) {
     for (int i = n - 1; i >= 0; i--) to->items[at + i] = from->items[first + i];
   } else {
@@ -2530,7 +2530,7 @@ static Value bi_vector_copy_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_vector_fill(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_VECTOR) cvm_abort("vector-fill!: expected a vector and a fill value");
+  if (nargs < 2 || args[0].tag != T_VECTOR) creme_abort("vector-fill!: expected a vector and a fill value");
   Vector *vec = args[0].as.vec;
   Value fill = args[1];
   int first, last;
@@ -2543,7 +2543,7 @@ static Value bi_vector_append(VM *vm, Value *args, int nargs) {
   (void)vm;
   int total = 0;
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_VECTOR) cvm_abort("vector-append: expected a vector");
+    if (args[i].tag != T_VECTOR) creme_abort("vector-append: expected a vector");
     total += args[i].as.vec->len;
   }
   Vector *vec = GC_MALLOC(sizeof(Vector));
@@ -2559,57 +2559,57 @@ static Value bi_vector_append(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_INT) cvm_abort("string-ref: expected (string index)");
+  if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_INT) creme_abort("string-ref: expected (string index)");
   int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].aux) cvm_abort("string-ref: index %d out of range", idx);
+  if (idx < 0 || idx >= args[0].aux) creme_abort("string-ref: index %d out of range", idx);
   return v_char((unsigned char)args[0].as.chars[idx]);
 }
 
 static Value bi_string_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_CHAR) cvm_abort("string-set!: expected (string index char)");
+  if (nargs != 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_CHAR) creme_abort("string-set!: expected (string index char)");
   int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].aux) cvm_abort("string-set!: index %d out of range", idx);
+  if (idx < 0 || idx >= args[0].aux) creme_abort("string-set!: index %d out of range", idx);
   ((char *)args[0].as.chars)[idx] = (char)args[2].as.i;
   return v_nil();
 }
 
 static Value bi_bytevector_u8_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT) cvm_abort("bytevector-u8-ref: expected (bytevector index)");
+  if (nargs != 2 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT) creme_abort("bytevector-u8-ref: expected (bytevector index)");
   int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.bv->len) cvm_abort("bytevector-u8-ref: index %d out of range", idx);
+  if (idx < 0 || idx >= args[0].as.bv->len) creme_abort("bytevector-u8-ref: index %d out of range", idx);
   return v_int(args[0].as.bv->bytes[idx]);
 }
 
 static Value bi_bytevector_u8_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 3 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT || args[2].tag != T_INT) cvm_abort("bytevector-u8-set!: expected (bytevector index byte)");
+  if (nargs != 3 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT || args[2].tag != T_INT) creme_abort("bytevector-u8-set!: expected (bytevector index byte)");
   int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.bv->len) cvm_abort("bytevector-u8-set!: index %d out of range", idx);
-  if (args[2].as.i < 0 || args[2].as.i > 255) cvm_abort("bytevector-u8-set!: byte out of range");
+  if (idx < 0 || idx >= args[0].as.bv->len) creme_abort("bytevector-u8-set!: index %d out of range", idx);
+  if (args[2].as.i < 0 || args[2].as.i > 255) creme_abort("bytevector-u8-set!: byte out of range");
   args[0].as.bv->bytes[idx] = (unsigned char)args[2].as.i;
   return v_nil();
 }
-static Value bi_char_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("char?: expected an argument"); return v_bool(args[0].tag == T_CHAR); }
+static Value bi_char_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("char?: expected an argument"); return v_bool(args[0].tag == T_CHAR); }
 /* Mirrors the real interpreter's own procedure? exactly (predicates.cr):
  * deliberately narrow -- Builtin/BytecodeClosure/BytecodeCaseClosure
  * (T_RECORD_CALLABLE counts because RecordAccessor/RecordMutator/ctor/
  * pred are real Builtin SUBCLASSES there), but NOT SchemeParameter
  * (T_PARAMETER) -- a parameter is callable via apply's generic dispatch
  * without being procedure?-true. */
-static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("procedure?: expected an argument"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_CASE_CLOSURE || args[0].tag == T_RECORD_CALLABLE || args[0].tag == T_BUILTIN || args[0].tag == T_CONTINUATION); }
-static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("number?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL || args[0].tag == T_COMPLEX); }
+static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("procedure?: expected an argument"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_CASE_CLOSURE || args[0].tag == T_RECORD_CALLABLE || args[0].tag == T_BUILTIN || args[0].tag == T_CONTINUATION); }
+static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("number?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL || args[0].tag == T_COMPLEX); }
 /* real? is every number EXCEPT a genuine T_COMPLEX -- mirrors real?
  * (predicates.cr) exactly: number?(v) && !v.is_a?(SchemeComplex). */
-static Value bi_real_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("real?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL); }
+static Value bi_real_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("real?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL); }
 /* complex? is literally an alias for number? -- every number is complex
  * per R7RS (mirrors complex.cr's own complex_p exactly, "true for any
  * number, real or complex"). */
 static Value bi_complex_p(VM *vm, Value *args, int nargs) { return bi_number_p(vm, args, nargs); }
 static Value bi_integer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("integer?: expected an argument");
+  if (nargs < 1) creme_abort("integer?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(1);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f == floor(args[0].as.f));
   /* T_RATIONAL is never whole by construction (make_rational_from_mpq
@@ -2621,9 +2621,9 @@ static Value bi_integer_p(VM *vm, Value *args, int nargs) {
  * complex is neither exact? nor inexact? here, same gap native itself
  * has (see complex.cr's own header comment on this not being special-
  * cased) -- not something this port is trying to fix. */
-static Value bi_exact_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("exact?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_RATIONAL); }
-static Value bi_inexact_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("inexact?: expected an argument"); return v_bool(args[0].tag == T_FLOAT); }
-static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) cvm_abort("exact-integer?: expected an argument"); return v_bool(args[0].tag == T_INT); }
+static Value bi_exact_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("exact?: expected an argument"); return v_bool(args[0].tag == T_INT || args[0].tag == T_RATIONAL); }
+static Value bi_inexact_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("inexact?: expected an argument"); return v_bool(args[0].tag == T_FLOAT); }
+static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("exact-integer?: expected an argument"); return v_bool(args[0].tag == T_INT); }
 /* rational? is exact (int/rational) OR a finite float -- mirrors
  * rational? (predicates.cr) exactly. Needed by modules/creme/bytecode.
  * sld's own write-datum! (ICE1 chunk serialization) to detect a rational
@@ -2633,7 +2633,7 @@ static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; if (
  * compile-time-constant path always goes through this). */
 static Value bi_rational_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("rational?: expected an argument");
+  if (nargs < 1) creme_abort("rational?: expected an argument");
   if (args[0].tag == T_INT || args[0].tag == T_RATIONAL) return v_bool(1);
   if (args[0].tag == T_FLOAT) return v_bool(isfinite(args[0].as.f));
   return v_bool(0);
@@ -2647,27 +2647,27 @@ static Value bi_rational_p(VM *vm, Value *args, int nargs) {
  * than half-built. */
 static Value bi_numerator(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("numerator: expected an argument");
+  if (nargs < 1) creme_abort("numerator: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_RATIONAL) {
-    if (!mpz_fits_slong_p(mpq_numref(args[0].as.rational->q))) cvm_abort("numerator: too large for this prototype's fixnum-only int type");
+    if (!mpz_fits_slong_p(mpq_numref(args[0].as.rational->q))) creme_abort("numerator: too large for this prototype's fixnum-only int type");
     return v_int((int64_t)mpz_get_si(mpq_numref(args[0].as.rational->q)));
   }
-  cvm_abort("numerator: expected an exact rational or integer");
+  creme_abort("numerator: expected an exact rational or integer");
 }
 static Value bi_denominator(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("denominator: expected an argument");
+  if (nargs < 1) creme_abort("denominator: expected an argument");
   if (args[0].tag == T_INT) return v_int(1);
   if (args[0].tag == T_RATIONAL) {
-    if (!mpz_fits_slong_p(mpq_denref(args[0].as.rational->q))) cvm_abort("denominator: too large for this prototype's fixnum-only int type");
+    if (!mpz_fits_slong_p(mpq_denref(args[0].as.rational->q))) creme_abort("denominator: too large for this prototype's fixnum-only int type");
     return v_int((int64_t)mpz_get_si(mpq_denref(args[0].as.rational->q)));
   }
-  cvm_abort("denominator: expected an exact rational or integer");
+  creme_abort("denominator: expected an exact rational or integer");
 }
-static Value bi_eq_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("eq?: expected two arguments"); return v_bool(cvm_eqv(args[0], args[1])); }
-static Value bi_eqv_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("eqv?: expected two arguments"); return v_bool(cvm_eqv(args[0], args[1])); }
-static Value bi_equal_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) cvm_abort("equal?: expected two arguments"); return v_bool(cvm_equal(args[0], args[1])); }
+static Value bi_eq_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("eq?: expected two arguments"); return v_bool(creme_eqv(args[0], args[1])); }
+static Value bi_eqv_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("eqv?: expected two arguments"); return v_bool(creme_eqv(args[0], args[1])); }
+static Value bi_equal_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("equal?: expected two arguments"); return v_bool(creme_equal(args[0], args[1])); }
 
 /* ---- numeric predicates / conversions ---- */
 /* zero?/positive?/negative?/abs all extend to T_RATIONAL below (mpq_sgn/
@@ -2683,41 +2683,41 @@ static Value bi_equal_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 
  * parity with native, not a remaining gap. */
 static Value bi_zero_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("zero?: expected an argument");
+  if (nargs < 1) creme_abort("zero?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i == 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f == 0.0);
   if (args[0].tag == T_RATIONAL) return v_bool(0); /* never zero, see value.h */
-  cvm_abort("zero?: not a number");
+  creme_abort("zero?: not a number");
 }
 static Value bi_positive_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("positive?: expected an argument");
+  if (nargs < 1) creme_abort("positive?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i > 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f > 0.0);
   if (args[0].tag == T_RATIONAL) return v_bool(mpq_sgn(args[0].as.rational->q) > 0);
-  cvm_abort("positive?: not a number");
+  creme_abort("positive?: not a number");
 }
 static Value bi_negative_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("negative?: expected an argument");
+  if (nargs < 1) creme_abort("negative?: expected an argument");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i < 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f < 0.0);
   if (args[0].tag == T_RATIONAL) return v_bool(mpq_sgn(args[0].as.rational->q) < 0);
-  cvm_abort("negative?: not a number");
+  creme_abort("negative?: not a number");
 }
-static Value bi_odd_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) cvm_abort("odd?: expected an integer"); return v_bool(args[0].as.i % 2 != 0); }
-static Value bi_even_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) cvm_abort("even?: expected an integer"); return v_bool(args[0].as.i % 2 == 0); }
+static Value bi_odd_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) creme_abort("odd?: expected an integer"); return v_bool(args[0].as.i % 2 != 0); }
+static Value bi_even_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) creme_abort("even?: expected an integer"); return v_bool(args[0].as.i % 2 == 0); }
 /* (square z) is equivalent to (* z z) -- reuse num_mul so it promotes
  * through the same int/rational/float/complex tower `*` itself does,
  * rather than re-deriving a narrower version here. */
 static Value bi_square(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("square: expected an argument");
+  if (nargs < 1) creme_abort("square: expected an argument");
   return num_mul(args[0], args[0]);
 }
 static Value bi_abs(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("abs: expected an argument");
+  if (nargs < 1) creme_abort("abs: expected an argument");
   if (args[0].tag == T_INT) return v_int(args[0].as.i < 0 ? -args[0].as.i : args[0].as.i);
   if (args[0].tag == T_FLOAT) return v_float(fabs(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
@@ -2729,18 +2729,18 @@ static Value bi_abs(VM *vm, Value *args, int nargs) {
     mpq_clear(q);
     return result;
   }
-  cvm_abort("abs: not a number");
+  creme_abort("abs: not a number");
 }
 static Value bi_min(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("min: expected at least one argument");
+  if (nargs < 1) creme_abort("min: expected at least one argument");
   Value m = args[0];
   for (int i = 1; i < nargs; i++) if (num_lt(args[i], m)) m = args[i];
   return m;
 }
 static Value bi_max(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("max: expected at least one argument");
+  if (nargs < 1) creme_abort("max: expected at least one argument");
   Value m = args[0];
   for (int i = 1; i < nargs; i++) if (num_gt(args[i], m)) m = args[i];
   return m;
@@ -2753,13 +2753,13 @@ static Value bi_max(VM *vm, Value *args, int nargs) {
  * GMP primitives line up exactly with R7RS's own floor/ceiling/truncate.
  * Result is always exact and integral, so always collapses to a T_INT. */
 static Value mpz_to_int_value(mpz_t z, const char *who) {
-  if (!mpz_fits_slong_p(z)) cvm_abort("%s: result too large for this prototype's fixnum-only int type", who);
+  if (!mpz_fits_slong_p(z)) creme_abort("%s: result too large for this prototype's fixnum-only int type", who);
   return v_int((int64_t)mpz_get_si(z));
 }
 
 static Value bi_round(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("round: expected an argument");
+  if (nargs < 1) creme_abort("round: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(round(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
@@ -2779,11 +2779,11 @@ static Value bi_round(VM *vm, Value *args, int nargs) {
     mpz_clears(floor_q, rem2, twice_rem, NULL);
     return result;
   }
-  cvm_abort("round: not a number");
+  creme_abort("round: not a number");
 }
 static Value bi_floor(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("floor: expected an argument");
+  if (nargs < 1) creme_abort("floor: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(floor(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
@@ -2794,11 +2794,11 @@ static Value bi_floor(VM *vm, Value *args, int nargs) {
     mpz_clear(z);
     return result;
   }
-  cvm_abort("floor: not a number");
+  creme_abort("floor: not a number");
 }
 static Value bi_ceiling(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("ceiling: expected an argument");
+  if (nargs < 1) creme_abort("ceiling: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(ceil(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
@@ -2809,11 +2809,11 @@ static Value bi_ceiling(VM *vm, Value *args, int nargs) {
     mpz_clear(z);
     return result;
   }
-  cvm_abort("ceiling: not a number");
+  creme_abort("ceiling: not a number");
 }
 static Value bi_truncate(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("truncate: expected an argument");
+  if (nargs < 1) creme_abort("truncate: expected an argument");
   if (args[0].tag == T_INT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(trunc(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
@@ -2824,26 +2824,26 @@ static Value bi_truncate(VM *vm, Value *args, int nargs) {
     mpz_clear(z);
     return result;
   }
-  cvm_abort("truncate: not a number");
+  creme_abort("truncate: not a number");
 }
 static Value bi_exact(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("exact: expected an argument");
+  if (nargs < 1) creme_abort("exact: expected an argument");
   if (args[0].tag == T_INT || args[0].tag == T_RATIONAL) return args[0];
   /* Truncates rather than finding the float's own exact rational value
    * (native's to_exact does the latter via BigRational -- see
    * builtin_helpers.cr) -- a pre-existing simplification of this
    * prototype's inexact->exact, unchanged/not in scope here. */
   if (args[0].tag == T_FLOAT) return v_int((int64_t)args[0].as.f);
-  cvm_abort("exact: not a number");
+  creme_abort("exact: not a number");
 }
 static Value bi_inexact(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("inexact: expected an argument");
+  if (nargs < 1) creme_abort("inexact: expected an argument");
   if (args[0].tag == T_FLOAT) return args[0];
   if (args[0].tag == T_INT) return v_float((double)args[0].as.i);
   if (args[0].tag == T_RATIONAL) return v_float(mpq_get_d(args[0].as.rational->q));
-  cvm_abort("inexact: not a number");
+  creme_abort("inexact: not a number");
 }
 
 /* ---- (scheme complex) -- mirrors src/creme/modules/scheme/complex.cr's
@@ -2856,36 +2856,36 @@ static int is_real_component(Value v) { return v.tag == T_INT || v.tag == T_FLOA
 static Value bi_make_rectangular(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || !is_real_component(args[0]) || !is_real_component(args[1])) {
-    cvm_abort("make-rectangular: expected two real numbers");
+    creme_abort("make-rectangular: expected two real numbers");
   }
   return make_complex(args[0], args[1]);
 }
 
 static Value bi_make_polar(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2) cvm_abort("make-polar: expected (magnitude angle)");
+  if (nargs != 2) creme_abort("make-polar: expected (magnitude angle)");
   double mag = as_double(args[0], "make-polar"), ang = as_double(args[1], "make-polar");
   return make_complex(v_float(mag * cos(ang)), v_float(mag * sin(ang)));
 }
 
 static Value bi_real_part(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) cvm_abort("real-part: expected an argument");
+  if (nargs != 1) creme_abort("real-part: expected an argument");
   if (args[0].tag == T_COMPLEX) return args[0].as.cplx->real;
-  if (!is_real_component(args[0])) cvm_abort("real-part: not a number");
+  if (!is_real_component(args[0])) creme_abort("real-part: not a number");
   return args[0];
 }
 
 static Value bi_imag_part(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) cvm_abort("imag-part: expected an argument");
+  if (nargs != 1) creme_abort("imag-part: expected an argument");
   if (args[0].tag == T_COMPLEX) return args[0].as.cplx->imag;
-  if (!is_real_component(args[0])) cvm_abort("imag-part: not a number");
+  if (!is_real_component(args[0])) creme_abort("imag-part: not a number");
   return v_int(0);
 }
 
 static Value bi_magnitude(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) cvm_abort("magnitude: expected an argument");
+  if (nargs != 1) creme_abort("magnitude: expected an argument");
   if (args[0].tag == T_COMPLEX) {
     double re = as_double(args[0].as.cplx->real, "magnitude"), im = as_double(args[0].as.cplx->imag, "magnitude");
     return v_float(sqrt(re * re + im * im));
@@ -2895,17 +2895,17 @@ static Value bi_magnitude(VM *vm, Value *args, int nargs) {
 
 static Value bi_angle(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) cvm_abort("angle: expected an argument");
+  if (nargs != 1) creme_abort("angle: expected an argument");
   if (args[0].tag == T_COMPLEX) {
     return v_float(atan2(as_double(args[0].as.cplx->imag, "angle"), as_double(args[0].as.cplx->real, "angle")));
   }
-  if (!is_real_component(args[0])) cvm_abort("angle: not a number");
+  if (!is_real_component(args[0])) creme_abort("angle: not a number");
   return v_float(as_double(args[0], "angle") < 0 ? M_PI : 0.0);
 }
 
 /* ---- pairs / lists ---- */
-Value bi_car(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) cvm_abort("car: expected a pair"); return args[0].as.pair->car; }
-Value bi_cdr(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) cvm_abort("cdr: expected a pair"); return args[0].as.pair->cdr; }
+Value bi_car(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) creme_abort("car: expected a pair"); return args[0].as.pair->car; }
+Value bi_cdr(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_PAIR) creme_abort("cdr: expected a pair"); return args[0].as.pair->cdr; }
 
 /* set-car!/set-cdr! -- mutate a Pair's own field in place (Pair is a
  * real, individually GC_MALLOC'd struct -- see value.h -- so this is
@@ -2917,13 +2917,13 @@ Value bi_cdr(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0
  * Crystal-side spec suite's identical pending case). */
 static Value bi_set_car_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_PAIR) cvm_abort("set-car!: expected a pair");
+  if (nargs < 2 || args[0].tag != T_PAIR) creme_abort("set-car!: expected a pair");
   args[0].as.pair->car = args[1];
   return v_nil();
 }
 static Value bi_set_cdr_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_PAIR) cvm_abort("set-cdr!: expected a pair");
+  if (nargs < 2 || args[0].tag != T_PAIR) creme_abort("set-cdr!: expected a pair");
   args[0].as.pair->cdr = args[1];
   return v_nil();
 }
@@ -2940,7 +2940,7 @@ static Value bi_set_cdr_bang(VM *vm, Value *args, int nargs) {
  * (cadr = (car (cdr x))). */
 static Value cxr_apply(const char *ops, int n, Value v) {
   for (int i = n - 1; i >= 0; i--) {
-    if (v.tag != T_PAIR) cvm_abort("c%.*sr: expected a pair", n, ops);
+    if (v.tag != T_PAIR) creme_abort("c%.*sr: expected a pair", n, ops);
     v = (ops[i] == 'a') ? v.as.pair->car : v.as.pair->cdr;
   }
   return v;
@@ -2949,7 +2949,7 @@ static Value cxr_apply(const char *ops, int n, Value v) {
 #define DEFINE_CXR(name, opstr)                                                     \
   static Value bi_##name(VM *vm, Value *args, int nargs) {                          \
     (void)vm;                                                                       \
-    if (nargs != 1) cvm_abort(#name ": expected 1 argument");                       \
+    if (nargs != 1) creme_abort(#name ": expected 1 argument");                       \
     return cxr_apply(opstr, (int)(sizeof(opstr) - 1), args[0]);                     \
   }
 
@@ -2981,16 +2981,16 @@ DEFINE_CXR(cddaar, "ddaa")
 DEFINE_CXR(cddadr, "ddad")
 DEFINE_CXR(cdddar, "ddda")
 DEFINE_CXR(cddddr, "dddd")
-Value bi_cons(VM *vm, Value *args, int nargs) { if (nargs < 2) cvm_abort("cons: expected two arguments"); return cvm_cons(vm, args[0], args[1]); }
+Value bi_cons(VM *vm, Value *args, int nargs) { if (nargs < 2) creme_abort("cons: expected two arguments"); return creme_cons(vm, args[0], args[1]); }
 static Value bi_list(VM *vm, Value *args, int nargs) {
   Value r = v_nil();
-  for (int i = nargs - 1; i >= 0; i--) r = cvm_cons(vm, args[i], r);
+  for (int i = nargs - 1; i >= 0; i--) r = creme_cons(vm, args[i], r);
   return r;
 }
 static Value bi_cons_star(VM *vm, Value *args, int nargs) {
   if (nargs == 0) return v_nil();
   Value r = args[nargs - 1];
-  for (int i = nargs - 2; i >= 0; i--) r = cvm_cons(vm, args[i], r);
+  for (int i = nargs - 2; i >= 0; i--) r = creme_cons(vm, args[i], r);
   return r;
 }
 static Value bi_append(VM *vm, Value *args, int nargs) {
@@ -3004,53 +3004,53 @@ static Value bi_append(VM *vm, Value *args, int nargs) {
     c = args[i];
     int idx = 0;
     while (c.tag == T_PAIR) { tmp[idx++] = c.as.pair->car; c = c.as.pair->cdr; }
-    for (int j = n - 1; j >= 0; j--) result = cvm_cons(vm, tmp[j], result);
+    for (int j = n - 1; j >= 0; j--) result = creme_cons(vm, tmp[j], result);
     free(tmp);
   }
   return result;
 }
 static Value bi_list_tail(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[1].tag != T_INT) cvm_abort("list-tail: expected (list k)");
+  if (nargs < 2 || args[1].tag != T_INT) creme_abort("list-tail: expected (list k)");
   Value cur = args[0];
   for (int64_t k = args[1].as.i; k > 0; k--) {
-    if (cur.tag != T_PAIR) cvm_abort("list-tail: index out of range");
+    if (cur.tag != T_PAIR) creme_abort("list-tail: index out of range");
     cur = cur.as.pair->cdr;
   }
   return cur;
 }
 static Value bi_list_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[1].tag != T_INT) cvm_abort("list-ref: expected (list k)");
+  if (nargs < 2 || args[1].tag != T_INT) creme_abort("list-ref: expected (list k)");
   Value cur = args[0];
   for (int64_t k = args[1].as.i; k > 0; k--) {
-    if (cur.tag != T_PAIR) cvm_abort("list-ref: index out of range");
+    if (cur.tag != T_PAIR) creme_abort("list-ref: index out of range");
     cur = cur.as.pair->cdr;
   }
-  if (cur.tag != T_PAIR) cvm_abort("list-ref: index out of range");
+  if (cur.tag != T_PAIR) creme_abort("list-ref: index out of range");
   return cur.as.pair->car;
 }
 static Value bi_list_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3 || args[1].tag != T_INT) cvm_abort("list-set!: expected (list k obj)");
+  if (nargs < 3 || args[1].tag != T_INT) creme_abort("list-set!: expected (list k obj)");
   Value cur = args[0];
   for (int64_t k = args[1].as.i; k > 0; k--) {
-    if (cur.tag != T_PAIR) cvm_abort("list-set!: index out of range");
+    if (cur.tag != T_PAIR) creme_abort("list-set!: index out of range");
     cur = cur.as.pair->cdr;
   }
-  if (cur.tag != T_PAIR) cvm_abort("list-set!: index out of range");
+  if (cur.tag != T_PAIR) creme_abort("list-set!: index out of range");
   cur.as.pair->car = args[2];
   return v_nil();
 }
 static Value bi_make_list(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("make-list: expected (k [fill])");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-list: expected (k [fill])");
   Value fill = nargs >= 2 ? args[1] : v_bool(0);
   Value result = v_nil();
-  for (int64_t i = 0; i < args[0].as.i; i++) result = cvm_cons(vm, fill, result);
+  for (int64_t i = 0; i < args[0].as.i; i++) result = creme_cons(vm, fill, result);
   return result;
 }
 static Value bi_list_copy(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("list-copy: expected a list");
+  if (nargs < 1) creme_abort("list-copy: expected a list");
   /* Shallow copy, preserving an improper tail as-is (R7RS: "if obj is
    * improper, the result is also improper, and the final cdr of obj is
    * the final cdr of the result"). */
@@ -3063,25 +3063,25 @@ static Value bi_list_copy(VM *vm, Value *args, int nargs) {
     cur = cur.as.pair->cdr;
   }
   Value result = cur; /* final (possibly non-nil) tail */
-  for (int i = n - 1; i >= 0; i--) result = cvm_cons(vm, items[i], result);
+  for (int i = n - 1; i >= 0; i--) result = creme_cons(vm, items[i], result);
   return result;
 }
 static Value bi_last_pair(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PAIR) cvm_abort("last-pair: expected a non-empty list");
+  if (nargs < 1 || args[0].tag != T_PAIR) creme_abort("last-pair: expected a non-empty list");
   Value cur = args[0];
   while (cur.as.pair->cdr.tag == T_PAIR) cur = cur.as.pair->cdr;
   return cur;
 }
 static Value bi_assoc(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("assoc: expected (key alist)");
+  if (nargs < 2) creme_abort("assoc: expected (key alist)");
   int has_pred = nargs >= 3;
   Value cur = args[1];
   while (cur.tag == T_PAIR) {
     Value entry = cur.as.pair->car;
     if (entry.tag == T_PAIR) {
-      int match = has_pred ? !v_falsy(cvm_apply(vm, args[2], (Value[]){args[0], entry.as.pair->car}, 2))
-                            : cvm_equal(entry.as.pair->car, args[0]);
+      int match = has_pred ? !v_falsy(creme_apply(vm, args[2], (Value[]){args[0], entry.as.pair->car}, 2))
+                            : creme_equal(entry.as.pair->car, args[0]);
       if (match) return entry;
     }
     cur = cur.as.pair->cdr;
@@ -3090,22 +3090,22 @@ static Value bi_assoc(VM *vm, Value *args, int nargs) {
 }
 static Value bi_assq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("assq: expected (key alist)");
+  if (nargs < 2) creme_abort("assq: expected (key alist)");
   Value cur = args[1];
   while (cur.tag == T_PAIR) {
     Value entry = cur.as.pair->car;
-    if (entry.tag == T_PAIR && cvm_eqv(entry.as.pair->car, args[0])) return entry;
+    if (entry.tag == T_PAIR && creme_eqv(entry.as.pair->car, args[0])) return entry;
     cur = cur.as.pair->cdr;
   }
   return v_bool(0);
 }
 static Value bi_member(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("member: expected (key list)");
+  if (nargs < 2) creme_abort("member: expected (key list)");
   int has_pred = nargs >= 3;
   Value cur = args[1];
   while (cur.tag == T_PAIR) {
-    int match = has_pred ? !v_falsy(cvm_apply(vm, args[2], (Value[]){args[0], cur.as.pair->car}, 2))
-                          : cvm_equal(cur.as.pair->car, args[0]);
+    int match = has_pred ? !v_falsy(creme_apply(vm, args[2], (Value[]){args[0], cur.as.pair->car}, 2))
+                          : creme_equal(cur.as.pair->car, args[0]);
     if (match) return cur;
     cur = cur.as.pair->cdr;
   }
@@ -3113,10 +3113,10 @@ static Value bi_member(VM *vm, Value *args, int nargs) {
 }
 static Value bi_memq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("memq: expected (key list)");
+  if (nargs < 2) creme_abort("memq: expected (key list)");
   Value cur = args[1];
   while (cur.tag == T_PAIR) {
-    if (cvm_eqv(cur.as.pair->car, args[0])) return cur;
+    if (creme_eqv(cur.as.pair->car, args[0])) return cur;
     cur = cur.as.pair->cdr;
   }
   return v_bool(0);
@@ -3128,7 +3128,7 @@ static Value bi_memq(VM *vm, Value *args, int nargs) {
  * support "call this after-thunk" alongside "restore these parameters".
  * Pushing our own UnwindAction BEFORE calling thunk means an error
  * raised (anywhere, however deep, including through further nested
- * cvm_apply calls) that unwinds past this dynamic-wind via an outer
+ * creme_apply calls) that unwinds past this dynamic-wind via an outer
  * guard handler will run `after` during that handler's own unwind-stack
  * drain (OP_PUSHHANDLER's resume branch) -- exactly like a pending
  * parameterize restoration -- even though this C function's own call
@@ -3136,21 +3136,21 @@ static Value bi_memq(VM *vm, Value *args, int nargs) {
  * entirely). On the ordinary, no-exception path, thunk returns normally
  * here and we pop + run our own action directly. */
 static Value bi_dynamic_wind(VM *vm, Value *args, int nargs) {
-  if (nargs != 3) cvm_abort("dynamic-wind: expected (before thunk after)");
+  if (nargs != 3) creme_abort("dynamic-wind: expected (before thunk after)");
   Value before = args[0], thunk = args[1], after = args[2];
-  cvm_apply(vm, before, NULL, 0);
-  if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("icecreme: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+  creme_apply(vm, before, NULL, 0);
+  if (vm->n_unwind >= CREME_UNWIND_CAP) creme_abort("icecreme: parameterize/dynamic-wind unwind stack full (CREME_UNWIND_CAP=%d)", CREME_UNWIND_CAP);
   UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
   ua->kind = UNWIND_DYNAMIC_WIND;
   ua->after = after;
-  Value result = cvm_apply(vm, thunk, NULL, 0);
+  Value result = creme_apply(vm, thunk, NULL, 0);
   /* Ordinary, no-exception return: pop our own action and run `after`
    * directly here (NOT via vm.c's own run_unwind_action, static/private
    * to that file -- this is the exact same one-line effect for the
    * DYNAMIC_WIND case). The guard-unwind path (vm.c) still handles the
    * exceptional case via that same UnwindAction, unaffected by this. */
   vm->n_unwind--;
-  cvm_apply(vm, after, NULL, 0);
+  creme_apply(vm, after, NULL, 0);
   return result;
 }
 
@@ -3160,26 +3160,26 @@ static Value bi_dynamic_wind(VM *vm, Value *args, int nargs) {
  * as the sole argument. If `proc` returns normally (never invokes the
  * continuation), call/cc itself returns that value, same as an ordinary
  * call. If the continuation IS invoked (immediately, or arbitrarily
- * deep -- through further nested cvm_apply calls, e.g. a for-each
- * callback), dispatch_call/cvm_apply's own T_CONTINUATION case (vm.c)
+ * deep -- through further nested creme_apply calls, e.g. a for-each
+ * callback), dispatch_call/creme_apply's own T_CONTINUATION case (vm.c)
  * unwinds pending dynamic-wind/parameterize actions and longjmps
  * straight back to the setjmp call site below, which returns k->result
  * instead. See value.h's own Continuation doc comment for why this is
  * NOT a general re-enterable continuation. */
 static Value bi_call_cc(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) cvm_abort("call/cc: expected a procedure");
+  if (nargs != 1) creme_abort("call/cc: expected a procedure");
   Continuation *k = GC_MALLOC(sizeof(Continuation));
   k->depth = vm->depth;
   k->unwind_mark = vm->n_unwind;
   if (setjmp(k->buf) != 0) return k->result;
   Value kval = v_continuation(k);
-  return cvm_apply(vm, args[0], &kval, 1);
+  return creme_apply(vm, args[0], &kval, 1);
 }
 
-/* ---- higher-order procedures (cvm_apply, vm.c, is the reentrant "call a
+/* ---- higher-order procedures (creme_apply, vm.c, is the reentrant "call a
  * Scheme value from C" helper these all need). ---- */
 static Value bi_apply(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("apply: expected at least (proc ... list)");
+  if (nargs < 2) creme_abort("apply: expected at least (proc ... list)");
   int n_extra = nargs - 2;
   Value list_arg = args[nargs - 1];
   int n_list = 0;
@@ -3191,12 +3191,12 @@ static Value bi_apply(VM *vm, Value *args, int nargs) {
   c = list_arg;
   int idx = n_extra;
   while (c.tag == T_PAIR) { call_args[idx++] = c.as.pair->car; c = c.as.pair->cdr; }
-  Value result = cvm_apply(vm, args[0], call_args, total);
+  Value result = creme_apply(vm, args[0], call_args, total);
   free(call_args);
   return result;
 }
 static Value bi_map(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("map: expected a procedure and at least one list");
+  if (nargs < 2) creme_abort("map: expected a procedure and at least one list");
   int n_lists = nargs - 1;
   Value *cursors = xmalloc(sizeof(Value) * (size_t)n_lists);
   Value *items = xmalloc(sizeof(Value) * (size_t)n_lists);
@@ -3210,20 +3210,20 @@ static Value bi_map(VM *vm, Value *args, int nargs) {
     for (int i = 0; i < n_lists; i++) { items[i] = cursors[i].as.pair->car; cursors[i] = cursors[i].as.pair->cdr; }
     /* r is a genuinely new value (map's whole point) with no other
      * reference until it's consed into `result` below -- acc must be
-     * GC-visible so a later cvm_apply's own allocations can't collect an
+     * GC-visible so a later creme_apply's own allocations can't collect an
      * earlier iteration's result out from under this loop. */
-    Value r = cvm_apply(vm, args[0], items, n_lists);
+    Value r = creme_apply(vm, args[0], items, n_lists);
     if (acc_len >= acc_cap) { acc_cap = acc_cap ? acc_cap * 2 : 8; acc = GC_REALLOC(acc, sizeof(Value) * (size_t)acc_cap); }
     acc[acc_len++] = r;
   }
   Value result = v_nil();
-  for (int i = acc_len - 1; i >= 0; i--) result = cvm_cons(vm, acc[i], result);
+  for (int i = acc_len - 1; i >= 0; i--) result = creme_cons(vm, acc[i], result);
   free(cursors);
   free(items);
   return result;
 }
 static Value bi_for_each(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("for-each: expected a procedure and at least one list");
+  if (nargs < 2) creme_abort("for-each: expected a procedure and at least one list");
   int n_lists = nargs - 1;
   Value *cursors = xmalloc(sizeof(Value) * (size_t)n_lists);
   Value *items = xmalloc(sizeof(Value) * (size_t)n_lists);
@@ -3233,18 +3233,18 @@ static Value bi_for_each(VM *vm, Value *args, int nargs) {
     for (int i = 0; i < n_lists; i++) if (cursors[i].tag != T_PAIR) { done = 1; break; }
     if (done) break;
     for (int i = 0; i < n_lists; i++) { items[i] = cursors[i].as.pair->car; cursors[i] = cursors[i].as.pair->cdr; }
-    cvm_apply(vm, args[0], items, n_lists);
+    creme_apply(vm, args[0], items, n_lists);
   }
   free(cursors);
   free(items);
   return v_nil();
 }
 static Value bi_vector_map(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("vector-map: expected a procedure and at least one vector");
+  if (nargs < 2) creme_abort("vector-map: expected a procedure and at least one vector");
   int n_vecs = nargs - 1;
   int minlen = -1;
   for (int i = 0; i < n_vecs; i++) {
-    if (args[1 + i].tag != T_VECTOR) cvm_abort("vector-map: expected a vector");
+    if (args[1 + i].tag != T_VECTOR) creme_abort("vector-map: expected a vector");
     int len = args[1 + i].as.vec->len;
     if (minlen < 0 || len < minlen) minlen = len;
   }
@@ -3254,53 +3254,53 @@ static Value bi_vector_map(VM *vm, Value *args, int nargs) {
   Value *items = xmalloc(sizeof(Value) * (size_t)n_vecs);
   for (int i = 0; i < minlen; i++) {
     for (int j = 0; j < n_vecs; j++) items[j] = args[1 + j].as.vec->items[i];
-    result->items[i] = cvm_apply(vm, args[0], items, n_vecs);
+    result->items[i] = creme_apply(vm, args[0], items, n_vecs);
   }
   free(items);
   return v_vector(result);
 }
 static Value bi_vector_for_each(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("vector-for-each: expected a procedure and at least one vector");
+  if (nargs < 2) creme_abort("vector-for-each: expected a procedure and at least one vector");
   int n_vecs = nargs - 1;
   int minlen = -1;
   for (int i = 0; i < n_vecs; i++) {
-    if (args[1 + i].tag != T_VECTOR) cvm_abort("vector-for-each: expected a vector");
+    if (args[1 + i].tag != T_VECTOR) creme_abort("vector-for-each: expected a vector");
     int len = args[1 + i].as.vec->len;
     if (minlen < 0 || len < minlen) minlen = len;
   }
   Value *items = xmalloc(sizeof(Value) * (size_t)n_vecs);
   for (int i = 0; i < minlen; i++) {
     for (int j = 0; j < n_vecs; j++) items[j] = args[1 + j].as.vec->items[i];
-    cvm_apply(vm, args[0], items, n_vecs);
+    creme_apply(vm, args[0], items, n_vecs);
   }
   free(items);
   return v_nil();
 }
 static Value bi_string_for_each(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("string-for-each: expected a procedure and at least one string");
+  if (nargs < 2) creme_abort("string-for-each: expected a procedure and at least one string");
   int n_strs = nargs - 1;
   int minlen = -1;
   for (int i = 0; i < n_strs; i++) {
-    if (args[1 + i].tag != T_STR) cvm_abort("string-for-each: expected a string");
+    if (args[1 + i].tag != T_STR) creme_abort("string-for-each: expected a string");
     int len = args[1 + i].aux;
     if (minlen < 0 || len < minlen) minlen = len;
   }
   Value *chars = xmalloc(sizeof(Value) * (size_t)n_strs);
   for (int idx = 0; idx < minlen; idx++) {
     for (int i = 0; i < n_strs; i++) chars[i] = v_char((unsigned char)args[1 + i].as.chars[idx]);
-    cvm_apply(vm, args[0], chars, n_strs);
+    creme_apply(vm, args[0], chars, n_strs);
   }
   free(chars);
   return v_nil();
 }
 static Value bi_filter(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("filter: expected (pred list)");
+  if (nargs < 2) creme_abort("filter: expected (pred list)");
   Value *acc = NULL;
   int len = 0, cap = 0;
   Value cur = args[1];
   while (cur.tag == T_PAIR) {
     Value item = cur.as.pair->car;
-    Value keep = cvm_apply(vm, args[0], &item, 1);
+    Value keep = creme_apply(vm, args[0], &item, 1);
     if (!v_falsy(keep)) {
       if (len >= cap) { cap = cap ? cap * 2 : 8; acc = xrealloc(acc, sizeof(Value) * (size_t)cap); }
       acc[len++] = item;
@@ -3308,7 +3308,7 @@ static Value bi_filter(VM *vm, Value *args, int nargs) {
     cur = cur.as.pair->cdr;
   }
   Value result = v_nil();
-  for (int i = len - 1; i >= 0; i--) result = cvm_cons(vm, acc[i], result);
+  for (int i = len - 1; i >= 0; i--) result = creme_cons(vm, acc[i], result);
   free(acc);
   return result;
 }
@@ -3331,12 +3331,12 @@ static Value bi_values(VM *vm, Value *args, int nargs) {
   return v_values(mv);
 }
 static Value bi_call_with_values(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("call-with-values: expected (producer consumer)");
-  Value produced = cvm_apply(vm, args[0], NULL, 0);
+  if (nargs < 2) creme_abort("call-with-values: expected (producer consumer)");
+  Value produced = creme_apply(vm, args[0], NULL, 0);
   if (produced.tag == T_VALUES) {
-    return cvm_apply(vm, args[1], produced.as.values->items, produced.as.values->len);
+    return creme_apply(vm, args[1], produced.as.values->items, produced.as.values->len);
   }
-  return cvm_apply(vm, args[1], &produced, 1);
+  return creme_apply(vm, args[1], &produced, 1);
 }
 
 /* ---- strings ---- */
@@ -3344,7 +3344,7 @@ Value bi_string_append(VM *vm, Value *args, int nargs) {
   (void)vm;
   size_t total = 0;
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_STR) cvm_abort("string-append: expected a string");
+    if (args[i].tag != T_STR) creme_abort("string-append: expected a string");
     total += (size_t)args[i].aux;
   }
   char *buf = GC_MALLOC(total ? total : 1);
@@ -3369,30 +3369,30 @@ static char *copy_bytes(const char *chars, int len) {
 
 static Value bi_substring(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_INT) cvm_abort("substring: expected (string start [end])");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_INT) creme_abort("substring: expected (string start [end])");
   int start = (int)args[1].as.i;
   int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].aux;
-  if (start < 0 || end > args[0].aux || start > end) cvm_abort("substring: index out of range");
+  if (start < 0 || end > args[0].aux || start > end) creme_abort("substring: index out of range");
   return v_str(copy_bytes(args[0].as.chars + start, end - start), end - start);
 }
 
 static Value bi_string_copy(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string-copy: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-copy: expected a string");
   int start = (nargs >= 2 && args[1].tag == T_INT) ? (int)args[1].as.i : 0;
   int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].aux;
-  if (start < 0 || end > args[0].aux || start > end) cvm_abort("string-copy: index out of range");
+  if (start < 0 || end > args[0].aux || start > end) creme_abort("string-copy: index out of range");
   return v_str(copy_bytes(args[0].as.chars + start, end - start), end - start);
 }
 static Value bi_string_to_list(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->list: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->list: expected a string");
   Value r = v_nil();
-  for (int i = args[0].aux - 1; i >= 0; i--) r = cvm_cons(vm, v_char((unsigned char)args[0].as.chars[i]), r);
+  for (int i = args[0].aux - 1; i >= 0; i--) r = creme_cons(vm, v_char((unsigned char)args[0].as.chars[i]), r);
   return r;
 }
 static Value bi_list_to_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("list->string: expected a list of chars");
+  if (nargs < 1) creme_abort("list->string: expected a list of chars");
   int n = 0;
   Value c = args[0];
   while (c.tag == T_PAIR) { n++; c = c.as.pair->cdr; }
@@ -3400,7 +3400,7 @@ static Value bi_list_to_string(VM *vm, Value *args, int nargs) {
   c = args[0];
   int i = 0;
   while (c.tag == T_PAIR) {
-    if (c.as.pair->car.tag != T_CHAR) cvm_abort("list->string: expected a list of chars");
+    if (c.as.pair->car.tag != T_CHAR) creme_abort("list->string: expected a list of chars");
     buf[i++] = (char)c.as.pair->car.as.i;
     c = c.as.pair->cdr;
   }
@@ -3408,7 +3408,7 @@ static Value bi_list_to_string(VM *vm, Value *args, int nargs) {
 }
 static Value bi_make_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) cvm_abort("make-string: expected a length");
+  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-string: expected a length");
   int64_t n = args[0].as.i;
   char fill = (nargs >= 2 && args[1].tag == T_CHAR) ? (char)args[1].as.i : ' ';
   char *buf = GC_MALLOC((size_t)(n ? n : 1));
@@ -3419,16 +3419,16 @@ static Value bi_string_ctor(VM *vm, Value *args, int nargs) {
   (void)vm;
   char *buf = GC_MALLOC((size_t)(nargs ? nargs : 1));
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_CHAR) cvm_abort("string: expected chars");
+    if (args[i].tag != T_CHAR) creme_abort("string: expected chars");
     buf[i] = (char)args[i].as.i;
   }
   return v_str(buf, nargs);
 }
 static Value bi_string_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("string=?: expected at least two strings");
+  if (nargs < 2) creme_abort("string=?: expected at least two strings");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) cvm_abort("string=?: expected strings");
+    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) creme_abort("string=?: expected strings");
     if (args[i - 1].aux != args[i].aux ||
         memcmp(args[i - 1].as.chars, args[i].as.chars, (size_t)args[i].aux) != 0) {
       return v_bool(0);
@@ -3449,9 +3449,9 @@ static int string_pair_cmp(Value a, Value b) {
   return alen == blen ? 0 : (alen < blen ? -1 : 1);
 }
 static Value string_chain(Value *args, int nargs, const char *who, int (*ok)(int)) {
-  if (nargs < 2) cvm_abort("%s: expected at least two strings", who);
+  if (nargs < 2) creme_abort("%s: expected at least two strings", who);
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) cvm_abort("%s: expected strings", who);
+    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) creme_abort("%s: expected strings", who);
     if (!ok(string_pair_cmp(args[i - 1], args[i]))) return v_bool(0);
   }
   return v_bool(1);
@@ -3470,9 +3470,9 @@ static Value bi_string_ge(VM *vm, Value *args, int nargs) { (void)vm; return str
 
 static Value bi_symbol_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("symbol=?: expected at least two symbols");
+  if (nargs < 2) creme_abort("symbol=?: expected at least two symbols");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_SYM || args[i].tag != T_SYM) cvm_abort("symbol=?: expected symbols");
+    if (args[i - 1].tag != T_SYM || args[i].tag != T_SYM) creme_abort("symbol=?: expected symbols");
     if (args[i - 1].aux != args[i].aux ||
         memcmp(args[i - 1].as.chars, args[i].as.chars, (size_t)args[i].aux) != 0) {
       return v_bool(0);
@@ -3483,9 +3483,9 @@ static Value bi_symbol_eq(VM *vm, Value *args, int nargs) {
 
 static Value bi_boolean_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("boolean=?: expected at least two booleans");
+  if (nargs < 2) creme_abort("boolean=?: expected at least two booleans");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_BOOL || args[i].tag != T_BOOL) cvm_abort("boolean=?: expected booleans");
+    if (args[i - 1].tag != T_BOOL || args[i].tag != T_BOOL) creme_abort("boolean=?: expected booleans");
     if (args[i - 1].as.b != args[i].as.b) return v_bool(0);
   }
   return v_bool(1);
@@ -3496,19 +3496,19 @@ static Value bi_boolean_eq(VM *vm, Value *args, int nargs) {
  * string from proc's own char results -- mirrors native's own
  * string_map exactly (min length, one call per index). */
 static Value bi_string_map(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("string-map: expected (proc string ...)");
+  if (nargs < 2) creme_abort("string-map: expected (proc string ...)");
   int nstrs = nargs - 1;
   int minlen = -1;
   for (int i = 1; i < nargs; i++) {
-    if (args[i].tag != T_STR) cvm_abort("string-map: expected a string");
+    if (args[i].tag != T_STR) creme_abort("string-map: expected a string");
     if (minlen < 0 || args[i].aux < minlen) minlen = args[i].aux;
   }
   char *buf = GC_MALLOC((size_t)(minlen ? minlen : 1));
   Value *call_args = GC_MALLOC(sizeof(Value) * (size_t)nstrs);
   for (int i = 0; i < minlen; i++) {
     for (int s = 0; s < nstrs; s++) call_args[s] = v_char((unsigned char)args[1 + s].as.chars[i]);
-    Value result = cvm_apply(vm, args[0], call_args, nstrs);
-    if (result.tag != T_CHAR) cvm_abort("string-map: expected the function to return a char");
+    Value result = creme_apply(vm, args[0], call_args, nstrs);
+    if (result.tag != T_CHAR) creme_abort("string-map: expected the function to return a char");
     buf[i] = (char)result.as.i;
   }
   return v_str(buf, minlen);
@@ -3521,19 +3521,19 @@ static Value bi_string_map(VM *vm, Value *args, int nargs) {
 static Value bi_string_copy_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR)
-    cvm_abort("string-copy!: expected (to at from [start [end]])");
+    creme_abort("string-copy!: expected (to at from [start [end]])");
   int at = (int)args[1].as.i;
   int first, last;
   byte_range_args(args, nargs, 3, args[2].aux, &first, &last);
   int count = last - first;
-  if (at < 0 || at + count > args[0].aux) cvm_abort("string-copy!: destination range out of bounds");
+  if (at < 0 || at + count > args[0].aux) creme_abort("string-copy!: destination range out of bounds");
   memmove((char *)args[0].as.chars + at, args[2].as.chars + first, (size_t)count);
   return v_nil();
 }
 
 static Value bi_string_fill_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_CHAR) cvm_abort("string-fill!: expected (string char [start [end]])");
+  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_CHAR) creme_abort("string-fill!: expected (string char [start [end]])");
   int first, last;
   byte_range_args(args, nargs, 2, args[0].aux, &first, &last);
   memset((char *)args[0].as.chars + first, (int)(unsigned char)args[1].as.i, (size_t)(last - first));
@@ -3542,7 +3542,7 @@ static Value bi_string_fill_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_to_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->vector: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->vector: expected a string");
   int first, last;
   byte_range_args(args, nargs, 1, args[0].aux, &first, &last);
   int len = last - first;
@@ -3555,14 +3555,14 @@ static Value bi_string_to_vector(VM *vm, Value *args, int nargs) {
 
 static Value bi_vector_to_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_VECTOR) cvm_abort("vector->string: expected a vector");
+  if (nargs < 1 || args[0].tag != T_VECTOR) creme_abort("vector->string: expected a vector");
   Vector *vec = args[0].as.vec;
   int first, last;
   byte_range_args(args, nargs, 1, vec->len, &first, &last);
   int len = last - first;
   char *buf = GC_MALLOC((size_t)(len ? len : 1));
   for (int i = 0; i < len; i++) {
-    if (vec->items[first + i].tag != T_CHAR) cvm_abort("vector->string: expected a vector of chars");
+    if (vec->items[first + i].tag != T_CHAR) creme_abort("vector->string: expected a vector of chars");
     buf[i] = (char)vec->items[first + i].as.i;
   }
   return v_str(buf, len);
@@ -3577,10 +3577,10 @@ static Value bi_vector_to_string(VM *vm, Value *args, int nargs) {
  * tried there. */
 static Value bi_string_to_number(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->number: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->number: expected a string");
   int radix = 10;
   if (nargs >= 2) {
-    if (args[1].tag != T_INT) cvm_abort("string->number: expected an integer radix");
+    if (args[1].tag != T_INT) creme_abort("string->number: expected an integer radix");
     radix = (int)args[1].as.i;
   }
   int len = args[0].aux;
@@ -3606,16 +3606,16 @@ static Value bi_string_to_number(VM *vm, Value *args, int nargs) {
  * instead of "1100". */
 Value bi_number_to_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("number->string: expected a number");
+  if (nargs < 1) creme_abort("number->string: expected a number");
   int radix = 10;
   if (nargs >= 2) {
-    if (args[1].tag != T_INT) cvm_abort("number->string: expected an integer radix");
+    if (args[1].tag != T_INT) creme_abort("number->string: expected an integer radix");
     radix = (int)args[1].as.i;
   }
   char buf[128];
   int len;
   if (radix != 10) {
-    if (args[0].tag != T_INT) cvm_abort("number->string: radix %d requires an exact integer", radix);
+    if (args[0].tag != T_INT) creme_abort("number->string: radix %d requires an exact integer", radix);
     int64_t n = args[0].as.i;
     int neg = n < 0;
     /* Negating INT64_MIN directly overflows -- widen through uint64_t
@@ -3643,14 +3643,14 @@ Value bi_number_to_string(VM *vm, Value *args, int nargs) {
       len = snprintf(buf, sizeof(buf), "%.17g", f);
     }
   } else {
-    cvm_abort("number->string: not a number");
+    creme_abort("number->string: not a number");
   }
   char *copy = GC_MALLOC((size_t)len);
   memcpy(copy, buf, (size_t)len);
   return v_str(copy, len);
 }
-static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_STR) cvm_abort("string->symbol: expected a string"); return v_sym(copy_bytes(args[0].as.chars, args[0].aux), args[0].aux); }
-static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) cvm_abort("symbol->string: expected a symbol"); return v_str(copy_bytes(args[0].as.chars, args[0].aux), args[0].aux); }
+static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->symbol: expected a string"); return v_sym(copy_bytes(args[0].as.chars, args[0].aux), args[0].aux); }
+static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) creme_abort("symbol->string: expected a symbol"); return v_str(copy_bytes(args[0].as.chars, args[0].aux), args[0].aux); }
 
 /* (creme introspection)'s gensym -- a distinct symbol each call
  * ("prefix__N", N a process-wide counter), needed by defmacro-based
@@ -3664,7 +3664,7 @@ static Value bi_gensym(VM *vm, Value *args, int nargs) {
   const char *prefix_chars = "g";
   int prefix_len = 1;
   if (nargs >= 1) {
-    if (args[0].tag != T_STR && args[0].tag != T_SYM) cvm_abort("gensym: expected a string or symbol prefix");
+    if (args[0].tag != T_STR && args[0].tag != T_SYM) creme_abort("gensym: expected a string or symbol prefix");
     prefix_chars = args[0].as.chars;
     prefix_len = args[0].aux;
   }
@@ -3674,13 +3674,13 @@ static Value bi_gensym(VM *vm, Value *args, int nargs) {
   int n = snprintf(buf, (size_t)cap, "%.*s__%lld", prefix_len, prefix_chars, (long long)g_gensym_counter);
   return v_sym(buf, n);
 }
-static Value bi_char_to_integer(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char->integer: expected a char"); return v_int(args[0].as.i); }
-static Value bi_integer_to_char(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) cvm_abort("integer->char: expected an integer"); return v_char(args[0].as.i); }
+static Value bi_char_to_integer(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char->integer: expected a char"); return v_int(args[0].as.i); }
+static Value bi_integer_to_char(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) creme_abort("integer->char: expected an integer"); return v_char(args[0].as.i); }
 static Value bi_char_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("char=?: expected at least two chars");
+  if (nargs < 2) creme_abort("char=?: expected at least two chars");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char=?: expected chars");
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) creme_abort("char=?: expected chars");
     if (args[i - 1].as.i != args[i].as.i) return v_bool(0);
   }
   return v_bool(1);
@@ -3688,9 +3688,9 @@ static Value bi_char_eq(VM *vm, Value *args, int nargs) {
 
 static Value bi_char_lt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("char<?: expected at least two chars");
+  if (nargs < 2) creme_abort("char<?: expected at least two chars");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char<?: expected chars");
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) creme_abort("char<?: expected chars");
     if (!(args[i - 1].as.i < args[i].as.i)) return v_bool(0);
   }
   return v_bool(1);
@@ -3698,9 +3698,9 @@ static Value bi_char_lt(VM *vm, Value *args, int nargs) {
 
 static Value bi_char_gt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("char>?: expected at least two chars");
+  if (nargs < 2) creme_abort("char>?: expected at least two chars");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char>?: expected chars");
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) creme_abort("char>?: expected chars");
     if (!(args[i - 1].as.i > args[i].as.i)) return v_bool(0);
   }
   return v_bool(1);
@@ -3708,9 +3708,9 @@ static Value bi_char_gt(VM *vm, Value *args, int nargs) {
 
 static Value bi_char_le(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("char<=?: expected at least two chars");
+  if (nargs < 2) creme_abort("char<=?: expected at least two chars");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char<=?: expected chars");
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) creme_abort("char<=?: expected chars");
     if (!(args[i - 1].as.i <= args[i].as.i)) return v_bool(0);
   }
   return v_bool(1);
@@ -3718,9 +3718,9 @@ static Value bi_char_le(VM *vm, Value *args, int nargs) {
 
 static Value bi_char_ge(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("char>=?: expected at least two chars");
+  if (nargs < 2) creme_abort("char>=?: expected at least two chars");
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("char>=?: expected chars");
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) creme_abort("char>=?: expected chars");
     if (!(args[i - 1].as.i >= args[i].as.i)) return v_bool(0);
   }
   return v_bool(1);
@@ -3732,7 +3732,7 @@ static Value bi_char_ge(VM *vm, Value *args, int nargs) {
  * letters, hex digits), so full Unicode case-folding isn't needed here. */
 static Value bi_char_downcase(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_CHAR) cvm_abort("char-downcase: expected a char");
+  if (nargs != 1 || args[0].tag != T_CHAR) creme_abort("char-downcase: expected a char");
   int64_t c = args[0].as.i;
   if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
   return v_char(c);
@@ -3740,7 +3740,7 @@ static Value bi_char_downcase(VM *vm, Value *args, int nargs) {
 
 static Value bi_char_upcase(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_CHAR) cvm_abort("char-upcase: expected a char");
+  if (nargs != 1 || args[0].tag != T_CHAR) creme_abort("char-upcase: expected a char");
   int64_t c = args[0].as.i;
   if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
   return v_char(c);
@@ -3760,51 +3760,51 @@ static Value bi_char_foldcase(VM *vm, Value *args, int nargs) {
 
 static Value bi_digit_value(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("digit-value: expected a char");
+  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("digit-value: expected a char");
   int64_t c = args[0].as.i;
   return (c >= '0' && c <= '9') ? v_int(c - '0') : v_bool(0);
 }
 
 static Value bi_char_alphabetic_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-alphabetic?: expected a char");
+  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-alphabetic?: expected a char");
   return v_bool(isalpha((int)args[0].as.i) != 0);
 }
 
 static Value bi_char_numeric_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-numeric?: expected a char");
+  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-numeric?: expected a char");
   return v_bool(isdigit((int)args[0].as.i) != 0);
 }
 
 static Value bi_char_whitespace_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-whitespace?: expected a char");
+  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-whitespace?: expected a char");
   return v_bool(isspace((int)args[0].as.i) != 0);
 }
 
 static Value bi_char_upper_case_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-upper-case?: expected a char");
+  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-upper-case?: expected a char");
   return v_bool(isupper((int)args[0].as.i) != 0);
 }
 
 static Value bi_char_lower_case_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) cvm_abort("char-lower-case?: expected a char");
+  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-lower-case?: expected a char");
   return v_bool(islower((int)args[0].as.i) != 0);
 }
 
-static char cvm_ascii_lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c; }
+static char creme_ascii_lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c; }
 
 /* char-ci=?/</>/<=/>= chain comparisons -- lowers both sides of each
  * adjacent pair before comparing, mirroring native's char_chain(...,
  * case_insensitive: true). */
 static Value char_ci_chain(Value *args, int nargs, const char *who, int (*cmp)(char, char)) {
-  if (nargs < 2) cvm_abort("%s: expected at least two chars", who);
+  if (nargs < 2) creme_abort("%s: expected at least two chars", who);
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) cvm_abort("%s: expected chars", who);
-    char a = cvm_ascii_lower((char)args[i - 1].as.i), b = cvm_ascii_lower((char)args[i].as.i);
+    if (args[i - 1].tag != T_CHAR || args[i].tag != T_CHAR) creme_abort("%s: expected chars", who);
+    char a = creme_ascii_lower((char)args[i - 1].as.i), b = creme_ascii_lower((char)args[i].as.i);
     if (!cmp(a, b)) return v_bool(0);
   }
   return v_bool(1);
@@ -3830,15 +3830,15 @@ static int string_ci_pair_cmp(Value a, Value b) {
   int alen = a.aux, blen = b.aux;
   int n = alen < blen ? alen : blen;
   for (int i = 0; i < n; i++) {
-    char ca = cvm_ascii_lower(a.as.chars[i]), cb = cvm_ascii_lower(b.as.chars[i]);
+    char ca = creme_ascii_lower(a.as.chars[i]), cb = creme_ascii_lower(b.as.chars[i]);
     if (ca != cb) return ca < cb ? -1 : 1;
   }
   return alen == blen ? 0 : (alen < blen ? -1 : 1);
 }
 static Value string_ci_chain(Value *args, int nargs, const char *who, int (*ok)(int)) {
-  if (nargs < 2) cvm_abort("%s: expected at least two strings", who);
+  if (nargs < 2) creme_abort("%s: expected at least two strings", who);
   for (int i = 1; i < nargs; i++) {
-    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) cvm_abort("%s: expected strings", who);
+    if (args[i - 1].tag != T_STR || args[i].tag != T_STR) creme_abort("%s: expected strings", who);
     if (!ok(string_ci_pair_cmp(args[i - 1], args[i]))) return v_bool(0);
   }
   return v_bool(1);
@@ -3865,21 +3865,21 @@ static Value bi_vector(VM *vm, Value *args, int nargs) {
   return v_vector(vec);
 }
 static Value bi_vector_to_list(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_VECTOR) cvm_abort("vector->list: expected a vector");
+  if (nargs < 1 || args[0].tag != T_VECTOR) creme_abort("vector->list: expected a vector");
   Vector *vec = args[0].as.vec;
   /* Optional start/end -- R7RS's (vector->list vector [start [end]]),
    * defaulting to the whole vector. (list->vector has no such args in
    * R7RS -- only this direction does -- so that one is left as-is.) */
   int64_t start = nargs >= 2 ? args[1].as.i : 0;
   int64_t end = nargs >= 3 ? args[2].as.i : vec->len;
-  if (start < 0 || end > vec->len || start > end) cvm_abort("vector->list: start/end out of range");
+  if (start < 0 || end > vec->len || start > end) creme_abort("vector->list: start/end out of range");
   Value r = v_nil();
-  for (int64_t i = end - 1; i >= start; i--) r = cvm_cons(vm, vec->items[i], r);
+  for (int64_t i = end - 1; i >= start; i--) r = creme_cons(vm, vec->items[i], r);
   return r;
 }
 static Value bi_list_to_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("list->vector: expected a list");
+  if (nargs < 1) creme_abort("list->vector: expected a list");
   int n = 0;
   Value c = args[0];
   while (c.tag == T_PAIR) { n++; c = c.as.pair->cdr; }
@@ -3896,10 +3896,10 @@ static Value bi_list_to_vector(VM *vm, Value *args, int nargs) {
 /* Builds a real condition (message + irritants list, not just a printed
  * string) so guard's error-object-message/error-object-irritants work
  * correctly on it -- unlike the old always-exits version, this raises to
- * the nearest guard handler if one is installed (see cvm_raise_condition/
+ * the nearest guard handler if one is installed (see creme_raise_condition/
  * Group G). */
 static Value bi_error(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("error: expected at least 1 argument");
+  if (nargs < 1) creme_abort("error: expected at least 1 argument");
   char *buf = NULL;
   size_t size = 0;
   FILE *ms = open_memstream(&buf, &size);
@@ -3913,11 +3913,11 @@ static Value bi_error(VM *vm, Value *args, int nargs) {
   fclose(ms);
 
   Value irritants = v_nil();
-  for (int i = nargs - 1; i >= 1; i--) irritants = cvm_cons(vm, args[i], irritants);
-  Value cond = cvm_make_condition(vm, buf, size, irritants);
+  for (int i = nargs - 1; i >= 1; i--) irritants = creme_cons(vm, args[i], irritants);
+  Value cond = creme_make_condition(vm, buf, size, irritants);
   free(buf);
 
-  if (vm->n_handlers > 0) cvm_raise_condition(vm, cond);
+  if (vm->n_handlers > 0) creme_raise_condition(vm, cond);
 
   /* Uncaught (no guard installed): print message + irritants together
    * for a human to read, same shape the old always-concatenated buffer
@@ -3936,12 +3936,12 @@ static Value bi_error(VM *vm, Value *args, int nargs) {
 
 /* Shared fallback for raise/raise-continuable when nothing catches
  * `obj`: escalate to the nearest `guard` handler if one is installed
- * (cvm_raise_condition longjmps, never returns), otherwise print and
+ * (creme_raise_condition longjmps, never returns), otherwise print and
  * exit -- same shape bi_raise's body always had, factored out so
  * raise-continuable's own no-handler-installed case (which needs the
  * identical fallback, see its own comment) doesn't duplicate it. */
 static _Noreturn void raise_uncaught_or_to_guard(VM *vm, Value obj) {
-  if (vm->n_handlers > 0) cvm_raise_condition(vm, obj);
+  if (vm->n_handlers > 0) creme_raise_condition(vm, obj);
   char *buf = NULL;
   size_t size = 0;
   FILE *ms = open_memstream(&buf, &size);
@@ -3969,10 +3969,10 @@ static _Noreturn void raise_uncaught_or_to_guard(VM *vm, Value obj) {
  * exception-handler/raise-continuable themselves to real C builtins
  * (see icecreme/vm.h's own UNWIND_EXC_HANDLER doc comment). */
 static Value bi_raise(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) cvm_abort("raise: expected 1 argument");
+  if (nargs != 1) creme_abort("raise: expected 1 argument");
   if (vm->n_exc_handlers > 0) {
     Value handler = vm->exc_handlers[--vm->n_exc_handlers];
-    cvm_apply(vm, handler, args, 1);
+    creme_apply(vm, handler, args, 1);
     vm->exc_handlers[vm->n_exc_handlers++] = handler;
     /* Handler returned normally -- falls through below. */
   }
@@ -3988,10 +3988,10 @@ static Value bi_raise(VM *vm, Value *args, int nargs) {
  * "no handler installed" error the way the old icecreme/compiler-run.scm
  * Scheme-level shim used to raise instead). */
 static Value bi_raise_continuable(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) cvm_abort("raise-continuable: expected 1 argument");
+  if (nargs != 1) creme_abort("raise-continuable: expected 1 argument");
   if (vm->n_exc_handlers > 0) {
     Value handler = vm->exc_handlers[--vm->n_exc_handlers];
-    Value result = cvm_apply(vm, handler, args, 1);
+    Value result = creme_apply(vm, handler, args, 1);
     vm->exc_handlers[vm->n_exc_handlers++] = handler;
     return result;
   }
@@ -4012,66 +4012,66 @@ static Value bi_raise_continuable(VM *vm, Value *args, int nargs) {
  * "restore to mark" is needed here instead of dynamic-wind's own
  * "call an ordinary after-thunk" shape). */
 static Value bi_with_exception_handler(VM *vm, Value *args, int nargs) {
-  if (nargs != 2) cvm_abort("with-exception-handler: expected (handler thunk)");
+  if (nargs != 2) creme_abort("with-exception-handler: expected (handler thunk)");
   Value handler = args[0], thunk = args[1];
-  if (vm->n_exc_handlers >= CVM_EXC_HANDLERS_CAP) {
-    cvm_abort("with-exception-handler: handler stack full (CVM_EXC_HANDLERS_CAP=%d)", CVM_EXC_HANDLERS_CAP);
+  if (vm->n_exc_handlers >= CREME_EXC_HANDLERS_CAP) {
+    creme_abort("with-exception-handler: handler stack full (CREME_EXC_HANDLERS_CAP=%d)", CREME_EXC_HANDLERS_CAP);
   }
   int mark = vm->n_exc_handlers;
   vm->exc_handlers[vm->n_exc_handlers++] = handler;
-  if (vm->n_unwind >= CVM_UNWIND_CAP) cvm_abort("icecreme: parameterize/dynamic-wind unwind stack full (CVM_UNWIND_CAP=%d)", CVM_UNWIND_CAP);
+  if (vm->n_unwind >= CREME_UNWIND_CAP) creme_abort("icecreme: parameterize/dynamic-wind unwind stack full (CREME_UNWIND_CAP=%d)", CREME_UNWIND_CAP);
   UnwindAction *ua = &vm->unwind_stack[vm->n_unwind++];
   ua->kind = UNWIND_EXC_HANDLER;
   ua->mark = mark;
-  Value result = cvm_apply(vm, thunk, NULL, 0);
+  Value result = creme_apply(vm, thunk, NULL, 0);
   vm->n_unwind--;
   vm->n_exc_handlers = mark;
   return result;
 }
 
 static Value bi_error_object_p(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("error-object?: expected an argument");
-  return v_bool(cvm_is_condition(vm, args[0]));
+  if (nargs < 1) creme_abort("error-object?: expected an argument");
+  return v_bool(creme_is_condition(vm, args[0]));
 }
 
 static Value bi_error_object_message(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || !cvm_is_condition(vm, args[0])) cvm_abort("error-object-message: expected an error object");
+  if (nargs < 1 || !creme_is_condition(vm, args[0])) creme_abort("error-object-message: expected an error object");
   return args[0].as.record->fields[0];
 }
 
 static Value bi_error_object_irritants(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || !cvm_is_condition(vm, args[0])) cvm_abort("error-object-irritants: expected an error object");
+  if (nargs < 1 || !creme_is_condition(vm, args[0])) creme_abort("error-object-irritants: expected an error object");
   return args[0].as.record->fields[1];
 }
 
 /* read-error?/file-error? -- native (exceptions.cr) only returns #t for
  * a condition of a DISTINCT read-error/file-error record type, which
- * this VM doesn't have (cvm_is_condition/get_condition_type is one
+ * this VM doesn't have (creme_is_condition/get_condition_type is one
  * unified condition shape for everything `error`/`raise` produce, see
- * this file's own cvm_make_condition). Every condition icecreme can
+ * this file's own creme_make_condition). Every condition icecreme can
  * currently construct is that one unified shape, so these are honest
  * always-#f stubs for now -- a fully faithful port needs dedicated
  * read-error/file-error condition kinds raised by `read`/the file-port
  * builtins specifically, which is out of scope here. */
 static Value bi_read_error_p(VM *vm, Value *args, int nargs) {
   (void)vm; (void)args;
-  if (nargs < 1) cvm_abort("read-error?: expected an argument");
+  if (nargs < 1) creme_abort("read-error?: expected an argument");
   return v_bool(0);
 }
 
 static Value bi_file_error_p(VM *vm, Value *args, int nargs) {
   (void)vm; (void)args;
-  if (nargs < 1) cvm_abort("file-error?: expected an argument");
+  if (nargs < 1) creme_abort("file-error?: expected an argument");
   return v_bool(0);
 }
 
 static Value bi_make_parameter(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("make-parameter: expected at least 1 argument");
+  if (nargs < 1) creme_abort("make-parameter: expected at least 1 argument");
   Parameter *p = GC_MALLOC(sizeof(Parameter));
   if (nargs >= 2) {
     p->has_converter = 1;
     p->converter = args[1];
-    p->value = cvm_apply(vm, args[1], &args[0], 1);
+    p->value = creme_apply(vm, args[1], &args[0], 1);
   } else {
     p->has_converter = 0;
     p->converter = v_nil();
@@ -4089,7 +4089,7 @@ static Value bi_current_time(VM *vm, Value *args, int nargs) {
 }
 static Value bi_time_difference(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("time-difference: expected two times");
+  if (nargs < 2) creme_abort("time-difference: expected two times");
   double a = args[0].tag == T_FLOAT ? args[0].as.f : (double)args[0].as.i;
   double b = args[1].tag == T_FLOAT ? args[1].as.f : (double)args[1].as.i;
   return v_float(a - b);
@@ -4106,17 +4106,17 @@ static Value bi_time_difference(VM *vm, Value *args, int nargs) {
 static double as_epoch_seconds(Value v, const char *who) {
   if (v.tag == T_FLOAT) return v.as.f;
   if (v.tag == T_INT) return (double)v.as.i;
-  cvm_abort("%s: expected a number (Unix epoch seconds)", who);
+  creme_abort("%s: expected a number (Unix epoch seconds)", who);
 }
 
 static void epoch_to_tm(double epoch, const char *who, struct tm *out) {
   time_t secs = (time_t)epoch;
-  if (!gmtime_r(&secs, out)) cvm_abort("%s: invalid time value", who);
+  if (!gmtime_r(&secs, out)) creme_abort("%s: invalid time value", who);
 }
 
 static Value bi_time_year(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("time-year: expected a time");
+  if (nargs < 1) creme_abort("time-year: expected a time");
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time-year"), "time-year", &tmv);
   return v_int(tmv.tm_year + 1900);
@@ -4124,7 +4124,7 @@ static Value bi_time_year(VM *vm, Value *args, int nargs) {
 
 static Value bi_time_month(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("time-month: expected a time");
+  if (nargs < 1) creme_abort("time-month: expected a time");
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time-month"), "time-month", &tmv);
   return v_int(tmv.tm_mon + 1);
@@ -4132,7 +4132,7 @@ static Value bi_time_month(VM *vm, Value *args, int nargs) {
 
 static Value bi_time_day(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("time-day: expected a time");
+  if (nargs < 1) creme_abort("time-day: expected a time");
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time-day"), "time-day", &tmv);
   return v_int(tmv.tm_mday);
@@ -4140,7 +4140,7 @@ static Value bi_time_day(VM *vm, Value *args, int nargs) {
 
 static Value bi_time_hour(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("time-hour: expected a time");
+  if (nargs < 1) creme_abort("time-hour: expected a time");
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time-hour"), "time-hour", &tmv);
   return v_int(tmv.tm_hour);
@@ -4148,7 +4148,7 @@ static Value bi_time_hour(VM *vm, Value *args, int nargs) {
 
 static Value bi_time_minute(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("time-minute: expected a time");
+  if (nargs < 1) creme_abort("time-minute: expected a time");
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time-minute"), "time-minute", &tmv);
   return v_int(tmv.tm_min);
@@ -4156,7 +4156,7 @@ static Value bi_time_minute(VM *vm, Value *args, int nargs) {
 
 static Value bi_time_second(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("time-second: expected a time");
+  if (nargs < 1) creme_abort("time-second: expected a time");
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time-second"), "time-second", &tmv);
   return v_int(tmv.tm_sec);
@@ -4164,13 +4164,13 @@ static Value bi_time_second(VM *vm, Value *args, int nargs) {
 
 static Value bi_time_add(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("time-add: expected (epoch seconds)");
+  if (nargs < 2) creme_abort("time-add: expected (epoch seconds)");
   return v_float(as_epoch_seconds(args[0], "time-add") + as_epoch_seconds(args[1], "time-add"));
 }
 
 static Value bi_time_to_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[1].tag != T_STR) cvm_abort("time->string: expected (time format-string)");
+  if (nargs < 2 || args[1].tag != T_STR) creme_abort("time->string: expected (time format-string)");
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time->string"), "time->string", &tmv);
   char fmt[256];
@@ -4206,7 +4206,7 @@ static int64_t tm_to_epoch_utc(const struct tm *tmv) {
 static Value bi_string_to_time(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) {
-    cvm_abort("string->time: expected (string format-string)");
+    creme_abort("string->time: expected (string format-string)");
   }
   char str[512];
   int str_len = args[0].aux < (int)sizeof(str) - 1 ? args[0].aux : (int)sizeof(str) - 1;
@@ -4218,7 +4218,7 @@ static Value bi_string_to_time(VM *vm, Value *args, int nargs) {
   fmt[fmt_len] = '\0';
   struct tm tmv;
   memset(&tmv, 0, sizeof(tmv));
-  if (!strptime(str, fmt, &tmv)) cvm_abort("string->time: could not parse '%s' with format '%s'", str, fmt);
+  if (!strptime(str, fmt, &tmv)) creme_abort("string->time: could not parse '%s' with format '%s'", str, fmt);
   return v_float((double)tm_to_epoch_utc(&tmv));
 }
 
@@ -4259,7 +4259,7 @@ static Value bi_jiffies_per_second(VM *vm, Value *args, int nargs) {
  * to read PORT, not a whole module for one function. */
 static Value bi_get_environment_variable(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("get-environment-variable: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("get-environment-variable: expected a string");
   char *name = xmalloc((size_t)args[0].aux + 1);
   memcpy(name, args[0].as.chars, (size_t)args[0].aux);
   name[args[0].aux] = 0;
@@ -4292,7 +4292,7 @@ static Value bi_get_environment_variables(VM *vm, Value *args, int nargs) {
     int val_len = (int)strlen(eq + 1);
     Value name = v_str(copy_bytes(entry, name_len), name_len);
     Value val = v_str(copy_bytes(eq + 1, val_len), val_len);
-    result = cvm_cons(vm, cvm_cons(vm, name, val), result);
+    result = creme_cons(vm, creme_cons(vm, name, val), result);
   }
   return result;
 }
@@ -4301,13 +4301,13 @@ static Value bi_get_environment_variables(VM *vm, Value *args, int nargs) {
  * command_line: (program-name . trailing-args), where "trailing-args"
  * is whatever icecreme's own argv held after the target file path (icecreme has
  * no other CLI surface a script would ever need to observe). Set once
- * by main() via cvm_set_command_line_args, before anything runs. */
+ * by main() via creme_set_command_line_args, before anything runs. */
 static Value bi_litstr_runtime(const char *s); /* defined further below */
 static const char *g_cmdline_program = NULL;
 static char **g_cmdline_args = NULL;
 static int g_cmdline_n_args = 0;
 
-void cvm_set_command_line_args(const char *program_name, int argc, char **argv) {
+void creme_set_command_line_args(const char *program_name, int argc, char **argv) {
   g_cmdline_program = program_name;
   g_cmdline_n_args = argc;
   g_cmdline_args = argv;
@@ -4317,10 +4317,10 @@ static Value bi_command_line(VM *vm, Value *args, int nargs) {
   (void)args; (void)nargs;
   Value result = v_nil();
   for (int i = g_cmdline_n_args - 1; i >= 0; i--) {
-    result = cvm_cons(vm, bi_litstr_runtime(g_cmdline_args[i]), result);
+    result = creme_cons(vm, bi_litstr_runtime(g_cmdline_args[i]), result);
   }
   const char *prog = g_cmdline_program ? g_cmdline_program : "icecreme";
-  return cvm_cons(vm, bi_litstr_runtime(prog), result);
+  return creme_cons(vm, bi_litstr_runtime(prog), result);
 }
 
 /* (creme env)'s set-environment-variable! -- a subprocess spawned via
@@ -4332,7 +4332,7 @@ static Value bi_command_line(VM *vm, Value *args, int nargs) {
 static Value bi_set_environment_variable(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) {
-    cvm_abort("set-environment-variable!: expected two strings");
+    creme_abort("set-environment-variable!: expected two strings");
   }
   char *name = xmalloc((size_t)args[0].aux + 1);
   memcpy(name, args[0].as.chars, (size_t)args[0].aux);
@@ -4352,7 +4352,7 @@ static Value bi_set_environment_variable(VM *vm, Value *args, int nargs) {
 static Value bi_delete_environment_variable(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_STR) {
-    cvm_abort("delete-environment-variable!: expected a string");
+    creme_abort("delete-environment-variable!: expected a string");
   }
   char *name = xmalloc((size_t)args[0].aux + 1);
   memcpy(name, args[0].as.chars, (size_t)args[0].aux);
@@ -4395,17 +4395,17 @@ static Value bi_litsym_runtime(const char *s) {
 static Value bi_runtime(VM *vm, Value *args, int nargs) {
   (void)args; (void)nargs;
   struct utsname u;
-  if (uname(&u) != 0) cvm_abort("runtime: uname(2) failed");
-  Value vm_pair = cvm_cons(vm, bi_litsym_runtime("vm"), bi_litstr_runtime("icecreme"));
-  Value compiler_pair = cvm_cons(vm, bi_litsym_runtime("compiler"), bi_litstr_runtime("self-hosted"));
-  Value version_pair = cvm_cons(vm, bi_litsym_runtime("version"), bi_litstr_runtime("0.1.0")); /* keep in sync with introspection.cr's runtime */
-  Value os_pair = cvm_cons(vm, bi_litsym_runtime("os"), bi_litstr_runtime(u.sysname));
-  Value arch_pair = cvm_cons(vm, bi_litsym_runtime("arch"), bi_litstr_runtime(u.machine));
-  return cvm_cons(vm, vm_pair,
-           cvm_cons(vm, compiler_pair,
-             cvm_cons(vm, version_pair,
-               cvm_cons(vm, os_pair,
-                 cvm_cons(vm, arch_pair, v_nil())))));
+  if (uname(&u) != 0) creme_abort("runtime: uname(2) failed");
+  Value vm_pair = creme_cons(vm, bi_litsym_runtime("vm"), bi_litstr_runtime("icecreme"));
+  Value compiler_pair = creme_cons(vm, bi_litsym_runtime("compiler"), bi_litstr_runtime("self-hosted"));
+  Value version_pair = creme_cons(vm, bi_litsym_runtime("version"), bi_litstr_runtime("0.1.0")); /* keep in sync with introspection.cr's runtime */
+  Value os_pair = creme_cons(vm, bi_litsym_runtime("os"), bi_litstr_runtime(u.sysname));
+  Value arch_pair = creme_cons(vm, bi_litsym_runtime("arch"), bi_litstr_runtime(u.machine));
+  return creme_cons(vm, vm_pair,
+           creme_cons(vm, compiler_pair,
+             creme_cons(vm, version_pair,
+               creme_cons(vm, os_pair,
+                 creme_cons(vm, arch_pair, v_nil())))));
 }
 
 /* (bound-names) -- a flat list of strings, one per currently-bound global
@@ -4420,7 +4420,7 @@ static Value bi_bound_names(VM *vm, Value *args, int nargs) {
   Value result = v_nil();
   for (int i = vm->n_globals - 1; i >= 0; i--) {
     if (!vm->globals[i].bound) continue;
-    result = cvm_cons(vm, bi_litstr_runtime(vm->globals[i].name), result);
+    result = creme_cons(vm, bi_litstr_runtime(vm->globals[i].name), result);
   }
   return result;
 }
@@ -4439,9 +4439,9 @@ static Value bi_bound_names(VM *vm, Value *args, int nargs) {
  * truth for this list across native/self-hosted). */
 static Value bi_features(VM *vm, Value *args, int nargs) {
   (void)args; (void)nargs;
-  return cvm_cons(vm, bi_litsym_runtime("r7rs"),
-           cvm_cons(vm, bi_litsym_runtime("creme"),
-             cvm_cons(vm, bi_litsym_runtime("creme.cr"), v_nil())));
+  return creme_cons(vm, bi_litsym_runtime("r7rs"),
+           creme_cons(vm, bi_litsym_runtime("creme"),
+             creme_cons(vm, bi_litsym_runtime("creme.cr"), v_nil())));
 }
 
 /* (creme introspection)'s macro?/record-fields -- see introspection.cr's
@@ -4452,15 +4452,15 @@ static Value bi_features(VM *vm, Value *args, int nargs) {
  * native's SchemeRecord#fields dispatch -- no per-type-specific code). */
 static Value bi_macro_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("macro?: expected an argument");
+  if (nargs < 1) creme_abort("macro?: expected an argument");
   return v_bool(args[0].tag == T_MACRO);
 }
 
 static Value bi_record_fields(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_RECORD) cvm_abort("record-fields: expected a record instance");
+  if (nargs < 1 || args[0].tag != T_RECORD) creme_abort("record-fields: expected a record instance");
   SchemeRecord *rec = args[0].as.record;
   Value result = v_nil();
-  for (int i = rec->type->n_fields - 1; i >= 0; i--) result = cvm_cons(vm, rec->fields[i], result);
+  for (int i = rec->type->n_fields - 1; i >= 0; i--) result = creme_cons(vm, rec->fields[i], result);
   return result;
 }
 
@@ -4476,7 +4476,7 @@ static Value bi_record_fields(VM *vm, Value *args, int nargs) {
 static Value bi_exit(VM *vm, Value *args, int nargs) {
   int64_t code = 0;
   if (nargs >= 1) {
-    if (args[0].tag != T_INT) cvm_abort("exit: expected an integer");
+    if (args[0].tag != T_INT) creme_abort("exit: expected an integer");
     code = args[0].as.i;
   }
   if (code < 0) code = 0;
@@ -4493,76 +4493,76 @@ static Value bi_exit(VM *vm, Value *args, int nargs) {
    * every thread's C frames regardless, since that part isn't tied to
    * any specific VM instance. */
   if (vm->profiler.enabled) {
-    cvm_profiler_stop_native(vm);
-    cvm_profiler_report(vm);
+    creme_profiler_stop_native(vm);
+    creme_profiler_report(vm);
   }
   exit((int)code);
 }
 
 /* Deeper car/cdr compositions -- (scheme cxr); the shallow forms
- * (car/cdr/caar/cadr/cdar/cddr) stay in cvm_register_base_builtins. */
-void cvm_register_cxr_builtins(VM *vm) {
-  cvm_register_builtin(vm, "caaar", bi_caaar);
-  cvm_register_builtin(vm, "caadr", bi_caadr);
-  cvm_register_builtin(vm, "cadar", bi_cadar);
-  cvm_register_builtin(vm, "caddr", bi_caddr);
-  cvm_register_builtin(vm, "cdaar", bi_cdaar);
-  cvm_register_builtin(vm, "cdadr", bi_cdadr);
-  cvm_register_builtin(vm, "cddar", bi_cddar);
-  cvm_register_builtin(vm, "cdddr", bi_cdddr);
-  cvm_register_builtin(vm, "caaaar", bi_caaaar);
-  cvm_register_builtin(vm, "caaadr", bi_caaadr);
-  cvm_register_builtin(vm, "caadar", bi_caadar);
-  cvm_register_builtin(vm, "caaddr", bi_caaddr);
-  cvm_register_builtin(vm, "cadaar", bi_cadaar);
-  cvm_register_builtin(vm, "cadadr", bi_cadadr);
-  cvm_register_builtin(vm, "caddar", bi_caddar);
-  cvm_register_builtin(vm, "cadddr", bi_cadddr);
-  cvm_register_builtin(vm, "cdaaar", bi_cdaaar);
-  cvm_register_builtin(vm, "cdaadr", bi_cdaadr);
-  cvm_register_builtin(vm, "cdadar", bi_cdadar);
-  cvm_register_builtin(vm, "cdaddr", bi_cdaddr);
-  cvm_register_builtin(vm, "cddaar", bi_cddaar);
-  cvm_register_builtin(vm, "cddadr", bi_cddadr);
-  cvm_register_builtin(vm, "cdddar", bi_cdddar);
-  cvm_register_builtin(vm, "cddddr", bi_cddddr);
+ * (car/cdr/caar/cadr/cdar/cddr) stay in creme_register_base_builtins. */
+void creme_register_cxr_builtins(VM *vm) {
+  creme_register_builtin(vm, "caaar", bi_caaar);
+  creme_register_builtin(vm, "caadr", bi_caadr);
+  creme_register_builtin(vm, "cadar", bi_cadar);
+  creme_register_builtin(vm, "caddr", bi_caddr);
+  creme_register_builtin(vm, "cdaar", bi_cdaar);
+  creme_register_builtin(vm, "cdadr", bi_cdadr);
+  creme_register_builtin(vm, "cddar", bi_cddar);
+  creme_register_builtin(vm, "cdddr", bi_cdddr);
+  creme_register_builtin(vm, "caaaar", bi_caaaar);
+  creme_register_builtin(vm, "caaadr", bi_caaadr);
+  creme_register_builtin(vm, "caadar", bi_caadar);
+  creme_register_builtin(vm, "caaddr", bi_caaddr);
+  creme_register_builtin(vm, "cadaar", bi_cadaar);
+  creme_register_builtin(vm, "cadadr", bi_cadadr);
+  creme_register_builtin(vm, "caddar", bi_caddar);
+  creme_register_builtin(vm, "cadddr", bi_cadddr);
+  creme_register_builtin(vm, "cdaaar", bi_cdaaar);
+  creme_register_builtin(vm, "cdaadr", bi_cdaadr);
+  creme_register_builtin(vm, "cdadar", bi_cdadar);
+  creme_register_builtin(vm, "cdaddr", bi_cdaddr);
+  creme_register_builtin(vm, "cddaar", bi_cddaar);
+  creme_register_builtin(vm, "cddadr", bi_cddadr);
+  creme_register_builtin(vm, "cdddar", bi_cdddar);
+  creme_register_builtin(vm, "cddddr", bi_cddddr);
 }
 
 /* (scheme complex) */
-void cvm_register_complex_builtins(VM *vm) {
-  cvm_register_builtin(vm, "complex?", bi_complex_p);
-  cvm_register_builtin(vm, "make-rectangular", bi_make_rectangular);
-  cvm_register_builtin(vm, "make-polar", bi_make_polar);
-  cvm_register_builtin(vm, "real-part", bi_real_part);
-  cvm_register_builtin(vm, "imag-part", bi_imag_part);
-  cvm_register_builtin(vm, "magnitude", bi_magnitude);
-  cvm_register_builtin(vm, "angle", bi_angle);
+void creme_register_complex_builtins(VM *vm) {
+  creme_register_builtin(vm, "complex?", bi_complex_p);
+  creme_register_builtin(vm, "make-rectangular", bi_make_rectangular);
+  creme_register_builtin(vm, "make-polar", bi_make_polar);
+  creme_register_builtin(vm, "real-part", bi_real_part);
+  creme_register_builtin(vm, "imag-part", bi_imag_part);
+  creme_register_builtin(vm, "magnitude", bi_magnitude);
+  creme_register_builtin(vm, "angle", bi_angle);
 }
 
 /* char/string case-folding + char classification. NOTE: string-upcase,
  * string-downcase, and string-foldcase are NOT registered here -- they
  * live in strings.c's own register function, not builtins.c, so there is
  * nothing to move for them. */
-void cvm_register_char_builtins(VM *vm) {
-  cvm_register_builtin(vm, "char-downcase", bi_char_downcase);
-  cvm_register_builtin(vm, "char-upcase", bi_char_upcase);
-  cvm_register_builtin(vm, "char-foldcase", bi_char_foldcase);
-  cvm_register_builtin(vm, "digit-value", bi_digit_value);
-  cvm_register_builtin(vm, "char-alphabetic?", bi_char_alphabetic_p);
-  cvm_register_builtin(vm, "char-numeric?", bi_char_numeric_p);
-  cvm_register_builtin(vm, "char-whitespace?", bi_char_whitespace_p);
-  cvm_register_builtin(vm, "char-upper-case?", bi_char_upper_case_p);
-  cvm_register_builtin(vm, "char-lower-case?", bi_char_lower_case_p);
-  cvm_register_builtin(vm, "char-ci=?", bi_char_ci_eq);
-  cvm_register_builtin(vm, "char-ci<?", bi_char_ci_lt);
-  cvm_register_builtin(vm, "char-ci>?", bi_char_ci_gt);
-  cvm_register_builtin(vm, "char-ci<=?", bi_char_ci_le);
-  cvm_register_builtin(vm, "char-ci>=?", bi_char_ci_ge);
-  cvm_register_builtin(vm, "string-ci=?", bi_string_ci_eq);
-  cvm_register_builtin(vm, "string-ci<?", bi_string_ci_lt);
-  cvm_register_builtin(vm, "string-ci>?", bi_string_ci_gt);
-  cvm_register_builtin(vm, "string-ci<=?", bi_string_ci_le);
-  cvm_register_builtin(vm, "string-ci>=?", bi_string_ci_ge);
+void creme_register_char_builtins(VM *vm) {
+  creme_register_builtin(vm, "char-downcase", bi_char_downcase);
+  creme_register_builtin(vm, "char-upcase", bi_char_upcase);
+  creme_register_builtin(vm, "char-foldcase", bi_char_foldcase);
+  creme_register_builtin(vm, "digit-value", bi_digit_value);
+  creme_register_builtin(vm, "char-alphabetic?", bi_char_alphabetic_p);
+  creme_register_builtin(vm, "char-numeric?", bi_char_numeric_p);
+  creme_register_builtin(vm, "char-whitespace?", bi_char_whitespace_p);
+  creme_register_builtin(vm, "char-upper-case?", bi_char_upper_case_p);
+  creme_register_builtin(vm, "char-lower-case?", bi_char_lower_case_p);
+  creme_register_builtin(vm, "char-ci=?", bi_char_ci_eq);
+  creme_register_builtin(vm, "char-ci<?", bi_char_ci_lt);
+  creme_register_builtin(vm, "char-ci>?", bi_char_ci_gt);
+  creme_register_builtin(vm, "char-ci<=?", bi_char_ci_le);
+  creme_register_builtin(vm, "char-ci>=?", bi_char_ci_ge);
+  creme_register_builtin(vm, "string-ci=?", bi_string_ci_eq);
+  creme_register_builtin(vm, "string-ci<?", bi_string_ci_lt);
+  creme_register_builtin(vm, "string-ci>?", bi_string_ci_gt);
+  creme_register_builtin(vm, "string-ci<=?", bi_string_ci_le);
+  creme_register_builtin(vm, "string-ci>=?", bi_string_ci_ge);
 }
 
 /* (scheme write). write-simple reuses bi_write directly -- its
@@ -4571,11 +4571,11 @@ void cvm_register_char_builtins(VM *vm) {
  * genuine two-pass, cycle-safe #n=/#n# writer -- NOT an alias to
  * `write`, since write_value's own T_PAIR case has no cycle guard and
  * would infinite-loop on a circular argument. */
-void cvm_register_write_builtins(VM *vm) {
-  cvm_register_builtin(vm, "display", bi_display);
-  cvm_register_builtin(vm, "write", bi_write);
-  cvm_register_builtin(vm, "write-simple", bi_write);
-  cvm_register_builtin(vm, "write-shared", bi_write_shared);
+void creme_register_write_builtins(VM *vm) {
+  creme_register_builtin(vm, "display", bi_display);
+  creme_register_builtin(vm, "write", bi_write);
+  creme_register_builtin(vm, "write-simple", bi_write);
+  creme_register_builtin(vm, "write-shared", bi_write_shared);
 }
 
 /* (scheme process-context). NOTE: emergency-exit is not registered
@@ -4587,71 +4587,71 @@ void cvm_register_write_builtins(VM *vm) {
  * process-context), with neither (creme process) nor (creme env), would
  * see them come up unbound under icecreme even though they're genuinely
  * ported. */
-void cvm_register_process_context_builtins(VM *vm) {
-  cvm_register_builtin(vm, "exit", bi_exit);
-  cvm_register_builtin(vm, "command-line", bi_command_line);
-  cvm_register_builtin(vm, "get-environment-variable", bi_get_environment_variable);
-  cvm_register_builtin(vm, "get-environment-variables", bi_get_environment_variables);
+void creme_register_process_context_builtins(VM *vm) {
+  creme_register_builtin(vm, "exit", bi_exit);
+  creme_register_builtin(vm, "command-line", bi_command_line);
+  creme_register_builtin(vm, "get-environment-variable", bi_get_environment_variable);
+  creme_register_builtin(vm, "get-environment-variables", bi_get_environment_variables);
 }
 
 /* (scheme lazy): force/promise?/make-promise -- delay/delay-force
  * compile straight to the MakePromise op (see bi_force's own comment),
  * so this is the library's whole runtime surface. */
-void cvm_register_lazy_builtins(VM *vm) {
-  cvm_register_builtin(vm, "force", bi_force);
-  cvm_register_builtin(vm, "promise?", bi_promise_p);
-  cvm_register_builtin(vm, "make-promise", bi_make_promise);
+void creme_register_lazy_builtins(VM *vm) {
+  creme_register_builtin(vm, "force", bi_force);
+  creme_register_builtin(vm, "promise?", bi_promise_p);
+  creme_register_builtin(vm, "make-promise", bi_make_promise);
 }
 
 /* (scheme inexact) plus flonum->bits/bits->flonum. */
-void cvm_register_math_builtins(VM *vm) {
-  cvm_register_builtin(vm, "flonum->bits", bi_flonum_to_bits);
-  cvm_register_builtin(vm, "bits->flonum", bi_bits_to_flonum);
-  cvm_register_builtin(vm, "sin", bi_sin);
-  cvm_register_builtin(vm, "cos", bi_cos);
-  cvm_register_builtin(vm, "tan", bi_tan);
-  cvm_register_builtin(vm, "asin", bi_asin);
-  cvm_register_builtin(vm, "acos", bi_acos);
-  cvm_register_builtin(vm, "atan", bi_atan);
-  cvm_register_builtin(vm, "log", bi_log);
-  cvm_register_builtin(vm, "exp", bi_exp);
-  cvm_register_builtin(vm, "log2", bi_log2);
-  cvm_register_builtin(vm, "log10", bi_log10);
-  cvm_register_builtin(vm, "atan2", bi_atan2);
-  cvm_register_builtin(vm, "pow", bi_pow);
-  cvm_register_builtin(vm, "hypot", bi_hypot);
+void creme_register_math_builtins(VM *vm) {
+  creme_register_builtin(vm, "flonum->bits", bi_flonum_to_bits);
+  creme_register_builtin(vm, "bits->flonum", bi_bits_to_flonum);
+  creme_register_builtin(vm, "sin", bi_sin);
+  creme_register_builtin(vm, "cos", bi_cos);
+  creme_register_builtin(vm, "tan", bi_tan);
+  creme_register_builtin(vm, "asin", bi_asin);
+  creme_register_builtin(vm, "acos", bi_acos);
+  creme_register_builtin(vm, "atan", bi_atan);
+  creme_register_builtin(vm, "log", bi_log);
+  creme_register_builtin(vm, "exp", bi_exp);
+  creme_register_builtin(vm, "log2", bi_log2);
+  creme_register_builtin(vm, "log10", bi_log10);
+  creme_register_builtin(vm, "atan2", bi_atan2);
+  creme_register_builtin(vm, "pow", bi_pow);
+  creme_register_builtin(vm, "hypot", bi_hypot);
 }
 
 /* Introspection-ish builtins. NOTE: library-exports is NOT registered
  * here -- it lives in bootstrap.c's own register function.
- * stdout-tty?/stdin-tty? moved to cvm_register_term_builtins (term.c) --
+ * stdout-tty?/stdin-tty? moved to creme_register_term_builtins (term.c) --
  * terminal-related, not general introspection. */
-void cvm_register_introspection_builtins(VM *vm) {
-  cvm_register_builtin(vm, "gensym", bi_gensym);
-  cvm_register_builtin(vm, "runtime", bi_runtime);
-  cvm_register_builtin(vm, "bound-names", bi_bound_names);
-  cvm_register_builtin(vm, "macro?", bi_macro_p);
-  cvm_register_builtin(vm, "record-fields", bi_record_fields);
+void creme_register_introspection_builtins(VM *vm) {
+  creme_register_builtin(vm, "gensym", bi_gensym);
+  creme_register_builtin(vm, "runtime", bi_runtime);
+  creme_register_builtin(vm, "bound-names", bi_bound_names);
+  creme_register_builtin(vm, "macro?", bi_macro_p);
+  creme_register_builtin(vm, "record-fields", bi_record_fields);
 }
 
 /* (scheme file). NOTE: delete-file, file-read, and file-write are NOT
  * registered here -- they live in bootstrap.c's own register function
  * (see its comment "file-read/file-write/delete-file already live in
  * ..."), so there is nothing to move for them here. */
-void cvm_register_file_builtins(VM *vm) {
-  cvm_register_builtin(vm, "file-exists?", bi_file_exists_p);
-  cvm_register_builtin(vm, "open-input-file", bi_open_input_file);
-  cvm_register_builtin(vm, "open-output-file", bi_open_output_file);
-  cvm_register_builtin(vm, "open-binary-input-file", bi_open_binary_input_file);
-  cvm_register_builtin(vm, "open-binary-output-file", bi_open_binary_output_file);
-  cvm_register_builtin(vm, "call-with-input-file", bi_call_with_input_file);
-  cvm_register_builtin(vm, "call-with-output-file", bi_call_with_output_file);
-  cvm_register_builtin(vm, "with-input-from-file", bi_with_input_from_file);
-  cvm_register_builtin(vm, "with-output-to-file", bi_with_output_to_file);
-  cvm_register_builtin(vm, "file-append", bi_file_append);
-  cvm_register_builtin(vm, "file-lines", bi_file_lines);
-  cvm_register_builtin(vm, "file-size", bi_file_size);
-  cvm_register_builtin(vm, "current-directory", bi_current_directory);
+void creme_register_file_builtins(VM *vm) {
+  creme_register_builtin(vm, "file-exists?", bi_file_exists_p);
+  creme_register_builtin(vm, "open-input-file", bi_open_input_file);
+  creme_register_builtin(vm, "open-output-file", bi_open_output_file);
+  creme_register_builtin(vm, "open-binary-input-file", bi_open_binary_input_file);
+  creme_register_builtin(vm, "open-binary-output-file", bi_open_binary_output_file);
+  creme_register_builtin(vm, "call-with-input-file", bi_call_with_input_file);
+  creme_register_builtin(vm, "call-with-output-file", bi_call_with_output_file);
+  creme_register_builtin(vm, "with-input-from-file", bi_with_input_from_file);
+  creme_register_builtin(vm, "with-output-to-file", bi_with_output_to_file);
+  creme_register_builtin(vm, "file-append", bi_file_append);
+  creme_register_builtin(vm, "file-lines", bi_file_lines);
+  creme_register_builtin(vm, "file-size", bi_file_size);
+  creme_register_builtin(vm, "current-directory", bi_current_directory);
 }
 
 /* (creme env)'s full accessor/mutator set -- native Crystal groups all
@@ -4659,275 +4659,275 @@ void cvm_register_file_builtins(VM *vm) {
  * four are registered here together, matching that grouping exactly
  * (get-environment-variables lives in bi_get_environment_variables,
  * above, alongside process-context's own copy -- see
- * cvm_register_process_context_builtins and main.c's
- * cvm_register_required_builtins for why both registration sites exist).
+ * creme_register_process_context_builtins and main.c's
+ * creme_register_required_builtins for why both registration sites exist).
  * environment-variable-set? has no icecreme-side implementation yet. */
-void cvm_register_env_builtins(VM *vm) {
-  cvm_register_builtin(vm, "get-environment-variable", bi_get_environment_variable);
-  cvm_register_builtin(vm, "get-environment-variables", bi_get_environment_variables);
-  cvm_register_builtin(vm, "set-environment-variable!", bi_set_environment_variable);
-  cvm_register_builtin(vm, "delete-environment-variable!", bi_delete_environment_variable);
+void creme_register_env_builtins(VM *vm) {
+  creme_register_builtin(vm, "get-environment-variable", bi_get_environment_variable);
+  creme_register_builtin(vm, "get-environment-variables", bi_get_environment_variables);
+  creme_register_builtin(vm, "set-environment-variable!", bi_set_environment_variable);
+  creme_register_builtin(vm, "delete-environment-variable!", bi_delete_environment_variable);
 }
 
-void cvm_register_base_builtins(VM *vm) {
-  cvm_init_current_ports(vm); /* must exist before this function's own current-output-port/current-input-port intern block, below */
-  cvm_register_builtin(vm, "features", bi_features);
-  cvm_register_builtin(vm, "make-vector", bi_make_vector);
-  cvm_register_builtin(vm, "current-second", bi_current_second);
-  cvm_register_builtin(vm, "sqrt", bi_sqrt);
-  cvm_register_builtin(vm, "nan?", bi_nan_p);
-  cvm_register_builtin(vm, "infinite?", bi_infinite_p);
-  cvm_register_builtin(vm, "finite?", bi_finite_p);
-  cvm_register_builtin(vm, "random-real", bi_random_real);
-  cvm_register_builtin(vm, "random-integer", bi_random_integer);
-  cvm_register_builtin(vm, "random-seed!", bi_random_seed_bang);
-  cvm_register_builtin(vm, "random-choice", bi_random_choice);
-  cvm_register_builtin(vm, "random-shuffle", bi_random_shuffle);
+void creme_register_base_builtins(VM *vm) {
+  creme_init_current_ports(vm); /* must exist before this function's own current-output-port/current-input-port intern block, below */
+  creme_register_builtin(vm, "features", bi_features);
+  creme_register_builtin(vm, "make-vector", bi_make_vector);
+  creme_register_builtin(vm, "current-second", bi_current_second);
+  creme_register_builtin(vm, "sqrt", bi_sqrt);
+  creme_register_builtin(vm, "nan?", bi_nan_p);
+  creme_register_builtin(vm, "infinite?", bi_infinite_p);
+  creme_register_builtin(vm, "finite?", bi_finite_p);
+  creme_register_builtin(vm, "random-real", bi_random_real);
+  creme_register_builtin(vm, "random-integer", bi_random_integer);
+  creme_register_builtin(vm, "random-seed!", bi_random_seed_bang);
+  creme_register_builtin(vm, "random-choice", bi_random_choice);
+  creme_register_builtin(vm, "random-shuffle", bi_random_shuffle);
   /* pi/e are value constants, not procedures -- interned directly into
-   * the global table (mirroring cvm_register_builtin's own two-line
+   * the global table (mirroring creme_register_builtin's own two-line
    * shape) rather than through a BuiltinFn, matching how native's own
    * register_library block does `env.define("pi", ...)` alongside its
    * register_module calls (see creme/math.cr). */
   {
-    int pi_slot = cvm_global_intern(vm, "pi", 2);
+    int pi_slot = creme_global_intern(vm, "pi", 2);
     vm->globals[pi_slot].value = v_float(M_PI);
     vm->globals[pi_slot].bound = 1;
-    int e_slot = cvm_global_intern(vm, "e", 1);
+    int e_slot = creme_global_intern(vm, "e", 1);
     vm->globals[e_slot].value = v_float(M_E);
     vm->globals[e_slot].bound = 1;
   }
-  cvm_register_builtin(vm, "newline", bi_newline);
-  cvm_register_builtin(vm, "open-output-string", bi_open_output_string);
-  cvm_register_builtin(vm, "get-output-string", bi_get_output_string);
-  cvm_register_builtin(vm, "string-length", bi_string_length);
-  cvm_register_builtin(vm, "write-string", bi_write_string);
-  cvm_register_builtin(vm, "write-char", bi_write_char);
-  cvm_register_builtin(vm, "reverse", bi_reverse);
-  cvm_register_builtin(vm, "length", bi_length);
+  creme_register_builtin(vm, "newline", bi_newline);
+  creme_register_builtin(vm, "open-output-string", bi_open_output_string);
+  creme_register_builtin(vm, "get-output-string", bi_get_output_string);
+  creme_register_builtin(vm, "string-length", bi_string_length);
+  creme_register_builtin(vm, "write-string", bi_write_string);
+  creme_register_builtin(vm, "write-char", bi_write_char);
+  creme_register_builtin(vm, "reverse", bi_reverse);
+  creme_register_builtin(vm, "length", bi_length);
   /* Genuine T_PARAMETER values, not builtins -- interned directly
    * (pi/e-style, see that block above) so parameterize can target them.
-   * cvm_init_current_ports (called once per VM, before this point --
-   * main.c for the top-level VM, cvm_new_child_vm for a spawned actor's
+   * creme_init_current_ports (called once per VM, before this point --
+   * main.c for the top-level VM, creme_new_child_vm for a spawned actor's
    * own VM) already built vm->current_output_param/
    * vm->current_input_param. */
   {
-    int cop_slot = cvm_global_intern(vm, "current-output-port", 20);
+    int cop_slot = creme_global_intern(vm, "current-output-port", 20);
     vm->globals[cop_slot].value = v_parameter(vm->current_output_param);
     vm->globals[cop_slot].bound = 1;
-    int cip_slot = cvm_global_intern(vm, "current-input-port", 19);
+    int cip_slot = creme_global_intern(vm, "current-input-port", 19);
     vm->globals[cip_slot].value = v_parameter(vm->current_input_param);
     vm->globals[cip_slot].bound = 1;
   }
-  cvm_register_builtin(vm, "open-input-string", bi_open_input_string);
-  cvm_register_builtin(vm, "port?", bi_port_p);
-  cvm_register_builtin(vm, "input-port?", bi_input_port_p);
-  cvm_register_builtin(vm, "output-port?", bi_output_port_p);
-  cvm_register_builtin(vm, "eof-object", bi_eof_object);
-  cvm_register_builtin(vm, "eof-object?", bi_eof_object_p);
-  cvm_register_builtin(vm, "close-port", bi_close_port);
-  cvm_register_builtin(vm, "flush-output-port", bi_flush_output_port);
-  cvm_register_builtin(vm, "close-input-port", bi_close_port);
-  cvm_register_builtin(vm, "close-output-port", bi_close_port);
-  cvm_register_builtin(vm, "read-char", bi_read_char);
-  cvm_register_builtin(vm, "peek-char", bi_peek_char);
-  cvm_register_builtin(vm, "read-line", bi_read_line);
-  cvm_register_builtin(vm, "read-string", bi_read_string);
-  cvm_register_builtin(vm, "char-ready?", bi_char_ready_p);
-  cvm_register_builtin(vm, "read", bi_read);
+  creme_register_builtin(vm, "open-input-string", bi_open_input_string);
+  creme_register_builtin(vm, "port?", bi_port_p);
+  creme_register_builtin(vm, "input-port?", bi_input_port_p);
+  creme_register_builtin(vm, "output-port?", bi_output_port_p);
+  creme_register_builtin(vm, "eof-object", bi_eof_object);
+  creme_register_builtin(vm, "eof-object?", bi_eof_object_p);
+  creme_register_builtin(vm, "close-port", bi_close_port);
+  creme_register_builtin(vm, "flush-output-port", bi_flush_output_port);
+  creme_register_builtin(vm, "close-input-port", bi_close_port);
+  creme_register_builtin(vm, "close-output-port", bi_close_port);
+  creme_register_builtin(vm, "read-char", bi_read_char);
+  creme_register_builtin(vm, "peek-char", bi_peek_char);
+  creme_register_builtin(vm, "read-line", bi_read_line);
+  creme_register_builtin(vm, "read-string", bi_read_string);
+  creme_register_builtin(vm, "char-ready?", bi_char_ready_p);
+  creme_register_builtin(vm, "read", bi_read);
 
-  cvm_register_builtin(vm, "not", bi_not);
-  cvm_register_builtin(vm, "pair?", bi_pair_p);
-  cvm_register_builtin(vm, "null?", bi_null_p);
-  cvm_register_builtin(vm, "list?", bi_list_p);
-  cvm_register_builtin(vm, "boolean?", bi_boolean_p);
-  cvm_register_builtin(vm, "symbol?", bi_symbol_p);
-  cvm_register_builtin(vm, "string?", bi_string_p);
-  cvm_register_builtin(vm, "vector?", bi_vector_p);
-  cvm_register_builtin(vm, "vector-ref", bi_vector_ref);
-  cvm_register_builtin(vm, "vector-set!", bi_vector_set);
-  cvm_register_builtin(vm, "vector-length", bi_vector_length);
-  cvm_register_builtin(vm, "string-ref", bi_string_ref);
-  cvm_register_builtin(vm, "string-set!", bi_string_set);
-  cvm_register_builtin(vm, "bytevector-u8-ref", bi_bytevector_u8_ref);
-  cvm_register_builtin(vm, "bytevector-u8-set!", bi_bytevector_u8_set);
-  cvm_register_builtin(vm, "char?", bi_char_p);
-  cvm_register_builtin(vm, "procedure?", bi_procedure_p);
-  cvm_register_builtin(vm, "number?", bi_number_p);
-  cvm_register_builtin(vm, "real?", bi_real_p);
-  cvm_register_builtin(vm, "integer?", bi_integer_p);
-  cvm_register_builtin(vm, "exact?", bi_exact_p);
-  cvm_register_builtin(vm, "inexact?", bi_inexact_p);
-  cvm_register_builtin(vm, "exact-integer?", bi_exact_integer_p);
-  cvm_register_builtin(vm, "rational?", bi_rational_p);
-  cvm_register_builtin(vm, "numerator", bi_numerator);
-  cvm_register_builtin(vm, "denominator", bi_denominator);
-  cvm_register_builtin(vm, "eq?", bi_eq_p);
-  cvm_register_builtin(vm, "eqv?", bi_eqv_p);
-  cvm_register_builtin(vm, "equal?", bi_equal_p);
+  creme_register_builtin(vm, "not", bi_not);
+  creme_register_builtin(vm, "pair?", bi_pair_p);
+  creme_register_builtin(vm, "null?", bi_null_p);
+  creme_register_builtin(vm, "list?", bi_list_p);
+  creme_register_builtin(vm, "boolean?", bi_boolean_p);
+  creme_register_builtin(vm, "symbol?", bi_symbol_p);
+  creme_register_builtin(vm, "string?", bi_string_p);
+  creme_register_builtin(vm, "vector?", bi_vector_p);
+  creme_register_builtin(vm, "vector-ref", bi_vector_ref);
+  creme_register_builtin(vm, "vector-set!", bi_vector_set);
+  creme_register_builtin(vm, "vector-length", bi_vector_length);
+  creme_register_builtin(vm, "string-ref", bi_string_ref);
+  creme_register_builtin(vm, "string-set!", bi_string_set);
+  creme_register_builtin(vm, "bytevector-u8-ref", bi_bytevector_u8_ref);
+  creme_register_builtin(vm, "bytevector-u8-set!", bi_bytevector_u8_set);
+  creme_register_builtin(vm, "char?", bi_char_p);
+  creme_register_builtin(vm, "procedure?", bi_procedure_p);
+  creme_register_builtin(vm, "number?", bi_number_p);
+  creme_register_builtin(vm, "real?", bi_real_p);
+  creme_register_builtin(vm, "integer?", bi_integer_p);
+  creme_register_builtin(vm, "exact?", bi_exact_p);
+  creme_register_builtin(vm, "inexact?", bi_inexact_p);
+  creme_register_builtin(vm, "exact-integer?", bi_exact_integer_p);
+  creme_register_builtin(vm, "rational?", bi_rational_p);
+  creme_register_builtin(vm, "numerator", bi_numerator);
+  creme_register_builtin(vm, "denominator", bi_denominator);
+  creme_register_builtin(vm, "eq?", bi_eq_p);
+  creme_register_builtin(vm, "eqv?", bi_eqv_p);
+  creme_register_builtin(vm, "equal?", bi_equal_p);
 
-  cvm_register_builtin(vm, "zero?", bi_zero_p);
-  cvm_register_builtin(vm, "positive?", bi_positive_p);
-  cvm_register_builtin(vm, "negative?", bi_negative_p);
-  cvm_register_builtin(vm, "odd?", bi_odd_p);
-  cvm_register_builtin(vm, "even?", bi_even_p);
-  cvm_register_builtin(vm, "abs", bi_abs);
-  cvm_register_builtin(vm, "square", bi_square);
-  cvm_register_builtin(vm, "min", bi_min);
-  cvm_register_builtin(vm, "max", bi_max);
-  cvm_register_builtin(vm, "round", bi_round);
-  cvm_register_builtin(vm, "floor", bi_floor);
-  cvm_register_builtin(vm, "ceiling", bi_ceiling);
-  cvm_register_builtin(vm, "truncate", bi_truncate);
-  cvm_register_builtin(vm, "exact", bi_exact);
-  cvm_register_builtin(vm, "inexact", bi_inexact);
-  cvm_register_builtin(vm, "exact->inexact", bi_inexact);
-  cvm_register_builtin(vm, "inexact->exact", bi_exact);
+  creme_register_builtin(vm, "zero?", bi_zero_p);
+  creme_register_builtin(vm, "positive?", bi_positive_p);
+  creme_register_builtin(vm, "negative?", bi_negative_p);
+  creme_register_builtin(vm, "odd?", bi_odd_p);
+  creme_register_builtin(vm, "even?", bi_even_p);
+  creme_register_builtin(vm, "abs", bi_abs);
+  creme_register_builtin(vm, "square", bi_square);
+  creme_register_builtin(vm, "min", bi_min);
+  creme_register_builtin(vm, "max", bi_max);
+  creme_register_builtin(vm, "round", bi_round);
+  creme_register_builtin(vm, "floor", bi_floor);
+  creme_register_builtin(vm, "ceiling", bi_ceiling);
+  creme_register_builtin(vm, "truncate", bi_truncate);
+  creme_register_builtin(vm, "exact", bi_exact);
+  creme_register_builtin(vm, "inexact", bi_inexact);
+  creme_register_builtin(vm, "exact->inexact", bi_inexact);
+  creme_register_builtin(vm, "inexact->exact", bi_exact);
 
-  cvm_register_builtin(vm, "car", bi_car);
-  cvm_register_builtin(vm, "cdr", bi_cdr);
-  cvm_register_builtin(vm, "set-car!", bi_set_car_bang);
-  cvm_register_builtin(vm, "set-cdr!", bi_set_cdr_bang);
-  cvm_register_builtin(vm, "caar", bi_caar);
-  cvm_register_builtin(vm, "cadr", bi_cadr);
-  cvm_register_builtin(vm, "cdar", bi_cdar);
-  cvm_register_builtin(vm, "cddr", bi_cddr);
-  cvm_register_builtin(vm, "cons", bi_cons);
-  cvm_register_builtin(vm, "list", bi_list);
-  cvm_register_builtin(vm, "cons*", bi_cons_star);
-  cvm_register_builtin(vm, "append", bi_append);
-  cvm_register_builtin(vm, "list-tail", bi_list_tail);
-  cvm_register_builtin(vm, "list-ref", bi_list_ref);
-  cvm_register_builtin(vm, "list-set!", bi_list_set);
-  cvm_register_builtin(vm, "make-list", bi_make_list);
-  cvm_register_builtin(vm, "list-copy", bi_list_copy);
-  cvm_register_builtin(vm, "last-pair", bi_last_pair);
-  cvm_register_builtin(vm, "assoc", bi_assoc);
-  cvm_register_builtin(vm, "assq", bi_assq);
-  cvm_register_builtin(vm, "assv", bi_assq);
-  cvm_register_builtin(vm, "member", bi_member);
-  cvm_register_builtin(vm, "memq", bi_memq);
-  cvm_register_builtin(vm, "memv", bi_memq);
+  creme_register_builtin(vm, "car", bi_car);
+  creme_register_builtin(vm, "cdr", bi_cdr);
+  creme_register_builtin(vm, "set-car!", bi_set_car_bang);
+  creme_register_builtin(vm, "set-cdr!", bi_set_cdr_bang);
+  creme_register_builtin(vm, "caar", bi_caar);
+  creme_register_builtin(vm, "cadr", bi_cadr);
+  creme_register_builtin(vm, "cdar", bi_cdar);
+  creme_register_builtin(vm, "cddr", bi_cddr);
+  creme_register_builtin(vm, "cons", bi_cons);
+  creme_register_builtin(vm, "list", bi_list);
+  creme_register_builtin(vm, "cons*", bi_cons_star);
+  creme_register_builtin(vm, "append", bi_append);
+  creme_register_builtin(vm, "list-tail", bi_list_tail);
+  creme_register_builtin(vm, "list-ref", bi_list_ref);
+  creme_register_builtin(vm, "list-set!", bi_list_set);
+  creme_register_builtin(vm, "make-list", bi_make_list);
+  creme_register_builtin(vm, "list-copy", bi_list_copy);
+  creme_register_builtin(vm, "last-pair", bi_last_pair);
+  creme_register_builtin(vm, "assoc", bi_assoc);
+  creme_register_builtin(vm, "assq", bi_assq);
+  creme_register_builtin(vm, "assv", bi_assq);
+  creme_register_builtin(vm, "member", bi_member);
+  creme_register_builtin(vm, "memq", bi_memq);
+  creme_register_builtin(vm, "memv", bi_memq);
 
-  cvm_register_builtin(vm, "apply", bi_apply);
-  cvm_register_builtin(vm, "map", bi_map);
-  cvm_register_builtin(vm, "for-each", bi_for_each);
-  cvm_register_builtin(vm, "string-for-each", bi_string_for_each);
-  cvm_register_builtin(vm, "filter", bi_filter);
-  cvm_register_builtin(vm, "values", bi_values);
-  cvm_register_builtin(vm, "call-with-values", bi_call_with_values);
-  cvm_register_builtin(vm, "dynamic-wind", bi_dynamic_wind);
-  cvm_register_builtin(vm, "call/cc", bi_call_cc);
-  cvm_register_builtin(vm, "call-with-current-continuation", bi_call_cc);
+  creme_register_builtin(vm, "apply", bi_apply);
+  creme_register_builtin(vm, "map", bi_map);
+  creme_register_builtin(vm, "for-each", bi_for_each);
+  creme_register_builtin(vm, "string-for-each", bi_string_for_each);
+  creme_register_builtin(vm, "filter", bi_filter);
+  creme_register_builtin(vm, "values", bi_values);
+  creme_register_builtin(vm, "call-with-values", bi_call_with_values);
+  creme_register_builtin(vm, "dynamic-wind", bi_dynamic_wind);
+  creme_register_builtin(vm, "call/cc", bi_call_cc);
+  creme_register_builtin(vm, "call-with-current-continuation", bi_call_cc);
 
-  cvm_register_builtin(vm, "string-append", bi_string_append);
-  cvm_register_builtin(vm, "substring", bi_substring);
-  cvm_register_builtin(vm, "string-copy", bi_string_copy);
-  cvm_register_builtin(vm, "string->list", bi_string_to_list);
-  cvm_register_builtin(vm, "list->string", bi_list_to_string);
-  cvm_register_builtin(vm, "make-string", bi_make_string);
-  cvm_register_builtin(vm, "string", bi_string_ctor);
-  cvm_register_builtin(vm, "string=?", bi_string_eq);
-  cvm_register_builtin(vm, "string<?", bi_string_lt);
-  cvm_register_builtin(vm, "string>?", bi_string_gt);
-  cvm_register_builtin(vm, "string<=?", bi_string_le);
-  cvm_register_builtin(vm, "string>=?", bi_string_ge);
-  cvm_register_builtin(vm, "symbol=?", bi_symbol_eq);
-  cvm_register_builtin(vm, "boolean=?", bi_boolean_eq);
-  cvm_register_builtin(vm, "string-map", bi_string_map);
-  cvm_register_builtin(vm, "string-copy!", bi_string_copy_bang);
-  cvm_register_builtin(vm, "string-fill!", bi_string_fill_bang);
-  cvm_register_builtin(vm, "string->vector", bi_string_to_vector);
-  cvm_register_builtin(vm, "vector->string", bi_vector_to_string);
-  cvm_register_builtin(vm, "string->number", bi_string_to_number);
-  cvm_register_builtin(vm, "number->string", bi_number_to_string);
-  cvm_register_builtin(vm, "string->symbol", bi_string_to_symbol);
-  cvm_register_builtin(vm, "symbol->string", bi_symbol_to_string);
-  cvm_register_builtin(vm, "char->integer", bi_char_to_integer);
-  cvm_register_builtin(vm, "integer->char", bi_integer_to_char);
-  cvm_register_builtin(vm, "char=?", bi_char_eq);
-  cvm_register_builtin(vm, "char<?", bi_char_lt);
-  cvm_register_builtin(vm, "char>?", bi_char_gt);
-  cvm_register_builtin(vm, "char<=?", bi_char_le);
-  cvm_register_builtin(vm, "char>=?", bi_char_ge);
+  creme_register_builtin(vm, "string-append", bi_string_append);
+  creme_register_builtin(vm, "substring", bi_substring);
+  creme_register_builtin(vm, "string-copy", bi_string_copy);
+  creme_register_builtin(vm, "string->list", bi_string_to_list);
+  creme_register_builtin(vm, "list->string", bi_list_to_string);
+  creme_register_builtin(vm, "make-string", bi_make_string);
+  creme_register_builtin(vm, "string", bi_string_ctor);
+  creme_register_builtin(vm, "string=?", bi_string_eq);
+  creme_register_builtin(vm, "string<?", bi_string_lt);
+  creme_register_builtin(vm, "string>?", bi_string_gt);
+  creme_register_builtin(vm, "string<=?", bi_string_le);
+  creme_register_builtin(vm, "string>=?", bi_string_ge);
+  creme_register_builtin(vm, "symbol=?", bi_symbol_eq);
+  creme_register_builtin(vm, "boolean=?", bi_boolean_eq);
+  creme_register_builtin(vm, "string-map", bi_string_map);
+  creme_register_builtin(vm, "string-copy!", bi_string_copy_bang);
+  creme_register_builtin(vm, "string-fill!", bi_string_fill_bang);
+  creme_register_builtin(vm, "string->vector", bi_string_to_vector);
+  creme_register_builtin(vm, "vector->string", bi_vector_to_string);
+  creme_register_builtin(vm, "string->number", bi_string_to_number);
+  creme_register_builtin(vm, "number->string", bi_number_to_string);
+  creme_register_builtin(vm, "string->symbol", bi_string_to_symbol);
+  creme_register_builtin(vm, "symbol->string", bi_symbol_to_string);
+  creme_register_builtin(vm, "char->integer", bi_char_to_integer);
+  creme_register_builtin(vm, "integer->char", bi_integer_to_char);
+  creme_register_builtin(vm, "char=?", bi_char_eq);
+  creme_register_builtin(vm, "char<?", bi_char_lt);
+  creme_register_builtin(vm, "char>?", bi_char_gt);
+  creme_register_builtin(vm, "char<=?", bi_char_le);
+  creme_register_builtin(vm, "char>=?", bi_char_ge);
 
-  cvm_register_builtin(vm, "vector", bi_vector);
-  cvm_register_builtin(vm, "vector->list", bi_vector_to_list);
-  cvm_register_builtin(vm, "list->vector", bi_list_to_vector);
-  cvm_register_builtin(vm, "vector-map", bi_vector_map);
-  cvm_register_builtin(vm, "vector-for-each", bi_vector_for_each);
-  cvm_register_builtin(vm, "vector-copy", bi_vector_copy);
-  cvm_register_builtin(vm, "vector-copy!", bi_vector_copy_bang);
-  cvm_register_builtin(vm, "vector-fill!", bi_vector_fill);
-  cvm_register_builtin(vm, "vector-append", bi_vector_append);
+  creme_register_builtin(vm, "vector", bi_vector);
+  creme_register_builtin(vm, "vector->list", bi_vector_to_list);
+  creme_register_builtin(vm, "list->vector", bi_list_to_vector);
+  creme_register_builtin(vm, "vector-map", bi_vector_map);
+  creme_register_builtin(vm, "vector-for-each", bi_vector_for_each);
+  creme_register_builtin(vm, "vector-copy", bi_vector_copy);
+  creme_register_builtin(vm, "vector-copy!", bi_vector_copy_bang);
+  creme_register_builtin(vm, "vector-fill!", bi_vector_fill);
+  creme_register_builtin(vm, "vector-append", bi_vector_append);
 
-  cvm_register_builtin(vm, "make-bytevector", bi_make_bytevector);
-  cvm_register_builtin(vm, "bytevector", bi_bytevector);
-  cvm_register_builtin(vm, "bytevector-length", bi_bytevector_length);
-  cvm_register_builtin(vm, "bytevector?", bi_bytevector_p);
-  cvm_register_builtin(vm, "bytevector-copy", bi_bytevector_copy);
-  cvm_register_builtin(vm, "bytevector-copy!", bi_bytevector_copy_bang);
-  cvm_register_builtin(vm, "bytevector-append", bi_bytevector_append);
-  cvm_register_builtin(vm, "utf8->string", bi_utf8_to_string);
-  cvm_register_builtin(vm, "string->utf8", bi_string_to_utf8);
-  cvm_register_builtin(vm, "open-input-bytevector", bi_open_input_bytevector);
-  cvm_register_builtin(vm, "open-output-bytevector", bi_open_output_bytevector);
-  cvm_register_builtin(vm, "get-output-bytevector", bi_get_output_bytevector);
-  cvm_register_builtin(vm, "binary-port?", bi_binary_port_p);
-  cvm_register_builtin(vm, "textual-port?", bi_textual_port_p);
-  cvm_register_builtin(vm, "input-port-open?", bi_input_port_open_p);
-  cvm_register_builtin(vm, "output-port-open?", bi_output_port_open_p);
-  cvm_register_builtin(vm, "read-u8", bi_read_u8);
-  cvm_register_builtin(vm, "peek-u8", bi_peek_u8);
-  cvm_register_builtin(vm, "u8-ready?", bi_char_ready_p);
-  cvm_register_builtin(vm, "write-u8", bi_write_u8);
-  cvm_register_builtin(vm, "read-bytevector", bi_read_bytevector);
-  cvm_register_builtin(vm, "read-bytevector!", bi_read_bytevector_bang);
-  cvm_register_builtin(vm, "write-bytevector", bi_write_bytevector);
-  cvm_register_builtin(vm, "call-with-port", bi_call_with_port);
+  creme_register_builtin(vm, "make-bytevector", bi_make_bytevector);
+  creme_register_builtin(vm, "bytevector", bi_bytevector);
+  creme_register_builtin(vm, "bytevector-length", bi_bytevector_length);
+  creme_register_builtin(vm, "bytevector?", bi_bytevector_p);
+  creme_register_builtin(vm, "bytevector-copy", bi_bytevector_copy);
+  creme_register_builtin(vm, "bytevector-copy!", bi_bytevector_copy_bang);
+  creme_register_builtin(vm, "bytevector-append", bi_bytevector_append);
+  creme_register_builtin(vm, "utf8->string", bi_utf8_to_string);
+  creme_register_builtin(vm, "string->utf8", bi_string_to_utf8);
+  creme_register_builtin(vm, "open-input-bytevector", bi_open_input_bytevector);
+  creme_register_builtin(vm, "open-output-bytevector", bi_open_output_bytevector);
+  creme_register_builtin(vm, "get-output-bytevector", bi_get_output_bytevector);
+  creme_register_builtin(vm, "binary-port?", bi_binary_port_p);
+  creme_register_builtin(vm, "textual-port?", bi_textual_port_p);
+  creme_register_builtin(vm, "input-port-open?", bi_input_port_open_p);
+  creme_register_builtin(vm, "output-port-open?", bi_output_port_open_p);
+  creme_register_builtin(vm, "read-u8", bi_read_u8);
+  creme_register_builtin(vm, "peek-u8", bi_peek_u8);
+  creme_register_builtin(vm, "u8-ready?", bi_char_ready_p);
+  creme_register_builtin(vm, "write-u8", bi_write_u8);
+  creme_register_builtin(vm, "read-bytevector", bi_read_bytevector);
+  creme_register_builtin(vm, "read-bytevector!", bi_read_bytevector_bang);
+  creme_register_builtin(vm, "write-bytevector", bi_write_bytevector);
+  creme_register_builtin(vm, "call-with-port", bi_call_with_port);
 
-  cvm_register_builtin(vm, "error", bi_error);
-  cvm_register_builtin(vm, "raise", bi_raise);
-  cvm_register_builtin(vm, "raise-continuable", bi_raise_continuable);
-  cvm_register_builtin(vm, "with-exception-handler", bi_with_exception_handler);
-  cvm_register_builtin(vm, "error-object?", bi_error_object_p);
-  cvm_register_builtin(vm, "error-object-message", bi_error_object_message);
-  cvm_register_builtin(vm, "error-object-irritants", bi_error_object_irritants);
-  cvm_register_builtin(vm, "read-error?", bi_read_error_p);
-  cvm_register_builtin(vm, "file-error?", bi_file_error_p);
-  cvm_register_builtin(vm, "make-parameter", bi_make_parameter);
-  cvm_register_builtin(vm, "quotient", bi_quotient);
-  cvm_register_builtin(vm, "remainder", bi_remainder);
-  cvm_register_builtin(vm, "modulo", bi_modulo);
-  cvm_register_builtin(vm, "truncate-quotient", bi_quotient);
-  cvm_register_builtin(vm, "truncate-remainder", bi_remainder);
-  cvm_register_builtin(vm, "floor-quotient", bi_floor_quotient);
-  cvm_register_builtin(vm, "floor-remainder", bi_modulo);
-  cvm_register_builtin(vm, "truncate/", bi_truncate_slash);
-  cvm_register_builtin(vm, "floor/", bi_floor_slash);
-  cvm_register_builtin(vm, "gcd", bi_gcd);
-  cvm_register_builtin(vm, "lcm", bi_lcm);
-  cvm_register_builtin(vm, "expt", bi_expt);
-  cvm_register_builtin(vm, "exact-integer-sqrt", bi_exact_integer_sqrt);
-  cvm_register_builtin(vm, "+", bi_plus);
-  cvm_register_builtin(vm, "-", bi_minus);
-  cvm_register_builtin(vm, "*", bi_star);
-  cvm_register_builtin(vm, "/", bi_slash);
-  cvm_register_builtin(vm, "<", bi_num_lt);
-  cvm_register_builtin(vm, ">", bi_num_gt);
-  cvm_register_builtin(vm, "<=", bi_num_le);
-  cvm_register_builtin(vm, ">=", bi_num_ge);
-  cvm_register_builtin(vm, "=", bi_num_eq);
-  cvm_register_builtin(vm, "current-time", bi_current_time);
-  cvm_register_builtin(vm, "time-difference", bi_time_difference);
-  cvm_register_builtin(vm, "time-add", bi_time_add);
-  cvm_register_builtin(vm, "time-year", bi_time_year);
-  cvm_register_builtin(vm, "time-month", bi_time_month);
-  cvm_register_builtin(vm, "time-day", bi_time_day);
-  cvm_register_builtin(vm, "time-hour", bi_time_hour);
-  cvm_register_builtin(vm, "time-minute", bi_time_minute);
-  cvm_register_builtin(vm, "time-second", bi_time_second);
-  cvm_register_builtin(vm, "time->string", bi_time_to_string);
-  cvm_register_builtin(vm, "string->time", bi_string_to_time);
-  cvm_register_builtin(vm, "current-jiffy", bi_current_jiffy);
-  cvm_register_builtin(vm, "jiffies-per-second", bi_jiffies_per_second);
+  creme_register_builtin(vm, "error", bi_error);
+  creme_register_builtin(vm, "raise", bi_raise);
+  creme_register_builtin(vm, "raise-continuable", bi_raise_continuable);
+  creme_register_builtin(vm, "with-exception-handler", bi_with_exception_handler);
+  creme_register_builtin(vm, "error-object?", bi_error_object_p);
+  creme_register_builtin(vm, "error-object-message", bi_error_object_message);
+  creme_register_builtin(vm, "error-object-irritants", bi_error_object_irritants);
+  creme_register_builtin(vm, "read-error?", bi_read_error_p);
+  creme_register_builtin(vm, "file-error?", bi_file_error_p);
+  creme_register_builtin(vm, "make-parameter", bi_make_parameter);
+  creme_register_builtin(vm, "quotient", bi_quotient);
+  creme_register_builtin(vm, "remainder", bi_remainder);
+  creme_register_builtin(vm, "modulo", bi_modulo);
+  creme_register_builtin(vm, "truncate-quotient", bi_quotient);
+  creme_register_builtin(vm, "truncate-remainder", bi_remainder);
+  creme_register_builtin(vm, "floor-quotient", bi_floor_quotient);
+  creme_register_builtin(vm, "floor-remainder", bi_modulo);
+  creme_register_builtin(vm, "truncate/", bi_truncate_slash);
+  creme_register_builtin(vm, "floor/", bi_floor_slash);
+  creme_register_builtin(vm, "gcd", bi_gcd);
+  creme_register_builtin(vm, "lcm", bi_lcm);
+  creme_register_builtin(vm, "expt", bi_expt);
+  creme_register_builtin(vm, "exact-integer-sqrt", bi_exact_integer_sqrt);
+  creme_register_builtin(vm, "+", bi_plus);
+  creme_register_builtin(vm, "-", bi_minus);
+  creme_register_builtin(vm, "*", bi_star);
+  creme_register_builtin(vm, "/", bi_slash);
+  creme_register_builtin(vm, "<", bi_num_lt);
+  creme_register_builtin(vm, ">", bi_num_gt);
+  creme_register_builtin(vm, "<=", bi_num_le);
+  creme_register_builtin(vm, ">=", bi_num_ge);
+  creme_register_builtin(vm, "=", bi_num_eq);
+  creme_register_builtin(vm, "current-time", bi_current_time);
+  creme_register_builtin(vm, "time-difference", bi_time_difference);
+  creme_register_builtin(vm, "time-add", bi_time_add);
+  creme_register_builtin(vm, "time-year", bi_time_year);
+  creme_register_builtin(vm, "time-month", bi_time_month);
+  creme_register_builtin(vm, "time-day", bi_time_day);
+  creme_register_builtin(vm, "time-hour", bi_time_hour);
+  creme_register_builtin(vm, "time-minute", bi_time_minute);
+  creme_register_builtin(vm, "time-second", bi_time_second);
+  creme_register_builtin(vm, "time->string", bi_time_to_string);
+  creme_register_builtin(vm, "string->time", bi_string_to_time);
+  creme_register_builtin(vm, "current-jiffy", bi_current_jiffy);
+  creme_register_builtin(vm, "jiffies-per-second", bi_jiffies_per_second);
 }

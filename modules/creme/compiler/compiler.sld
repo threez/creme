@@ -580,7 +580,7 @@
     ;;
     ;; Shared by compile-defmacro!'s own registered transformer below (for
     ;; a LOCAL, same-compile-session macro use) and icecreme's bootstrap.c
-    ;; (bi_expand_if_macro, via cvm_apply, looking this up by name in
+    ;; (bi_expand_if_macro, via creme_apply, looking this up by name in
     ;; vm->globals) for a defmacro EXPORTED from a library compiled
     ;; straight to bytecode -- e.g. sxql-select! from (creme sxql),
     ;; Crystal-native-precompiled into an icecreme image -- whose runtime value,
@@ -3226,7 +3226,7 @@
              (string->list s))))
 
     ;; #f (rather than letting a missing file abort the whole process --
-    ;; cvm_abort/an uncaught SchemeRuntimeError with no active guard here
+    ;; creme_abort/an uncaught SchemeRuntimeError with no active guard here
     ;; would kill the entire run, not just fail this one lookup) when the
     ;; file can't be read -- the signal that `name` is an ordinary
     ;; Crystal/icecreme-native library instead, with nothing further to do.

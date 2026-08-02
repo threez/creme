@@ -62,30 +62,30 @@ static void value_bytes(Value v, const char **out_ptr, int *out_len, const char 
     *out_len = v.as.bv->len;
     return;
   }
-  cvm_abort("%s: expected a blob or string argument", who);
+  creme_abort("%s: expected a blob or string argument", who);
 }
 
 static Value bi_digest_md5(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("digest-md5: expected string, got a non-string value");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("digest-md5: expected string, got a non-string value");
   return hex_digest(EVP_md5(), args[0].as.chars, args[0].aux);
 }
 
 static Value bi_digest_sha1(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("digest-sha1: expected string, got a non-string value");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("digest-sha1: expected string, got a non-string value");
   return hex_digest(EVP_sha1(), args[0].as.chars, args[0].aux);
 }
 
 static Value bi_digest_sha256(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("digest-sha256: expected string, got a non-string value");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("digest-sha256: expected string, got a non-string value");
   return hex_digest(EVP_sha256(), args[0].as.chars, args[0].aux);
 }
 
 static Value bi_digest_sha384(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("digest-sha384: expected an argument");
+  if (nargs < 1) creme_abort("digest-sha384: expected an argument");
   const char *ptr;
   int len;
   value_bytes(args[0], &ptr, &len, "digest-sha384");
@@ -94,7 +94,7 @@ static Value bi_digest_sha384(VM *vm, Value *args, int nargs) {
 
 static Value bi_digest_sha512(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("digest-sha512: expected an argument");
+  if (nargs < 1) creme_abort("digest-sha512: expected an argument");
   const char *ptr;
   int len;
   value_bytes(args[0], &ptr, &len, "digest-sha512");
@@ -103,7 +103,7 @@ static Value bi_digest_sha512(VM *vm, Value *args, int nargs) {
 
 static Value bi_hmac_sha256(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("hmac-sha256: expected 2 arguments");
+  if (nargs < 2) creme_abort("hmac-sha256: expected 2 arguments");
   const char *kptr, *dptr;
   int klen, dlen;
   value_bytes(args[0], &kptr, &klen, "hmac-sha256");
@@ -113,7 +113,7 @@ static Value bi_hmac_sha256(VM *vm, Value *args, int nargs) {
 
 static Value bi_hmac_sha384(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("hmac-sha384: expected 2 arguments");
+  if (nargs < 2) creme_abort("hmac-sha384: expected 2 arguments");
   const char *kptr, *dptr;
   int klen, dlen;
   value_bytes(args[0], &kptr, &klen, "hmac-sha384");
@@ -123,7 +123,7 @@ static Value bi_hmac_sha384(VM *vm, Value *args, int nargs) {
 
 static Value bi_hmac_sha512(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("hmac-sha512: expected 2 arguments");
+  if (nargs < 2) creme_abort("hmac-sha512: expected 2 arguments");
   const char *kptr, *dptr;
   int klen, dlen;
   value_bytes(args[0], &kptr, &klen, "hmac-sha512");
@@ -135,7 +135,7 @@ static const char B64_ALPHABET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 
 static Value bi_base64_encode(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("base64-encode: expected string, got a non-string value");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("base64-encode: expected string, got a non-string value");
   const unsigned char *in = (const unsigned char *)args[0].as.chars;
   int len = args[0].aux;
   int out_len = ((len + 2) / 3) * 4;
@@ -176,20 +176,20 @@ static int b64_value(char c) {
 
 static Value bi_base64_decode(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("base64-decode: expected string, got a non-string value");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("base64-decode: expected string, got a non-string value");
   const char *s = args[0].as.chars;
   int len = args[0].aux;
   if (len == 0) return v_str(GC_MALLOC(1), 0);
-  if (len % 4 != 0) cvm_abort("base64-decode: invalid base64: input length must be a multiple of 4");
+  if (len % 4 != 0) creme_abort("base64-decode: invalid base64: input length must be a multiple of 4");
 
   /* '=' padding may only appear as (up to) the last two characters. */
   for (int i = 0; i < len - 2; i++) {
-    if (s[i] == '=') cvm_abort("base64-decode: invalid base64: unexpected '=' padding");
+    if (s[i] == '=') creme_abort("base64-decode: invalid base64: unexpected '=' padding");
   }
   int pad = 0;
   if (s[len - 1] == '=') pad++;
   if (pad == 1 && s[len - 2] == '=') pad++;
-  if (pad == 0 && s[len - 2] == '=') cvm_abort("base64-decode: invalid base64: unexpected '=' padding");
+  if (pad == 0 && s[len - 2] == '=') creme_abort("base64-decode: invalid base64: unexpected '=' padding");
 
   int out_len = (len / 4) * 3 - pad;
   char *out = GC_MALLOC((size_t)(out_len ? out_len : 1));
@@ -201,7 +201,7 @@ static Value bi_base64_decode(VM *vm, Value *args, int nargs) {
     int v2 = (gp >= 2) ? 0 : b64_value(s[i + 2]);
     int v3 = (gp >= 1) ? 0 : b64_value(s[i + 3]);
     if (v0 < 0 || v1 < 0 || (gp < 2 && v2 < 0) || (gp < 1 && v3 < 0)) {
-      cvm_abort("base64-decode: invalid base64: contains a character outside the base64 alphabet");
+      creme_abort("base64-decode: invalid base64: contains a character outside the base64 alphabet");
     }
     unsigned int n = ((unsigned int)v0 << 18) | ((unsigned int)v1 << 12) | ((unsigned int)v2 << 6) | (unsigned int)v3;
     out[oi++] = (char)((n >> 16) & 0xff);
@@ -211,15 +211,15 @@ static Value bi_base64_decode(VM *vm, Value *args, int nargs) {
   return v_str(out, oi);
 }
 
-void cvm_register_digest_builtins(VM *vm) {
-  cvm_register_builtin(vm, "digest-md5", bi_digest_md5);
-  cvm_register_builtin(vm, "digest-sha1", bi_digest_sha1);
-  cvm_register_builtin(vm, "digest-sha256", bi_digest_sha256);
-  cvm_register_builtin(vm, "digest-sha384", bi_digest_sha384);
-  cvm_register_builtin(vm, "digest-sha512", bi_digest_sha512);
-  cvm_register_builtin(vm, "hmac-sha256", bi_hmac_sha256);
-  cvm_register_builtin(vm, "hmac-sha384", bi_hmac_sha384);
-  cvm_register_builtin(vm, "hmac-sha512", bi_hmac_sha512);
-  cvm_register_builtin(vm, "base64-encode", bi_base64_encode);
-  cvm_register_builtin(vm, "base64-decode", bi_base64_decode);
+void creme_register_digest_builtins(VM *vm) {
+  creme_register_builtin(vm, "digest-md5", bi_digest_md5);
+  creme_register_builtin(vm, "digest-sha1", bi_digest_sha1);
+  creme_register_builtin(vm, "digest-sha256", bi_digest_sha256);
+  creme_register_builtin(vm, "digest-sha384", bi_digest_sha384);
+  creme_register_builtin(vm, "digest-sha512", bi_digest_sha512);
+  creme_register_builtin(vm, "hmac-sha256", bi_hmac_sha256);
+  creme_register_builtin(vm, "hmac-sha384", bi_hmac_sha384);
+  creme_register_builtin(vm, "hmac-sha512", bi_hmac_sha512);
+  creme_register_builtin(vm, "base64-encode", bi_base64_encode);
+  creme_register_builtin(vm, "base64-decode", bi_base64_decode);
 }

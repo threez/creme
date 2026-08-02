@@ -14,16 +14,16 @@
 #include "secure_random.h"
 
 static int secure_random_count_arg(Value v, const char *who) {
-  if (v.tag != T_INT || v.as.i < 0) cvm_abort("%s: expected a non-negative integer, got a value of the wrong type", who);
+  if (v.tag != T_INT || v.as.i < 0) creme_abort("%s: expected a non-negative integer, got a value of the wrong type", who);
   return (int)v.as.i;
 }
 
 static Value bi_secure_random_bytes(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("secure-random-bytes: expected an argument");
+  if (nargs < 1) creme_abort("secure-random-bytes: expected an argument");
   int n = secure_random_count_arg(args[0], "secure-random-bytes");
   unsigned char *buf = GC_MALLOC((size_t)(n ? n : 1));
-  if (n > 0 && !RAND_bytes(buf, n)) cvm_abort("secure-random-bytes: RAND_bytes failed");
+  if (n > 0 && !RAND_bytes(buf, n)) creme_abort("secure-random-bytes: RAND_bytes failed");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
   bv->bytes = buf;
   bv->len = n;
@@ -32,10 +32,10 @@ static Value bi_secure_random_bytes(VM *vm, Value *args, int nargs) {
 
 static Value bi_secure_random_hex(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("secure-random-hex: expected an argument");
+  if (nargs < 1) creme_abort("secure-random-hex: expected an argument");
   int n = secure_random_count_arg(args[0], "secure-random-hex");
   unsigned char *raw = GC_MALLOC((size_t)(n ? n : 1));
-  if (n > 0 && !RAND_bytes(raw, n)) cvm_abort("secure-random-hex: RAND_bytes failed");
+  if (n > 0 && !RAND_bytes(raw, n)) creme_abort("secure-random-hex: RAND_bytes failed");
   static const char hexchars[] = "0123456789abcdef";
   char *buf = GC_MALLOC((size_t)(n ? n * 2 : 1));
   for (int i = 0; i < n; i++) {
@@ -49,10 +49,10 @@ static const char B64_ALPHABET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 
 static Value bi_secure_random_base64(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("secure-random-base64: expected an argument");
+  if (nargs < 1) creme_abort("secure-random-base64: expected an argument");
   int n = secure_random_count_arg(args[0], "secure-random-base64");
   unsigned char *in = GC_MALLOC((size_t)(n ? n : 1));
-  if (n > 0 && !RAND_bytes(in, n)) cvm_abort("secure-random-base64: RAND_bytes failed");
+  if (n > 0 && !RAND_bytes(in, n)) creme_abort("secure-random-base64: RAND_bytes failed");
 
   int out_len = ((n + 2) / 3) * 4;
   char *out = GC_MALLOC((size_t)(out_len ? out_len : 1));
@@ -81,8 +81,8 @@ static Value bi_secure_random_base64(VM *vm, Value *args, int nargs) {
   return v_str(out, oi);
 }
 
-void cvm_register_secure_random_builtins(VM *vm) {
-  cvm_register_builtin(vm, "secure-random-bytes", bi_secure_random_bytes);
-  cvm_register_builtin(vm, "secure-random-hex", bi_secure_random_hex);
-  cvm_register_builtin(vm, "secure-random-base64", bi_secure_random_base64);
+void creme_register_secure_random_builtins(VM *vm) {
+  creme_register_builtin(vm, "secure-random-bytes", bi_secure_random_bytes);
+  creme_register_builtin(vm, "secure-random-hex", bi_secure_random_hex);
+  creme_register_builtin(vm, "secure-random-base64", bi_secure_random_base64);
 }

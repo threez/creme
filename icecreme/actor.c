@@ -11,10 +11,10 @@
  * start-node/node-name/node-address/stop-node! for the 'local transport,
  * with register!/whereis scoped per-node and spawn inheriting its
  * spawning actor's own current node. Every actor gets its OWN VM (see
- * vm.c's cvm_new_child_vm) running on its own pthread; icecreme's bytecode dispatch
+ * vm.c's creme_new_child_vm) running on its own pthread; icecreme's bytecode dispatch
  * loop always reads globals through whichever `VM*` it's handed, so a
  * Closure/thunk captured in the spawning thread runs correctly against
- * the CHILD's own copied globals table the moment cvm_apply(child_vm,
+ * the CHILD's own copied globals table the moment creme_apply(child_vm,
  * thunk, ...) is called from that actor's own thread -- no special
  * Closure-side support needed at all (Closure carries only a Chunk* +
  * upvalues, never a VM pointer -- see vm.h's own struct Closure).
@@ -378,7 +378,7 @@ static char *dupn(const char *s, int len) {
 /* The full dialable URI for actor `id` on `sys`, whichever transport it
  * was started with -- mirrors native's own node_address_uri (shared by
  * local_ref_uri, for embedding a local ref in an outgoing tcp:/unix:
- * message, and the node-address builtin). Aborts (via cvm_abort -- only
+ * message, and the node-address builtin). Aborts (via creme_abort -- only
  * ever called from an actual actor's own thread, see write_datum/
  * bi_node_address) if `sys` was never given to start-node at all. */
 static char *node_address_uri(ActorSystem *sys, const char *id, int id_len) {
@@ -397,7 +397,7 @@ static char *node_address_uri(ActorSystem *sys, const char *id, int id_len) {
     buf = GC_MALLOC((size_t)(n + 1));
     snprintf(buf, (size_t)(n + 1), "local://%.*s@%.*s", id_len, id, sys->node_name_len, sys->node_name);
   } else {
-    cvm_abort("actor: start-node has not been called");
+    creme_abort("actor: start-node has not been called");
   }
   return buf;
 }
@@ -411,7 +411,7 @@ static char *node_address_uri(ActorSystem *sys, const char *id, int id_len) {
  * 'local (see ActorRef's comment on why). `decode_ctx`, if non-NULL, is
  * the PReader currently unwinding a just-received wire message -- errors
  * then go through preader_fail (safe from a network I/O thread with no
- * VM of its own) instead of cvm_abort (only safe from an actual actor's
+ * VM of its own) instead of creme_abort (only safe from an actual actor's
  * own thread, e.g. remote-ref's builtin call site, decode_ctx == NULL). */
 static Value make_ref_from_uri(const char *uri, int len, const char *who, PReader *decode_ctx);
 
@@ -459,15 +459,15 @@ static ActorContext *resolve_target(VM *vm, Value v, const char *who) {
     char *id = find_id_by_name_locked(sys, v.as.chars, v.aux);
     ActorContext *ctx = id ? find_context_by_id_locked(sys, id) : NULL;
     pthread_mutex_unlock(&sys->mutex);
-    if (!ctx) cvm_abort("%s: unknown actor name", who);
+    if (!ctx) creme_abort("%s: unknown actor name", who);
     return ctx;
   }
   if (v.tag == T_BOX && v.aux == BOX_KIND_ACTOR_REF) {
     ActorRef *ref = v.as.ptr;
     if (ref->local_ctx) return ref->local_ctx;
-    cvm_abort("%s: cannot %s a remote actor reference", who, who);
+    creme_abort("%s: cannot %s a remote actor reference", who, who);
   }
-  cvm_abort("%s: expected an actor name or ref", who);
+  creme_abort("%s: expected an actor name or ref", who);
 }
 
 /* Notifies every monitor watching `ctx` with a <down> message carrying
@@ -553,7 +553,7 @@ static void *actor_thread_main(void *arg) {
   GC_get_stack_base(&sb);
   GC_register_my_thread(&sb);
 
-  cvm_set_current_vm(ctx->vm);
+  creme_set_current_vm(ctx->vm);
   g_current_actor = ctx;
   ctx->vm->has_actor_unwind = 1;
 
@@ -562,7 +562,7 @@ static void *actor_thread_main(void *arg) {
    * is a string. */
   Value reason = v_sym("normal", 6);
   if (setjmp(ctx->vm->actor_unwind) == 0) {
-    cvm_apply(ctx->vm, thunk, NULL, 0);
+    creme_apply(ctx->vm, thunk, NULL, 0);
   } else {
     /* abort_message lives inside ctx->vm's own GC_MALLOC'd allocation --
      * sharing this pointer directly as the T_STR's own backing bytes
@@ -582,8 +582,8 @@ static void *actor_thread_main(void *arg) {
 }
 
 static Value bi_spawn(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("spawn: expected a thunk");
-  VM *child_vm = cvm_new_child_vm(vm);
+  if (nargs < 1) creme_abort("spawn: expected a thunk");
+  VM *child_vm = creme_new_child_vm(vm);
   /* A spawned actor inherits the SPAWNING actor's own current system --
    * mirrors native's `child.actor_system = system` (actor.cr). */
   ActorContext *ctx = new_actor_context(child_vm, ensure_context(vm)->system);
@@ -593,7 +593,7 @@ static Value bi_spawn(VM *vm, Value *args, int nargs) {
   sa->thunk = args[0];
 
   pthread_t tid;
-  if (pthread_create(&tid, NULL, actor_thread_main, sa) != 0) cvm_abort("spawn: failed to create a thread");
+  if (pthread_create(&tid, NULL, actor_thread_main, sa) != 0) creme_abort("spawn: failed to create a thread");
   ctx->thread = tid;
 
   return v_actor_ref(ctx->id, ctx);
@@ -679,7 +679,7 @@ static void write_string_escaped(WBuf *w, const char *s, int len) {
 }
 
 /* Only ever called from the SENDING actor's own thread (send_remote,
- * below) -- cvm_abort on an unsupported value is correct here, exactly
+ * below) -- creme_abort on an unsupported value is correct here, exactly
  * like any other actor-thread error (kills just this actor, notifies its
  * monitors -- see vm.c's own per-actor escape hatch). */
 static void write_datum(WBuf *w, Value v, ActorSystem *sys) {
@@ -774,10 +774,10 @@ static void write_datum(WBuf *w, Value v, ActorSystem *sys) {
         write_string_escaped(w, full, n2);
         return;
       }
-      cvm_abort("actor: cannot send this value over the wire (unsupported box kind %d)", v.aux);
+      creme_abort("actor: cannot send this value over the wire (unsupported box kind %d)", v.aux);
       return;
     default:
-      cvm_abort("actor: cannot send this value over the wire (unsupported value type)");
+      creme_abort("actor: cannot send this value over the wire (unsupported value type)");
   }
 }
 
@@ -791,7 +791,7 @@ static void encode_message(Value msg, ActorSystem *sys, char **out_buf, int *out
 
 /* ---- reader (only ever runs on a network I/O thread, never on an actual
  * actor's own VM thread -- see preader_fail's own comment on why it uses
- * its own longjmp escape instead of cvm_abort) --------------------------- */
+ * its own longjmp escape instead of creme_abort) --------------------------- */
 
 struct PReader {
   const char *s;
@@ -803,8 +803,8 @@ struct PReader {
 
 /* decode_message (the only caller) always runs on a bare network I/O
  * thread with no VM of its own on this call stack -- g_current_vm is
- * unset there, so cvm_abort's fallback would kill the WHOLE PROCESS on a
- * single malformed inbound message (see vm.c's cvm_abort: no
+ * unset there, so creme_abort's fallback would kill the WHOLE PROCESS on a
+ * single malformed inbound message (see vm.c's creme_abort: no
  * has_actor_unwind to longjmp to means it falls straight through to
  * exit(1)). This is this reader's own, entirely separate escape hatch:
  * unwinds straight back to decode_message's own setjmp, which just drops
@@ -1019,7 +1019,7 @@ static Value make_ref_from_uri(const char *uri, int len, const char *who, PReade
 #define URI_FAIL(...)                                            \
   do {                                                            \
     if (decode_ctx) preader_fail(decode_ctx, __VA_ARGS__);         \
-    else cvm_abort(__VA_ARGS__);                                  \
+    else creme_abort(__VA_ARGS__);                                  \
     return v_nil(); /* unreached */                                \
   } while (0)
 
@@ -1230,10 +1230,10 @@ static Connection *find_connection_locked(ActorSystem *sys, const char *key, int
 }
 
 /* Connects + handshakes a brand new outbound socket -- always called
- * from an actual actor's own thread (send_remote), so cvm_abort on
+ * from an actual actor's own thread (send_remote), so creme_abort on
  * failure is correct here (kills just this actor). */
 static Connection *dial(ActorSystem *sys, int addr_kind, const char *host, int port, const char *path) {
-  if (!sys->cookie) cvm_abort("send!: start-node must be called before contacting a remote actor");
+  if (!sys->cookie) creme_abort("send!: start-node must be called before contacting a remote actor");
   int fd;
   if (addr_kind == ADDR_TCP) {
     struct addrinfo hints;
@@ -1243,7 +1243,7 @@ static Connection *dial(ActorSystem *sys, int addr_kind, const char *host, int p
     struct addrinfo *res;
     char portbuf[16];
     snprintf(portbuf, sizeof(portbuf), "%d", port);
-    if (getaddrinfo(host, portbuf, &hints, &res) != 0) cvm_abort("send!: could not resolve host '%s'", host);
+    if (getaddrinfo(host, portbuf, &hints, &res) != 0) creme_abort("send!: could not resolve host '%s'", host);
     fd = -1;
     for (struct addrinfo *rp = res; rp; rp = rp->ai_next) {
       fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
@@ -1253,24 +1253,24 @@ static Connection *dial(ActorSystem *sys, int addr_kind, const char *host, int p
       fd = -1;
     }
     freeaddrinfo(res);
-    if (fd < 0) cvm_abort("send!: connection to %s:%d failed", host, port);
+    if (fd < 0) creme_abort("send!: connection to %s:%d failed", host, port);
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
   } else {
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) cvm_abort("send!: could not create a unix socket");
+    if (fd < 0) creme_abort("send!: could not create a unix socket");
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
       close(fd);
-      cvm_abort("send!: connection to unix socket '%s' failed", path);
+      creme_abort("send!: connection to unix socket '%s' failed", path);
     }
   }
   if (handshake_initiate(fd, sys->cookie, sys->cookie_len) != 0) {
     close(fd);
-    cvm_abort("send!: handshake failed or was rejected");
+    creme_abort("send!: handshake failed or was rejected");
   }
   Connection *conn = GC_MALLOC(sizeof(Connection));
   pthread_mutex_init(&conn->write_mutex, NULL);
@@ -1331,7 +1331,7 @@ static void send_remote(ActorSystem *sys, ActorRef *ref, Value msg) {
   pthread_mutex_lock(&conn->write_mutex);
   int rc = write_frame_fd(conn->fd, FRAME_DELIVER, body, body_len);
   pthread_mutex_unlock(&conn->write_mutex);
-  if (rc != 0) cvm_abort("send!: connection to %s failed", ref->id);
+  if (rc != 0) creme_abort("send!: connection to %s failed", ref->id);
 }
 
 /* ---- inbound: one pthread per accepted connection ------------------------ */
@@ -1419,7 +1419,7 @@ static void *accept_loop_main(void *arg) {
 }
 
 static Value bi_send_bang(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("send!: expected (target message)");
+  if (nargs < 2) creme_abort("send!: expected (target message)");
   Value target = args[0];
   if (target.tag == T_SYM || target.tag == T_STR) {
     ActorContext *ctx = resolve_target(vm, target, "send!");
@@ -1435,7 +1435,7 @@ static Value bi_send_bang(VM *vm, Value *args, int nargs) {
     }
     return v_nil();
   }
-  cvm_abort("send!: expected an actor reference or registered name");
+  creme_abort("send!: expected an actor reference or registered name");
 }
 
 static Value bi_receive_bang(VM *vm, Value *args, int nargs) {
@@ -1453,7 +1453,7 @@ static Value bi_self(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_monitor(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("monitor: expected a ref");
+  if (nargs < 1) creme_abort("monitor: expected a ref");
   ActorContext *watcher = ensure_context(vm);
   ActorContext *target = resolve_target(vm, args[0], "monitor");
 
@@ -1475,7 +1475,7 @@ static Value bi_monitor(VM *vm, Value *args, int nargs) {
 
 static Value bi_register_bang(VM *vm, Value *args, int nargs) {
   if (nargs < 2 || (args[0].tag != T_SYM && args[0].tag != T_STR) || args[1].tag != T_BOX || args[1].aux != BOX_KIND_ACTOR_REF) {
-    cvm_abort("register!: expected (name ref)");
+    creme_abort("register!: expected (name ref)");
   }
   ActorRef *ref = args[1].as.ptr;
 
@@ -1508,7 +1508,7 @@ static Value bi_register_bang(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_whereis(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || (args[0].tag != T_SYM && args[0].tag != T_STR)) cvm_abort("whereis: expected a name");
+  if (nargs < 1 || (args[0].tag != T_SYM && args[0].tag != T_STR)) creme_abort("whereis: expected a name");
   ActorSystem *sys = ensure_context(vm)->system;
   pthread_mutex_lock(&sys->mutex);
   char *id = find_id_by_name_locked(sys, args[0].as.chars, args[0].aux);
@@ -1519,7 +1519,7 @@ static Value bi_whereis(VM *vm, Value *args, int nargs) {
 
 static Value bi_actor_ref_id(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_ACTOR_REF) cvm_abort("actor-ref-id: expected an actor ref");
+  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_ACTOR_REF) creme_abort("actor-ref-id: expected an actor ref");
   ActorRef *ref = args[0].as.ptr;
   return v_str(ref->id, (int)strlen(ref->id));
 }
@@ -1559,7 +1559,7 @@ static void start_tcp_node(ActorSystem *sys, const char *host, int host_len, int
   char portbuf[16];
   snprintf(portbuf, sizeof(portbuf), "%d", port);
   if (getaddrinfo(host_len > 0 ? sys->tcp_host : NULL, portbuf, &hints, &res) != 0) {
-    cvm_abort("start-node: could not resolve host '%s'", sys->tcp_host);
+    creme_abort("start-node: could not resolve host '%s'", sys->tcp_host);
   }
   int fd = -1;
   for (struct addrinfo *rp = res; rp; rp = rp->ai_next) {
@@ -1572,10 +1572,10 @@ static void start_tcp_node(ActorSystem *sys, const char *host, int host_len, int
     fd = -1;
   }
   freeaddrinfo(res);
-  if (fd < 0) cvm_abort("start-node: could not bind %s:%d", sys->tcp_host, port);
+  if (fd < 0) creme_abort("start-node: could not bind %s:%d", sys->tcp_host, port);
   if (listen(fd, 64) != 0) {
     close(fd);
-    cvm_abort("start-node: listen failed");
+    creme_abort("start-node: listen failed");
   }
 
   struct sockaddr_storage actual;
@@ -1590,7 +1590,7 @@ static void start_tcp_node(ActorSystem *sys, const char *host, int host_len, int
   AcceptArgs *aa = GC_MALLOC(sizeof(AcceptArgs));
   aa->listener_fd = fd;
   aa->sys = sys;
-  if (pthread_create(&sys->accept_thread, NULL, accept_loop_main, aa) != 0) cvm_abort("start-node: failed to start the accept thread");
+  if (pthread_create(&sys->accept_thread, NULL, accept_loop_main, aa) != 0) creme_abort("start-node: failed to start the accept thread");
   pthread_detach(sys->accept_thread);
 }
 
@@ -1601,25 +1601,25 @@ static void start_unix_node(ActorSystem *sys, const char *path, int path_len, co
 
   unlink(sys->unix_path); /* drop a stale socket file from a prior crashed run */
   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (fd < 0) cvm_abort("start-node: could not create a unix socket");
+  if (fd < 0) creme_abort("start-node: could not create a unix socket");
   struct sockaddr_un addr;
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, sys->unix_path, sizeof(addr.sun_path) - 1);
   if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
     close(fd);
-    cvm_abort("start-node: could not bind unix socket '%s'", sys->unix_path);
+    creme_abort("start-node: could not bind unix socket '%s'", sys->unix_path);
   }
   if (listen(fd, 64) != 0) {
     close(fd);
-    cvm_abort("start-node: listen failed");
+    creme_abort("start-node: listen failed");
   }
   sys->listener_fd = fd;
 
   AcceptArgs *aa = GC_MALLOC(sizeof(AcceptArgs));
   aa->listener_fd = fd;
   aa->sys = sys;
-  if (pthread_create(&sys->accept_thread, NULL, accept_loop_main, aa) != 0) cvm_abort("start-node: failed to start the accept thread");
+  if (pthread_create(&sys->accept_thread, NULL, accept_loop_main, aa) != 0) creme_abort("start-node: failed to start the accept thread");
   pthread_detach(sys->accept_thread);
 }
 
@@ -1632,7 +1632,7 @@ static void start_unix_node(ActorSystem *sys, const char *path, int path_len, co
  * `current_interp.actor_system = system`) so any FUTURE spawn() from
  * this same thread lands its children in the new system too. */
 static Value bi_start_node(VM *vm, Value *args, int nargs) {
-  if (nargs < 3) cvm_abort("start-node: expected at least 3 arguments");
+  if (nargs < 3) creme_abort("start-node: expected at least 3 arguments");
   ActorSystem *sys = alloc_actor_system();
   sys->creator_vm = vm;
 
@@ -1641,15 +1641,15 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
     const char *tag = args[0].as.chars;
     if (tlen == 3 && memcmp(tag, "tcp", 3) == 0) {
       if (nargs < 4 || args[1].tag != T_STR || args[2].tag != T_INT || args[3].tag != T_STR) {
-        cvm_abort("start-node: 'tcp expects (host port cookie)");
+        creme_abort("start-node: 'tcp expects (host port cookie)");
       }
       start_tcp_node(sys, args[1].as.chars, args[1].aux, (int)args[2].as.i, args[3].as.chars, args[3].aux);
     } else if (tlen == 4 && memcmp(tag, "unix", 4) == 0) {
-      if (nargs < 3 || args[1].tag != T_STR || args[2].tag != T_STR) cvm_abort("start-node: 'unix expects (path cookie)");
+      if (nargs < 3 || args[1].tag != T_STR || args[2].tag != T_STR) creme_abort("start-node: 'unix expects (path cookie)");
       start_unix_node(sys, args[1].as.chars, args[1].aux, args[2].as.chars, args[2].aux);
     } else if (tlen == 5 && memcmp(tag, "local", 5) == 0) {
       if (nargs < 3 || (args[1].tag != T_SYM && args[1].tag != T_STR) || (args[2].tag != T_SYM && args[2].tag != T_STR)) {
-        cvm_abort("start-node: 'local expects (name cookie)");
+        creme_abort("start-node: 'local expects (name cookie)");
       }
       sys->node_name = dupn(args[1].as.chars, args[1].aux);
       sys->node_name_len = args[1].aux;
@@ -1660,10 +1660,10 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
       g_local_nodes = sys;
       pthread_mutex_unlock(&g_node_registry_mutex);
     } else {
-      cvm_abort("start-node: unknown transport '%.*s', expected 'tcp, 'unix, or 'local", tlen, tag);
+      creme_abort("start-node: unknown transport '%.*s', expected 'tcp, 'unix, or 'local", tlen, tag);
     }
   } else {
-    if (args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR) cvm_abort("start-node: expected (host port cookie)");
+    if (args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR) creme_abort("start-node: expected (host port cookie)");
     start_tcp_node(sys, args[0].as.chars, args[0].aux, (int)args[1].as.i, args[2].as.chars, args[2].aux);
   }
 
@@ -1672,7 +1672,7 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
 }
 
 static ActorSystem *node_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_ACTOR_NODE) cvm_abort("%s: expected a node handle", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_ACTOR_NODE) creme_abort("%s: expected a node handle", who);
   return v.as.ptr;
 }
 
@@ -1681,19 +1681,19 @@ static ActorSystem *node_arg(Value v, const char *who) {
  * signature. */
 static Value bi_node_name(VM *vm, Value *args, int nargs) {
   ActorSystem *sys = (nargs >= 1) ? node_arg(args[0], "node-name") : ensure_context(vm)->system;
-  if (!sys->node_name) cvm_abort("node-name: this node has no name (started as 'tcp or 'unix, or start-node has not been called)");
+  if (!sys->node_name) creme_abort("node-name: this node has no name (started as 'tcp or 'unix, or start-node has not been called)");
   return v_str(sys->node_name, sys->node_name_len);
 }
 
 static Value bi_node_port(VM *vm, Value *args, int nargs) {
   ActorSystem *sys = (nargs >= 1) ? node_arg(args[0], "node-port") : ensure_context(vm)->system;
-  if (sys->tcp_port < 0) cvm_abort("node-port: this node has no TCP port (started as 'unix or 'local, or start-node has not been called)");
+  if (sys->tcp_port < 0) creme_abort("node-port: this node has no TCP port (started as 'unix or 'local, or start-node has not been called)");
   return v_int(sys->tcp_port);
 }
 
 static Value bi_node_path(VM *vm, Value *args, int nargs) {
   ActorSystem *sys = (nargs >= 1) ? node_arg(args[0], "node-path") : ensure_context(vm)->system;
-  if (!sys->unix_path) cvm_abort("node-path: this node has no socket path (started as 'tcp or 'local, or start-node has not been called)");
+  if (!sys->unix_path) creme_abort("node-path: this node has no socket path (started as 'tcp or 'local, or start-node has not been called)");
   return v_str(sys->unix_path, (int)strlen(sys->unix_path));
 }
 
@@ -1706,7 +1706,7 @@ static Value bi_node_path(VM *vm, Value *args, int nargs) {
  * so no separate extraction path is needed. */
 static Value bi_node_address(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("node-address: expected (node id)");
+  if (nargs < 2) creme_abort("node-address: expected (node id)");
   ActorSystem *sys = node_arg(args[0], "node-address");
 
   const char *id_chars;
@@ -1719,7 +1719,7 @@ static Value bi_node_address(VM *vm, Value *args, int nargs) {
     id_chars = ref->id;
     id_len = (int)strlen(ref->id);
   } else {
-    cvm_abort("node-address: expected a string id or an actor ref");
+    creme_abort("node-address: expected a string id or an actor ref");
   }
 
   char *uri = node_address_uri(sys, id_chars, id_len);
@@ -1728,7 +1728,7 @@ static Value bi_node_address(VM *vm, Value *args, int nargs) {
 
 static Value bi_remote_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("remote-ref: expected a URI string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("remote-ref: expected a URI string");
   return make_ref_from_uri(args[0].as.chars, args[0].aux, "remote-ref", NULL);
 }
 
@@ -1763,39 +1763,39 @@ static Value bi_stop_node_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_down_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("down?: expected an argument");
+  if (nargs < 1) creme_abort("down?: expected an argument");
   return v_bool(args[0].tag == T_RECORD && args[0].as.record->type == get_down_type());
 }
 
 static Value bi_down_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_RECORD || args[0].as.record->type != get_down_type()) cvm_abort("down-ref: expected a <down> record");
+  if (nargs < 1 || args[0].tag != T_RECORD || args[0].as.record->type != get_down_type()) creme_abort("down-ref: expected a <down> record");
   return args[0].as.record->fields[0];
 }
 
 static Value bi_down_reason(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_RECORD || args[0].as.record->type != get_down_type()) cvm_abort("down-reason: expected a <down> record");
+  if (nargs < 1 || args[0].tag != T_RECORD || args[0].as.record->type != get_down_type()) creme_abort("down-reason: expected a <down> record");
   return args[0].as.record->fields[1];
 }
 
-void cvm_register_actor_builtins(VM *vm) {
-  cvm_register_builtin(vm, "spawn", bi_spawn);
-  cvm_register_builtin(vm, "send!", bi_send_bang);
-  cvm_register_builtin(vm, "receive!", bi_receive_bang);
-  cvm_register_builtin(vm, "self", bi_self);
-  cvm_register_builtin(vm, "monitor", bi_monitor);
-  cvm_register_builtin(vm, "register!", bi_register_bang);
-  cvm_register_builtin(vm, "whereis", bi_whereis);
-  cvm_register_builtin(vm, "actor-ref-id", bi_actor_ref_id);
-  cvm_register_builtin(vm, "down?", bi_down_p);
-  cvm_register_builtin(vm, "down-ref", bi_down_ref);
-  cvm_register_builtin(vm, "down-reason", bi_down_reason);
-  cvm_register_builtin(vm, "start-node", bi_start_node);
-  cvm_register_builtin(vm, "node-name", bi_node_name);
-  cvm_register_builtin(vm, "node-port", bi_node_port);
-  cvm_register_builtin(vm, "node-path", bi_node_path);
-  cvm_register_builtin(vm, "node-address", bi_node_address);
-  cvm_register_builtin(vm, "remote-ref", bi_remote_ref);
-  cvm_register_builtin(vm, "stop-node!", bi_stop_node_bang);
+void creme_register_actor_builtins(VM *vm) {
+  creme_register_builtin(vm, "spawn", bi_spawn);
+  creme_register_builtin(vm, "send!", bi_send_bang);
+  creme_register_builtin(vm, "receive!", bi_receive_bang);
+  creme_register_builtin(vm, "self", bi_self);
+  creme_register_builtin(vm, "monitor", bi_monitor);
+  creme_register_builtin(vm, "register!", bi_register_bang);
+  creme_register_builtin(vm, "whereis", bi_whereis);
+  creme_register_builtin(vm, "actor-ref-id", bi_actor_ref_id);
+  creme_register_builtin(vm, "down?", bi_down_p);
+  creme_register_builtin(vm, "down-ref", bi_down_ref);
+  creme_register_builtin(vm, "down-reason", bi_down_reason);
+  creme_register_builtin(vm, "start-node", bi_start_node);
+  creme_register_builtin(vm, "node-name", bi_node_name);
+  creme_register_builtin(vm, "node-port", bi_node_port);
+  creme_register_builtin(vm, "node-path", bi_node_path);
+  creme_register_builtin(vm, "node-address", bi_node_address);
+  creme_register_builtin(vm, "remote-ref", bi_remote_ref);
+  creme_register_builtin(vm, "stop-node!", bi_stop_node_bang);
 }

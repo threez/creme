@@ -14,8 +14,8 @@
  * via Boehm GC (GC_MALLOC/GC_REALLOC — the same collector Crystal itself
  * uses) rather than a custom allocator, so a long-running program (an HTTP
  * server, not just a one-shot benchmark) doesn't grow unbounded. */
-#ifndef CVM_VALUE_H
-#define CVM_VALUE_H
+#ifndef CREME_VALUE_H
+#define CREME_VALUE_H
 
 #include <setjmp.h>
 #include <stdint.h>
@@ -29,7 +29,7 @@ typedef enum {
   T_INT,
   T_FLOAT,
   T_SYM,    /* only ever loaded into a register and discarded (see
-             * cvm_serializer.cr's comment on the "define returns its own
+             * creme_serializer.cr's comment on the "define returns its own
              * name" idiom) — never inspected at runtime. */
   T_STR,    /* mutable string (string-set!, as of Group C) — `chars` is
              * declared `const` only to stop most code from writing
@@ -68,7 +68,7 @@ typedef enum {
                    * a positional fields array (mirrors SchemeRecord). */
   T_RECORD_CALLABLE, /* a record type's generated constructor/predicate/
                    * accessor/mutator -- see RC_* kinds and RecordCallable
-                   * below; `dispatch_call`/`cvm_apply` recognize this tag
+                   * below; `dispatch_call`/`creme_apply` recognize this tag
                    * directly (mirrors how the real VM's own dispatch_call
                    * special-cases RecordAccessor/RecordMutator, extended
                    * here to the constructor/predicate too, since icecreme's
@@ -77,7 +77,7 @@ typedef enum {
                    * type/field index the way a real Crystal closure can). */
   T_BUILTIN,
   T_PARAMETER, /* make-parameter/parameterize -- calling it with 0 args
-                * returns its current value (dispatch_call/cvm_apply
+                * returns its current value (dispatch_call/creme_apply
                 * recognize this tag directly, same as T_RECORD_CALLABLE),
                 * mirrors SchemeParameter exactly. */
   T_BOX,    /* opaque native handle -- a hash table, sql connection, mux
@@ -96,12 +96,12 @@ typedef enum {
              * bootstrap.c's own header comment and modules/creme/
              * compiler/compiler.sld's icecreme-expand-defmacro-form, which
              * does the actual expansion (bind params, compile+run body)
-             * reentrant from C via cvm_apply. define-syntax (syntax-rules)
+             * reentrant from C via creme_apply. define-syntax (syntax-rules)
              * macros aren't covered by this -- see bootstrap.c's
              * bi_expand_if_macro for why that's a narrower, separate gap. */
   T_CONTINUATION, /* call/cc's own captured escape point -- ESCAPE-ONLY
              * (a one-shot, upward/non-reentrant continuation): invoking
-             * one (dispatch_call/cvm_apply recognize this tag directly,
+             * one (dispatch_call/creme_apply recognize this tag directly,
              * same as T_PARAMETER/T_RECORD_CALLABLE) longjmps straight
              * back to call/cc's own setjmp call site, unwinding any
              * pending dynamic-wind/parameterize actions along the way

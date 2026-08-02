@@ -33,19 +33,19 @@
  * driver doesn't otherwise need. */
 static const char *g_target_path = NULL;
 
-void cvm_set_target_path(const char *path) {
+void creme_set_target_path(const char *path) {
   g_target_path = path;
 }
 
 /* args[0] must be a bytevector holding ICE1 bytes (typically the self-
  * hosted compiler's own compile-source-to-bytes output). Loads it against
- * THIS running program's global table (cvm_load_from_bytes interns by
+ * THIS running program's global table (creme_load_from_bytes interns by
  * name into the same vm->globals every other chunk already shares) and
- * runs it reentrantly (cvm_run_loaded_chunk), returning its value -- same
+ * runs it reentrantly (creme_run_loaded_chunk), returning its value -- same
  * contract as the Crystal-side load-chunk-bytes builtin. */
 static Value bi_load_chunk_bytes(VM *vm, Value *args, int nargs) {
   if (nargs != 1 || args[0].tag != T_BYTEVECTOR) {
-    cvm_abort("load-chunk-bytes: expected a bytevector");
+    creme_abort("load-chunk-bytes: expected a bytevector");
   }
   Bytevector *bv = args[0].as.bv;
   /* Unlike the NULL/NULL this used to pass unconditionally, now read the
@@ -61,13 +61,13 @@ static Value bi_load_chunk_bytes(VM *vm, Value *args, int nargs) {
    * native families and bakes them into exactly these bytes (see (creme
    * bytecode)'s chunk->bytes), so registering them here -- right before
    * actually running the loaded chunk -- closes that gap. See
-   * cvm_register_required_builtins's own doc comment (vm.h) for why
+   * creme_register_required_builtins's own doc comment (vm.h) for why
    * calling it twice (once in main.c, once here) is harmless. */
   char **families = NULL;
   int n_families = 0;
-  Chunk *chunk = cvm_load_from_bytes(vm, bv->bytes, (size_t)bv->len, &families, &n_families);
-  cvm_register_required_builtins(vm, families, n_families);
-  return cvm_run_loaded_chunk(vm, chunk);
+  Chunk *chunk = creme_load_from_bytes(vm, bv->bytes, (size_t)bv->len, &families, &n_families);
+  creme_register_required_builtins(vm, families, n_families);
+  return creme_run_loaded_chunk(vm, chunk);
 }
 
 /* (scheme eval)'s environment/null-environment/eval-2-arg support --
@@ -79,7 +79,7 @@ static Value bi_load_chunk_bytes(VM *vm, Value *args, int nargs) {
  * boundary a pure-Scheme primitive can't). */
 
 /* (make-environment) -- a fresh, completely empty environment (a genuine
- * separate VM, cvm_new_empty_vm, wrapped as a T_BOX so Scheme can hold
+ * separate VM, creme_new_empty_vm, wrapped as a T_BOX so Scheme can hold
  * and pass it around) -- see that function's own doc comment (vm.c) for
  * why "empty" already correctly models null-environment, and how
  * `environment`'s own import-sets populate one afterward. */
@@ -87,11 +87,11 @@ static Value bi_make_environment(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
-  return v_box(cvm_new_empty_vm(), BOX_KIND_ENVIRONMENT);
+  return v_box(creme_new_empty_vm(), BOX_KIND_ENVIRONMENT);
 }
 
 static VM *as_environment_vm(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_ENVIRONMENT) cvm_abort("%s: expected an environment", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_ENVIRONMENT) creme_abort("%s: expected an environment", who);
   return (VM *)v.as.ptr;
 }
 
@@ -116,13 +116,13 @@ static VM *as_environment_vm(Value v, const char *who) {
  * that as an error. */
 static Value bi_environment_copy_global(VM *vm, Value *args, int nargs) {
   if (nargs != 3 || args[1].tag != T_STR || args[2].tag != T_STR) {
-    cvm_abort("environment-copy-global!: expected (env-box external-name internal-name)");
+    creme_abort("environment-copy-global!: expected (env-box external-name internal-name)");
   }
   VM *target = as_environment_vm(args[0], "environment-copy-global!");
-  int src_slot = cvm_global_intern(vm, args[2].as.chars, args[2].aux);
+  int src_slot = creme_global_intern(vm, args[2].as.chars, args[2].aux);
   if (!vm->globals[src_slot].bound) return v_nil();
   Value value = vm->globals[src_slot].value;
-  int dst_slot = cvm_global_intern(target, args[1].as.chars, args[1].aux);
+  int dst_slot = creme_global_intern(target, args[1].as.chars, args[1].aux);
   target->globals[dst_slot].value = value;
   target->globals[dst_slot].bound = 1;
   return v_nil();
@@ -140,10 +140,10 @@ static Value bi_environment_copy_global(VM *vm, Value *args, int nargs) {
 static Value bi_environment_bound(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[1].tag != T_STR) {
-    cvm_abort("environment-bound?: expected (env-box name-string)");
+    creme_abort("environment-bound?: expected (env-box name-string)");
   }
   VM *target = as_environment_vm(args[0], "environment-bound?");
-  int slot = cvm_global_intern(target, args[1].as.chars, args[1].aux);
+  int slot = creme_global_intern(target, args[1].as.chars, args[1].aux);
   return v_bool(target->globals[slot].bound);
 }
 
@@ -175,15 +175,15 @@ static Value bi_current_environment(VM *vm, Value *args, int nargs) {
 static Value bi_load_chunk_bytes_into(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[1].tag != T_BYTEVECTOR) {
-    cvm_abort("load-chunk-bytes-into: expected (env-box bytevector)");
+    creme_abort("load-chunk-bytes-into: expected (env-box bytevector)");
   }
   VM *target = as_environment_vm(args[0], "load-chunk-bytes-into");
   Bytevector *bv = args[1].as.bv;
   char **families = NULL;
   int n_families = 0;
-  Chunk *chunk = cvm_load_from_bytes(target, bv->bytes, (size_t)bv->len, &families, &n_families);
-  cvm_register_required_builtins(target, families, n_families);
-  return cvm_run_loaded_chunk(target, chunk);
+  Chunk *chunk = creme_load_from_bytes(target, bv->bytes, (size_t)bv->len, &families, &n_families);
+  creme_register_required_builtins(target, families, n_families);
+  return creme_run_loaded_chunk(target, chunk);
 }
 
 /* icecreme's global table is already unconditionally flat -- no per-import
@@ -220,11 +220,11 @@ static Value bi_load_chunk_bytes_into(VM *vm, Value *args, int nargs) {
  * cheap to guard for anyway), this quietly falls back to the original
  * no-op rather than aborting. */
 static Value bi_import_bang(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) cvm_abort("import!: expected 1 argument");
+  if (nargs != 1) creme_abort("import!: expected 1 argument");
   const char *bridge_name = "import!-apply-aliases!";
-  int bridge_slot = cvm_global_intern(vm, bridge_name, (int)strlen(bridge_name));
+  int bridge_slot = creme_global_intern(vm, bridge_name, (int)strlen(bridge_name));
   if (!vm->globals[bridge_slot].bound) return v_nil();
-  cvm_apply(vm, vm->globals[bridge_slot].value, args, 1);
+  creme_apply(vm, vm->globals[bridge_slot].value, args, 1);
   return v_nil();
 }
 
@@ -235,7 +235,7 @@ static int sym_is(Value v, const char *s) {
 
 /* icecreme has no per-library grouping of its own flat global table at all --
  * every builtin from every conceptual "library" (regex.c, sql.c, ...) is
- * just registered into the same vm->globals via cvm_register_builtin, with
+ * just registered into the same vm->globals via creme_register_builtin, with
  * no record of which C file/module it came from. This is a small, hand-
  * maintained table of the (external . internal) export pairs (always the
  * same name on both sides here -- icecreme's own native registration never
@@ -253,7 +253,7 @@ static int sym_is(Value v, const char *s) {
  * same contract as native's own library-exports when the library isn't
  * registered. */
 static Value bi_library_exports(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) cvm_abort("library-exports: expected 1 argument");
+  if (nargs != 1) creme_abort("library-exports: expected 1 argument");
   Value name = args[0];
   if (name.tag != T_PAIR) return v_bool(0);
   Value first = name.as.pair->car;
@@ -274,7 +274,7 @@ static Value bi_library_exports(VM *vm, Value *args, int nargs) {
   Value result = v_nil();
   for (int i = n_exports - 1; i >= 0; i--) {
     Value sym = v_sym(exports[i], (int)strlen(exports[i]));
-    result = cvm_cons(vm, cvm_cons(vm, sym, sym), result);
+    result = creme_cons(vm, creme_cons(vm, sym, sym), result);
   }
   return result;
 }
@@ -290,7 +290,7 @@ static Value bi_library_exports(VM *vm, Value *args, int nargs) {
  * wrapping the macro's own raw top-level form, e.g. sxql-select! from
  * (creme sxql), the flagship case this exists for. The actual expansion
  * is delegated out to compiler.sld's own defmacro-expand-form/define-
- * syntax-expand-form via cvm_apply, picked by the wrapped form's own
+ * syntax-expand-form via creme_apply, picked by the wrapped form's own
  * head symbol -- this file has no compiler (or syntax-rules pattern
  * matcher) of its own to do that reentrant work in C, but the self-
  * hosted compiler that's necessarily ALREADY LOADED for expand-if-macro
@@ -300,13 +300,13 @@ static Value bi_library_exports(VM *vm, Value *args, int nargs) {
  * two exported procedures are that same logic, exported so this builtin
  * can reach either by name. */
 static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) cvm_abort("expand-if-macro: expected 1 argument");
+  if (nargs != 1) creme_abort("expand-if-macro: expected 1 argument");
   Value form = args[0];
   if (form.tag != T_PAIR) return v_bool(0);
   Value head = form.as.pair->car;
   if (head.tag != T_SYM) return v_bool(0);
 
-  int slot = cvm_global_intern(vm, head.as.chars, head.aux);
+  int slot = creme_global_intern(vm, head.as.chars, head.aux);
   if (!vm->globals[slot].bound || vm->globals[slot].value.tag != T_MACRO) return v_bool(0);
   Pair *macro_form = vm->globals[slot].value.as.pair;
 
@@ -314,16 +314,16 @@ static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
   int is_define_syntax = macro_head.tag == T_SYM && macro_head.aux == 13 &&
                          memcmp(macro_head.as.chars, "define-syntax", 13) == 0;
   const char *bridge_name = is_define_syntax ? "define-syntax-expand-form" : "defmacro-expand-form";
-  int bridge_slot = cvm_global_intern(vm, bridge_name, (int)strlen(bridge_name));
+  int bridge_slot = creme_global_intern(vm, bridge_name, (int)strlen(bridge_name));
   if (!vm->globals[bridge_slot].bound) {
-    cvm_abort("expand-if-macro: %s is not loaded (is (creme compiler compiler) imported?)", bridge_name);
+    creme_abort("expand-if-macro: %s is not loaded (is (creme compiler compiler) imported?)", bridge_name);
   }
 
   Value bridge_args[2];
   bridge_args[0] = v_pair(macro_form); /* re-tag as an ordinary pair for Scheme code */
   bridge_args[1] = form;
-  Value expansion = cvm_apply(vm, vm->globals[bridge_slot].value, bridge_args, 2);
-  return cvm_cons(vm, v_bool(1), expansion);
+  Value expansion = creme_apply(vm, vm->globals[bridge_slot].value, bridge_args, 2);
+  return creme_cons(vm, v_bool(1), expansion);
 }
 
 /* Reads `path`'s entire contents into one T_STR -- icecreme's only other file-
@@ -332,22 +332,22 @@ static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
  * file it (include ...)s) at all. */
 static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) cvm_abort("read-whole-file: expected a path string");
+  if (nargs != 1 || args[0].tag != T_STR) creme_abort("read-whole-file: expected a path string");
   char *path = GC_MALLOC((size_t)args[0].aux + 1);
   memcpy(path, args[0].as.chars, (size_t)args[0].aux);
   path[args[0].aux] = '\0';
 
   FILE *f = fopen(path, "rb");
-  if (!f) cvm_abort("read-whole-file: cannot open %s", path);
-  if (fseek(f, 0, SEEK_END) != 0) cvm_abort("read-whole-file: cannot seek %s", path);
+  if (!f) creme_abort("read-whole-file: cannot open %s", path);
+  if (fseek(f, 0, SEEK_END) != 0) creme_abort("read-whole-file: cannot seek %s", path);
   long size = ftell(f);
-  if (size < 0) cvm_abort("read-whole-file: cannot determine size of %s", path);
+  if (size < 0) creme_abort("read-whole-file: cannot determine size of %s", path);
   rewind(f);
 
   char *buf = GC_MALLOC((size_t)(size ? size : 1));
   size_t got = fread(buf, 1, (size_t)size, f);
   fclose(f);
-  if ((long)got != size) cvm_abort("read-whole-file: truncated read of %s", path);
+  if ((long)got != size) creme_abort("read-whole-file: truncated read of %s", path);
 
   return v_str(buf, (int)size);
 }
@@ -359,58 +359,58 @@ static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
  * matching src/creme/modules/creme/file.cr's own file-write contract. */
 static Value bi_file_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_STR) cvm_abort("file-write: expected (path content)");
+  if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("file-write: expected (path content)");
   char *path = GC_MALLOC((size_t)args[0].aux + 1);
   memcpy(path, args[0].as.chars, (size_t)args[0].aux);
   path[args[0].aux] = '\0';
 
   FILE *f = fopen(path, "wb");
-  if (!f) cvm_abort("file-write: cannot open %s for writing", path);
+  if (!f) creme_abort("file-write: cannot open %s for writing", path);
   size_t wrote = fwrite(args[1].as.chars, 1, (size_t)args[1].aux, f);
   fclose(f);
-  if ((int)wrote != args[1].aux) cvm_abort("file-write: truncated write of %s", path);
+  if ((int)wrote != args[1].aux) creme_abort("file-write: truncated write of %s", path);
   return v_nil();
 }
 
 static Value bi_delete_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) cvm_abort("delete-file: expected a path string");
+  if (nargs != 1 || args[0].tag != T_STR) creme_abort("delete-file: expected a path string");
   char *path = GC_MALLOC((size_t)args[0].aux + 1);
   memcpy(path, args[0].as.chars, (size_t)args[0].aux);
   path[args[0].aux] = '\0';
-  if (remove(path) != 0) cvm_abort("delete-file: cannot remove %s", path);
+  if (remove(path) != 0) creme_abort("delete-file: cannot remove %s", path);
   return v_nil();
 }
 
 /* Returns whatever path main.c decided needs compiling (see
- * cvm_set_target_path) -- the compiler driver's only way to learn what to
+ * creme_set_target_path) -- the compiler driver's only way to learn what to
  * compile, since icecreme has no general command-line/argv exposure. */
 static Value bi_cvm_target_path(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
-  if (!g_target_path) cvm_abort("icecreme-target-path: no target path set (not running in compiler mode)");
+  if (!g_target_path) creme_abort("icecreme-target-path: no target path set (not running in compiler mode)");
   return v_str(g_target_path, (int)strlen(g_target_path));
 }
 
-void cvm_register_bootstrap_builtins(VM *vm) {
-  cvm_register_builtin(vm, "load-chunk-bytes", bi_load_chunk_bytes);
-  cvm_register_builtin(vm, "make-environment", bi_make_environment);
-  cvm_register_builtin(vm, "environment-copy-global!", bi_environment_copy_global);
-  cvm_register_builtin(vm, "environment-bound?", bi_environment_bound);
-  cvm_register_builtin(vm, "load-chunk-bytes-into", bi_load_chunk_bytes_into);
-  cvm_register_builtin(vm, "current-environment", bi_current_environment);
-  cvm_register_builtin(vm, "import!", bi_import_bang);
-  cvm_register_builtin(vm, "library-exports", bi_library_exports);
-  cvm_register_builtin(vm, "expand-if-macro", bi_expand_if_macro);
-  cvm_register_builtin(vm, "read-whole-file", bi_read_whole_file);
-  cvm_register_builtin(vm, "icecreme-target-path", bi_cvm_target_path);
+void creme_register_bootstrap_builtins(VM *vm) {
+  creme_register_builtin(vm, "load-chunk-bytes", bi_load_chunk_bytes);
+  creme_register_builtin(vm, "make-environment", bi_make_environment);
+  creme_register_builtin(vm, "environment-copy-global!", bi_environment_copy_global);
+  creme_register_builtin(vm, "environment-bound?", bi_environment_bound);
+  creme_register_builtin(vm, "load-chunk-bytes-into", bi_load_chunk_bytes_into);
+  creme_register_builtin(vm, "current-environment", bi_current_environment);
+  creme_register_builtin(vm, "import!", bi_import_bang);
+  creme_register_builtin(vm, "library-exports", bi_library_exports);
+  creme_register_builtin(vm, "expand-if-macro", bi_expand_if_macro);
+  creme_register_builtin(vm, "read-whole-file", bi_read_whole_file);
+  creme_register_builtin(vm, "icecreme-target-path", bi_cvm_target_path);
   /* (creme file)'s own file-read has an identical (path) -> whole-file-
    * as-a-string contract to this file's own read-whole-file -- same C
    * function registered under the extra name, no new logic needed.
    * Needed by modules/creme/compiler/spec-helper.sld's own
    * library-body-source (used by spec/creme/compiler_self_host_spec.scm). */
-  cvm_register_builtin(vm, "file-read", bi_read_whole_file);
-  cvm_register_builtin(vm, "file-write", bi_file_write);
-  cvm_register_builtin(vm, "delete-file", bi_delete_file);
+  creme_register_builtin(vm, "file-read", bi_read_whole_file);
+  creme_register_builtin(vm, "file-write", bi_file_write);
+  creme_register_builtin(vm, "delete-file", bi_delete_file);
 }

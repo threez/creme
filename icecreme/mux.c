@@ -25,7 +25,7 @@
  *
  * icecreme's own `VM` struct (see vm.h) has a single shared operand stack/
  * frame array/handler stack — it is NOT safe for two threads to call
- * cvm_apply against the same VM concurrently. `mux-listen!`'s optional
+ * creme_apply against the same VM concurrently. `mux-listen!`'s optional
  * 3rd argument, an "options" string-keyed alist (e.g. '(("pool" . 8))),
  * can carry a "pool" entry that picks how request dispatch handles that
  * (see bi_mux_listen for the full options alist, which also takes
@@ -41,7 +41,7 @@
  *     do enough CPU work that real parallel dispatch across cores
  *     outweighs having more than one I/O thread at all.
  *   - `#t` or an explicit integer: a GROWABLE POOL of fully independent
- *     I/O threads, each with its OWN child VM (cvm_new_child_vm — the
+ *     I/O threads, each with its OWN child VM (creme_new_child_vm — the
  *     exact mechanism actor.c's own `spawn` already uses for the
  *     identical reason) and its OWN SO_REUSEPORT listener bound to the
  *     same host:port (see bind_listener/pool_worker_loop, below, for the
@@ -53,21 +53,21 @@
  *     balances new connections across the pool's listeners, not this
  *     file. This works because a `Closure` carries only a `Chunk*` +
  *     upvalues, never a `VM*` (vm.h) — the exact same route-handler
- *     closure registered against the original VM can be `cvm_apply`'d
+ *     closure registered against the original VM can be `creme_apply`'d
  *     against any worker's VM without modification, identical to how a
  *     spawned actor's captured thunk runs correctly against its own
  *     copied globals table.
  *
- * Either way, dispatch gets the same `cvm_set_current_vm`/
+ * Either way, dispatch gets the same `creme_set_current_vm`/
  * `has_actor_unwind`/`setjmp(vm->actor_unwind)` treatment actor.c's own
  * thread entry function gives a spawned actor (dispatch_with_recovery,
- * below): an uncaught `cvm_abort` while handling one request (a route
+ * below): an uncaught `creme_abort` while handling one request (a route
  * handler's own bug, a malformed builtin call, ...) degrades to a
  * synthesized 500 response for just that request, instead of taking the
  * whole process down — a real robustness improvement this file's own
  * original top-level-VM-only design never had (the main script's VM
  * leaves has_actor_unwind at its zero-init default, so an uncaught abort
- * there always falls through to cvm_abort's plain print+exit(1)
+ * there always falls through to creme_abort's plain print+exit(1)
  * backstop).
  *
  * picohttpparser has no chunked-REQUEST-body support of its own beyond
@@ -134,12 +134,12 @@ typedef struct {
 } MuxServer;
 
 static MuxApp *as_mux_app(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_MUX_ROUTER) cvm_abort("%s: expected a mux router", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_MUX_ROUTER) creme_abort("%s: expected a mux router", who);
   return (MuxApp *)v.as.ptr;
 }
 
 static MuxServer *as_mux_server(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_MUX_SERVER) cvm_abort("%s: expected a mux server", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_MUX_SERVER) creme_abort("%s: expected a mux server", who);
   return (MuxServer *)v.as.ptr;
 }
 
@@ -173,13 +173,13 @@ static Value bi_mux_router(VM *vm, Value *args, int nargs) {
 
 static Value bi_mux_router_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mux-router?: expected an argument");
+  if (nargs < 1) creme_abort("mux-router?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_MUX_ROUTER);
 }
 
 static void register_route(VM *vm, Value *args, int nargs, const char *method) {
   (void)vm;
-  if (nargs < 3 || args[1].tag != T_STR) cvm_abort("mux-%s!: expected (router path handler)", method);
+  if (nargs < 3 || args[1].tag != T_STR) creme_abort("mux-%s!: expected (router path handler)", method);
   MuxApp *app = as_mux_app(args[0], "mux-route!");
   if (app->n_routes >= app->cap_routes) {
     app->cap_routes = app->cap_routes ? app->cap_routes * 2 : 8;
@@ -200,7 +200,7 @@ static Value bi_mux_patch(VM *vm, Value *args, int nargs) { register_route(vm, a
 
 static Value bi_mux_use(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("mux-use!: expected (router middleware)");
+  if (nargs < 2) creme_abort("mux-use!: expected (router middleware)");
   MuxApp *app = as_mux_app(args[0], "mux-use!");
   if (app->n_middlewares >= app->cap_middlewares) {
     app->cap_middlewares = app->cap_middlewares ? app->cap_middlewares * 2 : 4;
@@ -243,7 +243,7 @@ static int match_route(VM *vm, const MuxRoute *route, const char *path, Value *o
   Value params = v_nil();
   for (int i = 0; i < np; i++) {
     if (psegs[i][0] == ':') {
-      params = cvm_cons(vm, cvm_cons(vm, v_gcstr(psegs[i] + 1, strlen(psegs[i] + 1)), v_gcstr(rsegs[i], strlen(rsegs[i]))), params);
+      params = creme_cons(vm, creme_cons(vm, v_gcstr(psegs[i] + 1, strlen(psegs[i] + 1)), v_gcstr(rsegs[i], strlen(rsegs[i]))), params);
     } else if (strcmp(psegs[i], rsegs[i]) != 0) {
       return 0;
     }
@@ -353,16 +353,16 @@ static Value build_request(VM *vm, const char *method, size_t method_len, const 
     if (!headers[i].name) continue; /* a multiline-header continuation line -- see phr_header's own doc comment */
     Value name = v_gcstr(headers[i].name, headers[i].name_len);
     Value value = v_gcstr(headers[i].value, headers[i].value_len);
-    hlist = cvm_cons(vm, cvm_cons(vm, name, value), hlist);
+    hlist = creme_cons(vm, creme_cons(vm, name, value), hlist);
   }
 
   Value request = v_nil();
-  request = cvm_cons(vm, cvm_cons(vm, v_litstr("body"), v_gcstr(body, body_len)), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_litstr("remote-addr"), v_litstr(remote_addr)), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_litstr("headers"), hlist), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_litstr("path-params"), path_params), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_litstr("path"), v_gcstr(path, path_len)), request);
-  request = cvm_cons(vm, cvm_cons(vm, v_litstr("method"), v_gcstr(method, method_len)), request);
+  request = creme_cons(vm, creme_cons(vm, v_litstr("body"), v_gcstr(body, body_len)), request);
+  request = creme_cons(vm, creme_cons(vm, v_litstr("remote-addr"), v_litstr(remote_addr)), request);
+  request = creme_cons(vm, creme_cons(vm, v_litstr("headers"), hlist), request);
+  request = creme_cons(vm, creme_cons(vm, v_litstr("path-params"), path_params), request);
+  request = creme_cons(vm, creme_cons(vm, v_litstr("path"), v_gcstr(path, path_len)), request);
+  request = creme_cons(vm, creme_cons(vm, v_litstr("method"), v_gcstr(method, method_len)), request);
   return request;
 }
 
@@ -391,7 +391,7 @@ static void write_response(VM *vm, sds *out, Value response, int keep_alive) {
     Port *port = GC_MALLOC(sizeof(Port));
     port->kind = PORT_KIND_OUTPUT_STRING; /* GC_MALLOC zero-inits, which would otherwise default to PORT_KIND_STDOUT (0) and misroute writes straight to real stdout instead of buffering here */
     Value port_val = v_port(port);
-    cvm_apply(vm, body, &port_val, 1);
+    creme_apply(vm, body, &port_val, 1);
     body_str = v_str(port->buf, port->len);
   } else {
     body_str = v_litstr("");
@@ -476,14 +476,14 @@ static void dispatch_request(VM *vm, MuxApp *app, const char *method, size_t met
   }
 
   Value request = build_request(vm, method, method_len, path, path_len, headers, num_headers, body, body_len, remote_addr, path_params);
-  Value response = cvm_apply(vm, matched->handler, &request, 1);
+  Value response = creme_apply(vm, matched->handler, &request, 1);
 
   Value status_v = alist_ref(response, "status");
   g_next_status = (status_v.tag == T_INT) ? status_v : v_int(200);
   Value next = v_builtin(bi_next_thunk);
   for (int i = 0; i < app->n_middlewares; i++) {
     Value margs[2] = {request, next};
-    cvm_apply(vm, app->middlewares[i], margs, 2);
+    creme_apply(vm, app->middlewares[i], margs, 2);
   }
 
   write_response(vm, out, response, keep_alive);
@@ -670,7 +670,7 @@ static void set_nonblocking(int fd) {
  * how a fully-read request gets from the I/O loop to a VM:
  *
  *   #t (default) or <integer N> -- a GROWABLE pool of fully independent
- *     I/O threads, each with its OWN child VM (cvm_new_child_vm) and its
+ *     I/O threads, each with its OWN child VM (creme_new_child_vm) and its
  *     OWN SO_REUSEPORT listener bound to the same host:port -- see this
  *     file's own header comment and pool_worker_loop's, below, for the
  *     full rationale and history (an earlier version of this handed a
@@ -714,13 +714,13 @@ static void conn_reset_for_next_request(Conn *c) {
   c->phase = CONN_READING_HEADERS;
 }
 
-/* Runs dispatch_request against `vm`, with the same cvm_abort-safety-net
+/* Runs dispatch_request against `vm`, with the same creme_abort-safety-net
  * setjmp(vm->actor_unwind) actor.c's own thread entry function uses for a
  * spawned actor: an uncaught abort while handling this one request
  * degrades to a synthesized 500 instead of taking down whatever thread
  * (a pool worker, or the I/O thread itself in inline mode) is running
  * it. `vm` must already have has_actor_unwind set and be the CURRENT vm
- * (cvm_set_current_vm) for the calling thread -- both pool workers and
+ * (creme_set_current_vm) for the calling thread -- both pool workers and
  * bi_mux_listen's own inline path set this up once, not per-call. */
 static sds dispatch_with_recovery(VM *vm, Conn *c) {
   sds out = sdsempty();
@@ -1035,8 +1035,8 @@ static void *pool_worker_thread_main(void *arg) {
   GC_get_stack_base(&sb);
   GC_register_my_thread(&sb);
 
-  VM *vm = cvm_new_child_vm(a->parent_vm);
-  cvm_set_current_vm(vm);
+  VM *vm = creme_new_child_vm(a->parent_vm);
+  creme_set_current_vm(vm);
   vm->has_actor_unwind = 1;
 
   pool_worker_loop(vm, a->app, a->fd, /* permanent */ 0);
@@ -1057,7 +1057,7 @@ static int bind_listener(const char *host, const char *port_str, int reuseport) 
   hints.ai_family = AF_UNSPEC;
   hints.ai_flags = AI_PASSIVE;
   struct addrinfo *res;
-  if (getaddrinfo(host, port_str, &hints, &res) != 0) cvm_abort("mux-listen!: could not resolve host '%s'", host);
+  if (getaddrinfo(host, port_str, &hints, &res) != 0) creme_abort("mux-listen!: could not resolve host '%s'", host);
   int fd = -1;
   for (struct addrinfo *rp = res; rp; rp = rp->ai_next) {
     fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
@@ -1080,7 +1080,7 @@ static int bind_listener(const char *host, const char *port_str, int reuseport) 
 }
 
 static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("mux-listen!: expected (router port [options])");
+  if (nargs < 2) creme_abort("mux-listen!: expected (router port [options])");
   MuxApp *app = as_mux_app(args[0], "mux-listen!");
 
   char port_buf[32];
@@ -1094,7 +1094,7 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
     port_buf[len] = 0;
     port_str = port_buf;
   } else {
-    cvm_abort("mux-listen!: expected an integer or string port");
+    creme_abort("mux-listen!: expected an integer or string port");
   }
 
   /* `options`: a string-keyed alist, e.g. '(("host" . "0.0.0.0") ("pool"
@@ -1128,16 +1128,16 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
     pool_max = pool_v.as.b ? mux_auto_pool_max() : 0;
   } else if (pool_v.tag == T_INT) {
     pool_max = (int)pool_v.as.i;
-    if (pool_max < 1) cvm_abort("mux-listen!: \"pool\" must be a positive integer, or #t/#f");
+    if (pool_max < 1) creme_abort("mux-listen!: \"pool\" must be a positive integer, or #t/#f");
   } else if (pool_v.tag != T_NIL) {
-    cvm_abort("mux-listen!: expected #t, #f, or a positive integer for \"pool\"");
+    creme_abort("mux-listen!: expected #t, #f, or a positive integer for \"pool\"");
   }
   int pool_min = pool_max > 0 ? (pool_max < POOL_DEFAULT_MIN ? pool_max : POOL_DEFAULT_MIN) : 0;
 
   /* bind+listen, mirroring actor.c's start_tcp_node exactly (same
    * getaddrinfo/socket/SO_REUSEADDR/bind/listen/getsockname dance). */
   int fd = bind_listener(host_buf, port_str, pool_max > 0);
-  if (fd < 0) cvm_abort("mux-listen!: failed to bind %s:%s", host_buf, port_str);
+  if (fd < 0) creme_abort("mux-listen!: failed to bind %s:%s", host_buf, port_str);
 
   /* getsockname gives the REAL bound port regardless of whether port_str
    * was a fixed port or "0" (ephemeral: let the OS pick) -- mux-base-url/
@@ -1184,7 +1184,7 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
 
     for (int i = 0; i < pool_min - 1; i++) {
       int extra_fd = bind_listener(host_buf, real_port, 1);
-      if (extra_fd < 0) cvm_abort("mux-listen!: failed to bind pool listener %d", i);
+      if (extra_fd < 0) creme_abort("mux-listen!: failed to bind pool listener %d", i);
       fdset_add(&g_pool_fds, extra_fd);
 
       PoolWorkerArgs *a = GC_MALLOC(sizeof(PoolWorkerArgs));
@@ -1192,12 +1192,12 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
       a->app = app;
       a->fd = extra_fd;
       pthread_t tid;
-      if (pthread_create(&tid, NULL, pool_worker_thread_main, a) != 0) cvm_abort("mux-listen!: failed to start a pool worker thread");
+      if (pthread_create(&tid, NULL, pool_worker_thread_main, a) != 0) creme_abort("mux-listen!: failed to start a pool worker thread");
       pthread_detach(tid);
     }
 
-    VM *main_vm = cvm_new_child_vm(vm);
-    cvm_set_current_vm(main_vm);
+    VM *main_vm = creme_new_child_vm(vm);
+    creme_set_current_vm(main_vm);
     main_vm->has_actor_unwind = 1;
     pool_worker_loop(main_vm, app, fd, /* permanent */ 1);
     return v_box(srv, BOX_KIND_MUX_SERVER);
@@ -1205,8 +1205,8 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
 
   /* pool #f: inline dispatch, one dedicated VM, no extra threads at all --
    * the calling thread's own poll() loop IS the whole server. */
-  g_inline_vm = cvm_new_child_vm(vm);
-  cvm_set_current_vm(g_inline_vm);
+  g_inline_vm = creme_new_child_vm(vm);
+  creme_set_current_vm(g_inline_vm);
   g_inline_vm->has_actor_unwind = 1;
 
   SlotSet slots;
@@ -1318,7 +1318,7 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
 
 static Value bi_mux_base_url(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mux-base-url: expected a server");
+  if (nargs < 1) creme_abort("mux-base-url: expected a server");
   MuxServer *srv = as_mux_server(args[0], "mux-base-url");
   char buf[300];
   int len = snprintf(buf, sizeof(buf), "http://%s:%s", srv->host, srv->port);
@@ -1326,17 +1326,17 @@ static Value bi_mux_base_url(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_mux_address(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("mux-address: expected a server");
+  if (nargs < 1) creme_abort("mux-address: expected a server");
   MuxServer *srv = as_mux_server(args[0], "mux-address");
   Value alist = v_nil();
-  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("port"), v_gcstr(srv->port, strlen(srv->port))), alist);
-  alist = cvm_cons(vm, cvm_cons(vm, v_litstr("host"), v_gcstr(srv->host, strlen(srv->host))), alist);
+  alist = creme_cons(vm, creme_cons(vm, v_litstr("port"), v_gcstr(srv->port, strlen(srv->port))), alist);
+  alist = creme_cons(vm, creme_cons(vm, v_litstr("host"), v_gcstr(srv->host, strlen(srv->host))), alist);
   return alist;
 }
 
 static Value bi_mux_close(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("mux-close!: expected a server");
+  if (nargs < 1) creme_abort("mux-close!: expected a server");
   MuxServer *srv = as_mux_server(args[0], "mux-close!");
   if (srv->uses_pool) {
     /* Every current pool listener, permanent or grown -- closing each
@@ -1351,18 +1351,18 @@ static Value bi_mux_close(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 
-void cvm_register_mux_builtins(VM *vm) {
-  cvm_register_builtin(vm, "mux-router", bi_mux_router);
-  cvm_register_builtin(vm, "mux-router?", bi_mux_router_p);
-  cvm_register_builtin(vm, "mux-get!", bi_mux_get);
-  cvm_register_builtin(vm, "mux-head!", bi_mux_head);
-  cvm_register_builtin(vm, "mux-post!", bi_mux_post);
-  cvm_register_builtin(vm, "mux-put!", bi_mux_put);
-  cvm_register_builtin(vm, "mux-delete!", bi_mux_delete);
-  cvm_register_builtin(vm, "mux-patch!", bi_mux_patch);
-  cvm_register_builtin(vm, "mux-use!", bi_mux_use);
-  cvm_register_builtin(vm, "mux-listen!", bi_mux_listen);
-  cvm_register_builtin(vm, "mux-base-url", bi_mux_base_url);
-  cvm_register_builtin(vm, "mux-address", bi_mux_address);
-  cvm_register_builtin(vm, "mux-close!", bi_mux_close);
+void creme_register_mux_builtins(VM *vm) {
+  creme_register_builtin(vm, "mux-router", bi_mux_router);
+  creme_register_builtin(vm, "mux-router?", bi_mux_router_p);
+  creme_register_builtin(vm, "mux-get!", bi_mux_get);
+  creme_register_builtin(vm, "mux-head!", bi_mux_head);
+  creme_register_builtin(vm, "mux-post!", bi_mux_post);
+  creme_register_builtin(vm, "mux-put!", bi_mux_put);
+  creme_register_builtin(vm, "mux-delete!", bi_mux_delete);
+  creme_register_builtin(vm, "mux-patch!", bi_mux_patch);
+  creme_register_builtin(vm, "mux-use!", bi_mux_use);
+  creme_register_builtin(vm, "mux-listen!", bi_mux_listen);
+  creme_register_builtin(vm, "mux-base-url", bi_mux_base_url);
+  creme_register_builtin(vm, "mux-address", bi_mux_address);
+  creme_register_builtin(vm, "mux-close!", bi_mux_close);
 }

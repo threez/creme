@@ -5,7 +5,7 @@ front end (Lexer → Reader → `analyze` → `BytecodeCompiler`) is unchanged a
 still owns compilation. `creme --emit-icecreme <file.scm> <out.ice>` compiles the
 whole script (plus its transitively-imported pure-Scheme library bodies)
 into one combined `Chunk` and serializes it (see
-`src/creme/compile/cvm_emitter.cr`) as "ICE1" — the SAME format
+`src/creme/compile/creme_emitter.cr`) as "ICE1" — the SAME format
 `src/creme/compile/chunk_serializer.cr`/`chunk_deserializer.cr` round-trip
 on the Crystal side, and the format `(creme bootstrap)`'s `load-chunk-bytes`
 already reads. This directory is a from-scratch C11 VM that loads and
@@ -92,7 +92,7 @@ submitted (`unbound variable: read`) — always invoke `repl.scm` straight
 from source, the same way `spec/creme/*.scm` files already do.
 
 This works because two things were already true before this file existed:
-`cvm_global_intern` interns by name against one persistent `vm->globals`
+`creme_global_intern` interns by name against one persistent `vm->globals`
 table, so repeated chunk loads against the same `VM*` already share
 bindings for free (`(define x 5)` on one line, `(display x)` on the
 next); and the self-hosted compiler's `compile-source-to-bytes` already
@@ -100,8 +100,8 @@ produces exactly the ICE1 bytes icecreme reads natively. The one missing piece
 was a way to load-and-run a freshly-computed bytevector of those bytes
 *from within an already-running icecreme program* — `icecreme/bootstrap.c`'s
 `load-chunk-bytes` (mirroring `(creme bootstrap)`'s Crystal-side builtin
-of the same name), backed by `loader.c`'s in-memory `cvm_load_from_bytes`
-and `vm.c`'s reentrant `cvm_run_loaded_chunk`.
+of the same name), backed by `loader.c`'s in-memory `creme_load_from_bytes`
+and `vm.c`'s reentrant `creme_run_loaded_chunk`.
 
 `icecreme/bootstrap.c` also provides `import!` and `expand-if-macro`. icecreme's
 global table is already unconditionally flat, so "importing" anything
@@ -127,7 +127,7 @@ top-level `defmacro`'s `Op::HelperForm` (kind 4, `vm.c`) binds a genuine
 recognizes that tag and delegates the actual expansion (bind params
 positionally to the call's own raw, unevaluated argument forms; compile +
 run the body) to `modules/creme/compiler/compiler.sld`'s own
-`defmacro-expand-form`, reached by name via `cvm_apply` — this file has
+`defmacro-expand-form`, reached by name via `creme_apply` — this file has
 no compiler of its own to do that reentrant compile-and-run step in C,
 but the self-hosted compiler is necessarily already loaded for
 `expand-if-macro` to ever be called at all (it's `compiler.sld`'s own
@@ -275,11 +275,11 @@ passing under `icecreme`:
   ESCAPE-ONLY (a one-shot, upward continuation, not a general
   re-enterable one — see `value.h`'s own `Continuation` doc comment):
   `setjmp` captures the point at call time; invoking the resulting
-  `T_CONTINUATION` value later (`dispatch_call`/`cvm_apply` both
+  `T_CONTINUATION` value later (`dispatch_call`/`creme_apply` both
   recognize it directly, same as `T_PARAMETER`) drains any pending
   `dynamic-wind`/`parameterize` actions down to that point (see below)
   and `longjmp`s back, regardless of how deep the intervening C call
-  stack got (nested `cvm_apply`s, e.g. a nested `for-each` callback) —
+  stack got (nested `creme_apply`s, e.g. a nested `for-each` callback) —
   the exact same technique `guard`'s own `GuardHandler` already used.
 - `dynamic-wind` (`icecreme/builtins.c`) generalizes the SAME unwind-stack
   mechanism `parameterize`'s `Op::PARAMPUSH`/`Op::PARAMPOP` already used
@@ -473,7 +473,7 @@ and prints a hot-spot table for each — the same idea as `creme --profile
 table <file.scm>`'s `(creme prof-vm)`/`(creme prof-native)` pair (see
 src/main.cr's `handle_profile`), ported to this VM's own execution model:
 
-- **Hot Scheme functions** (`icecreme/profiler.c`'s `cvm_profiler_tick`, hooked
+- **Hot Scheme functions** (`icecreme/profiler.c`'s `creme_profiler_tick`, hooked
   into `vm.c`'s dispatch loop at every instruction fetch): a cooperative,
   jittered-interval instruction counter — mirrors
   `src/creme/eval/interpreter.cr`'s `tick_sample` exactly, one sample every
@@ -481,14 +481,14 @@ src/main.cr's `handle_profile`), ported to this VM's own execution model:
   pair, symbolized as the chunk's own name, `file:line` (via a source line
   now stored per instruction in the `.ice` format — see below), and the
   opcode mnemonic.
-- **Hot C frames** (`cvm_profiler_start_native`/`_stop_native`): a
+- **Hot C frames** (`creme_profiler_start_native`/`_stop_native`): a
   `SIGPROF`+`ITIMER_PROF` sampler capturing a raw `backtrace(3)` every ~1ms,
   symbolized via `dladdr(3)` once the run finishes. Unlike `creme`'s own
   native sampler, this one is **not** expected to show much per-Scheme-
   function detail: `icecreme` runs Scheme-level calls through its own explicit
   `Frame` array (see "Call/upvalue mechanics" below), not C recursion, so a
   C-stack sample mostly reflects genuine C time — GC, builtins, and
-  `cvm_dispatch`'s own loop — rather than which Scheme function was running.
+  `creme_dispatch`'s own loop — rather than which Scheme function was running.
   It's still useful for catching real C-level cost (e.g. a slow builtin, or
   GC pressure) that the VM-level sampler can't see at all.
 
@@ -545,7 +545,7 @@ multi-value carrier — see "Value/type model" below; `values`/
 `call-with-values` now genuinely carry more than one value, not just the
 first); `MakeCaseClosure` (`case-lambda`, backed by a real
 `T_CASE_CLOSURE` value kind — arity selection happens in
-`dispatch_call`/`cvm_apply`, so a case-lambda called directly, via
+`dispatch_call`/`creme_apply`, so a case-lambda called directly, via
 `apply`, or via `map`/`for-each` all resolve the same way, mirroring
 `BytecodeCaseClosure#select_clause` exactly); and `CaseMatch`/
 `CaseDispatch` (so `case` — both the linear-scan and hash-dispatch forms
@@ -578,7 +578,7 @@ which is a different, harder problem `setjmp`/`longjmp` alone doesn't solve.
 
 Unlike every other op, `guard`'s three opcodes don't fit the ordinary
 "read operands, write a register, NEXT()" shape — an error raised
-arbitrarily deep (including through `cvm_apply`'s own reentrant C
+arbitrarily deep (including through `creme_apply`'s own reentrant C
 recursion, e.g. inside a `map`/`for-each` callback) has to unwind straight
 back to the nearest enclosing `guard`, in one step, regardless of how many
 C stack frames sit in between. This VM uses `setjmp`/`longjmp` for that:
@@ -593,11 +593,11 @@ C stack frames sit in between. This VM uses `setjmp`/`longjmp` for that:
   saved mark, closes upvalues for every discarded frame, collapses
   `vm->depth` straight back to the handler's frame, writes the condition
   into the clause-checking code's own register, and jumps there).
-- `cvm_abort` (every runtime error in this VM funnels through it) checks
+- `creme_abort` (every runtime error in this VM funnels through it) checks
   a process-global "current VM" (mirrors `profiler.c`'s own
-  `g_profiled_vm` pattern, since `cvm_abort`'s signature has no room for a
+  `g_profiled_vm` pattern, since `creme_abort`'s signature has no room for a
   `VM*` parameter across its ~100 existing call sites) — if a handler is
-  installed, it builds a condition record and calls `cvm_raise_condition`
+  installed, it builds a condition record and calls `creme_raise_condition`
   (pop the handler, `longjmp`); otherwise it prints and `exit(1)`s exactly
   as before. `error`/`raise` (new builtins) do the same check themselves,
   building a real message+irritants condition (`error`) or raising the
@@ -745,7 +745,7 @@ port-defaulting builtin read straight through them), then (in a later
 pass) a mutable-but-plain per-thread C global indirection; they're now
 genuine `T_PARAMETER` values (`vm->current_output_param`/
 `vm->current_input_param`, one pair per VM instance — see `vm.h`'s own
-VM-struct doc comment and `builtins.c`'s `cvm_init_current_ports`), so
+VM-struct doc comment and `builtins.c`'s `creme_init_current_ports`), so
 `parameterize` can genuinely retarget them (this used to abort with
 "parameterize: expected a parameter object"). Every port-defaulting
 builtin still reads through the SAME two names it always did
@@ -755,7 +755,7 @@ no other call site needed to change. `with-input-from-file`/
 `with-output-to-file` reuse the SAME dynamic-wind unwind-stack mechanism
 `dynamic-wind` itself uses (see `bi_with_input_from_file`'s own comment)
 so the previous port is restored even if the redirected thunk escapes
-via an error. An actor spawn (`cvm_new_child_vm`) gives its own VM a
+via an error. An actor spawn (`creme_new_child_vm`) gives its own VM a
 FRESH pair rather than inheriting the parent's via that function's own
 wholesale `globals` memcpy — sharing one Parameter across actor threads
 would let one actor's `parameterize`/`with-output-to-file` redirect a
@@ -771,7 +771,7 @@ evaluator in C (see that file's own comments on both).
 
 A batch of smaller R7RS-completeness fixes landed together (`builtins.c`
 unless noted): `eqv?`/`equal?` now compare floats by bit pattern, not
-`==`, so `(eqv? 0.0 -0.0)` is correctly `#f` (`vm.c`'s `cvm_eqv`);
+`==`, so `(eqv? 0.0 -0.0)` is correctly `#f` (`vm.c`'s `creme_eqv`);
 `equal?` now terminates on circular structure (an ancestor-tracking
 `EqualSeen` stack, same idea as `guard`'s own unwind mechanism, just for
 comparison instead of control flow) and has a real byte-compare case
@@ -860,7 +860,7 @@ Per `value.h`'s own header comment — deliberate, not accidental:
   the exact same `MakePromise` op), `T_PORT` (output-string only — no
   input ports, no file ports), `T_CLOSURE`, `T_CASE_CLOSURE` (`case-lambda`
   — an ordered array of `Closure`s, one per clause; `dispatch_call`/
-  `cvm_apply` pick the first whose arity accepts the call's argument
+  `creme_apply` pick the first whose arity accepts the call's argument
   count), `T_BUILTIN`, and `T_BOX` (an opaque native handle, tagged by
   `kind`: hash table, SQL connection, mux router, mux server), and
   `T_VALUES` (a genuine multiple-values carrier —
@@ -873,13 +873,13 @@ Per `value.h`'s own header comment — deliberate, not accidental:
   IDENTITY not name, so distinct `define-record-type` invocations are
   always disjoint even when they share a type name), and one generated
   constructor/predicate/accessor/mutator per type respectively;
-  `dispatch_call`/`cvm_apply` recognize `T_RECORD_CALLABLE` directly,
+  `dispatch_call`/`creme_apply` recognize `T_RECORD_CALLABLE` directly,
   since icecreme's plain `BuiltinFn` function pointer has nowhere to stash a
   captured record type/field index the way a real closure can — see
   `vm.c`'s `call_record_callable`), and `T_PARAMETER` (`make-parameter`'s
   own value — current value + optional converter procedure, mirrors
   `SchemeParameter` exactly; calling it with 0 args returns its current
-  value, same `dispatch_call`/`cvm_apply` recognition pattern as
+  value, same `dispatch_call`/`creme_apply` recognition pattern as
   `T_RECORD_CALLABLE`, though `procedure?` deliberately excludes it,
   matching the real interpreter's own narrower definition), `T_CONTINUATION`
   (`call/cc`'s escape-only captured jump point — see "Compiler mode"
@@ -921,7 +921,7 @@ for a genuine cycle, without hanging. This spans three files:
   a genuinely circular one would never terminate, a real (previously
   undiscovered) crash/hang bug, not just "unsupported". Now does a
   cheap first pass (`count_datum_visits`, an ancestor-tracking walk —
-  the same technique `cvm_equal`/`write_value_shared` already use, just
+  the same technique `creme_equal`/`write_value_shared` already use, just
   ported to Crystal) counting how many times each distinct pair/vector
   pointer (by `object_id`, genuine reference identity) is reached;
   anything reached ≥2 times — whether via a real cycle or separate,
@@ -992,7 +992,7 @@ evaluating against the one real global table, since icecreme's `VM` struct
 has exactly one flat `globals[]` array. They're now genuinely isolated,
 without touching that flat-table architecture for the *whole running
 program* at all: an "environment" is just a genuinely separate,
-completely independent `VM` (`cvm_new_empty_vm`, `vm.c`) — no call
+completely independent `VM` (`creme_new_empty_vm`, `vm.c`) — no call
 stack/frames actually used, just its own `globals[]` — wrapped as an
 opaque `T_BOX(BOX_KIND_ENVIRONMENT)` value so Scheme can hold and pass
 it around. Three new `icecreme/bootstrap.c` builtins expose this:
@@ -1036,12 +1036,12 @@ makes `eval`'s 2-arg form actually target the right place).
   resolving `GetGlobal`/`DefGlobal` operands, needs to know which table
   to target.
 
-One easy trap avoided: `cvm_register_required_builtins` (`main.c`)
+One easy trap avoided: `creme_register_required_builtins` (`main.c`)
 always registers the full base+write builtin set the FIRST time it's
 called for a given VM, regardless of what's actually needed — correct
 for the one real top-level VM (which always needs `base`/`write`
 eventually anyway) but exactly wrong for a fresh environment VM, which
-`load-chunk-bytes-into` also runs through: `cvm_new_empty_vm` pre-marks
+`load-chunk-bytes-into` also runs through: `creme_new_empty_vm` pre-marks
 its own VM as `base_write_registered` already-done, so an environment
 never silently regains `+`/every other base builtin the instant
 anything is `eval`'d into it.
@@ -1078,7 +1078,7 @@ flat, whole-program-wide `globals[]` array with no runtime notion of
 whether from the user's own script or any imported library's `(begin
 ...)` body, lands in the exact same namespace. The obvious-looking fix
 — give every library its own VM (icecreme already has the machinery,
-`cvm_new_empty_vm`/`make-environment`, built for `environment`/`eval`)
+`creme_new_empty_vm`/`make-environment`, built for `environment`/`eval`)
 — was tried in design and **rejected**: icecreme bakes every `GetGlobal`/
 `DefGlobal` operand into a raw array index into one *specific* VM's
 table, once, at chunk-load time (`resolve_globals`, `loader.c`). A
@@ -1248,11 +1248,11 @@ different path.
   silently invalidate every such pointer. Generous fixed caps sidestep the
   whole problem rather than solving it generally. The CAP itself is now
   embedder-configurable, though, not a hardcoded constant baked into the
-  VM struct's own layout: `cvm_alloc_vm(stack_cap, frames_cap)` (`vm.c`)
+  VM struct's own layout: `creme_alloc_vm(stack_cap, frames_cap)` (`vm.c`)
   is the one place every VM gets built (the main script's own top-level
   VM, a spawned actor's child VM, an `environment`/`eval` target), and any
   of them can be given a tighter or looser limit than
-  `CVM_DEFAULT_STACK_CAP`/`CVM_DEFAULT_FRAMES_CAP` (`vm.h`) — the running
+  `CREME_DEFAULT_STACK_CAP`/`CREME_DEFAULT_FRAMES_CAP` (`vm.h`) — the running
   `icecreme` binary itself exposes this today via the `ICECREME_STACK_CAP`/
   `ICECREME_FRAMES_CAP` environment variables (`main.c`), ahead of a real
   embedding API that would pass these values in directly.
@@ -1309,7 +1309,7 @@ different path.
 - `loader.c` — deserializes an ICE1 file OR in-memory byte buffer (one
   combined `Chunk`, no multi-chunk envelope), then resolves global names.
 - `vm.c` — the dispatch loop, call/upvalue machinery, global table,
-  guard/parameterize unwind machinery (`cvm_abort`/`cvm_raise_condition`).
+  guard/parameterize unwind machinery (`creme_abort`/`creme_raise_condition`).
 - `builtins.c` — the R7RS-base-ish builtin surface (see table above).
 - `mux.c`/`mux.h` — `(creme mux)`, a real HTTP server via poll(2) + picohttpparser. Dispatch is either inline (one thread, `mux-listen!`'s "pool" option `#f`, the default) or a growable pool of fully independent SO_REUSEPORT worker threads (`#t`/an integer max), each with its own child VM and no cross-thread handoff at all — the pool grows/shrinks with load between a permanent floor and that max.
 - `sql.c`/`sql.h` — `(creme sql)`, real SQLite via the C API.

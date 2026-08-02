@@ -13,7 +13,7 @@ module Creme
   # pushed on entry to write_seq / popped on exit, via with_write_seq_
   # ancestor), not a whole-traversal visited set: this only needs to stop
   # re-descending into a container that's already an ancestor of itself
-  # (a genuine cycle) -- same technique icecreme's own cvm_equal/
+  # (a genuine cycle) -- same technique icecreme's own creme_equal/
   # write_value_shared (icecreme/builtins.c) use for the identical problem,
   # applied there for equal?/write-shared instead of display/write.
   # Deliberately at MODULE scope (not inside SchemeBaseValue, which is

@@ -15,11 +15,11 @@
  * integer -- real parallelism, better for CPU-heavy handlers) and no
  * pool at all (#f -- zero extra threads, better for cheap/fast
  * handlers). */
-#ifndef CVM_MUX_H
-#define CVM_MUX_H
+#ifndef CREME_MUX_H
+#define CREME_MUX_H
 
 #include "vm.h"
 
-void cvm_register_mux_builtins(VM *vm);
+void creme_register_mux_builtins(VM *vm);
 
 #endif

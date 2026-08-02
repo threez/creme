@@ -18,7 +18,7 @@
  * and frees it immediately.
  *
  * Same EVP_CIPHER_CTX-style resource-cleanup discipline (creme cipher)'s
- * own icecreme/cipher.c established: cvm_abort longjmps past any C++-style
+ * own icecreme/cipher.c established: creme_abort longjmps past any C++-style
  * RAII that doesn't exist in C, so every error branch below explicitly
  * frees whatever OpenSSL resource it opened first. */
 #include <gc.h>
@@ -63,11 +63,11 @@ static void value_bytes(Value v, const unsigned char **out_ptr, int *out_len, co
     *out_len = v.as.bv->len;
     return;
   }
-  cvm_abort("%s: expected a blob or string argument", who);
+  creme_abort("%s: expected a blob or string argument", who);
 }
 
 static PKeyBox *pkey_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_PKEY) cvm_abort("%s: expected a pkey, got a value of the wrong type", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_PKEY) creme_abort("%s: expected a pkey, got a value of the wrong type", who);
   return (PKeyBox *)v.as.ptr;
 }
 
@@ -94,11 +94,11 @@ static char *bio_to_gc_string(BIO *bio, int *len_out) {
 
 static char *rsa_to_pem(RSA *rsa, int is_private, int *len_out, const char *who) {
   BIO *bio = BIO_new(BIO_s_mem());
-  if (!bio) cvm_abort("%s: BIO_new failed", who);
+  if (!bio) creme_abort("%s: BIO_new failed", who);
   int ret = is_private ? PEM_write_bio_RSAPrivateKey(bio, rsa, NULL, NULL, 0, NULL, NULL) : PEM_write_bio_RSA_PUBKEY(bio, rsa);
   if (ret != 1) {
     BIO_free(bio);
-    cvm_abort("%s: failed to write RSA PEM", who);
+    creme_abort("%s: failed to write RSA PEM", who);
   }
   char *pem = bio_to_gc_string(bio, len_out);
   BIO_free(bio);
@@ -107,11 +107,11 @@ static char *rsa_to_pem(RSA *rsa, int is_private, int *len_out, const char *who)
 
 static char *ec_to_pem(EC_KEY *ec, int is_private, int *len_out, const char *who) {
   BIO *bio = BIO_new(BIO_s_mem());
-  if (!bio) cvm_abort("%s: BIO_new failed", who);
+  if (!bio) creme_abort("%s: BIO_new failed", who);
   int ret = is_private ? PEM_write_bio_ECPrivateKey(bio, ec, NULL, NULL, 0, NULL, NULL) : PEM_write_bio_EC_PUBKEY(bio, ec);
   if (ret != 1) {
     BIO_free(bio);
-    cvm_abort("%s: failed to write EC PEM", who);
+    creme_abort("%s: failed to write EC PEM", who);
   }
   char *pem = bio_to_gc_string(bio, len_out);
   BIO_free(bio);
@@ -122,13 +122,13 @@ static char *ec_to_pem(EC_KEY *ec, int is_private, int *len_out, const char *who
  * public RSA/EC_KEY* it extracted from a certificate (via
  * X509_get_pubkey + EVP_PKEY_get1_RSA/EC_KEY) into a (creme pkey) box
  * without duplicating rsa_to_pem/ec_to_pem/pkey_box here. */
-Value cvm_pkey_box_public_rsa(RSA *rsa) {
+Value creme_pkey_box_public_rsa(RSA *rsa) {
   int pem_len;
   char *pem = rsa_to_pem(rsa, 0, &pem_len, "x509-cert-public-key");
   return pkey_box(PKEY_KIND_RSA, 0, pem, pem_len);
 }
 
-Value cvm_pkey_box_public_ec(EC_KEY *ec) {
+Value creme_pkey_box_public_ec(EC_KEY *ec) {
   int pem_len;
   char *pem = ec_to_pem(ec, 0, &pem_len, "x509-cert-public-key");
   return pkey_box(PKEY_KIND_EC, 0, pem, pem_len);
@@ -167,7 +167,7 @@ static RSA *pem_to_rsa(const char *pem, int pem_len, const char *who) {
   if (rsa) return rsa;
   rsa = pem_try_rsa_public(pem, pem_len);
   if (rsa) return rsa;
-  cvm_abort("%s: not a recognizable RSA PEM key", who);
+  creme_abort("%s: not a recognizable RSA PEM key", who);
 }
 
 static EC_KEY *pem_to_ec(const char *pem, int pem_len, const char *who) {
@@ -175,12 +175,12 @@ static EC_KEY *pem_to_ec(const char *pem, int pem_len, const char *who) {
   if (ec) return ec;
   ec = pem_try_ec_public(pem, pem_len);
   if (ec) return ec;
-  cvm_abort("%s: not a recognizable EC PEM key", who);
+  creme_abort("%s: not a recognizable EC PEM key", who);
 }
 
 static EVP_PKEY *pkeybox_to_evp(PKeyBox *box, const char *who) {
   EVP_PKEY *pkey = EVP_PKEY_new();
-  if (!pkey) cvm_abort("%s: EVP_PKEY_new failed", who);
+  if (!pkey) creme_abort("%s: EVP_PKEY_new failed", who);
   if (box->kind == PKEY_KIND_RSA) {
     RSA *rsa = pem_to_rsa(box->pem, box->pem_len, who);
     EVP_PKEY_set1_RSA(pkey, rsa);
@@ -197,7 +197,7 @@ static int ec_curve_nid(const char *curve, const char *who) {
   if (strcmp(curve, "p256") == 0) return NID_X9_62_prime256v1;
   if (strcmp(curve, "p384") == 0) return NID_secp384r1;
   if (strcmp(curve, "p521") == 0) return NID_secp521r1;
-  cvm_abort("%s: unknown curve '%s' (expected p256, p384, or p521)", who, curve);
+  creme_abort("%s: unknown curve '%s' (expected p256, p384, or p521)", who, curve);
 }
 
 /* ---- generation ----------------------------------------------------------- */
@@ -206,24 +206,24 @@ static Value bi_rsa_generate_key(VM *vm, Value *args, int nargs) {
   (void)vm;
   int bits = 2048;
   if (nargs >= 1) {
-    if (args[0].tag != T_INT) cvm_abort("rsa-generate-key: expected an integer bit count");
+    if (args[0].tag != T_INT) creme_abort("rsa-generate-key: expected an integer bit count");
     bits = (int)args[0].as.i;
   }
-  if (bits < 2048) cvm_abort("rsa-generate-key: bits must be at least 2048, got %d", bits);
+  if (bits < 2048) creme_abort("rsa-generate-key: bits must be at least 2048, got %d", bits);
 
   RSA *rsa = RSA_new();
-  if (!rsa) cvm_abort("rsa-generate-key: RSA_new failed");
+  if (!rsa) creme_abort("rsa-generate-key: RSA_new failed");
   BIGNUM *e = BN_new();
   if (!e) {
     RSA_free(rsa);
-    cvm_abort("rsa-generate-key: BN_new failed");
+    creme_abort("rsa-generate-key: BN_new failed");
   }
   BN_set_word(e, RSA_F4);
   int ret = RSA_generate_key_ex(rsa, bits, e, NULL);
   BN_free(e);
   if (ret != 1) {
     RSA_free(rsa);
-    cvm_abort("rsa-generate-key: RSA_generate_key_ex failed");
+    creme_abort("rsa-generate-key: RSA_generate_key_ex failed");
   }
   int pem_len;
   char *pem = rsa_to_pem(rsa, 1, &pem_len, "rsa-generate-key");
@@ -235,16 +235,16 @@ static Value bi_ec_generate_key(VM *vm, Value *args, int nargs) {
   (void)vm;
   const char *curve = "p256";
   if (nargs >= 1) {
-    if (args[0].tag != T_SYM) cvm_abort("ec-generate-key: expected a symbol");
+    if (args[0].tag != T_SYM) creme_abort("ec-generate-key: expected a symbol");
     curve = args[0].as.chars;
   }
   int nid = ec_curve_nid(curve, "ec-generate-key");
 
   EC_KEY *key = EC_KEY_new_by_curve_name(nid);
-  if (!key) cvm_abort("ec-generate-key: EC_KEY_new_by_curve_name failed");
+  if (!key) creme_abort("ec-generate-key: EC_KEY_new_by_curve_name failed");
   if (EC_KEY_generate_key(key) != 1) {
     EC_KEY_free(key);
-    cvm_abort("ec-generate-key: EC_KEY_generate_key failed");
+    creme_abort("ec-generate-key: EC_KEY_generate_key failed");
   }
   int pem_len;
   char *pem = ec_to_pem(key, 1, &pem_len, "ec-generate-key");
@@ -256,19 +256,19 @@ static Value bi_ec_generate_key(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("pkey?: expected an argument");
+  if (nargs < 1) creme_abort("pkey?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_PKEY);
 }
 
 static Value bi_pkey_private_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("pkey-private?: expected an argument");
+  if (nargs < 1) creme_abort("pkey-private?: expected an argument");
   return v_bool(pkey_arg(args[0], "pkey-private?")->is_private);
 }
 
 static Value bi_pkey_type(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("pkey-type: expected an argument");
+  if (nargs < 1) creme_abort("pkey-type: expected an argument");
   PKeyBox *box = pkey_arg(args[0], "pkey-type");
   const char *name = box->kind == PKEY_KIND_RSA ? "rsa" : "ec";
   return v_sym(name, (int)strlen(name));
@@ -276,7 +276,7 @@ static Value bi_pkey_type(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_public_key(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("pkey-public-key: expected an argument");
+  if (nargs < 1) creme_abort("pkey-public-key: expected an argument");
   PKeyBox *box = pkey_arg(args[0], "pkey-public-key");
   if (!box->is_private) return pkey_box(box->kind, 0, box->pem, box->pem_len);
 
@@ -298,14 +298,14 @@ static Value bi_pkey_public_key(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_to_pem(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("pkey->pem: expected an argument");
+  if (nargs < 1) creme_abort("pkey->pem: expected an argument");
   PKeyBox *box = pkey_arg(args[0], "pkey->pem");
   return v_str(box->pem, box->pem_len);
 }
 
 static Value bi_pem_to_pkey(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("pem->pkey: expected a string");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("pem->pkey: expected a string");
   const char *pem_in = args[0].as.chars;
   int pem_len = args[0].aux;
 
@@ -333,16 +333,16 @@ static Value bi_pem_to_pkey(VM *vm, Value *args, int nargs) {
     EC_KEY_free(ec);
     return pkey_box(PKEY_KIND_EC, 0, pem, pem_len);
   }
-  cvm_abort("pem->pkey: not a recognizable RSA/EC PEM key");
+  creme_abort("pem->pkey: not a recognizable RSA/EC PEM key");
 }
 
 /* ---- sign/verify (shared across RSA and EC) -------------------------------- */
 
 static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("pkey-sign: expected 2 arguments");
+  if (nargs < 2) creme_abort("pkey-sign: expected 2 arguments");
   PKeyBox *box = pkey_arg(args[0], "pkey-sign");
-  if (!box->is_private) cvm_abort("pkey-sign: expected a private key");
+  if (!box->is_private) creme_abort("pkey-sign: expected a private key");
   const unsigned char *msg;
   int msg_len;
   value_bytes(args[1], &msg, &msg_len, "pkey-sign");
@@ -351,17 +351,17 @@ static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
   if (!ctx) {
     EVP_PKEY_free(pkey);
-    cvm_abort("pkey-sign: EVP_MD_CTX_new failed");
+    creme_abort("pkey-sign: EVP_MD_CTX_new failed");
   }
   if (EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, pkey) != 1) {
     EVP_MD_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("pkey-sign: EVP_DigestSignInit failed");
+    creme_abort("pkey-sign: EVP_DigestSignInit failed");
   }
   if (EVP_DigestSignUpdate(ctx, msg, (size_t)msg_len) != 1) {
     EVP_MD_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("pkey-sign: EVP_DigestSignUpdate failed");
+    creme_abort("pkey-sign: EVP_DigestSignUpdate failed");
   }
   size_t sig_len = 0;
   EVP_DigestSignFinal(ctx, NULL, &sig_len);
@@ -369,7 +369,7 @@ static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
   if (EVP_DigestSignFinal(ctx, sig, &sig_len) != 1) {
     EVP_MD_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("pkey-sign: EVP_DigestSignFinal failed");
+    creme_abort("pkey-sign: EVP_DigestSignFinal failed");
   }
   EVP_MD_CTX_free(ctx);
   EVP_PKEY_free(pkey);
@@ -378,7 +378,7 @@ static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_verify(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("pkey-verify: expected 3 arguments");
+  if (nargs < 3) creme_abort("pkey-verify: expected 3 arguments");
   PKeyBox *box = pkey_arg(args[0], "pkey-verify");
   const unsigned char *msg, *sig;
   int msg_len, sig_len;
@@ -389,17 +389,17 @@ static Value bi_pkey_verify(VM *vm, Value *args, int nargs) {
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
   if (!ctx) {
     EVP_PKEY_free(pkey);
-    cvm_abort("pkey-verify: EVP_MD_CTX_new failed");
+    creme_abort("pkey-verify: EVP_MD_CTX_new failed");
   }
   if (EVP_DigestVerifyInit(ctx, NULL, EVP_sha256(), NULL, pkey) != 1) {
     EVP_MD_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("pkey-verify: EVP_DigestVerifyInit failed");
+    creme_abort("pkey-verify: EVP_DigestVerifyInit failed");
   }
   if (EVP_DigestVerifyUpdate(ctx, msg, (size_t)msg_len) != 1) {
     EVP_MD_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("pkey-verify: EVP_DigestVerifyUpdate failed");
+    creme_abort("pkey-verify: EVP_DigestVerifyUpdate failed");
   }
   int ok = EVP_DigestVerifyFinal(ctx, sig, (size_t)sig_len);
   EVP_MD_CTX_free(ctx);
@@ -413,33 +413,33 @@ static Value bi_pkey_verify(VM *vm, Value *args, int nargs) {
 static unsigned char *rsa_oaep_op(RSA *rsa, const unsigned char *input, int input_len, int encrypt, int *out_len,
                                    const char *who) {
   EVP_PKEY *pkey = EVP_PKEY_new();
-  if (!pkey) cvm_abort("%s: EVP_PKEY_new failed", who);
+  if (!pkey) creme_abort("%s: EVP_PKEY_new failed", who);
   EVP_PKEY_set1_RSA(pkey, rsa);
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(pkey, NULL);
   if (!ctx) {
     EVP_PKEY_free(pkey);
-    cvm_abort("%s: EVP_PKEY_CTX_new failed", who);
+    creme_abort("%s: EVP_PKEY_CTX_new failed", who);
   }
   int init_ok = encrypt ? EVP_PKEY_encrypt_init(ctx) : EVP_PKEY_decrypt_init(ctx);
   if (init_ok != 1) {
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("%s: EVP_PKEY_%s_init failed", who, encrypt ? "encrypt" : "decrypt");
+    creme_abort("%s: EVP_PKEY_%s_init failed", who, encrypt ? "encrypt" : "decrypt");
   }
   if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0) {
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("%s: failed to set OAEP padding", who);
+    creme_abort("%s: failed to set OAEP padding", who);
   }
   if (EVP_PKEY_CTX_set_rsa_oaep_md(ctx, EVP_sha256()) <= 0) {
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("%s: failed to set OAEP digest", who);
+    creme_abort("%s: failed to set OAEP digest", who);
   }
   if (EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, EVP_sha256()) <= 0) {
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("%s: failed to set MGF1 digest", who);
+    creme_abort("%s: failed to set MGF1 digest", who);
   }
 
   size_t outlen = 0;
@@ -448,7 +448,7 @@ static unsigned char *rsa_oaep_op(RSA *rsa, const unsigned char *input, int inpu
   if (step1 != 1) {
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(pkey);
-    cvm_abort("%s: failed to determine output length", who);
+    creme_abort("%s: failed to determine output length", who);
   }
   unsigned char *out_buf = GC_MALLOC(outlen ? outlen : 1);
   int step2 = encrypt ? EVP_PKEY_encrypt(ctx, out_buf, &outlen, input, (size_t)input_len)
@@ -457,9 +457,9 @@ static unsigned char *rsa_oaep_op(RSA *rsa, const unsigned char *input, int inpu
   EVP_PKEY_free(pkey);
   if (step2 != 1) {
     if (encrypt) {
-      cvm_abort("%s: EVP_PKEY_encrypt failed", who);
+      creme_abort("%s: EVP_PKEY_encrypt failed", who);
     } else {
-      cvm_abort("%s: decryption failed (wrong key, or corrupted/truncated ciphertext)", who);
+      creme_abort("%s: decryption failed (wrong key, or corrupted/truncated ciphertext)", who);
     }
   }
   *out_len = (int)outlen;
@@ -468,9 +468,9 @@ static unsigned char *rsa_oaep_op(RSA *rsa, const unsigned char *input, int inpu
 
 static Value bi_rsa_encrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("rsa-encrypt: expected 2 arguments");
+  if (nargs < 2) creme_abort("rsa-encrypt: expected 2 arguments");
   PKeyBox *box = pkey_arg(args[0], "rsa-encrypt");
-  if (box->kind != PKEY_KIND_RSA) cvm_abort("rsa-encrypt: expected an RSA key");
+  if (box->kind != PKEY_KIND_RSA) creme_abort("rsa-encrypt: expected an RSA key");
   const unsigned char *pt;
   int pt_len;
   value_bytes(args[1], &pt, &pt_len, "rsa-encrypt");
@@ -484,10 +484,10 @@ static Value bi_rsa_encrypt(VM *vm, Value *args, int nargs) {
 
 static Value bi_rsa_decrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) cvm_abort("rsa-decrypt: expected 2 arguments");
+  if (nargs < 2) creme_abort("rsa-decrypt: expected 2 arguments");
   PKeyBox *box = pkey_arg(args[0], "rsa-decrypt");
-  if (box->kind != PKEY_KIND_RSA) cvm_abort("rsa-decrypt: expected an RSA key");
-  if (!box->is_private) cvm_abort("rsa-decrypt: expected a private key");
+  if (box->kind != PKEY_KIND_RSA) creme_abort("rsa-decrypt: expected an RSA key");
+  if (!box->is_private) creme_abort("rsa-decrypt: expected a private key");
   const unsigned char *ct;
   int ct_len;
   value_bytes(args[1], &ct, &ct_len, "rsa-decrypt");
@@ -499,17 +499,17 @@ static Value bi_rsa_decrypt(VM *vm, Value *args, int nargs) {
   return bytevector_value(out, out_len);
 }
 
-void cvm_register_pkey_builtins(VM *vm) {
-  cvm_register_builtin(vm, "rsa-generate-key", bi_rsa_generate_key);
-  cvm_register_builtin(vm, "ec-generate-key", bi_ec_generate_key);
-  cvm_register_builtin(vm, "pkey?", bi_pkey_p);
-  cvm_register_builtin(vm, "pkey-private?", bi_pkey_private_p);
-  cvm_register_builtin(vm, "pkey-type", bi_pkey_type);
-  cvm_register_builtin(vm, "pkey-public-key", bi_pkey_public_key);
-  cvm_register_builtin(vm, "pkey->pem", bi_pkey_to_pem);
-  cvm_register_builtin(vm, "pem->pkey", bi_pem_to_pkey);
-  cvm_register_builtin(vm, "pkey-sign", bi_pkey_sign);
-  cvm_register_builtin(vm, "pkey-verify", bi_pkey_verify);
-  cvm_register_builtin(vm, "rsa-encrypt", bi_rsa_encrypt);
-  cvm_register_builtin(vm, "rsa-decrypt", bi_rsa_decrypt);
+void creme_register_pkey_builtins(VM *vm) {
+  creme_register_builtin(vm, "rsa-generate-key", bi_rsa_generate_key);
+  creme_register_builtin(vm, "ec-generate-key", bi_ec_generate_key);
+  creme_register_builtin(vm, "pkey?", bi_pkey_p);
+  creme_register_builtin(vm, "pkey-private?", bi_pkey_private_p);
+  creme_register_builtin(vm, "pkey-type", bi_pkey_type);
+  creme_register_builtin(vm, "pkey-public-key", bi_pkey_public_key);
+  creme_register_builtin(vm, "pkey->pem", bi_pkey_to_pem);
+  creme_register_builtin(vm, "pem->pkey", bi_pem_to_pkey);
+  creme_register_builtin(vm, "pkey-sign", bi_pkey_sign);
+  creme_register_builtin(vm, "pkey-verify", bi_pkey_verify);
+  creme_register_builtin(vm, "rsa-encrypt", bi_rsa_encrypt);
+  creme_register_builtin(vm, "rsa-decrypt", bi_rsa_decrypt);
 }

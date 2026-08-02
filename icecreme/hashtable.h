@@ -5,11 +5,11 @@
  * real Values live in an ordinary GC_MALLOC'd side table (also needed to
  * reconstruct native-Crystal-matching insertion order, since Verstable
  * itself doesn't preserve one). */
-#ifndef CVM_HASHTABLE_H
-#define CVM_HASHTABLE_H
+#ifndef CREME_HASHTABLE_H
+#define CREME_HASHTABLE_H
 
 #include "vm.h"
 
-void cvm_register_hashtable_builtins(VM *vm);
+void creme_register_hashtable_builtins(VM *vm);
 
 #endif

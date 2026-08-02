@@ -40,10 +40,13 @@ both reaching their current shape) — not itemized individually here;
   `doc/deadend-icecreme.md`, `spec/creme/examples_cvm_spec.scm` →
   `spec/creme/examples_icecreme_spec.scm`, `src/creme/compile/cvm_emitter.cr`
   → `src/creme/compile/icecreme_emitter.cr` (`CVMEmitter` → `IcecremeEmitter`).
-- Not renamed, deliberately: the internal C implementation's own
-  `cvm_*`/`CVM_*` function and macro naming convention (e.g. `cvm_alloc_vm`,
-  `cvm_cons`, `CVM_COMPILER_DRIVER_PATH`) — a purely internal detail with no
-  user-facing surface, left alone to avoid an enormous, low-value diff.
+- The internal C implementation's own `cvm_*`/`CVM_*` function/macro naming
+  convention (~315 functions, ~62 macros — e.g. `cvm_alloc_vm` → `creme_alloc_vm`,
+  `cvm_cons` → `creme_cons`, `CVM_COMPILER_DRIVER_PATH` → `CREME_COMPILER_DRIVER_PATH`,
+  `CvmHashTable` → `CremeHashTable`) is also renamed to `creme_`/`CREME_`, for a
+  single consistent internal prefix across the whole project rather than
+  `icecreme_`/`ICECREME_` (reserved for the smaller set of genuinely
+  user-facing names — the CLI flags, env vars, and extension above).
 
 ### Breaking: `Scheme` Crystal namespace renamed to `Creme`, shard renamed `scheme` → `creme`
 

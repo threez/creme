@@ -11,7 +11,7 @@
 ;; (csv-read/csv-write/csv-read-headers/csv-write-headers) and streaming
 ;; (csv-reader-open/-read!/-?, csv-writer-open/-row!/-?) built on the same
 ;; generic row-parser, driven either over a plain buffer or over a Port
-;; via the shared cvm_port_read_char/cvm_port_write_bytes helpers
+;; via the shared creme_port_read_char/creme_port_write_bytes helpers
 ;; introduced alongside this file.
 ;;
 ;; Run with (all cases pass under all three):

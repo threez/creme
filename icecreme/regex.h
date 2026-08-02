@@ -3,11 +3,11 @@
  * regex flavor the real Crystal `Regex` class itself uses). Exists
  * specifically so the self-hosted reader (modules/creme/compiler/
  * reader.sld) can run under icecreme -- see regex.c's own header comment. */
-#ifndef CVM_REGEX_H
-#define CVM_REGEX_H
+#ifndef CREME_REGEX_H
+#define CREME_REGEX_H
 
 #include "vm.h"
 
-void cvm_register_regex_builtins(VM *vm);
+void creme_register_regex_builtins(VM *vm);
 
 #endif

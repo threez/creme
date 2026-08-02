@@ -21,8 +21,8 @@
 #include "opcodes.h"
 #include "vm.h"
 
-/* Either a real file (cvm_load, the normal `icecreme foo.ice` path) or an
- * in-memory byte buffer (cvm_load_from_bytes, used by the `load-chunk-
+/* Either a real file (creme_load, the normal `icecreme foo.ice` path) or an
+ * in-memory byte buffer (creme_load_from_bytes, used by the `load-chunk-
  * bytes` builtin to load a bytevector a running program just computed --
  * e.g. the self-hosted compiler's own compile-source-to-bytes output).
  * `read_chunk`/`read_datum`/etc. below never care which mode is active --
@@ -37,7 +37,7 @@
  * genuine cycle) already resolves correctly; for any other tag, `value`
  * is filled in only after the datum is fully read (no cycle is possible
  * through a non-container value anyway). */
-#define CVM_DATUM_LABELS_CAP 256
+#define CREME_DATUM_LABELS_CAP 256
 typedef struct {
   int id;
   Value value;
@@ -50,7 +50,7 @@ typedef struct {
   const char *path; /* diagnostic label only -- a fixed string like
                       * "<bytevector>" when reading from a buffer, since
                       * there's no filename in that case. */
-  DatumLabel labels[CVM_DATUM_LABELS_CAP];
+  DatumLabel labels[CREME_DATUM_LABELS_CAP];
   int n_labels;
   int datum_depth;  /* current read_datum_rec nesting -- see its own guard */
   int chunk_depth;  /* current read_chunk nesting (nested protos) -- ditto */
@@ -59,12 +59,12 @@ typedef struct {
 static void must_read(Reader *r, void *dst, size_t n) {
   if (r->f) {
     if (fread(dst, 1, n, r->f) != n) {
-      cvm_abort("icecreme: truncated or corrupt bytecode file %s", r->path);
+      creme_abort("icecreme: truncated or corrupt bytecode file %s", r->path);
     }
     return;
   }
   if (r->buf_pos + n > r->buf_len) {
-    cvm_abort("icecreme: truncated or corrupt bytecode in %s", r->path);
+    creme_abort("icecreme: truncated or corrupt bytecode in %s", r->path);
   }
   memcpy(dst, r->buf + r->buf_pos, n);
   r->buf_pos += n;
@@ -100,22 +100,22 @@ static unsigned char read_u8(Reader *r) {
  * chunk layout changes in a way an older reader couldn't safely parse.
  * See CHANGELOG.md/icecreme/STABILITY.md for the compatibility policy this
  * exists to support. */
-#define CVM_ICE1_FORMAT_VERSION 1
+#define CREME_ICE1_FORMAT_VERSION 1
 
 /* Checks the "ICE1" magic + format-version byte every entry point below
  * reads first, before anything else -- shared so the three call sites
- * (cvm_peek_required_families/cvm_load/cvm_load_from_bytes) give
+ * (creme_peek_required_families/creme_load/creme_load_from_bytes) give
  * identical, consistent errors for either failure instead of three
  * hand-duplicated checks drifting apart over time. */
 static void check_magic_and_version(Reader *r) {
   char magic[4];
   must_read(r, magic, 4);
   if (memcmp(magic, "ICE1", 4) != 0) {
-    cvm_abort("icecreme: %s is not an ICE1 bytecode file (re-emit with `creme --emit-icecreme`?)", r->path);
+    creme_abort("icecreme: %s is not an ICE1 bytecode file (re-emit with `creme --emit-icecreme`?)", r->path);
   }
   unsigned char version = read_u8(r);
-  if (version != CVM_ICE1_FORMAT_VERSION) {
-    cvm_abort("icecreme: %s was compiled with ICE1 format version %d, this icecreme only reads version %d -- re-emit it with a matching `creme --emit-icecreme`", r->path, version, CVM_ICE1_FORMAT_VERSION);
+  if (version != CREME_ICE1_FORMAT_VERSION) {
+    creme_abort("icecreme: %s was compiled with ICE1 format version %d, this icecreme only reads version %d -- re-emit it with a matching `creme --emit-icecreme`", r->path, version, CREME_ICE1_FORMAT_VERSION);
   }
 }
 
@@ -131,7 +131,7 @@ static void check_magic_and_version(Reader *r) {
  * boundary an embedder crosses with untrusted/unvalidated bytecode (a
  * compiled-elsewhere .ice, or a load-chunk-bytes blob), so it must
  * reject an implausible count outright instead of attempting whatever
- * allocation it implies. CVM_LOADER_MAX_COUNT is generous headroom over
+ * allocation it implies. CREME_LOADER_MAX_COUNT is generous headroom over
  * any real compiled program's own counts (icecreme/compiler-run.ice, the
  * largest real chunk in this repo, needs a tiny fraction of it) while
  * still well short of "attempt a multi-gigabyte allocation on a corrupt/
@@ -140,12 +140,12 @@ static void check_magic_and_version(Reader *r) {
  * array field: 67,108,864 * sizeof(void*)), confirmed via `make fuzz`
  * (see fuzz/fuzz_loader.c) finding it as an out-of-memory artifact within
  * the first few hundred runs. */
-#define CVM_LOADER_MAX_COUNT (1 << 21) /* 2,097,152 */
+#define CREME_LOADER_MAX_COUNT (1 << 21) /* 2,097,152 */
 
 static int32_t read_count(Reader *r, const char *what) {
   int32_t v = read_i32(r);
-  if (v < 0 || v > CVM_LOADER_MAX_COUNT) {
-    cvm_abort("icecreme: corrupt bytecode in %s: implausible %s count %d", r->path, what, v);
+  if (v < 0 || v > CREME_LOADER_MAX_COUNT) {
+    creme_abort("icecreme: corrupt bytecode in %s: implausible %s count %d", r->path, what, v);
   }
   return v;
 }
@@ -154,8 +154,8 @@ static int32_t read_count(Reader *r, const char *what) {
  * need their own storage (leaked, like everything else here — see
  * value.h's header comment). */
 static char *read_bytes(Reader *r, int len) {
-  if (len < 0 || len > CVM_LOADER_MAX_COUNT) {
-    cvm_abort("icecreme: corrupt bytecode in %s: implausible byte length %d", r->path, len);
+  if (len < 0 || len > CREME_LOADER_MAX_COUNT) {
+    creme_abort("icecreme: corrupt bytecode in %s: implausible byte length %d", r->path, len);
   }
   char *buf = GC_MALLOC((size_t)len + 1);
   if (len > 0) must_read(r, buf, (size_t)len);
@@ -164,8 +164,8 @@ static char *read_bytes(Reader *r, int len) {
 }
 
 /* Looks up `name` among already-registered globals (builtins are registered
- * by main.c BEFORE cvm_load runs — see main.c) without creating a new
- * unbound slot for a miss, unlike cvm_global_intern. Mirrors
+ * by main.c BEFORE creme_load runs — see main.c) without creating a new
+ * unbound slot for a miss, unlike creme_global_intern. Mirrors
  * chunk_deserializer.cr's TAG_BUILTIN handling (`env.get?(name)`, nilable).
  * A miss returns v_nil() — same "unused placeholder" convention the old
  * CVM2 loader used for every Builtin const, since icecreme's fused-op deopt
@@ -181,8 +181,8 @@ static Value resolve_builtin_const(VM *vm, const char *name, int len) {
 }
 
 static void datum_label_add(Reader *r, int id, Value v) {
-  if (r->n_labels >= CVM_DATUM_LABELS_CAP) {
-    cvm_abort("icecreme: too many datum labels in one top-level datum (max %d) in %s", CVM_DATUM_LABELS_CAP, r->path);
+  if (r->n_labels >= CREME_DATUM_LABELS_CAP) {
+    creme_abort("icecreme: too many datum labels in one top-level datum (max %d) in %s", CREME_DATUM_LABELS_CAP, r->path);
   }
   r->labels[r->n_labels].id = id;
   r->labels[r->n_labels].value = v;
@@ -210,7 +210,7 @@ static Value read_datum_rec(Reader *r, VM *vm);
  * DoS (or worse, on a platform without stack-overflow protection) rather
  * than the clean "corrupt bytecode" rejection every other malformed-
  * input case here already gives. */
-#define CVM_LOADER_MAX_DATUM_DEPTH 100000
+#define CREME_LOADER_MAX_DATUM_DEPTH 100000
 
 /* General recursive datum reader (mirrors ChunkSerializer's write_datum) —
  * used both for an ordinary chunk const and for a QQ_CONST template node's
@@ -254,10 +254,10 @@ static Value read_datum_rec_impl(Reader *r, VM *vm);
  * (TAG_COMPLEX/TAG_PAIR/TAG_VECTOR's own car/cdr/item reads) goes through
  * THIS name, not the impl directly, so the depth counter and its cap are
  * enforced at every nesting level, not just the outermost. See
- * CVM_LOADER_MAX_DATUM_DEPTH's own doc comment for why. */
+ * CREME_LOADER_MAX_DATUM_DEPTH's own doc comment for why. */
 static Value read_datum_rec(Reader *r, VM *vm) {
-  if (r->datum_depth >= CVM_LOADER_MAX_DATUM_DEPTH) {
-    cvm_abort("icecreme: corrupt bytecode in %s: datum nesting too deep (max %d)", r->path, CVM_LOADER_MAX_DATUM_DEPTH);
+  if (r->datum_depth >= CREME_LOADER_MAX_DATUM_DEPTH) {
+    creme_abort("icecreme: corrupt bytecode in %s: datum nesting too deep (max %d)", r->path, CREME_LOADER_MAX_DATUM_DEPTH);
   }
   r->datum_depth++;
   Value result = read_datum_rec_impl(r, vm);
@@ -270,7 +270,7 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
   if (tag == TAG_LABEL_REF) {
     int id = read_i32(r);
     Value v;
-    if (!datum_label_find(r, id, &v)) cvm_abort("icecreme: unknown datum label #%d# in %s", id, r->path);
+    if (!datum_label_find(r, id, &v)) creme_abort("icecreme: unknown datum label #%d# in %s", id, r->path);
     return v;
   }
   int def_id = -1;
@@ -298,11 +298,11 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
      * still honor that -- a corrupt/hostile den=0 reaches GMP's own
      * mpq_set_si/mpq_canonicalize, which detects the division by zero
      * itself and calls ITS OWN exception handler (an unconditional
-     * raise/abort, not cvm_abort's catchable path) -- a real,
+     * raise/abort, not creme_abort's catchable path) -- a real,
      * reproducible crash found via `make fuzz` (see fuzz/fuzz_loader.c)
      * within a couple thousand runs. */
     if (den == 0) {
-      cvm_abort("icecreme: corrupt bytecode in %s: rational constant has a zero denominator", r->path);
+      creme_abort("icecreme: corrupt bytecode in %s: rational constant has a zero denominator", r->path);
     }
     mpq_t q;
     mpq_init(q);
@@ -384,7 +384,7 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
     return result;
   }
   default:
-    cvm_abort("icecreme: unknown const/datum tag %d in %s", tag, r->path);
+    creme_abort("icecreme: unknown const/datum tag %d in %s", tag, r->path);
   }
 }
 
@@ -410,7 +410,7 @@ static QQTemplate *read_qq_template(Reader *r, VM *vm) {
     for (int i = 0; i < t->n_items; i++) t->items[i] = read_qq_template(r, vm);
     break;
   default:
-    cvm_abort("icecreme: unknown QQTemplate tag %d in %s", t->tag, r->path);
+    creme_abort("icecreme: unknown QQTemplate tag %d in %s", t->tag, r->path);
   }
   return t;
 }
@@ -441,7 +441,7 @@ static CaseDispatchTable read_case_dispatch_table(Reader *r) {
     case CDK_NIL:
       break;
     default:
-      cvm_abort("icecreme: unknown CaseDispatchKey tag %d in %s", e->tag, r->path);
+      creme_abort("icecreme: unknown CaseDispatchKey tag %d in %s", e->tag, r->path);
     }
     e->target = read_i32(r);
   }
@@ -451,8 +451,8 @@ static CaseDispatchTable read_case_dispatch_table(Reader *r) {
 /* Max recursive-descent depth through read_chunk (nested protos, i.e.
  * lexically nested lambdas) -- generous headroom over any realistic
  * source nesting depth, for the same untrusted-input reason
- * CVM_LOADER_MAX_DATUM_DEPTH exists (see its own doc comment). */
-#define CVM_LOADER_MAX_CHUNK_DEPTH 10000
+ * CREME_LOADER_MAX_DATUM_DEPTH exists (see its own doc comment). */
+#define CREME_LOADER_MAX_CHUNK_DEPTH 10000
 
 static Chunk *read_chunk_impl(Reader *r, VM *vm);
 
@@ -460,8 +460,8 @@ static Chunk *read_chunk_impl(Reader *r, VM *vm);
  * through THIS name, not the impl directly, enforcing the cap at every
  * nesting level. Mirrors read_datum_rec's own wrapper/impl split. */
 static Chunk *read_chunk(Reader *r, VM *vm) {
-  if (r->chunk_depth >= CVM_LOADER_MAX_CHUNK_DEPTH) {
-    cvm_abort("icecreme: corrupt bytecode in %s: chunk (proto) nesting too deep (max %d)", r->path, CVM_LOADER_MAX_CHUNK_DEPTH);
+  if (r->chunk_depth >= CREME_LOADER_MAX_CHUNK_DEPTH) {
+    creme_abort("icecreme: corrupt bytecode in %s: chunk (proto) nesting too deep (max %d)", r->path, CREME_LOADER_MAX_CHUNK_DEPTH);
   }
   r->chunk_depth++;
   Chunk *c = read_chunk_impl(r, vm);
@@ -499,7 +499,7 @@ static Chunk *read_chunk_impl(Reader *r, VM *vm) {
       pos->col = 0;
     }
     if (ins->op < 0 || ins->op >= OP_COUNT) {
-      cvm_abort("icecreme: unknown opcode id %d in %s", ins->op, r->path);
+      creme_abort("icecreme: unknown opcode id %d in %s", ins->op, r->path);
     }
   }
 
@@ -568,18 +568,18 @@ static Chunk *read_chunk_impl(Reader *r, VM *vm) {
  * ISN'T actually a symbol/string (e.g. a TAG_INT const), used to reach
  * `.as.chars`/`.aux` directly -- reinterpreting an arbitrary Value's
  * bit pattern as a pointer+length and calling strlen/memcmp on it via
- * cvm_global_intern. Found via `make fuzz` (see fuzz/fuzz_loader.c) as
+ * creme_global_intern. Found via `make fuzz` (see fuzz/fuzz_loader.c) as
  * a real, reproducible SIGSEGV inside strlen within the first ~1500
  * runs -- confirmed a genuine type-confusion bug, not a fuzzer/harness
  * artifact, by hand-crafting a chunk whose GetGlobal operand pointed at
  * a TAG_INT const. */
 static Value global_name_const(Chunk *c, int idx, const char *path) {
   if (idx < 0 || idx >= c->n_consts) {
-    cvm_abort("icecreme: corrupt bytecode in %s: global-name const index %d out of range (n_consts=%d)", path, idx, c->n_consts);
+    creme_abort("icecreme: corrupt bytecode in %s: global-name const index %d out of range (n_consts=%d)", path, idx, c->n_consts);
   }
   Value name = c->consts[idx];
   if (name.tag != T_SYM && name.tag != T_STR) {
-    cvm_abort("icecreme: corrupt bytecode in %s: global-name const #%d is not a symbol/string (tag %d)", path, idx, name.tag);
+    creme_abort("icecreme: corrupt bytecode in %s: global-name const #%d is not a symbol/string (tag %d)", path, idx, name.tag);
   }
   return name;
 }
@@ -590,13 +590,13 @@ static void resolve_globals(VM *vm, Chunk *c, const char *path) {
     switch (ins->op) {
     case OP_GETGLOBAL: {
       Value name = global_name_const(c, ins->b, path);
-      ins->b = cvm_global_intern(vm, name.as.chars, name.aux);
+      ins->b = creme_global_intern(vm, name.as.chars, name.aux);
       break;
     }
     case OP_DEFGLOBAL:
     case OP_SETGLOBAL: {
       Value name = global_name_const(c, ins->a, path);
-      ins->a = cvm_global_intern(vm, name.as.chars, name.aux);
+      ins->a = creme_global_intern(vm, name.as.chars, name.aux);
       break;
     }
     case OP_CALLGLOBAL:
@@ -604,13 +604,13 @@ static void resolve_globals(VM *vm, Chunk *c, const char *path) {
     case OP_FORLOOPGUARDEDINC:
     case OP_FORLOOPGUARDEDDEC: {
       Value name = global_name_const(c, ins->d, path);
-      ins->d = cvm_global_intern(vm, name.as.chars, name.aux);
+      ins->d = creme_global_intern(vm, name.as.chars, name.aux);
       break;
     }
     case OP_RETURNGLOBAL:
     case OP_TESTGLOBALIDENTITY: {
       Value name = global_name_const(c, ins->a, path);
-      ins->a = cvm_global_intern(vm, name.as.chars, name.aux);
+      ins->a = creme_global_intern(vm, name.as.chars, name.aux);
       break;
     }
     default:
@@ -644,24 +644,24 @@ static void read_required_families(Reader *r, char ***names_out, int *count_out)
   if (count_out) *count_out = count;
 }
 
-/* Standalone "peek" counterpart to cvm_load: opens `path`, reads just the
+/* Standalone "peek" counterpart to creme_load: opens `path`, reads just the
  * magic + required-families metadata section, then closes the file again
  * without touching the chunk body -- so main.c can learn which builtin
  * families a compiled file needs and register only those BEFORE calling the
- * real cvm_load (which needs those globals already registered, since
- * resolve_globals's cvm_global_intern must see them to resolve GetGlobal/
+ * real creme_load (which needs those globals already registered, since
+ * resolve_globals's creme_global_intern must see them to resolve GetGlobal/
  * DefGlobal/etc. operands correctly -- see resolve_globals's own doc
- * comment above and main.c's registration-before-cvm_load convention).
- * cvm_load itself re-reads (and discards, if the caller passes NULL/NULL)
+ * comment above and main.c's registration-before-creme_load convention).
+ * creme_load itself re-reads (and discards, if the caller passes NULL/NULL)
  * this same section when it runs for real right after -- a second, cheap
  * file open+seek, deliberately kept rather than threading one shared Reader
  * across two calls, since that would mean exposing Reader's file-handle
  * lifetime across a call boundary for no real benefit here. */
-void cvm_peek_required_families(const char *path, char ***names_out, int *count_out) {
+void creme_peek_required_families(const char *path, char ***names_out, int *count_out) {
   Reader r = {0};
   r.path = path;
   r.f = fopen(path, "rb");
-  if (!r.f) cvm_abort("icecreme: cannot open %s", path);
+  if (!r.f) creme_abort("icecreme: cannot open %s", path);
 
   check_magic_and_version(&r);
 
@@ -669,11 +669,11 @@ void cvm_peek_required_families(const char *path, char ***names_out, int *count_
   fclose(r.f);
 }
 
-Chunk *cvm_load(const char *path, VM *vm, char ***required_families_out, int *required_families_count_out) {
+Chunk *creme_load(const char *path, VM *vm, char ***required_families_out, int *required_families_count_out) {
   Reader r = {0};
   r.path = path;
   r.f = fopen(path, "rb");
-  if (!r.f) cvm_abort("icecreme: cannot open %s", path);
+  if (!r.f) creme_abort("icecreme: cannot open %s", path);
 
   check_magic_and_version(&r);
 
@@ -686,12 +686,12 @@ Chunk *cvm_load(const char *path, VM *vm, char ***required_families_out, int *re
   return chunk;
 }
 
-/* In-memory counterpart of cvm_load -- see the Reader struct's own doc
+/* In-memory counterpart of creme_load -- see the Reader struct's own doc
  * comment above. Used by (creme bootstrap)'s icecreme-side `load-chunk-bytes`
  * builtin (bootstrap.c) to load a bytevector a running program just
  * computed (e.g. the self-hosted compiler's own compile-source-to-bytes
  * output) without ever touching the filesystem. */
-Chunk *cvm_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len, char ***required_families_out, int *required_families_count_out) {
+Chunk *creme_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len, char ***required_families_out, int *required_families_count_out) {
   Reader r = {0};
   r.path = "<bytevector>";
   r.buf = bytes;

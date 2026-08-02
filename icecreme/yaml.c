@@ -113,7 +113,7 @@ static Value v_str_copy(const char *s, int len) {
 
 static void yaml_next_event(yaml_parser_t *parser, yaml_event_t *event) {
   if (!yaml_parser_parse(parser, event))
-    cvm_abort("yaml-read: invalid yaml: %s", parser->problem ? parser->problem : "parse error");
+    creme_abort("yaml-read: invalid yaml: %s", parser->problem ? parser->problem : "parse error");
 }
 
 static int yaml_text_is(const char *s, int len, const char *lit) {
@@ -253,7 +253,7 @@ static Value yaml_parse_mapping(yaml_parser_t *parser) {
       yaml_event_delete(&kev);
       break;
     }
-    if (kev.type != YAML_SCALAR_EVENT) cvm_abort("yaml-read: invalid yaml: only scalar mapping keys are supported");
+    if (kev.type != YAML_SCALAR_EVENT) creme_abort("yaml-read: invalid yaml: only scalar mapping keys are supported");
     Value key = v_str_copy((const char *)kev.data.scalar.value, (int)kev.data.scalar.length);
     yaml_event_delete(&kev);
 
@@ -287,18 +287,18 @@ static Value yaml_parse_value(yaml_parser_t *parser, yaml_event_t *event) {
     case YAML_MAPPING_START_EVENT:
       return yaml_parse_mapping(parser);
     case YAML_ALIAS_EVENT:
-      cvm_abort("yaml-read: anchors/aliases are not supported");
+      creme_abort("yaml-read: anchors/aliases are not supported");
     default:
-      cvm_abort("yaml-read: invalid yaml: unexpected event");
+      creme_abort("yaml-read: invalid yaml: unexpected event");
   }
 }
 
 static Value bi_yaml_read(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) cvm_abort("yaml-read: expected string, got a non-string value");
+  if (nargs < 1 || args[0].tag != T_STR) creme_abort("yaml-read: expected string, got a non-string value");
 
   yaml_parser_t parser;
-  if (!yaml_parser_initialize(&parser)) cvm_abort("yaml-read: failed to initialize yaml parser");
+  if (!yaml_parser_initialize(&parser)) creme_abort("yaml-read: failed to initialize yaml parser");
   yaml_parser_set_input_string(&parser, (const unsigned char *)args[0].as.chars, (size_t)args[0].aux);
 
   yaml_event_t event;
@@ -336,7 +336,7 @@ static int is_yaml_alist(Value v) {
 }
 
 static void yaml_emit_or_abort(yaml_emitter_t *emitter, yaml_event_t *event) {
-  if (!yaml_emitter_emit(emitter, event)) cvm_abort("yaml-write: failed to emit yaml event");
+  if (!yaml_emitter_emit(emitter, event)) creme_abort("yaml-write: failed to emit yaml event");
 }
 
 static void yaml_emit_scalar(yaml_emitter_t *emitter, const char *s, int len) {
@@ -403,7 +403,7 @@ static void yaml_emit_value(yaml_emitter_t *emitter, Value v, const char *who) {
         yaml_mapping_end_event_initialize(&end);
         yaml_emit_or_abort(emitter, &end);
       } else {
-        if (!is_proper_list(v)) cvm_abort("%s: cannot serialize improper list", who);
+        if (!is_proper_list(v)) creme_abort("%s: cannot serialize improper list", who);
         yaml_event_t start, end;
         yaml_sequence_start_event_initialize(&start, NULL, NULL, 1, YAML_BLOCK_SEQUENCE_STYLE);
         yaml_emit_or_abort(emitter, &start);
@@ -413,7 +413,7 @@ static void yaml_emit_value(yaml_emitter_t *emitter, Value v, const char *who) {
       }
       return;
     default:
-      cvm_abort("%s: cannot serialize this value", who);
+      creme_abort("%s: cannot serialize this value", who);
   }
 }
 
@@ -424,13 +424,13 @@ static int yaml_write_handler(void *data, unsigned char *buffer, size_t size) {
 
 static Value bi_yaml_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("yaml-write: expected an argument");
+  if (nargs < 1) creme_abort("yaml-write: expected an argument");
 
   GBuf out;
   gbuf_init(&out);
 
   yaml_emitter_t emitter;
-  if (!yaml_emitter_initialize(&emitter)) cvm_abort("yaml-write: failed to initialize yaml emitter");
+  if (!yaml_emitter_initialize(&emitter)) creme_abort("yaml-write: failed to initialize yaml emitter");
   yaml_emitter_set_output(&emitter, yaml_write_handler, &out);
 
   yaml_event_t event;
@@ -454,7 +454,7 @@ static Value bi_yaml_write(VM *vm, Value *args, int nargs) {
   return v_str(out.buf, out.len);
 }
 
-void cvm_register_yaml_builtins(VM *vm) {
-  cvm_register_builtin(vm, "yaml-read", bi_yaml_read);
-  cvm_register_builtin(vm, "yaml-write", bi_yaml_write);
+void creme_register_yaml_builtins(VM *vm) {
+  creme_register_builtin(vm, "yaml-read", bi_yaml_read);
+  creme_register_builtin(vm, "yaml-write", bi_yaml_write);
 }

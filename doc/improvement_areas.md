@@ -18,7 +18,7 @@ assumed icecreme resolves a global-variable reference the way, say, a
 Python module dict or a JS global object does — a real lookup on every
 access. It doesn't: `loader.c`'s `resolve_globals` interns every
 `GetGlobal`/`SetGlobal`/`DefGlobal`/`CallGlobal` reference to a fixed
-array slot index once, at load time (see `cvm_global_intern`). At
+array slot index once, at load time (see `creme_global_intern`). At
 runtime it's already just `vm->globals[ins->b]` — a direct array index
 plus a `bound` flag check, with no name comparison or hashtable
 involved. There's nothing here for an inline cache to speed up; this

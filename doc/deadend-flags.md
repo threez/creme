@@ -21,7 +21,7 @@ design, same as the sibling doc — the point is the verdict.
   so `-O2`'s inlining heuristic inlines them at every `OP_ADD`/`OP_TESTLT`/
   etc. call site for free (confirmed via `objdump -dr vm.o`); `-O3`'s more
   aggressive general-purpose inlining elsewhere in the same translation
-  unit bloats `cvm_dispatch` enough to cost icache/branch-prediction
+  unit bloats `creme_dispatch` enough to cost icache/branch-prediction
   locality on that same hot loop, outweighing whatever `-O3` gains
   elsewhere. **Never built past the design stage once this was raised.**
 

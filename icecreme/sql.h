@@ -3,11 +3,11 @@
  * (single connection, matching icecreme's single-threaded design — no reader/
  * writer WAL split like the real sql.cr needs for concurrent real-file
  * access). */
-#ifndef CVM_SQL_H
-#define CVM_SQL_H
+#ifndef CREME_SQL_H
+#define CREME_SQL_H
 
 #include "vm.h"
 
-void cvm_register_sql_builtins(VM *vm);
+void creme_register_sql_builtins(VM *vm);
 
 #endif

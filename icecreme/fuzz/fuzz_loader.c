@@ -1,4 +1,4 @@
-/* libFuzzer harness for cvm_load_from_bytes (loader.c) -- the ICE1
+/* libFuzzer harness for creme_load_from_bytes (loader.c) -- the ICE1
  * bytecode deserializer, the concrete untrusted-input boundary an
  * embedder crosses whenever it loads a precompiled .ice/bytevector it
  * didn't itself just compile (see icecreme/README.md's embedding notes).
@@ -23,7 +23,7 @@
  * field), so no state (globals table, handler stack) leaks between
  * fuzz iterations sharing this one persistent process. has_actor_unwind
  * + a local setjmp is the same mechanism actor.c's own spawned-actor
- * threads use to confine an uncaught cvm_abort to just their own
+ * threads use to confine an uncaught creme_abort to just their own
  * unwind point instead of exit()ing the whole process (see vm.h's own
  * has_actor_unwind doc comment) -- exactly what a persistent, many-
  * iterations-per-process fuzzer needs: a malformed input's expected
@@ -39,12 +39,12 @@
 
 /* Real implementation lives in main.c, excluded here so libFuzzer's own
  * main() (from its runtime, linked in via -fsanitize=fuzzer) is the only
- * one. Nothing this harness calls (cvm_load_from_bytes and what it calls
+ * one. Nothing this harness calls (creme_load_from_bytes and what it calls
  * transitively) actually invokes builtin registration -- this stub only
  * exists to satisfy bootstrap.o's own reference to it (bi_load_chunk_
  * bytes/bi_load_chunk_bytes_into, neither of which this harness reaches
  * either, but the linker still needs the symbol to resolve). */
-void cvm_register_required_builtins(VM *vm, char **families, int n_families) {
+void creme_register_required_builtins(VM *vm, char **families, int n_families) {
   (void)vm;
   (void)families;
   (void)n_families;
@@ -52,14 +52,14 @@ void cvm_register_required_builtins(VM *vm, char **families, int n_families) {
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   VM *vm = GC_MALLOC(sizeof(VM));
-  cvm_set_current_vm(vm);
+  creme_set_current_vm(vm);
   vm->has_actor_unwind = 1;
   if (setjmp(vm->actor_unwind) == 0) {
     char **families = NULL;
     int n_families = 0;
-    cvm_load_from_bytes(vm, data, size, &families, &n_families);
+    creme_load_from_bytes(vm, data, size, &families, &n_families);
   }
-  /* A caught cvm_abort (the expected outcome for almost every fuzzed
+  /* A caught creme_abort (the expected outcome for almost every fuzzed
    * input -- "corrupt bytecode", truncated file, implausible count,
    * excess nesting, etc.) lands here via the longjmp above; a
    * successfully-parsed input just falls through normally. Either way,

@@ -14,8 +14,8 @@
  * digest)'s EVP_Digest/HMAC and (creme actor)'s own HMAC-SHA256
  * handshake already use.
  *
- * cvm_abort longjmps out of the current builtin call on any error path
- * (see vm.c's own cvm_abort, used from a live (guard ...) handler) --
+ * creme_abort longjmps out of the current builtin call on any error path
+ * (see vm.c's own creme_abort, used from a live (guard ...) handler) --
  * every error branch below explicitly EVP_CIPHER_CTX_free()s first, so
  * a repeated failure (e.g. a bad tag on every retry) can't leak an
  * EVP_CIPHER_CTX each time the way an unwinding C++ exception would
@@ -42,7 +42,7 @@ static void value_bytes(Value v, const unsigned char **out_ptr, int *out_len, co
     *out_len = v.as.bv->len;
     return;
   }
-  cvm_abort("%s: expected a blob or string argument", who);
+  creme_abort("%s: expected a blob or string argument", who);
 }
 
 static Value str_lit(const char *s) { return v_str(s, (int)strlen(s)); }
@@ -65,7 +65,7 @@ static Value bytevector_value(const unsigned char *bytes, int len) {
 
 static Value random_bytevector(int n, const char *who) {
   unsigned char *buf = GC_MALLOC((size_t)n);
-  if (!RAND_bytes(buf, n)) cvm_abort("%s: RAND_bytes failed", who);
+  if (!RAND_bytes(buf, n)) creme_abort("%s: RAND_bytes failed", who);
   return bytevector_value(buf, n);
 }
 
@@ -90,22 +90,22 @@ static Value bi_aes_256_gcm_random_nonce(VM *vm, Value *args, int nargs) {
  * must run before any FFI call touches key/nonce. */
 static EVP_CIPHER_CTX *cipher_new_ctx(const unsigned char *key, int keylen, const unsigned char *nonce, int noncelen, int enc,
                                        const char *who) {
-  if (keylen != CIPHER_KEY_SIZE) cvm_abort("%s: expected a %d-byte key, got %d bytes", who, CIPHER_KEY_SIZE, keylen);
-  if (noncelen != CIPHER_NONCE_SIZE) cvm_abort("%s: expected a %d-byte nonce, got %d bytes", who, CIPHER_NONCE_SIZE, noncelen);
+  if (keylen != CIPHER_KEY_SIZE) creme_abort("%s: expected a %d-byte key, got %d bytes", who, CIPHER_KEY_SIZE, keylen);
+  if (noncelen != CIPHER_NONCE_SIZE) creme_abort("%s: expected a %d-byte nonce, got %d bytes", who, CIPHER_NONCE_SIZE, noncelen);
 
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-  if (!ctx) cvm_abort("%s: failed to allocate a cipher context", who);
+  if (!ctx) creme_abort("%s: failed to allocate a cipher context", who);
   if (EVP_CipherInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL, enc) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("%s: EVP_CipherInit_ex failed", who);
+    creme_abort("%s: EVP_CipherInit_ex failed", who);
   }
   if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, noncelen, NULL) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("%s: failed to set the GCM nonce length", who);
+    creme_abort("%s: failed to set the GCM nonce length", who);
   }
   if (EVP_CipherInit_ex(ctx, NULL, NULL, key, nonce, enc) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("%s: EVP_CipherInit_ex (key/nonce) failed", who);
+    creme_abort("%s: EVP_CipherInit_ex (key/nonce) failed", who);
   }
   return ctx;
 }
@@ -115,13 +115,13 @@ static void cipher_feed_aad(EVP_CIPHER_CTX *ctx, const unsigned char *aad, int a
   int outlen = 0;
   if (EVP_CipherUpdate(ctx, NULL, &outlen, aad, aadlen) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("%s: failed to authenticate additional data", who);
+    creme_abort("%s: failed to authenticate additional data", who);
   }
 }
 
 static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) cvm_abort("aes-256-gcm-encrypt: expected at least 3 arguments");
+  if (nargs < 3) creme_abort("aes-256-gcm-encrypt: expected at least 3 arguments");
   const unsigned char *key, *nonce, *pt, *aad = NULL;
   int keylen, noncelen, ptlen, aadlen = 0;
   value_bytes(args[0], &key, &keylen, "aes-256-gcm-encrypt");
@@ -136,20 +136,20 @@ static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
   int outlen = 0;
   if (EVP_CipherUpdate(ctx, outbuf, &outlen, pt, ptlen) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("aes-256-gcm-encrypt: EVP_CipherUpdate failed");
+    creme_abort("aes-256-gcm-encrypt: EVP_CipherUpdate failed");
   }
   int total = outlen;
   int finlen = 0;
   if (EVP_CipherFinal_ex(ctx, outbuf + total, &finlen) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("aes-256-gcm-encrypt: EVP_CipherFinal_ex failed");
+    creme_abort("aes-256-gcm-encrypt: EVP_CipherFinal_ex failed");
   }
   total += finlen;
 
   unsigned char *tag = GC_MALLOC(CIPHER_TAG_SIZE);
   if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, CIPHER_TAG_SIZE, tag) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("aes-256-gcm-encrypt: failed to get the authentication tag");
+    creme_abort("aes-256-gcm-encrypt: failed to get the authentication tag");
   }
   EVP_CIPHER_CTX_free(ctx);
 
@@ -159,7 +159,7 @@ static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
 
 static Value bi_aes_256_gcm_decrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 4) cvm_abort("aes-256-gcm-decrypt: expected at least 4 arguments");
+  if (nargs < 4) creme_abort("aes-256-gcm-decrypt: expected at least 4 arguments");
   const unsigned char *key, *nonce, *ct, *tag, *aad = NULL;
   int keylen, noncelen, ctlen, taglen, aadlen = 0;
   value_bytes(args[0], &key, &keylen, "aes-256-gcm-decrypt");
@@ -167,7 +167,7 @@ static Value bi_aes_256_gcm_decrypt(VM *vm, Value *args, int nargs) {
   value_bytes(args[2], &ct, &ctlen, "aes-256-gcm-decrypt");
   value_bytes(args[3], &tag, &taglen, "aes-256-gcm-decrypt");
   if (nargs >= 5) value_bytes(args[4], &aad, &aadlen, "aes-256-gcm-decrypt");
-  if (taglen != CIPHER_TAG_SIZE) cvm_abort("aes-256-gcm-decrypt: expected a %d-byte tag, got %d bytes", CIPHER_TAG_SIZE, taglen);
+  if (taglen != CIPHER_TAG_SIZE) creme_abort("aes-256-gcm-decrypt: expected a %d-byte tag, got %d bytes", CIPHER_TAG_SIZE, taglen);
 
   EVP_CIPHER_CTX *ctx = cipher_new_ctx(key, keylen, nonce, noncelen, 0, "aes-256-gcm-decrypt");
   cipher_feed_aad(ctx, aad, aadlen, "aes-256-gcm-decrypt");
@@ -176,27 +176,27 @@ static Value bi_aes_256_gcm_decrypt(VM *vm, Value *args, int nargs) {
   int outlen = 0;
   if (EVP_CipherUpdate(ctx, outbuf, &outlen, ct, ctlen) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("aes-256-gcm-decrypt: EVP_CipherUpdate failed");
+    creme_abort("aes-256-gcm-decrypt: EVP_CipherUpdate failed");
   }
   int total = outlen;
   /* EVP_CTRL_GCM_ takes a non-const void* even though it never writes
    * through it for SET_TAG -- `tag` is otherwise treated read-only. */
   if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, CIPHER_TAG_SIZE, (void *)tag) != 1) {
     EVP_CIPHER_CTX_free(ctx);
-    cvm_abort("aes-256-gcm-decrypt: failed to set the authentication tag");
+    creme_abort("aes-256-gcm-decrypt: failed to set the authentication tag");
   }
   int finlen = 0;
   int ok = EVP_CipherFinal_ex(ctx, outbuf + total, &finlen);
   EVP_CIPHER_CTX_free(ctx);
-  if (ok != 1) cvm_abort("aes-256-gcm-decrypt: authentication failed (tag mismatch)");
+  if (ok != 1) creme_abort("aes-256-gcm-decrypt: authentication failed (tag mismatch)");
   total += finlen;
 
   return bytevector_value(outbuf, total);
 }
 
-void cvm_register_cipher_builtins(VM *vm) {
-  cvm_register_builtin(vm, "aes-256-gcm-encrypt", bi_aes_256_gcm_encrypt);
-  cvm_register_builtin(vm, "aes-256-gcm-decrypt", bi_aes_256_gcm_decrypt);
-  cvm_register_builtin(vm, "aes-256-gcm-random-key", bi_aes_256_gcm_random_key);
-  cvm_register_builtin(vm, "aes-256-gcm-random-nonce", bi_aes_256_gcm_random_nonce);
+void creme_register_cipher_builtins(VM *vm) {
+  creme_register_builtin(vm, "aes-256-gcm-encrypt", bi_aes_256_gcm_encrypt);
+  creme_register_builtin(vm, "aes-256-gcm-decrypt", bi_aes_256_gcm_decrypt);
+  creme_register_builtin(vm, "aes-256-gcm-random-key", bi_aes_256_gcm_random_key);
+  creme_register_builtin(vm, "aes-256-gcm-random-nonce", bi_aes_256_gcm_random_nonce);
 }

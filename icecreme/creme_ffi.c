@@ -74,7 +74,7 @@ typedef struct {
 } FfiFunc;
 
 static int ffi_type_kind_from_sym(Value v, const char *who) {
-  if (v.tag != T_SYM) cvm_abort("%s: expected a type symbol", who);
+  if (v.tag != T_SYM) creme_abort("%s: expected a type symbol", who);
   const char *s = v.as.chars;
   int len = v.aux;
 #define MATCH(lit) (len == (int)(sizeof(lit) - 1) && memcmp(s, lit, len) == 0)
@@ -86,7 +86,7 @@ static int ffi_type_kind_from_sym(Value v, const char *who) {
   if (MATCH("string")) return FFI_T_STRING;
   if (MATCH("pointer")) return FFI_T_POINTER;
 #undef MATCH
-  cvm_abort("%s: unknown ffi type '%.*s' (expected void/int32/int64/double/bool/string/pointer)", who, len, s);
+  creme_abort("%s: unknown ffi type '%.*s' (expected void/int32/int64/double/bool/string/pointer)", who, len, s);
 }
 
 static ffi_type *libffi_type_for_kind(int kind) {
@@ -98,13 +98,13 @@ static ffi_type *libffi_type_for_kind(int kind) {
   case FFI_T_BOOL: return &ffi_type_sint32;
   case FFI_T_STRING: return &ffi_type_pointer;
   case FFI_T_POINTER: return &ffi_type_pointer;
-  default: cvm_abort("ffi: internal: bad type kind %d", kind);
+  default: creme_abort("ffi: internal: bad type kind %d", kind);
   }
 }
 
 static Value bi_ffi_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) cvm_abort("ffi-open: expected a library path/name string");
+  if (nargs != 1 || args[0].tag != T_STR) creme_abort("ffi-open: expected a library path/name string");
   char *path = GC_MALLOC((size_t)args[0].aux + 1);
   memcpy(path, args[0].as.chars, (size_t)args[0].aux);
   path[args[0].aux] = '\0';
@@ -112,7 +112,7 @@ static Value bi_ffi_open(VM *vm, Value *args, int nargs) {
   void *handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
   if (!handle) {
     const char *err = dlerror();
-    cvm_abort("ffi-open: %s: %s", path, err ? err : "dlopen failed");
+    creme_abort("ffi-open: %s: %s", path, err ? err : "dlopen failed");
   }
   return v_box(handle, BOX_KIND_FFI_LIB);
 }
@@ -120,7 +120,7 @@ static Value bi_ffi_open(VM *vm, Value *args, int nargs) {
 static Value bi_ffi_close(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_FFI_LIB) {
-    cvm_abort("ffi-close: expected a value from ffi-open");
+    creme_abort("ffi-close: expected a value from ffi-open");
   }
   dlclose(args[0].as.ptr);
   return v_nil();
@@ -129,7 +129,7 @@ static Value bi_ffi_close(VM *vm, Value *args, int nargs) {
 static Value bi_ffi_function(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 4 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_FFI_LIB || args[1].tag != T_STR) {
-    cvm_abort("ffi-function: expected (lib name-string ret-type-symbol arg-type-symbol-list)");
+    creme_abort("ffi-function: expected (lib name-string ret-type-symbol arg-type-symbol-list)");
   }
   void *handle = args[0].as.ptr;
   char *name = GC_MALLOC((size_t)args[1].aux + 1);
@@ -139,7 +139,7 @@ static Value bi_ffi_function(VM *vm, Value *args, int nargs) {
   dlerror();
   void *fnptr = dlsym(handle, name);
   const char *err = dlerror();
-  if (err) cvm_abort("ffi-function: %s: %s", name, err);
+  if (err) creme_abort("ffi-function: %s: %s", name, err);
 
   int ret_kind = ffi_type_kind_from_sym(args[2], "ffi-function");
 
@@ -163,7 +163,7 @@ static Value bi_ffi_function(VM *vm, Value *args, int nargs) {
 
   ffi_status status = ffi_prep_cif(&f->cif, FFI_DEFAULT_ABI, (unsigned int)n_args,
                                     libffi_type_for_kind(ret_kind), arg_types);
-  if (status != FFI_OK) cvm_abort("ffi-function: %s: ffi_prep_cif failed (status %d)", name, (int)status);
+  if (status != FFI_OK) creme_abort("ffi-function: %s: ffi_prep_cif failed (status %d)", name, (int)status);
 
   return v_box(f, BOX_KIND_FFI_FUNC);
 }
@@ -184,24 +184,24 @@ typedef union {
 static void marshal_arg_into(Value v, int kind, FfiSlot *slot, const char *who) {
   switch (kind) {
   case FFI_T_INT32:
-    if (v.tag != T_INT) cvm_abort("%s: expected an integer argument", who);
+    if (v.tag != T_INT) creme_abort("%s: expected an integer argument", who);
     slot->i32 = (int32_t)v.as.i;
     return;
   case FFI_T_INT64:
-    if (v.tag != T_INT) cvm_abort("%s: expected an integer argument", who);
+    if (v.tag != T_INT) creme_abort("%s: expected an integer argument", who);
     slot->i64 = v.as.i;
     return;
   case FFI_T_DOUBLE:
     if (v.tag == T_FLOAT) { slot->d = v.as.f; return; }
     if (v.tag == T_INT) { slot->d = (double)v.as.i; return; }
-    cvm_abort("%s: expected a real-number argument", who);
+    creme_abort("%s: expected a real-number argument", who);
   case FFI_T_BOOL:
-    if (v.tag != T_BOOL) cvm_abort("%s: expected a boolean argument", who);
+    if (v.tag != T_BOOL) creme_abort("%s: expected a boolean argument", who);
     slot->i32 = v.as.b ? 1 : 0;
     return;
   case FFI_T_STRING: {
     if (v.tag == T_BOOL && !v.as.b) { slot->ptr = NULL; return; } /* #f -> NULL */
-    if (v.tag != T_STR) cvm_abort("%s: expected a string (or #f) argument", who);
+    if (v.tag != T_STR) creme_abort("%s: expected a string (or #f) argument", who);
     char *buf = GC_MALLOC((size_t)v.aux + 1);
     memcpy(buf, v.as.chars, (size_t)v.aux);
     buf[v.aux] = '\0';
@@ -210,11 +210,11 @@ static void marshal_arg_into(Value v, int kind, FfiSlot *slot, const char *who) 
   }
   case FFI_T_POINTER:
     if (v.tag == T_BOOL && !v.as.b) { slot->ptr = NULL; return; } /* #f -> NULL */
-    if (v.tag != T_BOX || v.aux != BOX_KIND_FFI_POINTER) cvm_abort("%s: expected a pointer (or #f) argument", who);
+    if (v.tag != T_BOX || v.aux != BOX_KIND_FFI_POINTER) creme_abort("%s: expected a pointer (or #f) argument", who);
     slot->ptr = v.as.ptr;
     return;
   default:
-    cvm_abort("%s: internal: bad type kind %d", who, kind);
+    creme_abort("%s: internal: bad type kind %d", who, kind);
   }
 }
 
@@ -237,20 +237,20 @@ static Value marshal_return(int kind, FfiSlot *slot) {
     if (!slot->ptr) return v_bool(0);
     return v_box(slot->ptr, BOX_KIND_FFI_POINTER);
   default:
-    cvm_abort("ffi-call: internal: bad return type kind %d", kind);
+    creme_abort("ffi-call: internal: bad return type kind %d", kind);
   }
 }
 
 static Value bi_ffi_call(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_FFI_FUNC) {
-    cvm_abort("ffi-call: expected (func arg-list)");
+    creme_abort("ffi-call: expected (func arg-list)");
   }
   FfiFunc *f = (FfiFunc *)args[0].as.ptr;
 
   int given = 0;
   for (Value cur = args[1]; cur.tag == T_PAIR; cur = cur.as.pair->cdr) given++;
-  if (given != f->n_args) cvm_abort("ffi-call: expected %d argument(s), got %d", f->n_args, given);
+  if (given != f->n_args) creme_abort("ffi-call: expected %d argument(s), got %d", f->n_args, given);
 
   FfiSlot *slots = GC_MALLOC(sizeof(FfiSlot) * (size_t)(f->n_args ? f->n_args : 1));
   void **arg_ptrs = GC_MALLOC(sizeof(void *) * (size_t)(f->n_args ? f->n_args : 1));
@@ -272,28 +272,28 @@ static Value bi_ffi_call(VM *vm, Value *args, int nargs) {
  * general safety net -- an arbitrary offset+type still reads/writes
  * anywhere, same as real C). */
 static void *ffi_pointer_base_arg(Value v, const char *who) {
-  if (v.tag == T_BOOL && !v.as.b) cvm_abort("%s: pointer is null", who);
-  if (v.tag != T_BOX || v.aux != BOX_KIND_FFI_POINTER) cvm_abort("%s: expected a pointer argument", who);
-  if (!v.as.ptr) cvm_abort("%s: pointer is null", who);
+  if (v.tag == T_BOOL && !v.as.b) creme_abort("%s: pointer is null", who);
+  if (v.tag != T_BOX || v.aux != BOX_KIND_FFI_POINTER) creme_abort("%s: expected a pointer argument", who);
+  if (!v.as.ptr) creme_abort("%s: pointer is null", who);
   return v.as.ptr;
 }
 
 static Value bi_ffi_pointer_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 3 || args[1].tag != T_INT) cvm_abort("ffi-pointer-ref: expected (pointer offset type-symbol)");
+  if (nargs != 3 || args[1].tag != T_INT) creme_abort("ffi-pointer-ref: expected (pointer offset type-symbol)");
   void *base = ffi_pointer_base_arg(args[0], "ffi-pointer-ref");
   int kind = ffi_type_kind_from_sym(args[2], "ffi-pointer-ref");
-  if (kind == FFI_T_VOID) cvm_abort("ffi-pointer-ref: type must not be void");
+  if (kind == FFI_T_VOID) creme_abort("ffi-pointer-ref: type must not be void");
   FfiSlot *slot = (FfiSlot *)((char *)base + args[1].as.i);
   return marshal_return(kind, slot);
 }
 
 static Value bi_ffi_pointer_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 4 || args[1].tag != T_INT) cvm_abort("ffi-pointer-set!: expected (pointer offset type-symbol value)");
+  if (nargs != 4 || args[1].tag != T_INT) creme_abort("ffi-pointer-set!: expected (pointer offset type-symbol value)");
   void *base = ffi_pointer_base_arg(args[0], "ffi-pointer-set!");
   int kind = ffi_type_kind_from_sym(args[2], "ffi-pointer-set!");
-  if (kind == FFI_T_VOID) cvm_abort("ffi-pointer-set!: type must not be void");
+  if (kind == FFI_T_VOID) creme_abort("ffi-pointer-set!: type must not be void");
   FfiSlot *slot = (FfiSlot *)((char *)base + args[1].as.i);
   marshal_arg_into(args[3], kind, slot, "ffi-pointer-set!");
   return v_nil();
@@ -301,13 +301,13 @@ static Value bi_ffi_pointer_set(VM *vm, Value *args, int nargs) {
 
 static Value bi_ffi_type_size(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) cvm_abort("ffi-type-size: expected a type symbol");
+  if (nargs != 1) creme_abort("ffi-type-size: expected a type symbol");
   int kind = ffi_type_kind_from_sym(args[0], "ffi-type-size");
   switch (kind) {
   case FFI_T_INT32: return v_int(4);
   case FFI_T_BOOL: return v_int(4);
   case FFI_T_INT64: case FFI_T_DOUBLE: case FFI_T_STRING: case FFI_T_POINTER: return v_int(8);
-  default: cvm_abort("ffi-type-size: 'void has no size");
+  default: creme_abort("ffi-type-size: 'void has no size");
   }
 }
 
@@ -319,7 +319,7 @@ static Value bi_ffi_type_size(VM *vm, Value *args, int nargs) {
  * no matching free is ever REQUIRED, unlike a libc-malloc'd buffer. */
 static Value bi_ffi_gc_malloc(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_INT || args[0].as.i < 0) cvm_abort("ffi-gc-malloc: expected a non-negative size");
+  if (nargs != 1 || args[0].tag != T_INT || args[0].as.i < 0) creme_abort("ffi-gc-malloc: expected a non-negative size");
   return v_box(GC_MALLOC((size_t)args[0].as.i), BOX_KIND_FFI_POINTER);
 }
 
@@ -335,7 +335,7 @@ static Value bi_ffi_gc_malloc(VM *vm, Value *args, int nargs) {
  * this bridge's existing no-bounds-checking SECURITY posture. */
 static Value bi_ffi_gc_free(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) cvm_abort("ffi-gc-free: expected a pointer");
+  if (nargs != 1) creme_abort("ffi-gc-free: expected a pointer");
   void *ptr = ffi_pointer_base_arg(args[0], "ffi-gc-free");
   GC_FREE(ptr);
   return v_nil();
@@ -343,42 +343,42 @@ static Value bi_ffi_gc_free(VM *vm, Value *args, int nargs) {
 
 static Value bi_ffi_lib_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("ffi-lib?: expected an argument");
+  if (nargs < 1) creme_abort("ffi-lib?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_FFI_LIB);
 }
 
 static Value bi_ffi_function_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("ffi-function?: expected an argument");
+  if (nargs < 1) creme_abort("ffi-function?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_FFI_FUNC);
 }
 
 static Value bi_ffi_pointer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) cvm_abort("ffi-pointer?: expected an argument");
+  if (nargs < 1) creme_abort("ffi-pointer?: expected an argument");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_FFI_POINTER);
 }
 
 static Value bi_ffi_null_pointer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_FFI_POINTER) {
-    cvm_abort("ffi-null-pointer?: expected a pointer");
+    creme_abort("ffi-null-pointer?: expected a pointer");
   }
   return v_bool(args[0].as.ptr == NULL);
 }
 
-void cvm_register_ffi_builtins(VM *vm) {
-  cvm_register_builtin(vm, "ffi-open", bi_ffi_open);
-  cvm_register_builtin(vm, "ffi-close", bi_ffi_close);
-  cvm_register_builtin(vm, "ffi-function", bi_ffi_function);
-  cvm_register_builtin(vm, "ffi-call", bi_ffi_call);
-  cvm_register_builtin(vm, "ffi-pointer-ref", bi_ffi_pointer_ref);
-  cvm_register_builtin(vm, "ffi-pointer-set!", bi_ffi_pointer_set);
-  cvm_register_builtin(vm, "ffi-type-size", bi_ffi_type_size);
-  cvm_register_builtin(vm, "ffi-gc-malloc", bi_ffi_gc_malloc);
-  cvm_register_builtin(vm, "ffi-gc-free", bi_ffi_gc_free);
-  cvm_register_builtin(vm, "ffi-lib?", bi_ffi_lib_p);
-  cvm_register_builtin(vm, "ffi-function?", bi_ffi_function_p);
-  cvm_register_builtin(vm, "ffi-pointer?", bi_ffi_pointer_p);
-  cvm_register_builtin(vm, "ffi-null-pointer?", bi_ffi_null_pointer_p);
+void creme_register_ffi_builtins(VM *vm) {
+  creme_register_builtin(vm, "ffi-open", bi_ffi_open);
+  creme_register_builtin(vm, "ffi-close", bi_ffi_close);
+  creme_register_builtin(vm, "ffi-function", bi_ffi_function);
+  creme_register_builtin(vm, "ffi-call", bi_ffi_call);
+  creme_register_builtin(vm, "ffi-pointer-ref", bi_ffi_pointer_ref);
+  creme_register_builtin(vm, "ffi-pointer-set!", bi_ffi_pointer_set);
+  creme_register_builtin(vm, "ffi-type-size", bi_ffi_type_size);
+  creme_register_builtin(vm, "ffi-gc-malloc", bi_ffi_gc_malloc);
+  creme_register_builtin(vm, "ffi-gc-free", bi_ffi_gc_free);
+  creme_register_builtin(vm, "ffi-lib?", bi_ffi_lib_p);
+  creme_register_builtin(vm, "ffi-function?", bi_ffi_function_p);
+  creme_register_builtin(vm, "ffi-pointer?", bi_ffi_pointer_p);
+  creme_register_builtin(vm, "ffi-null-pointer?", bi_ffi_null_pointer_p);
 }

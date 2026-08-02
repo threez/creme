@@ -146,24 +146,24 @@ typedef struct {
 static void parse_url(const char *url, int len, ParsedUrl *out, const char *who) {
   const char *scheme_end = memchr(url, ':', (size_t)len);
   if (!scheme_end || scheme_end + 2 >= url + len || scheme_end[1] != '/' || scheme_end[2] != '/') {
-    cvm_abort("%s: invalid url '%.*s': missing scheme", who, len, url);
+    creme_abort("%s: invalid url '%.*s': missing scheme", who, len, url);
   }
   int scheme_len = (int)(scheme_end - url);
   int https = (scheme_len == 5 && memcmp(url, "https", 5) == 0);
   if (!https && !(scheme_len == 4 && memcmp(url, "http", 4) == 0)) {
-    cvm_abort("%s: invalid url '%.*s': unsupported scheme", who, len, url);
+    creme_abort("%s: invalid url '%.*s': unsupported scheme", who, len, url);
   }
 
   const char *rest = scheme_end + 3;
   int rest_len = len - (int)(rest - url);
-  if (rest_len == 0) cvm_abort("%s: invalid url '%.*s': missing host", who, len, url);
+  if (rest_len == 0) creme_abort("%s: invalid url '%.*s': missing host", who, len, url);
 
   const char *slash = memchr(rest, '/', (size_t)rest_len);
   const char *host_port = rest;
   int host_port_len = slash ? (int)(slash - rest) : rest_len;
   const char *path = slash ? slash : "/";
   int path_len = slash ? (rest_len - host_port_len) : 1;
-  if (host_port_len == 0) cvm_abort("%s: invalid url '%.*s': missing host", who, len, url);
+  if (host_port_len == 0) creme_abort("%s: invalid url '%.*s': missing host", who, len, url);
 
   const char *colon = memchr(host_port, ':', (size_t)host_port_len);
   int host_len = colon ? (int)(colon - host_port) : host_port_len;
@@ -171,7 +171,7 @@ static void parse_url(const char *url, int len, ParsedUrl *out, const char *who)
   if (colon) {
     char portbuf[16];
     int plen = host_port_len - host_len - 1;
-    if (plen <= 0 || plen >= (int)sizeof(portbuf)) cvm_abort("%s: invalid url '%.*s': bad port", who, len, url);
+    if (plen <= 0 || plen >= (int)sizeof(portbuf)) creme_abort("%s: invalid url '%.*s': bad port", who, len, url);
     memcpy(portbuf, colon + 1, (size_t)plen);
     portbuf[plen] = '\0';
     port = atoi(portbuf);
@@ -197,7 +197,7 @@ static HeaderLine *parse_headers_arg(Value v, const char *who) {
   while (cur.tag == T_PAIR) {
     Value entry = cur.as.pair->car;
     if (entry.tag != T_PAIR || entry.as.pair->car.tag != T_STR || entry.as.pair->cdr.tag != T_STR) {
-      cvm_abort("%s: expected (name . value) pair in headers", who);
+      creme_abort("%s: expected (name . value) pair in headers", who);
     }
     HeaderLine *hl = GC_MALLOC(sizeof(HeaderLine));
     hl->name = dupn(entry.as.pair->car.as.chars, entry.as.pair->car.aux);
@@ -207,7 +207,7 @@ static HeaderLine *parse_headers_arg(Value v, const char *who) {
     tail = &hl->next;
     cur = cur.as.pair->cdr;
   }
-  if (cur.tag != T_NIL) cvm_abort("%s: expected a proper list of (name . value) headers", who);
+  if (cur.tag != T_NIL) creme_abort("%s: expected a proper list of (name . value) headers", who);
   return head;
 }
 
@@ -278,7 +278,7 @@ static void ssl_ctx_init(void) {
   SSL_library_init();
   SSL_load_error_strings();
   g_ssl_ctx = SSL_CTX_new(TLS_client_method());
-  if (!g_ssl_ctx) cvm_abort("http: failed to create an SSL context");
+  if (!g_ssl_ctx) creme_abort("http: failed to create an SSL context");
   /* SSL_VERIFY_PEER (reject an invalid/untrusted cert) is the whole
    * point of doing TLS at all -- there is deliberately no builtin or
    * flag anywhere in this file to turn it off. Hostname verification
@@ -288,7 +288,7 @@ static void ssl_ctx_init(void) {
    * dialed, and without SSL_set1_host that mismatch would go unchecked. */
   SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
   if (!SSL_CTX_set_default_verify_paths(g_ssl_ctx)) {
-    cvm_abort("http: failed to load the system's default TLS trust store");
+    creme_abort("http: failed to load the system's default TLS trust store");
   }
 }
 
@@ -309,7 +309,7 @@ static int connect_tls(Conn *c, const char *host, int port, const char *who) {
   c->fd = connect_tcp(host, port);
   if (c->fd < 0) return -1;
   c->ssl = SSL_new(g_ssl_ctx);
-  if (!c->ssl) cvm_abort("%s: failed to create an SSL session", who);
+  if (!c->ssl) creme_abort("%s: failed to create an SSL session", who);
   SSL_set_fd(c->ssl, c->fd);
   SSL_set_tlsext_host_name(c->ssl, host);
   SSL_set1_host(c->ssl, host);
@@ -317,7 +317,7 @@ static int connect_tls(Conn *c, const char *host, int port, const char *who) {
     unsigned long e = ERR_get_error();
     char ebuf[256];
     ERR_error_string_n(e, ebuf, sizeof(ebuf));
-    cvm_abort("%s: TLS handshake with %s:%d failed: %s", who, host, port, ebuf);
+    creme_abort("%s: TLS handshake with %s:%d failed: %s", who, host, port, ebuf);
   }
   return 0;
 }
@@ -425,31 +425,31 @@ static char *dechunk(const char *body, int body_len, int *out_len) {
 /* ---- the shared request/response driver behind every http-* builtin --- */
 
 static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, int has_headers, Value body_v, int has_body, const char *who) {
-  if (url_v.tag != T_STR) cvm_abort("%s: expected string, got a non-string value", who);
+  if (url_v.tag != T_STR) creme_abort("%s: expected string, got a non-string value", who);
   ParsedUrl u;
   parse_url(url_v.as.chars, url_v.aux, &u, who);
 
   HeaderLine *user_headers = NULL;
   if (has_headers) {
-    if (headers_v.tag != T_PAIR && headers_v.tag != T_NIL) cvm_abort("%s: expected a headers alist", who);
+    if (headers_v.tag != T_PAIR && headers_v.tag != T_NIL) creme_abort("%s: expected a headers alist", who);
     user_headers = parse_headers_arg(headers_v, who);
   }
 
   const char *req_body = NULL;
   int req_body_len = 0;
   if (has_body) {
-    if (body_v.tag != T_STR) cvm_abort("%s: expected a string body", who);
+    if (body_v.tag != T_STR) creme_abort("%s: expected a string body", who);
     req_body = body_v.as.chars;
     req_body_len = body_v.aux;
   }
 
   Conn conn;
   if (u.https) {
-    if (connect_tls(&conn, u.host, u.port, who) != 0) cvm_abort("%s: connection to %s:%d failed", who, u.host, u.port);
+    if (connect_tls(&conn, u.host, u.port, who) != 0) creme_abort("%s: connection to %s:%d failed", who, u.host, u.port);
   } else {
     conn.ssl = NULL;
     conn.fd = connect_tcp(u.host, u.port);
-    if (conn.fd < 0) cvm_abort("%s: connection to %s:%d failed", who, u.host, u.port);
+    if (conn.fd < 0) creme_abort("%s: connection to %s:%d failed", who, u.host, u.port);
   }
 
   HBuf req;
@@ -464,7 +464,7 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
 
   if (conn_write_all(&conn, req.buf, (size_t)req.len) != 0) {
     conn_close(&conn);
-    cvm_abort("%s: connection to %s:%d failed while sending the request", who, u.host, u.port);
+    creme_abort("%s: connection to %s:%d failed while sending the request", who, u.host, u.port);
   }
 
   HBuf resp;
@@ -474,9 +474,9 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
 
   int next;
   int status_line_end = find_line_end(resp.buf, resp.len, 0, &next);
-  if (status_line_end < 0) cvm_abort("%s: %s:%d closed the connection without sending a response", who, u.host, u.port);
+  if (status_line_end < 0) creme_abort("%s: %s:%d closed the connection without sending a response", who, u.host, u.port);
   int status;
-  if (parse_status_line(resp.buf, status_line_end, &status) != 0) cvm_abort("%s: malformed status line from %s:%d", who, u.host, u.port);
+  if (parse_status_line(resp.buf, status_line_end, &status) != 0) creme_abort("%s: malformed status line from %s:%d", who, u.host, u.port);
 
   int pos = next;
   int chunked = 0;
@@ -524,58 +524,58 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
   for (HeaderLine *h = resp_headers; h; h = h->next) arr[idx++] = h;
   Value header_list = v_nil();
   for (int i = n_headers - 1; i >= 0; i--) {
-    Value pair = cvm_cons(vm, v_litstr(arr[i]->name), v_litstr(arr[i]->value));
-    header_list = cvm_cons(vm, pair, header_list);
+    Value pair = creme_cons(vm, v_litstr(arr[i]->name), v_litstr(arr[i]->value));
+    header_list = creme_cons(vm, pair, header_list);
   }
 
-  Value status_pair = cvm_cons(vm, v_litstr("status"), v_int(status));
-  Value headers_pair = cvm_cons(vm, v_litstr("headers"), header_list);
-  Value body_pair = cvm_cons(vm, v_litstr("body"), v_str(final_body, final_len));
-  return cvm_cons(vm, status_pair, cvm_cons(vm, headers_pair, cvm_cons(vm, body_pair, v_nil())));
+  Value status_pair = creme_cons(vm, v_litstr("status"), v_int(status));
+  Value headers_pair = creme_cons(vm, v_litstr("headers"), header_list);
+  Value body_pair = creme_cons(vm, v_litstr("body"), v_str(final_body, final_len));
+  return creme_cons(vm, status_pair, creme_cons(vm, headers_pair, creme_cons(vm, body_pair, v_nil())));
 }
 
 static Value bi_http_get(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("http-get: expected a url");
+  if (nargs < 1) creme_abort("http-get: expected a url");
   return http_do(vm, "GET", args[0], nargs >= 2 ? args[1] : v_nil(), nargs >= 2, v_nil(), 0, "http-get");
 }
 
 static Value bi_http_head(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("http-head: expected a url");
+  if (nargs < 1) creme_abort("http-head: expected a url");
   return http_do(vm, "HEAD", args[0], nargs >= 2 ? args[1] : v_nil(), nargs >= 2, v_nil(), 0, "http-head");
 }
 
 static Value bi_http_delete(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) cvm_abort("http-delete: expected a url");
+  if (nargs < 1) creme_abort("http-delete: expected a url");
   return http_do(vm, "DELETE", args[0], nargs >= 2 ? args[1] : v_nil(), nargs >= 2, v_nil(), 0, "http-delete");
 }
 
 static Value bi_http_post(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("http-post: expected (url body [headers])");
+  if (nargs < 2) creme_abort("http-post: expected (url body [headers])");
   return http_do(vm, "POST", args[0], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, args[1], 1, "http-post");
 }
 
 static Value bi_http_put(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("http-put: expected (url body [headers])");
+  if (nargs < 2) creme_abort("http-put: expected (url body [headers])");
   return http_do(vm, "PUT", args[0], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, args[1], 1, "http-put");
 }
 
 static Value bi_http_patch(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) cvm_abort("http-patch: expected (url body [headers])");
+  if (nargs < 2) creme_abort("http-patch: expected (url body [headers])");
   return http_do(vm, "PATCH", args[0], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, args[1], 1, "http-patch");
 }
 
 static Value bi_http_request(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) cvm_abort("http-request: expected (method url [headers [body]])");
+  if (nargs < 2 || args[0].tag != T_STR) creme_abort("http-request: expected (method url [headers [body]])");
   char *method = dupn(args[0].as.chars, args[0].aux);
   return http_do(vm, method, args[1], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, nargs >= 4 ? args[3] : v_nil(), nargs >= 4, "http-request");
 }
 
-void cvm_register_http_builtins(VM *vm) {
-  cvm_register_builtin(vm, "http-get", bi_http_get);
-  cvm_register_builtin(vm, "http-head", bi_http_head);
-  cvm_register_builtin(vm, "http-delete", bi_http_delete);
-  cvm_register_builtin(vm, "http-post", bi_http_post);
-  cvm_register_builtin(vm, "http-put", bi_http_put);
-  cvm_register_builtin(vm, "http-patch", bi_http_patch);
-  cvm_register_builtin(vm, "http-request", bi_http_request);
+void creme_register_http_builtins(VM *vm) {
+  creme_register_builtin(vm, "http-get", bi_http_get);
+  creme_register_builtin(vm, "http-head", bi_http_head);
+  creme_register_builtin(vm, "http-delete", bi_http_delete);
+  creme_register_builtin(vm, "http-post", bi_http_post);
+  creme_register_builtin(vm, "http-put", bi_http_put);
+  creme_register_builtin(vm, "http-patch", bi_http_patch);
+  creme_register_builtin(vm, "http-request", bi_http_request);
 }

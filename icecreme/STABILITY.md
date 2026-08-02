@@ -39,7 +39,7 @@ Versions follow `shard.yml`'s own `version:` field, synced into
 - **The `icecreme` CLI's own invocation contract**: `icecreme <file.ice-or-.scm>
   [script-args...]`, the `--profile` flag, and the `ICECREME_STACK_CAP`/
   `ICECREME_FRAMES_CAP` environment-variable resource-limit overrides (see
-  `cvm_alloc_vm`'s own doc comment in `vm.h`).
+  `creme_alloc_vm`'s own doc comment in `vm.h`).
 
 ## Explicitly UNSTABLE (may change in any release, including a patch)
 
