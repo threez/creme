@@ -2,7 +2,7 @@ require "../../spec_helper"
 require "file_utils"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -12,7 +12,7 @@ end
 
 describe "Appendix A Standard Libraries" do
   it "(scheme base) imports and every (scheme base) export is bound in @global" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     interp.library_export_names(["scheme", "base"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
@@ -20,7 +20,7 @@ describe "Appendix A Standard Libraries" do
 
   it "(scheme write) imports and exports display/write" do
     w("(import (scheme write)) (+ 1 1)").should eq("2")
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     interp.library_export_names(["scheme", "write"]).each do |name|
       interp.global.get?(name).should_not be_nil, "expected #{name} to be bound in @global"
     end
@@ -74,7 +74,7 @@ describe "Appendix A Standard Libraries" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "answer.scm"), "(define answer 42)")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
       Scheme.run_source(interp, <<-SCM).write_string.should eq("42")
         (import (scheme load))

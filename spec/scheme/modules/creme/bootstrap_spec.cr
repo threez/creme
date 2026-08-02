@@ -1,12 +1,12 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme bootstrap)) #{src}").write_string
 end
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme bootstrap)) #{src}")
 end
 
@@ -24,7 +24,7 @@ end
 
 describe "bootstrap module" do
   it "runs a deserialized chunk that matches direct evaluation" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (creme bootstrap))")
     blob = compiled_bytes(interp, interp.global, "(+ 1 2 3)")
     interp.global.define("chunk-bytes", blob)
@@ -33,7 +33,7 @@ describe "bootstrap module" do
   end
 
   it "round-trips closures, recursion, and strings/vectors" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (creme bootstrap))")
     src = <<-SCM
     (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
@@ -54,7 +54,7 @@ describe "bootstrap module" do
   end
 
   it "import! copies a library's bindings into the global env" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (creme bootstrap))")
     interp.global.get?("regexp-matches?").should be_nil
     Scheme.run_source(interp, %((import! (quote ((creme regex))))))
@@ -62,7 +62,7 @@ describe "bootstrap module" do
   end
 
   it "import! applies only/except/prefix import-set filters" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (creme bootstrap))")
     Scheme.run_source(interp, %((import! (quote ((prefix (only (creme regex) regexp) rx-))))))
     interp.global.get?("rx-regexp").should_not be_nil
@@ -70,21 +70,21 @@ describe "bootstrap module" do
   end
 
   it "expand-if-macro detects and expands a defmacro-defined global" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (creme bootstrap)) (defmacro my-list2 args (cons 'list args))")
     result = Scheme.run_source(interp, %((expand-if-macro '(my-list2 1 2 3))))
     result.write_string.should eq("(#t list 1 2 3)")
   end
 
   it "expand-if-macro detects and expands a define-syntax-defined global" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, %((import (creme bootstrap)) (define-syntax my-swap! (syntax-rules () ((_ a b) (let ((tmp a)) (set! a b) (set! b tmp)))))))
     result = Scheme.run_source(interp, %((expand-if-macro '(my-swap! x y))))
     result.write_string.should eq("(#t let ((tmp x)) (set! x y) (set! y tmp))")
   end
 
   it "expand-if-macro returns #f for an ordinary procedure or unbound name" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (creme bootstrap))")
     Scheme.run_source(interp, %((expand-if-macro '(+ 1 2)))).write_string.should eq("#f")
     Scheme.run_source(interp, %((expand-if-macro '(totally-unbound-name 1 2)))).write_string.should eq("#f")

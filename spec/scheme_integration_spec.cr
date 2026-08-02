@@ -76,7 +76,7 @@ describe "integration: examples/demo.scm scenarios" do
   end
 
   it "runs examples/demo.scm end to end without raising" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_file(interp, "examples/demo.scm")
   end
 end

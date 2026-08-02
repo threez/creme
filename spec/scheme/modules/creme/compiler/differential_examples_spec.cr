@@ -15,8 +15,8 @@ require "../../../../spec_helper"
 #   - 27-http-json-fetch.scm, 34-actor-ping-pong.scm, 35-mux-router.scm:
 #     real network I/O (sockets/HTTP) -- unavailable/flaky in CI, and 34
 #     also spawns actor Fibers with non-deterministic interleaving.
-#   - 37-raft-kv-store.scm: a multi-node Raft cluster; log/message
-#     ordering across nodes isn't guaranteed byte-identical run to run.
+#   - 37-raft-kv-store.scm: a multi-node Raft cluster; log/message ordering
+#     across nodes isn't guaranteed byte-identical run to run.
 #   - 03-random-password-generator.scm, 10-random-dice-roller.scm,
 #     17-random-lottery-drawer.scm, 25-rfc8439-secure-message.scm:
 #     unseeded (random) output (25 generates a random key/nonce), genuinely
@@ -24,6 +24,11 @@ require "../../../../spec_helper"
 #   - 07-time-process-stopwatch.scm, 20-time-json-event-log.scm,
 #     14-process-build-pipeline.scm, 38-memoized-fib.scm: print wall-clock
 #     timestamps/elapsed durations.
+#   - 40-ffi-struct-pointer-clock.scm: prints the real wall-clock time
+#     (via libc's gettimeofday(), read back field-by-field out of a real
+#     struct timeval) -- the native and self-hosted runs happen a moment
+#     apart, so the tv_sec/tv_usec values would spuriously fail an
+#     otherwise-identical diff.
 #   - bench/bench.scm: shells out to external processes/language runtimes
 #     (Ruby, Racket, Go, Node, ...) for a cross-language timing comparison
 #     -- explicitly documented in its own header as "a single-run
@@ -59,11 +64,21 @@ EXCLUDED = [
   "20-time-json-event-log.scm",
   "14-process-build-pipeline.scm",
   "38-memoized-fib.scm",
+  "40-ffi-struct-pointer-clock.scm",
   "demo2.scm",
 ]
 
 private def load_toolchain(interp : Scheme::Interpreter) : Nil
   Scheme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
+  # See src/main.cr's SELF_HOSTED_TOOLCHAIN_MARK_LOADED's own doc comment
+  # -- needed now that compiler.sld's own file-read genuinely works
+  # reentrant here too, to avoid re-reading/re-executing one of these
+  # same libraries' own source a second time.
+  Scheme.run_source(interp, %(
+    (mark-self-hosted-library-loaded! '(creme peg))
+    (mark-self-hosted-library-loaded! '(creme bytecode))
+    (mark-self-hosted-library-loaded! '(creme compiler reader))
+    (mark-self-hosted-library-loaded! '(creme compiler compiler))))
 end
 
 private def run_native(path : String) : String
@@ -95,7 +110,7 @@ describe "differential sweep: examples/*.scm compiled by both compilers" do
   # vetted for this sweep.
   files = Dir.glob("examples/*.scm")
     .reject { |path| EXCLUDED.includes?(File.basename(path)) }
-    .sort
+    .sort!
 
   files.each do |path|
     it "produces identical stdout for #{path} natively vs. self-hosted-compiled" do

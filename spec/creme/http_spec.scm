@@ -13,10 +13,12 @@
 ;; whatever bytes were read, if the server ever sends one) rather than
 ;; tracking Content-Length precisely while receiving.
 ;;
-;; TLS/HTTPS is a deliberate, documented scope cut (see http.c's own
-;; header comment) -- this project's own native spec suite
-;; (spec/scheme/modules/creme/http_spec.cr) never exercises HTTPS
-;; either, only plain http://127.0.0.1:<port>.
+;; HTTPS/TLS is now real (cvm/http.c's own header comment) -- this file's
+;; two https:// cases near the end are the only ones needing actual
+;; external network access, everything else here is local-only via the
+;; spawned mux server below. Native's own spec suite (spec/scheme/modules/
+;; creme/http_spec.cr) still never exercises HTTPS -- that's Crystal's
+;; standard HTTP::Client, already TLS-capable independent of this project.
 ;;
 ;; Unlike this directory's should-match-native? spec files, this one
 ;; needs a REAL server to test the client against -- same reasoning as
@@ -84,7 +86,7 @@
          (mux-head! router "/head"
            (lambda (request)
              (list (cons "status" 200) (cons "body" ""))))
-         (mux-listen! router http-spec-port "127.0.0.1")
+         (mux-listen! router http-spec-port (list (cons "host" "127.0.0.1")))
          (display "unreachable: mux-listen! blocks its own thread forever")))
 
 (define (try-connect n)
@@ -125,7 +127,23 @@
   (it "raises on a malformed url"
     (should-raise? (lambda () (http-get "not a url"))))
 
-  (it "raises on an https url (TLS not supported)"
-    (should-raise? (lambda () (http-get "https://example.com")))))
+  ;; HTTPS: real TLS now (cvm/http.c's Conn/connect_tls), always with full
+  ;; certificate + hostname verification (SSL_VERIFY_PEER against the
+  ;; system trust store, plus SSL_set1_host -- see http.c's own header
+  ;; comment; there's no flag anywhere to turn either off). Unlike every
+  ;; other case in this file, these two genuinely need REAL external
+  ;; network access -- there's no local TLS server here to test against
+  ;; (cvm's own mux.c is a plain-HTTP server only, no TLS listener), so
+  ;; this mirrors examples/27-http-json-fetch.scm's own pre-existing
+  ;; live-network dependency (postman-echo.com) rather than introducing a
+  ;; new kind of exception: example.com and badssl.com's wrong-host
+  ;; fixture are both long-lived, stable endpoints kept up specifically
+  ;; for this kind of TLS-client smoke test.
+  (it "performs a real HTTPS GET with certificate/hostname verification"
+    (let ((result (http-get "https://example.com")))
+      (should-equal? (cdr (assoc "status" result)) 200)))
+
+  (it "rejects an https url whose certificate doesn't match the hostname"
+    (should-raise? (lambda () (http-get "https://wrong.host.badssl.com/")))))
 
 (spec-summary!)

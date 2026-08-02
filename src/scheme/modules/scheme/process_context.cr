@@ -32,7 +32,7 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "process-context"] do |env|
+    register_library ["creme", "builtin", "process-context"] do |env|
       register_module(Scheme::Builtins::ProcessLibrary, env) +
         register_module(Scheme::Builtins::EnvVars, env) +
         register_module(Scheme::Builtins::ProcessContext, env)

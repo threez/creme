@@ -1,7 +1,7 @@
 require "../../spec_helper"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -178,7 +178,7 @@ describe Scheme::Interpreter do
     end
 
     it "names an anonymous lambda when bound via define" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       Scheme.run_source(interp, "(define f (lambda (x) x))")
       interp.global.get("f").display_string.should eq("#<closure:f>")
     end
@@ -362,35 +362,35 @@ describe Scheme::Interpreter do
 
   describe "max_eval_depth" do
     it "defaults to DEFAULT_MAX_EVAL_DEPTH" do
-      Scheme::Interpreter.new.max_eval_depth.should eq(Scheme::Interpreter::DEFAULT_MAX_EVAL_DEPTH)
+      Scheme::Interpreter.new(library_search_path: ["./modules"]).max_eval_depth.should eq(Scheme::Interpreter::DEFAULT_MAX_EVAL_DEPTH)
     end
 
     it "is configurable via the constructor" do
-      Scheme::Interpreter.new(max_eval_depth: 10).max_eval_depth.should eq(10)
+      Scheme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 10).max_eval_depth.should eq(10)
     end
 
     it "is configurable after construction via the property setter" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.max_eval_depth = 10
       interp.max_eval_depth.should eq(10)
     end
 
     it "raises sooner when configured with a smaller depth" do
-      interp = Scheme::Interpreter.new(max_eval_depth: 10)
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 10)
       expect_raises(Scheme::SchemeRuntimeError, /recursion depth exceeded/) do
         Scheme.run_source(interp, "(define (f n) (+ 1 (f (+ n 1)))) (f 0)")
       end
     end
 
     it "raises for non-tail recursion that exceeds the default depth" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       expect_raises(Scheme::SchemeRuntimeError, /recursion depth exceeded/) do
         Scheme.run_source(interp, "(define (count-up n) (if (= n 0) 0 (+ 1 (count-up (- n 1))))) (count-up 5000)")
       end
     end
 
     it "allows deeper non-tail recursion when configured with a larger depth" do
-      interp = Scheme::Interpreter.new(max_eval_depth: 6000)
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 6000)
       Scheme.run_source(interp, "(define (count-up n) (if (= n 0) 0 (+ 1 (count-up (- n 1))))) (count-up 5000)")
         .as(Scheme::SchemeInt).value.should eq(5000_i64)
     end
@@ -398,40 +398,40 @@ describe Scheme::Interpreter do
 
   describe "max_steps" do
     it "defaults to nil (unbounded)" do
-      Scheme::Interpreter.new.max_steps.should be_nil
+      Scheme::Interpreter.new(library_search_path: ["./modules"]).max_steps.should be_nil
     end
 
     it "is configurable via the constructor" do
-      Scheme::Interpreter.new(max_steps: 10).max_steps.should eq(10)
+      Scheme::Interpreter.new(library_search_path: ["./modules"], max_steps: 10).max_steps.should eq(10)
     end
 
     it "is configurable after construction via the property setter" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.max_steps = 10
       interp.max_steps.should eq(10)
     end
 
     it "raises SchemeExecutionLimitError for an infinite tail loop when set" do
-      interp = Scheme::Interpreter.new(max_steps: 1000)
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_steps: 1000)
       expect_raises(Scheme::SchemeExecutionLimitError, /execution step limit exceeded/) do
         Scheme.run_source(interp, "(define (f) (f)) (f)")
       end
     end
 
     it "does not raise for a normal script well under the limit" do
-      interp = Scheme::Interpreter.new(max_steps: 100_000)
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_steps: 100_000)
       Scheme.run_source(interp, "(define (sq x) (* x x)) (sq 5)").as(Scheme::SchemeInt).value.should eq(25_i64)
     end
 
     it "does not interfere with max_eval_depth's own non-tail guard" do
-      interp = Scheme::Interpreter.new(max_eval_depth: 10, max_steps: 1_000_000)
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 10, max_steps: 1_000_000)
       expect_raises(Scheme::SchemeExecutionLimitError, /recursion depth exceeded/) do
         Scheme.run_source(interp, "(define (f n) (+ 1 (f (+ n 1)))) (f 0)")
       end
     end
 
     it "resets its budget for each independent top-level call" do
-      interp = Scheme::Interpreter.new(max_steps: 50)
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_steps: 50)
       Scheme.run_source(interp, "(+ 1 1)")
       Scheme.run_source(interp, "(+ 2 2)").as(Scheme::SchemeInt).value.should eq(4_i64)
     end
@@ -471,6 +471,18 @@ describe Scheme::Interpreter do
       interp = Scheme::Interpreter.sandboxed(allowed_libraries: ["scheme inexact"])
       expect_raises(Scheme::SchemeRuntimeError, /import: library \(creme process\) is not permitted/) do
         Scheme.run_source(interp, "(import (creme process))")
+      end
+    end
+
+    # (creme ffi) hands a guest script genuine native code execution
+    # (dlopen + an arbitrary native call by name/signature) -- confirms it
+    # gets no special treatment and is denied by the same allowlist gate as
+    # every other library, so an embedder excluding it from allowed_
+    # libraries actually works.
+    it "denies (creme ffi) like any other library not in the explicit allowlist" do
+      interp = Scheme::Interpreter.sandboxed(allowed_libraries: ["scheme inexact"])
+      expect_raises(Scheme::SchemeRuntimeError, /import: library \(creme ffi\) is not permitted/) do
+        Scheme.run_source(interp, "(import (creme ffi))")
       end
     end
   end
@@ -514,14 +526,14 @@ describe Scheme::Interpreter do
 
   describe "#apply" do
     it "applies a Builtin" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       f = interp.global.get("+")
       interp.apply(f, [Scheme::SchemeInt.new(1_i64), Scheme::SchemeInt.new(2_i64)] of Scheme::SchemeValue)
         .as(Scheme::SchemeInt).value.should eq(3_i64)
     end
 
     it "applies a Lambda" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       Scheme.run_source(interp, "(define (sq x) (* x x))")
       f = interp.global.get("sq")
       interp.apply(f, [Scheme::SchemeInt.new(4_i64)] of Scheme::SchemeValue)
@@ -537,21 +549,21 @@ describe Scheme::Interpreter do
 
   describe "#parse_formals" do
     it "parses fixed params" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       params, rest = interp.parse_formals(Scheme.a_to_list([Scheme::SchemeSym.of("a"), Scheme::SchemeSym.of("b")] of Scheme::SchemeValue))
       params.should eq(["a", "b"])
       rest.should be_nil
     end
 
     it "parses a fully variadic symbol spec" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       params, rest = interp.parse_formals(Scheme::SchemeSym.of("args"))
       params.should eq([] of String)
       rest.should eq("args")
     end
 
     it "parses a dotted rest param" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       formals = Scheme.a_to_list([Scheme::SchemeSym.of("a")] of Scheme::SchemeValue, Scheme::SchemeSym.of("rest"))
       params, rest = interp.parse_formals(formals)
       params.should eq(["a"])
@@ -559,7 +571,7 @@ describe Scheme::Interpreter do
     end
 
     it "raises for a non-symbol formal" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       formals = Scheme.a_to_list([Scheme::SchemeInt.new(1_i64)] of Scheme::SchemeValue)
       expect_raises(Scheme::SchemeRuntimeError, /bad formal parameter/) do
         interp.parse_formals(formals)

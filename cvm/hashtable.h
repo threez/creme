@@ -1,10 +1,10 @@
-/* (creme hash-table) — a real equal?-keyed hash table, backed by facil.io's
- * fiobj_hash (lib/facil/fiobj/fiobj_hash.h). See hashtable.c's own header
- * comment for the key design point: FIOBJ is used purely as a structural-
- * equality/hash INDEX (Scheme key -> a small integer), never to hold the
- * actual stored value — the real Values live in an ordinary GC_MALLOC'd
- * side table, so Boehm GC can see them regardless of what facil.io's own
- * (non-GC, refcounted) allocator does with the FIOBJ objects themselves. */
+/* (creme hash-table) — a real equal?-keyed hash table, backed by Verstable
+ * (vendor/verstable/verstable.h, MIT). See hashtable.c's own header comment
+ * for the key design point: the Verstable map is used purely as a Scheme
+ * key -> small-integer INDEX, never to hold the actual stored value — the
+ * real Values live in an ordinary GC_MALLOC'd side table (also needed to
+ * reconstruct native-Crystal-matching insertion order, since Verstable
+ * itself doesn't preserve one). */
 #ifndef CVM_HASHTABLE_H
 #define CVM_HASHTABLE_H
 

@@ -4,6 +4,7 @@
 # ===========================================================================
 
 require "json"
+require "yaml"
 
 module Scheme
   # Bytes round-trips losslessly (via SchemeBlob, never ambiguous with anything
@@ -59,6 +60,14 @@ module Scheme
     to_scheme(v.raw)
   end
 
+  # YAML::Any#raw is the same Hash/Array/scalar shape JSON::Any#raw is
+  # (Hash keyed by YAML::Any rather than String -- the generic
+  # to_scheme(Hash) overload above already coerces any key via `k.to_s`,
+  # which round-trips a YAML::Any scalar key back to its plain text).
+  def self.to_scheme(v : YAML::Any) : SchemeValue
+    to_scheme(v.raw)
+  end
+
   # One-directional: this dialect has no SchemeTime, every time value is a bare
   # epoch-second SchemeFloat (see modules/time.cr's current-time/time_from_epoch),
   # so from_scheme can't distinguish a converted Time from an ordinary float.
@@ -68,6 +77,13 @@ module Scheme
 
   def self.to_scheme(v : Bytes) : SchemeValue
     SchemeBlob.new(v)
+  end
+
+  # A YAML "!!set" decodes to a Crystal Set (of YAML::Any) rather than a
+  # Hash or Array -- no Set-shaped SchemeValue exists, so it flattens to a
+  # SchemeVector of its elements, same as any other sequence-shaped value.
+  def self.to_scheme(v : Set) : SchemeValue
+    to_scheme(v.to_a)
   end
 
   # SchemeValue -> Crystal, generic/unknown-shape case. NIL maps to Crystal nil

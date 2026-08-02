@@ -152,8 +152,8 @@ static void csv_cell_bytes(Value v, char **out_buf, int *out_len) {
   int n;
   switch (v.tag) {
   case T_STR:
-    *out_buf = (char *)v.as.str.chars;
-    *out_len = v.as.str.len;
+    *out_buf = (char *)v.as.chars;
+    *out_len = v.aux;
     return;
   case T_CHAR:
     *out_buf = GC_MALLOC(1);
@@ -224,9 +224,9 @@ static char csv_char_arg(Value *args, int nargs, int idx, char default_char) {
 static int csv_quoting_arg(Value *args, int nargs, int idx) {
   if (nargs <= idx) return 1; /* rfc */
   if (args[idx].tag != T_SYM) cvm_abort("csv: expected a quoting symbol");
-  if (args[idx].as.str.len == 4 && memcmp(args[idx].as.str.chars, "none", 4) == 0) return 0;
-  if (args[idx].as.str.len == 3 && memcmp(args[idx].as.str.chars, "rfc", 3) == 0) return 1;
-  if (args[idx].as.str.len == 3 && memcmp(args[idx].as.str.chars, "all", 3) == 0) return 2;
+  if (args[idx].aux == 4 && memcmp(args[idx].as.chars, "none", 4) == 0) return 0;
+  if (args[idx].aux == 3 && memcmp(args[idx].as.chars, "rfc", 3) == 0) return 1;
+  if (args[idx].aux == 3 && memcmp(args[idx].as.chars, "all", 3) == 0) return 2;
   cvm_abort("csv: unknown quoting mode (expected none, rfc, or all)");
 }
 
@@ -256,7 +256,7 @@ static Value bi_csv_read(VM *vm, Value *args, int nargs) {
   if (nargs < 1 || args[0].tag != T_STR) cvm_abort("csv-read: expected a string");
   char sep = csv_char_arg(args, nargs, 1, ',');
   char quote = csv_char_arg(args, nargs, 2, '"');
-  BufSrc bs = {args[0].as.str.chars, args[0].as.str.len, 0};
+  BufSrc bs = {args[0].as.chars, args[0].aux, 0};
   CharSrc src = {buf_next, buf_peek, &bs};
 
   int rows_cap = 8, rows_n = 0;
@@ -280,7 +280,7 @@ static Value bi_csv_read_headers(VM *vm, Value *args, int nargs) {
   if (nargs < 1 || args[0].tag != T_STR) cvm_abort("csv-read-headers: expected a string");
   char sep = csv_char_arg(args, nargs, 1, ',');
   char quote = csv_char_arg(args, nargs, 2, '"');
-  BufSrc bs = {args[0].as.str.chars, args[0].as.str.len, 0};
+  BufSrc bs = {args[0].as.chars, args[0].aux, 0};
   CharSrc src = {buf_next, buf_peek, &bs};
 
   Value *headers;
@@ -379,14 +379,14 @@ static Value bi_csv_reader_open(VM *vm, Value *args, int nargs) {
 static Value bi_csv_reader_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("csv-reader?: expected an argument");
-  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_CSV_READER);
+  return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_CSV_READER);
 }
 
 static Value bi_csv_reader_read_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BOX || args[0].as.box.kind != BOX_KIND_CSV_READER)
+  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_CSV_READER)
     cvm_abort("csv-reader-read!: expected a csv reader");
-  CvmCsvReader *r = args[0].as.box.ptr;
+  CvmCsvReader *r = args[0].as.ptr;
   CharSrc src = {port_next, port_peek, r->port};
   Value *cells;
   int n;
@@ -411,14 +411,14 @@ static Value bi_csv_writer_open(VM *vm, Value *args, int nargs) {
 static Value bi_csv_writer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("csv-writer?: expected an argument");
-  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_CSV_WRITER);
+  return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_CSV_WRITER);
 }
 
 static Value bi_csv_writer_row_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BOX || args[0].as.box.kind != BOX_KIND_CSV_WRITER)
+  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_CSV_WRITER)
     cvm_abort("csv-writer-row!: expected a csv writer");
-  CvmCsvWriter *w = args[0].as.box.ptr;
+  CvmCsvWriter *w = args[0].as.ptr;
   DynBuf out = {NULL, 0, 0};
   csv_write_row(&out, args + 1, nargs - 1, w->sep, w->quote, w->quoting);
   cvm_port_write_bytes(w->port, out.buf ? out.buf : "", out.len);

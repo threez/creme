@@ -994,6 +994,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "actor"], Scheme::Builtins::ActorLibrary
+    register_library ["creme", "builtin", "actor"], Scheme::Builtins::ActorLibrary
   end
 end

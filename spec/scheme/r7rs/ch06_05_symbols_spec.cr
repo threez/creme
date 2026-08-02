@@ -1,7 +1,7 @@
 require "../../spec_helper"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 

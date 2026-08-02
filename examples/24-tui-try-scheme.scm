@@ -1,4 +1,4 @@
-(import (scheme base) (scheme write) (scheme eval) (scheme read) (scheme process-context) (creme tui))
+(import (scheme base) (scheme write) (scheme eval) (scheme read) (scheme process-context) (creme tui) (creme scheme-lexer))
 
 (define (range-list a b) (if (>= a b) '() (cons a (range-list (+ a 1) b))))
 
@@ -53,84 +53,77 @@
       (get-output-string result-text))))
 
 ;; ---- Syntax highlighting for the input pane ----
+;;
+;; TextEdit's highlighter contract (tui-text-edit-set-highlighter! in
+;; src/scheme/modules/creme/tui.cr) wants `line-string -> list of
+;; (text . style-or-#f)` pairs, where `style` is a real tui-style OBJECT
+;; (see tui_cells_from_scheme/tui_style_from_alist there) — a different
+;; shape than (creme highlight)'s highlight-line, which instead returns a
+;; single pre-rendered ANSI-colored STRING. So highlight-line itself can't
+;; be used directly here; instead we call (creme scheme-lexer)'s
+;; scheme-tokenize ourselves (the same tokenizer highlight-line is built
+;; on) to get real per-token (kind . text) pairs, then map each kind to a
+;; tui-style object using the SAME color-family mapping highlight-line's
+;; own token-color uses internally (modules/creme/highlight.sld) --
+;; translating its ANSI SGR codes (1;34 bold-blue, 32 green, 36 cyan, 35
+;; magenta, 2 dim, 33 yellow) into equivalent tui-style calls. Since we
+;; only change each token's STYLE and never its TEXT or boundaries, the
+;; "concatenated text equals the input line exactly" contract holds for
+;; free -- it's the same invariant scheme-tokenize/highlight-line already
+;; guarantee.
 
 (define scheme-keywords
-  (list "define" "lambda" "λ" "if" "cond" "when" "unless" "let" "let*" "letrec"
+  (list "define" "lambda" "λ" "if" "cond" "when" "unless"
+        "let" "let*" "letrec" "letrec*" "let-values" "let*-values"
+        "let-syntax" "letrec-syntax" "define-syntax" "syntax-rules"
         "begin" "and" "or" "quote" "quasiquote" "unquote" "unquote-splicing"
-        "set!" "require" "defmacro"))
+        "set!" "define-values" "define-record-type" "case" "case-lambda"
+        "do" "guard" "parameterize" "cond-expand"
+        "delay" "delay-force" "make-promise"
+        "require" "defmacro"))
 
-(define scheme-constants (list "#t" "#f" "()"))
+(define (scheme-tui-keyword? text) (if (member text scheme-keywords) #t #f))
 
-(define keyword-style (tui-style (list (cons "bold" #t) (cons "fg" (tui-color-named 'blue)))))
-(define string-style (tui-style (list (cons "fg" (tui-color-named 'green)))))
-(define number-style (tui-style (list (cons "fg" (tui-color-named 'magenta)))))
-(define paren-style (tui-style (list (cons "fg" (tui-color-named 'gray)))))
-(define constant-style (tui-style (list (cons "fg" (tui-color-named 'cyan)))))
+(define scheme-tui-keyword-style (tui-style (list (cons "bold" #t) (cons "fg" (tui-color-named 'blue)))))
+(define scheme-tui-string-style (tui-style (list (cons "fg" (tui-color-named 'green)))))
+(define scheme-tui-char-style (tui-style (list (cons "fg" (tui-color-named 'cyan)))))
+(define scheme-tui-number-style (tui-style (list (cons "fg" (tui-color-named 'magenta)))))
+(define scheme-tui-boolean-style (tui-style (list (cons "fg" (tui-color-named 'cyan)))))
+(define scheme-tui-dim-style (tui-style (list (cons "dim" #t))))
+(define scheme-tui-quote-style (tui-style (list (cons "fg" (tui-color-named 'yellow)))))
 
-(define (member? x lst) (if (member x lst) #t #f))
+;; Same kind -> color-family mapping as (creme highlight)'s own
+;; token-color, just expressed as tui-style objects instead of ANSI SGR
+;; codes. #f (no style) for plain/uncolored kinds (symbol non-keywords,
+;; whitespace, unknown) -- same convention the old inline highlighter's
+;; own token-style used for "no color".
+(define (scheme-tui-token-style kind text)
+  (case kind
+    ((symbol) (if (scheme-tui-keyword? text) scheme-tui-keyword-style #f))
+    ((string unterminated-string) scheme-tui-string-style)
+    ((char) scheme-tui-char-style)
+    ((number) scheme-tui-number-style)
+    ((boolean) scheme-tui-boolean-style)
+    ((open close) scheme-tui-dim-style)
+    ((line-comment block-comment unterminated-block-comment datum-comment) scheme-tui-dim-style)
+    ((quote-mark) scheme-tui-quote-style)
+    (else #f))) ; whitespace, unknown: no style
 
-(define (char-space? c) (or (eq? c #\space) (eq? c #\tab)))
-(define (char-open? c) (eq? c #\())
-(define (char-close? c) (eq? c #\)))
-(define (char-quote? c) (eq? c #\"))
-(define (char-digit? c) (and (>= (char->integer c) 48) (<= (char->integer c) 57)))
-(define (atom-char? c) (not (or (char-space? c) (char-open? c) (char-close? c) (char-quote? c))))
-
-(define (scan-while line i len pred)
-  (if (or (>= i len) (not (pred (string-ref line i))))
-      i
-      (scan-while line (+ i 1) len pred)))
-
-(define (scan-string-end line i len)
-  (cond
-    ((>= i len) i)
-    ((char-quote? (string-ref line i)) (+ i 1))
-    (else (scan-string-end line (+ i 1) len))))
-
-(define (all-digits? tok i len)
-  (or (>= i len)
-      (and (char-digit? (string-ref tok i)) (all-digits? tok (+ i 1) len))))
-
-(define (token-number? tok)
-  (and (> (string-length tok) 0) (all-digits? tok 0 (string-length tok))))
-
-(define (token-style tok)
-  (cond
-    ((member? tok scheme-keywords) keyword-style)
-    ((member? tok scheme-constants) constant-style)
-    ((token-number? tok) number-style)
-    (else #f)))
-
-;; Scans `line` into a list of (text . style-or-#f) pairs covering every
-;; character exactly once, in order — the contract tui-text-edit-set-
-;; highlighter! requires (see its doc comment in src/scheme/modules/tui.cr).
-(define (scheme-highlight-line line)
-  (reverse (highlight-scan line 0 (string-length line) '())))
-
-(define (highlight-scan line i len acc)
-  (if (>= i len)
-      acc
-      (let ((c (string-ref line i)))
-        (cond
-          ((char-space? c)
-           (let ((j (scan-while line i len char-space?)))
-             (highlight-scan line j len (cons (cons (substring line i j) #f) acc))))
-          ((or (char-open? c) (char-close? c))
-           (highlight-scan line (+ i 1) len (cons (cons (substring line i (+ i 1)) paren-style) acc)))
-          ((char-quote? c)
-           (let ((j (scan-string-end line (+ i 1) len)))
-             (highlight-scan line j len (cons (cons (substring line i j) string-style) acc))))
-          (else
-           (let* ((j (scan-while line i len atom-char?))
-                  (tok (substring line i j)))
-             (highlight-scan line j len (cons (cons tok (token-style tok)) acc))))))))
+;; The adapter itself: tokenize `line` with the real lexer and map each
+;; (kind . text) token to (text . style-or-#f), preserving token
+;; boundaries exactly (so concatenation still equals `line`).
+(define (scheme-tui-highlight-line line)
+  (map (lambda (tok)
+         (let ((kind (car tok)) (text (cdr tok)))
+           (cons text (scheme-tui-token-style kind text))))
+       (scheme-tokenize line)))
 
 ;; Rebuilds the input pane around fresh text, keeping `bottom-pane` and
 ;; the vstack's own hosted widget pointed at the same TextEdit object —
 ;; tui-text-edit-value always needs to read whatever is currently loaded.
 (define (load-input! text)
   (set! bottom-pane (tui-text-edit text))
-  (tui-text-edit-set-highlighter! bottom-pane scheme-highlight-line)
+  (tui-text-edit-set-highlighter! bottom-pane scheme-tui-highlight-line)
   (tui-vstack-set-bottom! vstack bottom-pane))
 
 (define top-title-fn
@@ -176,7 +169,7 @@
 
 (define screen (tui-screen))
 (set! bottom-pane (tui-text-edit (lesson-code (current-lesson))))
-(tui-text-edit-set-highlighter! bottom-pane scheme-highlight-line)
+(tui-text-edit-set-highlighter! bottom-pane scheme-tui-highlight-line)
 (set! vstack (tui-vstack screen top-pane bottom-pane 8))
 
 (tui-run screen vstack

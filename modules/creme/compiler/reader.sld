@@ -28,11 +28,15 @@
 ;;
 ;; Known gaps (matching this Scheme's own documented R7RS caveats where
 ;; applicable, see README's "Known caveats"): no #!fold-case directive
-;; support (not implemented natively either); no datum labels (#n=/#n#,
-;; cycle construction) -- rare in ordinary program source, deferred; only
-;; "\n"-style line continuations inside strings (not "\r\n"); the
-;; identifier delimiter set is a reasonable approximation of R7RS's real
-;; one, not a byte-for-byte port of lexer.cr's.
+;; support (not implemented natively either); datum labels (#n=/#n#) are
+;; supported for pairs, including genuine cycles (parse-datum-label,
+;; below), but NOT for a self-referential vector specifically (a labeled
+;; non-pair datum is just bound to its own value directly, which can't
+;; capture a cycle through a vector -- no test in this project's own
+;; spec suite needs one); only "\n"-style line continuations inside
+;; strings (not "\r\n"); the identifier delimiter set is a reasonable
+;; approximation of R7RS's real one, not a byte-for-byte port of
+;; lexer.cr's.
 ;; ===========================================================================
 
 (define-library (creme compiler reader)
@@ -380,7 +384,74 @@
                 ((char=? c2 #\\) (parse-char-literal str pos))
                 ((memv (char-downcase c2) (list #\t #\f)) (bool-literal-parser str pos))
                 ((memv (char-downcase c2) (list #\e #\i #\b #\o #\d #\x)) (parse-prefixed-number str pos))
+                ((char-numeric? c2) (parse-datum-label str pos))
                 (else (error "reader: unknown # syntax" (substring str pos (min len (+ pos 2))))))))))
+
+    ;; ---------------------------------------------------------------------
+    ;; Datum labels (R7RS §2.4, #n=/#n#) -- a mutable alist (id . value),
+    ;; reset once per TOP-LEVEL datum by read-toplevel-datum below (R7RS:
+    ;; "a datum label's scope is only the outermost datum it appears in"),
+    ;; NOT by read-datum itself (which also runs for every NESTED datum --
+    ;; resetting there would lose a label defined while parsing an earlier
+    ;; sibling/child of the same outermost datum). `assv` finds the FIRST
+    ;; (most recently prepended) binding for a given id, so re-binding an
+    ;; id (the def half, below) via a fresh cons onto the front correctly
+    ;; shadows an earlier one with no need to remove it.
+    ;;
+    ;; Genuine cycles (`#0=(1 2 . #0#)`) need the same placeholder-then-
+    ;; patch trick the native Crystal reader/cvm's own loader.c use: the
+    ;; def half allocates an empty (mutable) placeholder PAIR and binds
+    ;; the label to THAT before recursing into the labeled datum's own
+    ;; contents, so a `#0#` reached while still parsing those contents
+    ;; (a real cycle) resolves to the placeholder's own identity; once
+    ;; the labeled datum finishes parsing, set-car!/set-cdr! patch the
+    ;; placeholder to match, and the placeholder itself (not the
+    ;; freshly-consed value read-datum returned) is what gets returned
+    ;; from and stays bound under this label -- so every occurrence of
+    ;; `#0#` and the `#0=`-labeled position ITSELF all share one identity.
+    ;; Only pairs get this treatment: a labeled non-pair datum (a bare
+    ;; symbol/number/string/vector/...) can't participate in a genuine
+    ;; CYCLE in the first place (nothing about it is self-referential),
+    ;; so it's simply bound to its own already-computed value directly --
+    ;; this does mean a self-referential VECTOR literal specifically
+    ;; (`#0=#(#0#)`) isn't supported (no test in this project's own spec
+    ;; suite exercises one), a deliberate, narrower scope cut mirroring
+    ;; this file's other documented simplifications.
+    (define current-datum-labels '())
+
+    (define (digit-run-end str pos)
+      (if (and (< pos (string-length str)) (char-numeric? (string-ref str pos)))
+          (digit-run-end str (+ pos 1))
+          pos))
+
+    (define (parse-datum-label str pos)
+      ;; str[pos] is #\#, str[pos+1] is a digit already confirmed by parse-hash
+      (let* ((digits-start (+ pos 1))
+             (digits-end (digit-run-end str digits-start))
+             (id (string->number (substring str digits-start digits-end))))
+        (if (>= digits-end (string-length str))
+            (error "reader: malformed datum label (expected = or #)" pos)
+            (let ((marker (string-ref str digits-end)))
+              (cond
+                ((char=? marker #\#)
+                 (let ((entry (assv id current-datum-labels)))
+                   (if (not entry) (error "reader: reference to undefined datum label" id))
+                   (cons (cdr entry) (+ digits-end 1))))
+                ((char=? marker #\=)
+                 (let ((placeholder (cons '() '())))
+                   (set! current-datum-labels (cons (cons id placeholder) current-datum-labels))
+                   (let ((r (read-datum str (+ digits-end 1))))
+                     (if (not r) (error "reader: expected a datum after datum label =" pos))
+                     (let ((value (car r)))
+                       (if (pair? value)
+                           (begin
+                             (set-car! placeholder (car value))
+                             (set-cdr! placeholder (cdr value))
+                             (cons placeholder (cdr r)))
+                           (begin
+                             (set! current-datum-labels (cons (cons id value) current-datum-labels))
+                             (cons value (cdr r))))))))
+                (else (error "reader: malformed datum label (expected = or #)" pos)))))))
 
     (define (read-datum str pos)
       (let ((p (skip-atmosphere str pos)))
@@ -400,13 +471,21 @@
                 (else (parse-token str p)))))))
 
     ;; Public entry point: reads every top-level datum in `str`, in order.
+    ;; Resets current-datum-labels before each TOP-LEVEL datum only (see
+    ;; that variable's own doc comment) -- every recursive/nested call
+    ;; goes through plain read-datum, unchanged, so labels stay visible
+    ;; across an entire outermost datum's own nested structure.
+    (define (read-toplevel-datum str pos)
+      (set! current-datum-labels '())
+      (read-datum str pos))
+
     (define (read-program str)
       (let ((len (string-length str)))
         (let loop ((pos 0) (acc '()))
           (let ((p (skip-atmosphere str pos)))
             (if (>= p len)
                 (reverse acc)
-                (let ((r (read-datum str p)))
+                (let ((r (read-toplevel-datum str p)))
                   (if (not r)
                       (error "reader: failed to read a datum" p)
                       (loop (cdr r) (cons (car r) acc)))))))))))

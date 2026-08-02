@@ -136,7 +136,120 @@ enum {
   OP_MAKEPROMISE = 116,
   OP_HELPERFORM = 117,
   OP_HELPERFORMLOCAL = 118,
-  OP_COUNT = 119,
+  /* a=counter register, b=forward jump offset (skip loop if zero-trip),
+   * c=limit register, d=step immediate (nonzero int32). Range is INCLUSIVE
+   * of limit (Lua FORLOOP-style — see Scheme::Op::ForPrep's own doc
+   * comment in opcode.cr). */
+  OP_FORPREP = 119,
+  /* a=counter register, b=backward jump offset (to the instruction after
+   * OP_FORPREP), c=limit register, d=step immediate (same convention as
+   * OP_FORPREP). counter += d; if still in range vs limit, jump backward. */
+  OP_FORLOOP = 120,
+  /* ForLoop's counterpart for a counted loop recursing through a GLOBAL binding (an
+   * ordinary self-recursive `(define (f ...) ...)`, not a let-loop/do) -- see
+   * Scheme::Op::ForLoopGuardedInc/Dec's own doc comment in opcode.cr for the full
+   * rationale. a=counter register, b=backward jump offset (same convention as
+   * OP_FORLOOP), c=limit register. Step is implicit: +1 for OP_FORLOOPGUARDEDINC, -1 for
+   * OP_FORLOOPGUARDEDDEC -- freeing d (OP_FORLOOP's step slot) to instead hold a
+   * pre-resolved global slot index (see loader.c's resolve_globals -- same convention
+   * OP_CALLGLOBAL's own d already uses) naming the recursed-to function's own global
+   * binding. Every iteration: counter += step; test in-range vs limit as usual; ALSO
+   * re-fetch that global's current value and compare it (pointer identity) against the
+   * closure that's currently executing -- only take the backward jump if BOTH hold. A
+   * redefinition (identity mismatch) and ordinary range-exhaustion both just fall
+   * through (no jump); OP_TESTGLOBALIDENTITY, immediately following the loop, tells them
+   * apart. */
+  OP_FORLOOPGUARDEDINC = 121,
+  OP_FORLOOPGUARDEDDEC = 122,
+  /* Runs once, right after an OP_FORLOOPGUARDEDINC/DEC loop exits (NOT hot). a=global
+   * slot index (same convention as OP_FORLOOPGUARDEDINC/DEC's own d), b=forward jump
+   * offset. Re-fetches that global's current value and compares it (pointer identity) to
+   * the currently-executing closure: identical means the loop ran to genuine completion
+   * (fall through to the ordinary base-case value); different means a mid-loop
+   * redefinition ended it early (jump forward by b to a deopt block -- the plain,
+   * unfused compilation of the original `if`). */
+  OP_TESTGLOBALIDENTITY = 123,
+  OP_COUNT = 124,
+
+  /* Runtime-only opcodes below this point — NEVER present in a serialized
+   * chunk (nothing on-disk ever encodes an id >= OP_COUNT, and loader.c's
+   * bytecode reader has no reason to produce one). These exist purely for
+   * cvm's own in-process call-site quickening: vm.c's OP_CALLGLOBAL case
+   * rewrites an instruction to one of these in place, the first time that
+   * call site's target turns out to be a specific well-known builtin
+   * (`+`, `-`, `*`, `car`, `cdr`, `cons`, `modulo` — see builtins.c's
+   * bi_plus/bi_minus/bi_star/bi_car/bi_cdr/bi_cons/bi_modulo doc comment
+   * for why the self-hosted bootstrap compiler ever compiles these as an
+   * ordinary CallGlobal in the first place, unlike the native compiler's
+   * fused Add/Sub/Cons ops) with a matching argument count, OR a
+   * `define-record-type` field accessor/constructor (OP_QCALLGLOBAL_
+   * RECACC/OP_QCALLGLOBAL_RECCTOR — every top-level record accessor and
+   * constructor is a T_RECORD_CALLABLE behind an ordinary CallGlobal too,
+   * never a fused op of its own; see vm.c's quicken_callglobal_op doc
+   * comment). Each one re-checks its target global's CURRENT value
+   * against the exact expected builtin (or record-accessor/constructor
+   * kind) every time it runs and deopts back to a plain OP_CALLGLOBAL —
+   * permanently, for that call site — the instant that check fails (a
+   * redefinition). Appended after OP_COUNT specifically so a newly added
+   * on-disk op id can never collide with one of these.
+   *
+   * OP_QCALLGLOBAL_ADD3 exists alongside OP_QCALLGLOBAL_ADD2 because `+`
+   * is genuinely called with 3 arguments at real call sites (e.g.
+   * `(+ acc (point-x p) (point-y p))`) — the compiler's own static
+   * arithmetic fusion only ever handles 2-operand shapes (see
+   * doc/optimization-cvm.md Section 3), so any 3-arg `+` call always
+   * compiles to a plain CallGlobal regardless of redefinition tracking,
+   * exactly the same "quickening is the only optimization that ever
+   * reaches this call site" situation the 2-arg opcodes already handle.
+   * `-`/`*` don't get a 3-arg sibling here since no 3-arg call site for
+   * either has actually been found hot yet — add one the same way if one
+   * ever is. `cons` has no 3-arg form at all (R7RS `cons` is always
+   * exactly 2 arguments). */
+  OP_QCALLGLOBAL_ADD2 = OP_COUNT,
+  OP_QCALLGLOBAL_SUB2,
+  OP_QCALLGLOBAL_MUL2,
+  OP_QCALLGLOBAL_CONS2,
+  OP_QCALLGLOBAL_CAR1,
+  OP_QCALLGLOBAL_CDR1,
+  OP_QCALLGLOBAL_RECACC,
+  /* define-record-type constructor -- the constructor-side counterpart of
+   * OP_QCALLGLOBAL_RECACC just above: a top-level record constructor is
+   * ALSO a T_RECORD_CALLABLE (kind RC_CTOR) behind an ordinary CallGlobal,
+   * never a fused op of its own, so it needs the exact same treatment.
+   * Native creme's own vm.cr gained this first (QCallGlobalRecCtor) —
+   * this ports it here for parity; see vm.c's quicken_callglobal_op and
+   * this op's own CASE for the details (build the SchemeRecord straight
+   * from the call's own argument registers, same as call_record_callable's
+   * RC_CTOR case already does, just skipping dispatch_call to get there). */
+  OP_QCALLGLOBAL_RECCTOR,
+  OP_QCALLGLOBAL_ADD3,
+  OP_QCALLGLOBAL_MOD2,
+  /* string-append (2-arg)/number->string (1-arg, implicit radix 10) and
+   * (creme hash-table)'s hash-table-set!/hash-table-ref -- native creme's
+   * own vm.cr gained all four first (QCallGlobalStrAppend2/
+   * QCallGlobalNumToStr1/QCallGlobalHashSet/QCallGlobalHashRef), ported
+   * here for parity. Each identity-checks a global cell's current value
+   * against bi_string_append/bi_number_to_string/bi_hash_table_set/
+   * bi_hash_table_ref (exposed non-`static` in vm.h for exactly this,
+   * same as bi_plus/etc.) and, on a match, calls that same C function
+   * DIRECTLY with the call's own argument registers -- skipping
+   * dispatch_call's own (already cheap, but non-zero) tag-check chain to
+   * get there, not skipping any argument-array allocation the way native
+   * creme's version does (cvm's dispatch_call already passes a raw stack
+   * slice to every builtin call, quickened or not -- see its own T_BUILTIN
+   * branch). No separate argument-type validation here: an unquickened
+   * call to the same C function would hit the exact same cvm_abort on bad
+   * input, and cvm_abort's own longjmp-to-nearest-guard-handler unwinds
+   * correctly regardless of how many C frames are between it and that
+   * handler, so calling the builtin directly here (bypassing dispatch_
+   * call) changes nothing about error/guard behavior. HashRef quickens at
+   * both its 2- and 3-arg forms (its own internal logic already handles
+   * both correctly, including "key not found"). */
+  OP_QCALLGLOBAL_STRAPPEND2,
+  OP_QCALLGLOBAL_NUMTOSTR1,
+  OP_QCALLGLOBAL_HASHSET,
+  OP_QCALLGLOBAL_HASHREF,
+  OP_QUICK_COUNT,
 };
 
 /* int -> mnemonic lookup for these ids lives in profiler.c (cvm_op_name),
@@ -160,6 +273,11 @@ enum {
   TAG_VECTOR = 10,
   TAG_BLOB = 11,
   TAG_BUILTIN = 12,
+  /* Datum labels (R7RS #n=/#n#) -- see chunk_serializer.cr's own
+   * TAG_LABEL_DEF/TAG_LABEL_REF doc comment for the wire shape; loader.c's
+   * read_datum builds the matching Reader-side label table. */
+  TAG_LABEL_DEF = 13,
+  TAG_LABEL_REF = 14,
 };
 
 /* On-disk Op::CaseDispatch key tags — mirrors chunk.cr's CaseDispatchKey.

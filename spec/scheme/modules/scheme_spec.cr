@@ -1,7 +1,7 @@
 require "../../spec_helper"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -87,7 +87,7 @@ describe "(scheme process-context)" do
   end
 
   it "emergency-exit raises SchemeExit, same as exit" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     expect_raises(Scheme::SchemeExit) do
       Scheme.run_source(interp, "(import (scheme process-context)) (emergency-exit 3)")
     end
@@ -108,7 +108,7 @@ describe "(scheme time)" do
   end
 
   it "current-jiffy increases monotonically" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (scheme time) (scheme base))")
     a = Scheme.run_source(interp, "(current-jiffy)").as(Scheme::SchemeInt).value
     b = Scheme.run_source(interp, "(current-jiffy)").as(Scheme::SchemeInt).value

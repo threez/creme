@@ -112,6 +112,21 @@ module Scheme
       @values || raise "Env: array-backed frame missing values"
     end
 
+    # Every name bound AT THIS FRAME specifically (never walks `parent`) --
+    # for introspection (creme introspection)'s `bound-names`, called on
+    # `interp.global`, which has no parent, so the distinction is moot there,
+    # but this must NOT walk the chain in general since it's also valid to
+    # call on a non-root frame. Returns a fresh Array each call (hash.keys
+    # already copies; the array-backed branch dups so the caller can never
+    # mutate this frame's own @names storage).
+    def local_names : Array(String)
+      if hash = @hash
+        hash.keys
+      else
+        names!.dup
+      end
+    end
+
     protected def lookup_local(name : String) : SchemeValue?
       if hash = @hash
         hash[name]?

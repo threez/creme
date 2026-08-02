@@ -1,7 +1,7 @@
 require "../../spec_helper"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -23,7 +23,7 @@ describe "make-parameter/parameterize" do
   end
 
   it "restores the previous value even when the body raises" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(define p (make-parameter 10))")
     expect_raises(Scheme::SchemeUserError) do
       Scheme.run_source(interp, %[(parameterize ((p 20)) (error "boom"))])

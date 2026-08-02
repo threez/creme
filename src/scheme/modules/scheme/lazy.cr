@@ -58,7 +58,7 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "lazy"] do |env|
+    register_library ["creme", "builtin", "lazy"] do |env|
       own = register_module(Scheme::Builtins::LazyLibrary, env)
       %w[delay delay-force].each { |name| env.define(name, SchemeSpecialForm.new(name)) }
       own + %w[delay delay-force]

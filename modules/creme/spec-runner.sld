@@ -79,13 +79,15 @@
              (err (cadr result))
              (code (caddr result))
              (parsed (spec-runner-extract-value out)))
-        (if (and (pair? parsed) (= (length parsed) 3) (integer? (car parsed)) (integer? (cadr parsed)))
+        ;; (total failed pending tree) -- see (creme spec)'s spec-summary!
+        ;; for the writer side of this same shape.
+        (if (and (pair? parsed) (= (length parsed) 4) (integer? (car parsed)) (integer? (cadr parsed)) (integer? (caddr parsed)))
             (begin
-              (render-spec-tree! (caddr parsed))
-              (spec-record-external-result! path (car parsed) (cadr parsed)))
+              (render-spec-tree! (cadddr parsed))
+              (spec-record-external-result! path (car parsed) (cadr parsed) (caddr parsed)))
             (begin
               (display out)
               (if (> (string-length err) 0) (begin (display err) (newline)))
-              (display "  (no valid (total failed tree) value read back -- process exited with code ")
+              (display "  (no valid (total failed pending tree) value read back -- process exited with code ")
               (display code) (display " before spec-summary! ever ran)") (newline)
-              (spec-record-external-result! path 1 1)))))))
+              (spec-record-external-result! path 1 1 0)))))))

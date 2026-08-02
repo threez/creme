@@ -2,7 +2,7 @@ require "../../spec_helper"
 require "file_utils"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -49,7 +49,7 @@ describe "R7RS §6.13.1 Ports" do
     Dir.mkdir_p(dir)
     begin
       path = File.join(dir, "probe.txt")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       Scheme.run_source(interp, <<-SCM).write_string.should eq(%("hi"))
         (import (scheme file))
         (define op (open-output-file "#{path}"))

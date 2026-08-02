@@ -76,6 +76,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "json"], Scheme::Builtins::JsonLibrary
+    register_library ["creme", "builtin", "json"], Scheme::Builtins::JsonLibrary
   end
 end

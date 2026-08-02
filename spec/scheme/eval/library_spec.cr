@@ -8,7 +8,7 @@ require "file_utils"
 # (import (test base)) to see +/string-append/etc., since library Envs are
 # deliberately parentless (see interpreter/library.cr's doc comment).
 private def new_interp : Scheme::Interpreter
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   exports = %w[+ - * < = string-append car cdr cons list vector-set! vector-ref vector-length make-vector].to_h { |name| {name, name} }
   interp.register_library(["test", "base"], interp.global, exports)
   interp
@@ -20,7 +20,7 @@ end
 # verbatim. (scheme base) becomes a genuine always-on library in Stage 2;
 # until then this mirrors what that stage will register.
 private def new_scheme_base_interp : Scheme::Interpreter
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   exports = (%w[
     + - * < = > <= >= string-append car cdr cons list
     vector-set! vector-ref vector-length make-vector display newline

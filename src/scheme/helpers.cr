@@ -30,12 +30,26 @@ module Scheme
     result
   end
 
+  # Floyd's tortoise-and-hare: R7RS requires `list?` (this function's own
+  # sole caller) to return #f -- not hang -- on a genuinely circular
+  # list, which a plain single-pointer cdr-walk (this used to be one)
+  # can't do by itself. `fast` advances two cdrs per iteration, `slow`
+  # one; if they're ever object-identical again, `fast` has lapped
+  # `slow` around a cycle. No extra memory needed (unlike a visited-set
+  # approach), and terminates in O(n) either way.
   def self.proper_list?(v : SchemeValue) : Bool
-    cur = v
-    while cur.is_a?(Cons)
-      cur = cur.cdr
+    slow : SchemeValue = v
+    fast : SchemeValue = v
+    loop do
+      return true if fast.is_a?(SchemeNil)
+      return false unless fast.is_a?(Cons)
+      fast = fast.cdr
+      return true if fast.is_a?(SchemeNil)
+      return false unless fast.is_a?(Cons)
+      fast = fast.cdr
+      slow = slow.as(Cons).cdr
+      return false if fast.is_a?(Cons) && slow.is_a?(Cons) && fast.object_id == slow.object_id
     end
-    cur.is_a?(SchemeNil)
   end
 
   def self.as_f64(v : SchemeValue, who : String) : Float64

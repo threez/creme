@@ -93,7 +93,7 @@ module Scheme
     # library_search_path shouldn't be forced into) — it must be explicitly
     # (import (creme extra))ed like any other file-based library, same as
     # (creme sxql).
-    AUTO_IMPORTED_LIBRARIES = [["scheme", "base"], ["scheme", "write"]]
+    AUTO_IMPORTED_LIBRARIES = [["creme", "builtin", "base"], ["creme", "builtin", "write"]]
 
     # base_names/write_names are the section modules' own register_module
     # return values (collected in Interpreter#initialize); (builtin base)'s
@@ -102,10 +102,10 @@ module Scheme
     # itself.
     private def install_builtin_libraries(base_names : Array(String), write_names : Array(String)) : Nil
       base_exports = (base_names + BUILTIN_BASE_NONFN).to_h { |name| {name, name} }
-      register_library(["builtin", "base"], @base_env, base_exports)
+      register_library(["creme", "builtin", "base"], @base_env, base_exports)
 
       write_exports = write_names.to_h { |name| {name, name} }
-      register_library(["builtin", "write"], @base_env, write_exports)
+      register_library(["creme", "builtin", "write"], @base_env, write_exports)
     end
 
     # (scheme base)'s own Scheme-defined layer, on top of (builtin base) —
@@ -139,18 +139,18 @@ module Scheme
     # which must never gate the interpreter's own internal bootstrap wiring,
     # only a guest program's own (import ...) forms.
     private def install_scheme_base_and_write_libraries : Nil
-      builtin_base = @libraries[["builtin", "base"]]
+      builtin_base = @libraries[["creme", "builtin", "base"]]
       base_env = Env.new
       SchemeLibrary.import_bindings(base_env, builtin_base.exports.map { |external, internal| {external, builtin_base, internal} })
       BytecodeCompiler.run_program(self, Reader.read_all(SCHEME_BASE_ADDITIONS_SRC, "<scheme base>"), base_env)
       base_exports = (builtin_base.exports.keys + SCHEME_BASE_ADDITIONS_NAMES).to_h { |name| {name, name} }
-      register_library(["scheme", "base"], base_env, base_exports)
+      register_library(["creme", "builtin", "base"], base_env, base_exports)
 
-      builtin_write = @libraries[["builtin", "write"]]
+      builtin_write = @libraries[["creme", "builtin", "write"]]
       write_env = Env.new
       SchemeLibrary.import_bindings(write_env, builtin_write.exports.map { |external, internal| {external, builtin_write, internal} })
       write_exports = builtin_write.exports.keys.to_h { |name| {name, name} }
-      register_library(["scheme", "write"], write_env, write_exports)
+      register_library(["creme", "builtin", "write"], write_env, write_exports)
     end
   end
 end

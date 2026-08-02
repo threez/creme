@@ -119,6 +119,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "prof-vm"], Scheme::Builtins::ProfVM
+    register_library ["creme", "builtin", "prof-vm"], Scheme::Builtins::ProfVM
   end
 end

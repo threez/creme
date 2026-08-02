@@ -26,7 +26,21 @@ module Scheme
       io.read_fully(magic_buf)
       magic = String.new(magic_buf)
       raise FormatError.new("chunk_deserializer: bad magic #{magic.inspect}, expected #{ChunkSerializer::MAGIC.inspect}") unless magic == ChunkSerializer::MAGIC
+      version = read_byte!(io)
+      unless version == ChunkSerializer::FORMAT_VERSION
+        raise FormatError.new("chunk_deserializer: format version #{version} (expected #{ChunkSerializer::FORMAT_VERSION}) -- re-emit this chunk with the current creme/cvm")
+      end
+      read_required_families(io) # not yet consumed by any caller; just skip past it
       read_chunk(io, env)
+    end
+
+    # Reads (and discards) the "required families" metadata section that sits
+    # between the magic and the chunk body — see ChunkSerializer.serialize.
+    # Nothing reads this yet, but it must be consumed here so the chunk body
+    # that immediately follows it is read from the right offset.
+    private def self.read_required_families(io : IO) : Array(String)
+      count = read_i32(io)
+      Array(String).new(count) { read_string(io) }
     end
 
     private def self.read_byte!(io : IO) : UInt8

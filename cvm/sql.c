@@ -10,8 +10,8 @@
 #include "sql.h"
 
 static sqlite3 *as_sql(Value v, const char *who) {
-  if (v.tag != T_BOX || v.as.box.kind != BOX_KIND_SQL) cvm_abort("%s: expected a sql connection", who);
-  return (sqlite3 *)v.as.box.ptr;
+  if (v.tag != T_BOX || v.aux != BOX_KIND_SQL) cvm_abort("%s: expected a sql connection", who);
+  return (sqlite3 *)v.as.ptr;
 }
 
 /* For a C string literal (e.g. the alist keys below) — T_STR is mutable
@@ -39,7 +39,7 @@ static void bind_param(sqlite3_stmt *stmt, int idx, Value v) {
     break;
   case T_STR:
   case T_SYM:
-    sqlite3_bind_text(stmt, idx, v.as.str.chars, v.as.str.len, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, idx, v.as.chars, v.aux, SQLITE_TRANSIENT);
     break;
   case T_BOOL:
     sqlite3_bind_int(stmt, idx, v.as.b ? 1 : 0);
@@ -74,7 +74,7 @@ static Value column_to_value(sqlite3_stmt *stmt, int col) {
 static sqlite3_stmt *prepare_and_bind(sqlite3 *db, Value sql_val, Value *params, int n_params) {
   if (sql_val.tag != T_STR) cvm_abort("sql: expected a SQL string");
   sqlite3_stmt *stmt;
-  if (sqlite3_prepare_v2(db, sql_val.as.str.chars, sql_val.as.str.len, &stmt, NULL) != SQLITE_OK) {
+  if (sqlite3_prepare_v2(db, sql_val.as.chars, sql_val.aux, &stmt, NULL) != SQLITE_OK) {
     cvm_abort("sql: prepare failed: %s", sqlite3_errmsg(db));
   }
   for (int i = 0; i < n_params; i++) bind_param(stmt, i + 1, params[i]);
@@ -84,9 +84,9 @@ static sqlite3_stmt *prepare_and_bind(sqlite3 *db, Value sql_val, Value *params,
 static Value bi_sql_open(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_STR) cvm_abort("sql-open: expected a path string");
-  char *path = malloc((size_t)args[0].as.str.len + 1);
-  memcpy(path, args[0].as.str.chars, (size_t)args[0].as.str.len);
-  path[args[0].as.str.len] = 0;
+  char *path = malloc((size_t)args[0].aux + 1);
+  memcpy(path, args[0].as.chars, (size_t)args[0].aux);
+  path[args[0].aux] = 0;
   sqlite3 *db;
   int rc = sqlite3_open(path, &db);
   free(path);
@@ -104,7 +104,7 @@ static Value bi_sql_close(VM *vm, Value *args, int nargs) {
 static Value bi_sql_connection_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("sql-connection?: expected an argument");
-  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_SQL);
+  return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_SQL);
 }
 
 static Value bi_sql_execute(VM *vm, Value *args, int nargs) {

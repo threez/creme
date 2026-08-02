@@ -1,0 +1,5 @@
+Globs:
+  - src/**/*.cr
+  - spec/**/*.cr
+  - competition/**/*.cr
+  - "!**/lib/**/*.cr"

@@ -124,8 +124,25 @@ module Scheme
       elsif scope.bound?(name)
         VarRefNode.new(name, pos)
       else
-        GlobalRefNode.new(name, pos)
+        GlobalRefNode.new(cvm_global_name(name, scope), pos)
       end
+    end
+
+    # Only used by CVMEmitter's per-library second analyze pass (see
+    # `cvm_rename`'s own doc comment on Interpreter) to qualify a library's
+    # own internal (non-exported) top-level bindings so they can't collide
+    # with another library's same-named internal helper in cvm's single
+    # flat, name-interned global table (cvm has no per-library namespacing
+    # of its own — see cvm/vm.c's cvm_global_intern). `scope.bound?(name)`
+    # is false only for a genuinely free (library-top-level-or-outer)
+    # reference — a lexically local/internal-define name (already added to
+    # `scope` by whatever body prepass introduced it) must never be
+    # renamed here, since it isn't actually going to become a cvm global at
+    # all. nil `@cvm_rename` (the overwhelmingly common case — real
+    # interpreter execution never sets this) makes this a plain no-op.
+    private def cvm_global_name(name : String, scope : AnalyzerScope) : String
+      return name if scope.bound?(name)
+      (rename = @cvm_rename) ? rename[name]? || name : name
     end
 
     private def analyze_cons(form : Cons, env : Env, scope : AnalyzerScope) : Node
@@ -474,7 +491,7 @@ module Scheme
       args = Scheme.list_to_a(form.cdr)
       return malformed("set!: expects 2 arguments", form) unless args.size == 2
       return malformed("set!: first argument must be a symbol", form) unless (n = args[0]).is_a?(SchemeSym)
-      SetBangNode.new(n.name, analyze(args[1], env, scope), form.pos)
+      SetBangNode.new(cvm_global_name(n.name, scope), analyze(args[1], env, scope), form.pos)
     end
 
     private def analyze_when(form : Cons, env : Env, scope : AnalyzerScope, negate : Bool) : Node
@@ -674,12 +691,12 @@ module Scheme
         # so an already-named/nested lambda (e.g. one that itself shadows
         # a name via its own shorthand define) is never renamed.
         val.name = target.name if val.is_a?(LambdaNode) && val.name == "lambda"
-        DefineNode.new(target.name, val, form.pos)
+        DefineNode.new(cvm_global_name(target.name, scope), val, form.pos)
       when Cons
         fname = target.car
         return malformed("define: function name must be a symbol", form) unless fname.is_a?(SchemeSym)
         lam = build_lambda_node(target.cdr, Scheme.list_to_a(rest.cdr), fname.name, env, scope, form.pos, "define: function body is empty")
-        lam.is_a?(String) ? malformed(lam, form) : DefineNode.new(fname.name, lam, form.pos)
+        lam.is_a?(String) ? malformed(lam, form) : DefineNode.new(cvm_global_name(fname.name, scope), lam, form.pos)
       else
         malformed("define: bad target #{target.write_string}", form)
       end

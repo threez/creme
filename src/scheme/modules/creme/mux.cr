@@ -51,6 +51,15 @@
 # back via `mux-address` (host/port alist) or `mux-base-url` ("http://host:port",
 # ready to concatenate a path onto for a (creme http) client call) — and
 # `mux-close!` to shut the server down.
+#
+# `mux-listen!`'s optional 3rd argument is a string-keyed options alist
+# (e.g. '(("host" . "0.0.0.0"))), same convention as the request/response
+# alists above, rather than a positional host argument — this backend
+# only reads "host" out of it (defaulting to "127.0.0.1" if absent or the
+# argument is omitted entirely) and otherwise ignores any key it doesn't
+# recognize, e.g. cvm's own cvm-only "pool" (cvm/mux.c's own header
+# comment) — Crystal uses Fiber concurrency here, not a worker-VM pool,
+# so there's nothing to configure on this backend for that key.
 # ===========================================================================
 
 require "mux"
@@ -175,11 +184,15 @@ module Scheme::Builtins::MuxLibrary
   @[Scheme::SchemeFn("mux-listen!", min: 2, max: 3)]
   def mux_listen(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     app = mux_router_arg(args[0], "mux-listen!")
-    host, port = if args.size == 3
-                   {mux_str_arg(args[1], "mux-listen!"), mux_int_arg(args[2], "mux-listen!")}
-                 else
-                   {"127.0.0.1", mux_int_arg(args[1], "mux-listen!")}
-                 end
+    port = mux_int_arg(args[1], "mux-listen!")
+    host = "127.0.0.1"
+    if args.size == 3
+      if host_v = alist_lookup(args[2], "host")
+        host = mux_str_arg(host_v, "mux-listen!")
+      end
+      # Any other key ("pool", ...) is simply ignored -- see this file's
+      # own header comment for why.
+    end
     handlers = [Scheme::MuxInterpreterPoolHandler.new(interp).as(HTTP::Handler)]
     handlers.concat(app.middlewares.map { |middleware| Scheme::MuxMiddlewareHandler.new(interp, middleware).as(HTTP::Handler) })
     handlers << app.router.as(HTTP::Handler)
@@ -367,6 +380,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "mux"], Scheme::Builtins::MuxLibrary
+    register_library ["creme", "builtin", "mux"], Scheme::Builtins::MuxLibrary
   end
 end

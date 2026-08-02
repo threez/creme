@@ -931,7 +931,7 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "treelist"] do |env|
+    register_library ["creme", "builtin", "treelist"] do |env|
       names = register_module(Scheme::Builtins::Treelist, env)
       env.define("empty-treelist", SchemeTreelist.new(RRB::Tree.empty))
       names + ["empty-treelist"]

@@ -318,11 +318,26 @@ module Scheme::Builtins::ProcessExtra
     sleep(seconds.seconds)
     NIL.as(SchemeValue)
   end
+
+  # (sleep-ms! milliseconds) -> same fiber-yielding sleep! above, but
+  # takes an exact integer count of milliseconds instead of a real number
+  # of seconds. Exists so portable Scheme code (written to run unchanged
+  # under both this interpreter and cvm/'s own sleep-ms!, which only has
+  # an integer-milliseconds C API) never needs two timer call sites --
+  # see (creme raft-scheme)'s election/heartbeat tickers, the first
+  # caller of this.
+  @[Scheme::SchemeFn("sleep-ms!", min: 1, max: 1)]
+  def sleep_ms_bang(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    ms = int_arg(args[0], "sleep-ms!")
+    raise SchemeRuntimeError.new("sleep-ms!: milliseconds must be non-negative") if ms < 0
+    sleep(ms.milliseconds)
+    NIL.as(SchemeValue)
+  end
 end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "process"] do |env|
+    register_library ["creme", "builtin", "process"] do |env|
       register_module(Scheme::Builtins::ProcessLibrary, env) +
         register_module(Scheme::Builtins::ProcessExtra, env)
     end

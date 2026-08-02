@@ -153,7 +153,31 @@ describe "integration: examples/*.scm" do
     run_example("examples/38-memoized-fib.scm")
   end
 
-  it "runs bench.scm end to end without raising" do
-    run_example("bench/bench.scm")
+  it "runs 39-ffi-libm-caller.scm end to end without raising" do
+    run_example("examples/39-ffi-libm-caller.scm")
+  end
+
+  it "runs 40-ffi-struct-pointer-clock.scm end to end without raising" do
+    run_example("examples/40-ffi-struct-pointer-clock.scm")
+  end
+
+  it "runs 41-ffi-record-file-handle.scm end to end without raising" do
+    run_example("examples/41-ffi-record-file-handle.scm")
+  end
+
+  it "runs competition/bench.scm's bench suite end to end without raising" do
+    # competition/bench.scm now defaults to running BOTH suites (the fast
+    # in-process CPU comparison, then the slow HTTP-benchmarked demo-todo
+    # comparison, which builds and spawns 8 servers) -- pass --only bench
+    # via ARGV (read through (command-line)/(creme cli), same as a real
+    # `creme competition/bench.scm --only bench` invocation) so this stays
+    # the same fast, dependency-light smoke test it always was.
+    original_argv = ARGV.dup
+    ARGV.replace(["competition/bench.scm", "--only", "bench"])
+    begin
+      run_example("competition/bench.scm")
+    ensure
+      ARGV.replace(original_argv)
+    end
   end
 end

@@ -69,6 +69,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "complex"], Scheme::Builtins::Complex
+    register_library ["creme", "builtin", "complex"], Scheme::Builtins::Complex
   end
 end

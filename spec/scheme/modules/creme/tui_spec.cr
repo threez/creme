@@ -1,7 +1,7 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme tui)) #{src}").write_string
 end
 

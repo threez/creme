@@ -106,6 +106,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "http"], Scheme::Builtins::HttpLibrary
+    register_library ["creme", "builtin", "http"], Scheme::Builtins::HttpLibrary
   end
 end

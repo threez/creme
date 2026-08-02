@@ -67,7 +67,7 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "env"] do |env|
+    register_library ["creme", "builtin", "env"] do |env|
       register_module(Scheme::Builtins::EnvVars, env) +
         register_module(Scheme::Builtins::EnvExtra, env)
     end

@@ -1,7 +1,7 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme env)) #{src}").write_string
 end
 
@@ -27,7 +27,7 @@ describe "env module" do
     key = "SCHEME_CR_ENV_SPEC_ALL_VAR"
     ENV[key] = "present"
     begin
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       result = Scheme.run_source(interp, %[(import (creme env)) (assoc "#{key}" (get-environment-variables))])
       result.should be_a(Scheme::Cons)
       result.as(Scheme::Cons).cdr.as(Scheme::SchemeStr).value.should eq("present")

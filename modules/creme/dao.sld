@@ -117,7 +117,7 @@
 ;; ===========================================================================
 
 (define-library (creme dao)
-  (export define-dao dao-ref dao-run-stmt!
+  (export define-dao dao-ref dao-ref-proc dao-run-stmt!
           dao-create-table! dao-insert! dao-select-all dao-select-one dao-update! dao-delete! dao-count
           dao-prepare-all dao-prepare-by-id dao-prepare-delete
           dao-all-prepared dao-one-prepared dao-delete-prepared! dao-count-prepared)
@@ -133,16 +133,23 @@
             (else (dao-filter pred (cdr lst)))))
 
     ;; dao-ref is a hot path (every field read on every row, on every
-    ;; request, uncached -- unlike a whole rendered row, a single field
-    ;; read has nothing to memoize against) -- profiled as this project's
-    ;; single biggest shared cost between the HTML and JSON demo-todo
-    ;; routes (competition/scheme/demo-todo/app.scm; see cvm --profile's
-    ;; own hot-spot table). `col` only ever comes from a small, fixed set
-    ;; of column-name symbols per table, so the string->symbol/string-
-    ;; append/symbol->string round trip that derives its `:col`-keyword-
-    ;; alist key (see this file's own header comment on the row shape)
-    ;; only needs to happen once per distinct symbol, ever -- cached here
-    ;; rather than redone on every single dao-ref call.
+    ;; request) -- profiled (cvm --profile) as this project's single
+    ;; biggest shared cost between the HTML and JSON demo-todo routes
+    ;; (competition/scheme/demo-todo/app.scm), split between dao-ref
+    ;; itself and dao-ref-keyword's own runtime string->symbol/string-
+    ;; append/symbol->string + hash-table-ref cache lookup on every call.
+    ;; Every real call site (this file's own bool-accessors below,
+    ;; app.scm's own routes) passes `col` as a literal quoted symbol --
+    ;; the SAME conversion, over and over, forever, for that one call
+    ;; site -- so dao-ref is a `defmacro`, not a plain procedure: when
+    ;; `col` is `(quote sym)` syntactically, the `:col`-keyword-alist key
+    ;; (see this file's own header comment on the row shape) is computed
+    ;; ONCE, here, at macro-expansion time, folding straight to a bare
+    ;; `(cdr (assq ':col row))` with no runtime keyword-derivation or
+    ;; cache lookup left at all. dao-ref-keyword/dao-ref-proc (below)
+    ;; remain the fallback for a genuinely dynamic (non-literal) `col`
+    ;; expression -- this library's own generated code never produces
+    ;; one, but nothing stops a caller's own code from passing one.
     (define dao-ref-keyword-cache (make-hash-table))
 
     ;; A plain #f default here, not a thunk: Scheme evaluates every
@@ -160,9 +167,29 @@
 
     ;; assq, not assoc: sxql-row->kw-alist's own keys are always symbols
     ;; (string->symbol's own interning already makes eq? valid and exact
-    ;; for symbol comparison, cheaper than assoc's default equal?).
-    (define (dao-ref row col)
+    ;; for symbol comparison, cheaper than assoc's default equal?). The
+    ;; dynamic-col fallback dao-ref's own defmacro expands to when it
+    ;; can't fold `col` at macro-expansion time -- exported (unlike
+    ;; dao-ref-keyword) since the macro's emitted code runs in the
+    ;; CALLING script's own scope, which only ever sees this library's
+    ;; exports (see this file's header comment on defmacro's shared-
+    ;; @global-env transformer bodies vs. its emitted code's own scope).
+    (define (dao-ref-proc row col)
       (cdr (assq (dao-ref-keyword col) row)))
+
+    ;; See the header comment above dao-ref-keyword-cache for why this is
+    ;; a defmacro. `col` here is the UNEVALUATED call-site syntax, so
+    ;; `(and (pair? col) (eq? (car col) 'quote))` recognizes exactly a
+    ;; literal `'sym`/`(quote sym)` argument -- string->symbol/string-
+    ;; append here run once, now, at macro-expansion time (this
+    ;; interpreter's own symbol table, the same one dao-ref-keyword's
+    ;; runtime call would have interned into, so the two are eq?-
+    ;; identical either way) -- never at every one of this call site's
+    ;; own future invocations.
+    (defmacro dao-ref (row col)
+      (if (and (pair? col) (eq? (car col) 'quote))
+          (list 'cdr (list 'assq (list 'quote (string->symbol (string-append ":" (symbol->string (cadr col))))) row))
+          (list 'dao-ref-proc row col)))
 
     (define (dao-run-stmt! conn stmt)
       (let ((yielded (sxql-yield stmt)))
@@ -228,8 +255,8 @@
     ;; call. sxql parameterises every value as a `?` placeholder (see
     ;; sxql-render-expr), so the string is independent of the id value; the
     ;; id is bound positionally at run time by the dao-*-prepared runners.
-    ;; Row shape (sxql-row->kw-alist) and results are identical to the
-    ;; non-prepared dao-select-*/dao-delete! paths above -- only the redundant
+    ;; Row shape and results are identical to the non-prepared
+    ;; dao-select-*/dao-delete! paths above -- only the redundant
     ;; per-call query construction is gone. INSERT/UPDATE stay on the sxql
     ;; path: their column set (and thus SQL shape) varies with the kvs passed.
 
@@ -242,8 +269,24 @@
     (define (dao-prepare-delete table)
       (car (sxql-yield (sxql-delete-from table (sxql-where (sxql-= 'id 0))))))
 
+    ;; This prepared-query path is (with dao-ref, above) the OTHER half of
+    ;; this project's single biggest shared cost between the HTML and JSON
+    ;; demo-todo routes (cvm --profile) -- it used to run every row
+    ;; through sxql-row->kw-alist, re-deriving (string->symbol/string-
+    ;; append, plus a fresh per-row closure for map's own lambda) the SAME
+    ;; :col keyword symbols from scratch for every single row, even though
+    ;; a prepared query's column set never varies from one row (or one
+    ;; call) to the next. sxql-run (see that procedure's own comment)
+    ;; already had the fix for exactly this on the non-prepared path --
+    ;; interning `keys` ONCE from the first row and reusing them across
+    ;; every row via sxql-zip-kw-row -- so this just reuses that same
+    ;; shape here instead of duplicating sxql-row->kw-alist's slower one.
     (define (dao-run-select conn sql params)
-      (map sxql-row->kw-alist (vector->list (apply sql-query conn sql params))))
+      (let ((rows (vector->list (apply sql-query conn sql params))))
+        (if (null? rows)
+            '()
+            (let ((keys (map (lambda (pair) (string->symbol (string-append ":" (car pair)))) (car rows))))
+              (map (lambda (row) (sxql-zip-kw-row keys row)) rows)))))
 
     (define (dao-all-prepared conn sql)
       (dao-run-select conn sql '()))

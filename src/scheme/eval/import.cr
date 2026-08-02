@@ -55,7 +55,7 @@ module Scheme
     # Useful for building a deny-list-style allowlist, e.g.
     # `interp.available_libraries - ["list process", "list file", "list sql", "list env"]`.
     def available_libraries : Array(String)
-      @libraries.keys.map { |name| SchemeLibrary.library_name_string(name) }
+      (@libraries.keys + @pending_libraries.keys).uniq.map { |name| SchemeLibrary.library_name_string(name) }
     end
 
     # An already-registered library's own export alist (external name ->
@@ -253,7 +253,7 @@ module Scheme
       if (allowed = @allowed_libraries) && !allowed.includes?(SchemeLibrary.library_name_string(name))
         raise SchemeRuntimeError.new("import: library (#{SchemeLibrary.library_name_string(name)}) is not permitted")
       end
-      @libraries[name]? || load_library_file(name) ||
+      construct_pending_library(name) || load_library_file(name) ||
         raise SchemeRuntimeError.new("import: unknown library (#{SchemeLibrary.library_name_string(name)})")
     end
 
@@ -288,7 +288,26 @@ module Scheme
 
         @load_dirs << File.dirname(resolved)
         begin
-          build_library(name, parts[1..])
+          # A file-based library's own internal (import ...) declarations
+          # are an implementation detail, not a guest-facing import — e.g.
+          # every old R7RS standard-library name (modules/scheme/*.sld) is
+          # now a thin frontend whose whole body is just
+          # `(import (creme builtin xxx))`. allowed_libraries gates which
+          # names a GUEST program may reach; it must not also have to
+          # separately permit whatever internal native family a permitted
+          # file-based library happens to be implemented on top of, or
+          # sandboxing one of these old names would need its entire
+          # dependency chain enumerated too. What's actually loadable here
+          # was already decided by @library_search_path (host-controlled) and
+          # the allowed_libraries check the caller made against `name`
+          # itself before ever reaching load_library_file.
+          previous_allowed = @allowed_libraries
+          @allowed_libraries = nil
+          begin
+            build_library(name, parts[1..])
+          ensure
+            @allowed_libraries = previous_allowed
+          end
         ensure
           @load_dirs.pop
         end
@@ -327,7 +346,22 @@ module Scheme
       return nil unless form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && head.name == "define-library"
       parts = Scheme.list_to_a(form.cdr)
       return nil if parts.empty?
-      collect_library_body_forms_for_cvm(parts[1..], relative)
+
+      # An `include`/`include-ci` declaration below resolves its filename
+      # relative to the CURRENT top of @load_dirs (read_include_file's own
+      # contract) — the real `import` path (load_library_file) pushes the
+      # library's own directory before walking declarations for exactly this
+      # reason, but this second, cvm-only pass reuses the same file without
+      # going through load_library_file at all, so it needs the identical
+      # push/pop here or a relative include would resolve against whatever
+      # directory happened to be on top instead (e.g. the top-level script's
+      # own directory).
+      @load_dirs << File.dirname(resolved)
+      begin
+        collect_library_body_forms_for_cvm(parts[1..], relative)
+      ensure
+        @load_dirs.pop
+      end
     end
 
     private def collect_library_body_forms_for_cvm(declarations : Array(SchemeValue), relative : String) : Array(SchemeValue)
@@ -339,9 +373,13 @@ module Scheme
         args = Scheme.list_to_a(decl.cdr)
         case tag.name
         when "begin"
-          body.concat(args)
+          body.concat(inline_nested_includes_for_cvm(args))
         when "include", "include-ci"
-          raise SchemeRuntimeError.new("cvm: #{relative}: include/include-ci inside a define-library isn't supported by --emit-cvm yet")
+          fold_case = tag.name == "include-ci"
+          args.each do |filename_form|
+            raise SchemeRuntimeError.new("define-library: #{tag.name} expects string filenames") unless filename_form.is_a?(SchemeStr)
+            read_include_file(filename_form.value, fold_case) { |forms| body.concat(inline_nested_includes_for_cvm(forms)) }
+          end
         when "cond-expand"
           body.concat(collect_library_body_forms_for_cvm(matched_cond_expand_declarations(args), relative))
         else
@@ -349,6 +387,37 @@ module Scheme
         end
       end
       body
+    end
+
+    # An included file's own top-level forms may themselves contain an
+    # expression-level `(include ...)`/`(include-ci ...)` form (R7RS
+    # §4.1.7's own definition-context "include" — same grammar as the
+    # define-library declaration above, just appearing inline in an
+    # ordinary body). The real (non-cvm) path leaves this for the Analyzer
+    # to expand lazily via analyze_include/eval_include, which works there
+    # because analysis happens immediately, in file order, while
+    # @load_dirs still reflects each include's own nesting at the exact
+    # moment it's analyzed. This cvm-only collection pass instead gathers
+    # every form upfront for CVMEmitter to analyze in a SECOND, much later
+    # pass (cvm_emitter.cr) against a totally different @load_dirs
+    # context by then — so a nested include must be expanded eagerly here,
+    # recursively, while @load_dirs (via read_include_file's own push/pop)
+    # still correctly reflects the nesting, rather than left as a raw form
+    # for that later pass to resolve against the wrong directory.
+    private def inline_nested_includes_for_cvm(forms : Array(SchemeValue)) : Array(SchemeValue)
+      result = [] of SchemeValue
+      forms.each do |form|
+        if form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && (head.name == "include" || head.name == "include-ci")
+          fold_case = head.name == "include-ci"
+          Scheme.list_to_a(form.cdr).each do |filename_form|
+            raise SchemeRuntimeError.new("include: expects string filenames") unless filename_form.is_a?(SchemeStr)
+            read_include_file(filename_form.value, fold_case) { |nested| result.concat(inline_nested_includes_for_cvm(nested)) }
+          end
+        else
+          result << form
+        end
+      end
+      result
     end
   end
 end

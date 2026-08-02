@@ -53,7 +53,7 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "inexact"] do |env|
+    register_library ["creme", "builtin", "inexact"] do |env|
       register_module(Scheme::Builtins::MathLibrary, env) +
         register_module(Scheme::Builtins::InexactExtra, env)
     end

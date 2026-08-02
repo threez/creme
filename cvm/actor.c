@@ -341,6 +341,27 @@ static void move_context_to_system(ActorContext *ctx, ActorSystem *new_sys) {
   new_sys->actors = ctx;
   ctx->system = new_sys;
 
+  /* new_sys->next_actor_id is independent of whatever system ctx's id
+   * was minted in (new_actor_context, above) -- a freshly alloc_actor_
+   * system'd sys always starts counting from 1, with no idea ctx is
+   * moving in still carrying (say) "1" from its old system. Without
+   * this, the FIRST actor spawned afterward in new_sys (bi_spawn's own
+   * new_actor_context call) mints that same "1" again, and two distinct
+   * ActorContexts end up sharing one id -- notify_down/monitor/whereis
+   * all key strictly off ctx->id string equality (find_context_by_id_
+   * locked), so a collision silently routes a <down> notification (or
+   * any addressed send) to whichever of the two same-id contexts happens
+   * to come first in new_sys->actors, not necessarily the intended one.
+   * Concretely: examples/34-actor-ping-pong.scm's own `(start-node ...)`
+   * followed by `(spawn ...)` + `(monitor ...)` + `(receive!)` used to
+   * hang forever this way -- the moved-in main-script ctx and the freshly
+   * spawned child both got id "1" in the node's own system, so the
+   * child's own exit notification could be delivered back to the CHILD's
+   * own (already-exited) mailbox instead of the watching main script's,
+   * leaving its `(receive!)` blocked with nothing ever arriving. */
+  long ctx_id_n = strtol(ctx->id, NULL, 10);
+  if (ctx_id_n >= new_sys->next_actor_id) new_sys->next_actor_id = ctx_id_n + 1;
+
   pthread_mutex_unlock(&second->mutex);
   pthread_mutex_unlock(&first->mutex);
 }
@@ -435,14 +456,14 @@ static ActorContext *resolve_target(VM *vm, Value v, const char *who) {
   if (v.tag == T_SYM || v.tag == T_STR) {
     ActorSystem *sys = ensure_context(vm)->system;
     pthread_mutex_lock(&sys->mutex);
-    char *id = find_id_by_name_locked(sys, v.as.str.chars, v.as.str.len);
+    char *id = find_id_by_name_locked(sys, v.as.chars, v.aux);
     ActorContext *ctx = id ? find_context_by_id_locked(sys, id) : NULL;
     pthread_mutex_unlock(&sys->mutex);
     if (!ctx) cvm_abort("%s: unknown actor name", who);
     return ctx;
   }
-  if (v.tag == T_BOX && v.as.box.kind == BOX_KIND_ACTOR_REF) {
-    ActorRef *ref = v.as.box.ptr;
+  if (v.tag == T_BOX && v.aux == BOX_KIND_ACTOR_REF) {
+    ActorRef *ref = v.as.ptr;
     if (ref->local_ctx) return ref->local_ctx;
     cvm_abort("%s: cannot %s a remote actor reference", who, who);
   }
@@ -690,10 +711,10 @@ static void write_datum(WBuf *w, Value v, ActorSystem *sys) {
       return;
     }
     case T_STR:
-      write_string_escaped(w, v.as.str.chars, v.as.str.len);
+      write_string_escaped(w, v.as.chars, v.aux);
       return;
     case T_SYM:
-      wbuf_puts(w, v.as.str.chars, (size_t)v.as.str.len);
+      wbuf_puts(w, v.as.chars, (size_t)v.aux);
       return;
     case T_PAIR: {
       wbuf_putc(w, '(');
@@ -724,7 +745,7 @@ static void write_datum(WBuf *w, Value v, ActorSystem *sys) {
     case T_RECORD: {
       RecordType *rt = v.as.record->type;
       wbuf_puts(w, "(\"@record\" ", 11);
-      write_string_escaped(w, rt->name.as.str.chars, rt->name.as.str.len);
+      write_string_escaped(w, rt->name.as.chars, rt->name.aux);
       for (int i = 0; i < rt->n_fields; i++) {
         wbuf_putc(w, ' ');
         write_datum(w, v.as.record->fields[i], sys);
@@ -733,8 +754,8 @@ static void write_datum(WBuf *w, Value v, ActorSystem *sys) {
       return;
     }
     case T_BOX:
-      if (v.as.box.kind == BOX_KIND_ACTOR_REF) {
-        ActorRef *ref = v.as.box.ptr;
+      if (v.aux == BOX_KIND_ACTOR_REF) {
+        ActorRef *ref = v.as.ptr;
         char *uri;
         if (ref->local_ctx) {
           uri = node_address_uri(sys, ref->id, (int)strlen(ref->id));
@@ -753,7 +774,7 @@ static void write_datum(WBuf *w, Value v, ActorSystem *sys) {
         write_string_escaped(w, full, n2);
         return;
       }
-      cvm_abort("actor: cannot send this value over the wire (unsupported box kind %d)", v.as.box.kind);
+      cvm_abort("actor: cannot send this value over the wire (unsupported box kind %d)", v.aux);
       return;
     default:
       cvm_abort("actor: cannot send this value over the wire (unsupported value type)");
@@ -885,21 +906,21 @@ static Value read_list(PReader *r) {
     items[n++] = read_datum(r);
   }
 
-  if (!has_tail && n >= 2 && items[0].tag == T_STR && items[0].as.str.len == 7 &&
-      memcmp(items[0].as.str.chars, "@record", 7) == 0) {
+  if (!has_tail && n >= 2 && items[0].tag == T_STR && items[0].aux == 7 &&
+      memcmp(items[0].as.chars, "@record", 7) == 0) {
     Value type_name_v = items[1];
     if (type_name_v.tag != T_STR) preader_fail(r, "actor: malformed @record wire data (missing type name)");
     int slot = -1;
     for (int i = 0; i < r->vm->n_globals; i++) {
       const char *gn = r->vm->globals[i].name;
       if (r->vm->globals[i].bound && r->vm->globals[i].value.tag == T_RECORD_TYPE &&
-          (int)strlen(gn) == type_name_v.as.str.len && memcmp(gn, type_name_v.as.str.chars, (size_t)type_name_v.as.str.len) == 0) {
+          (int)strlen(gn) == type_name_v.aux && memcmp(gn, type_name_v.as.chars, (size_t)type_name_v.aux) == 0) {
         slot = i;
         break;
       }
     }
     if (slot < 0) {
-      preader_fail(r, "actor: received unknown record type '%.*s' over the network", type_name_v.as.str.len, type_name_v.as.str.chars);
+      preader_fail(r, "actor: received unknown record type '%.*s' over the network", type_name_v.aux, type_name_v.as.chars);
     }
     RecordType *rt = r->vm->globals[slot].value.as.record_type;
     SchemeRecord *rec = GC_MALLOC(sizeof(SchemeRecord));
@@ -1405,8 +1426,8 @@ static Value bi_send_bang(VM *vm, Value *args, int nargs) {
     mailbox_send(&ctx->mailbox, args[1]);
     return v_nil();
   }
-  if (target.tag == T_BOX && target.as.box.kind == BOX_KIND_ACTOR_REF) {
-    ActorRef *ref = target.as.box.ptr;
+  if (target.tag == T_BOX && target.aux == BOX_KIND_ACTOR_REF) {
+    ActorRef *ref = target.as.ptr;
     if (ref->local_ctx) {
       mailbox_send(&ref->local_ctx->mailbox, args[1]);
     } else {
@@ -1453,15 +1474,15 @@ static Value bi_monitor(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_register_bang(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || (args[0].tag != T_SYM && args[0].tag != T_STR) || args[1].tag != T_BOX || args[1].as.box.kind != BOX_KIND_ACTOR_REF) {
+  if (nargs < 2 || (args[0].tag != T_SYM && args[0].tag != T_STR) || args[1].tag != T_BOX || args[1].aux != BOX_KIND_ACTOR_REF) {
     cvm_abort("register!: expected (name ref)");
   }
-  ActorRef *ref = args[1].as.box.ptr;
+  ActorRef *ref = args[1].as.ptr;
 
   NameEntry *ne = GC_MALLOC(sizeof(NameEntry));
-  ne->name = GC_MALLOC((size_t)(args[0].as.str.len ? args[0].as.str.len : 1));
-  memcpy(ne->name, args[0].as.str.chars, (size_t)args[0].as.str.len);
-  ne->name_len = args[0].as.str.len;
+  ne->name = GC_MALLOC((size_t)(args[0].aux ? args[0].aux : 1));
+  memcpy(ne->name, args[0].as.chars, (size_t)args[0].aux);
+  ne->name_len = args[0].aux;
   ne->id = ref->id;
 
   /* register!/whereis are per-system -- a name registered in one 'local
@@ -1490,7 +1511,7 @@ static Value bi_whereis(VM *vm, Value *args, int nargs) {
   if (nargs < 1 || (args[0].tag != T_SYM && args[0].tag != T_STR)) cvm_abort("whereis: expected a name");
   ActorSystem *sys = ensure_context(vm)->system;
   pthread_mutex_lock(&sys->mutex);
-  char *id = find_id_by_name_locked(sys, args[0].as.str.chars, args[0].as.str.len);
+  char *id = find_id_by_name_locked(sys, args[0].as.chars, args[0].aux);
   ActorContext *ctx = id ? find_context_by_id_locked(sys, id) : NULL;
   pthread_mutex_unlock(&sys->mutex);
   return ctx ? v_actor_ref(ctx->id, ctx) : v_bool(0);
@@ -1498,8 +1519,8 @@ static Value bi_whereis(VM *vm, Value *args, int nargs) {
 
 static Value bi_actor_ref_id(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BOX || args[0].as.box.kind != BOX_KIND_ACTOR_REF) cvm_abort("actor-ref-id: expected an actor ref");
-  ActorRef *ref = args[0].as.box.ptr;
+  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_ACTOR_REF) cvm_abort("actor-ref-id: expected an actor ref");
+  ActorRef *ref = args[0].as.ptr;
   return v_str(ref->id, (int)strlen(ref->id));
 }
 
@@ -1616,24 +1637,24 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
   sys->creator_vm = vm;
 
   if (args[0].tag == T_SYM) {
-    int tlen = args[0].as.str.len;
-    const char *tag = args[0].as.str.chars;
+    int tlen = args[0].aux;
+    const char *tag = args[0].as.chars;
     if (tlen == 3 && memcmp(tag, "tcp", 3) == 0) {
       if (nargs < 4 || args[1].tag != T_STR || args[2].tag != T_INT || args[3].tag != T_STR) {
         cvm_abort("start-node: 'tcp expects (host port cookie)");
       }
-      start_tcp_node(sys, args[1].as.str.chars, args[1].as.str.len, (int)args[2].as.i, args[3].as.str.chars, args[3].as.str.len);
+      start_tcp_node(sys, args[1].as.chars, args[1].aux, (int)args[2].as.i, args[3].as.chars, args[3].aux);
     } else if (tlen == 4 && memcmp(tag, "unix", 4) == 0) {
       if (nargs < 3 || args[1].tag != T_STR || args[2].tag != T_STR) cvm_abort("start-node: 'unix expects (path cookie)");
-      start_unix_node(sys, args[1].as.str.chars, args[1].as.str.len, args[2].as.str.chars, args[2].as.str.len);
+      start_unix_node(sys, args[1].as.chars, args[1].aux, args[2].as.chars, args[2].aux);
     } else if (tlen == 5 && memcmp(tag, "local", 5) == 0) {
       if (nargs < 3 || (args[1].tag != T_SYM && args[1].tag != T_STR) || (args[2].tag != T_SYM && args[2].tag != T_STR)) {
         cvm_abort("start-node: 'local expects (name cookie)");
       }
-      sys->node_name = dupn(args[1].as.str.chars, args[1].as.str.len);
-      sys->node_name_len = args[1].as.str.len;
-      sys->cookie = dupn(args[2].as.str.chars, args[2].as.str.len);
-      sys->cookie_len = args[2].as.str.len;
+      sys->node_name = dupn(args[1].as.chars, args[1].aux);
+      sys->node_name_len = args[1].aux;
+      sys->cookie = dupn(args[2].as.chars, args[2].aux);
+      sys->cookie_len = args[2].aux;
       pthread_mutex_lock(&g_node_registry_mutex);
       sys->next = g_local_nodes;
       g_local_nodes = sys;
@@ -1643,7 +1664,7 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
     }
   } else {
     if (args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR) cvm_abort("start-node: expected (host port cookie)");
-    start_tcp_node(sys, args[0].as.str.chars, args[0].as.str.len, (int)args[1].as.i, args[2].as.str.chars, args[2].as.str.len);
+    start_tcp_node(sys, args[0].as.chars, args[0].aux, (int)args[1].as.i, args[2].as.chars, args[2].aux);
   }
 
   move_context_to_system(ensure_context(vm), sys);
@@ -1651,8 +1672,8 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
 }
 
 static ActorSystem *node_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.as.box.kind != BOX_KIND_ACTOR_NODE) cvm_abort("%s: expected a node handle", who);
-  return v.as.box.ptr;
+  if (v.tag != T_BOX || v.aux != BOX_KIND_ACTOR_NODE) cvm_abort("%s: expected a node handle", who);
+  return v.as.ptr;
 }
 
 /* node-name: 0 args means "the calling actor's own current node", 1 arg
@@ -1677,8 +1698,12 @@ static Value bi_node_path(VM *vm, Value *args, int nargs) {
 }
 
 /* node-address: builds the dialable URI for an actor on `node`, whichever
- * transport it was started with -- accepts either a raw id string or an
- * actor-ref (its id is extracted) as the second argument. */
+ * transport it was started with -- accepts a raw id string, a bare symbol
+ * (e.g. a name registered via (creme actor-supervisor)'s child-spec, as
+ * examples/34-actor-ping-pong.scm does), or an actor-ref (its id is
+ * extracted) as the second argument. Symbols and strings share the same
+ * chars/aux layout in this prototype's value model (see value.h's T_SYM),
+ * so no separate extraction path is needed. */
 static Value bi_node_address(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2) cvm_abort("node-address: expected (node id)");
@@ -1686,11 +1711,11 @@ static Value bi_node_address(VM *vm, Value *args, int nargs) {
 
   const char *id_chars;
   int id_len;
-  if (args[1].tag == T_STR) {
-    id_chars = args[1].as.str.chars;
-    id_len = args[1].as.str.len;
-  } else if (args[1].tag == T_BOX && args[1].as.box.kind == BOX_KIND_ACTOR_REF) {
-    ActorRef *ref = args[1].as.box.ptr;
+  if (args[1].tag == T_STR || args[1].tag == T_SYM) {
+    id_chars = args[1].as.chars;
+    id_len = args[1].aux;
+  } else if (args[1].tag == T_BOX && args[1].aux == BOX_KIND_ACTOR_REF) {
+    ActorRef *ref = args[1].as.ptr;
     id_chars = ref->id;
     id_len = (int)strlen(ref->id);
   } else {
@@ -1704,7 +1729,7 @@ static Value bi_node_address(VM *vm, Value *args, int nargs) {
 static Value bi_remote_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_STR) cvm_abort("remote-ref: expected a URI string");
-  return make_ref_from_uri(args[0].as.str.chars, args[0].as.str.len, "remote-ref", NULL);
+  return make_ref_from_uri(args[0].as.chars, args[0].aux, "remote-ref", NULL);
 }
 
 /* stop-node!: 0 args means "the calling actor's own current node", 1 arg

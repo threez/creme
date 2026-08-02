@@ -1,7 +1,7 @@
 require "../../spec_helper"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -66,7 +66,7 @@ describe "guard" do
   end
 
   it "does not catch a max_eval_depth exceeded error" do
-    interp = Scheme::Interpreter.new(max_eval_depth: 10)
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 10)
     expect_raises(Scheme::SchemeExecutionLimitError, /recursion depth exceeded/) do
       Scheme.run_source(interp, "(define (f n) (+ 1 (f (+ n 1)))) (guard (e (#t 'caught)) (f 0))")
     end

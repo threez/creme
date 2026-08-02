@@ -23,6 +23,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "read"], Scheme::Builtins::ReadLibrary
+    register_library ["creme", "builtin", "read"], Scheme::Builtins::ReadLibrary
   end
 end

@@ -152,6 +152,19 @@ enum {
   BOX_KIND_ACTOR_REF = 11,
   BOX_KIND_ACTOR_NODE = 12, /* actor.c Phase 3+: a start-node handle */
   BOX_KIND_BIGDECIMAL = 13,
+  BOX_KIND_ENVIRONMENT = 14, /* bootstrap.c -- a genuinely separate child VM's
+                              * own global table, used as (scheme eval)'s
+                              * environment/null-environment/eval-2-arg target */
+  BOX_KIND_FFI_LIB = 15,     /* ffi.c -- a dlopen(3) handle */
+  BOX_KIND_FFI_FUNC = 16,    /* ffi.c -- a prepared libffi ffi_cif + fn ptr */
+  BOX_KIND_FFI_POINTER = 17, /* ffi.c -- an opaque native pointer round-tripped
+                              * through Scheme (an ffi-call argument/return
+                              * value of type 'pointer) */
+  BOX_KIND_PKEY = 18,        /* pkey.c -- an RSA/EC asymmetric key (see that
+                              * file's own header comment for why it holds
+                              * PEM text, never a live EVP_PKEY/RSA/EC_KEY*) */
+  BOX_KIND_X509_CERT = 19,   /* x509.c -- an X.509 certificate (PEM text) */
+  BOX_KIND_X509_CSR = 20,    /* x509.c -- a certificate signing request (PEM text) */
 };
 
 typedef struct Value Value;
@@ -175,16 +188,25 @@ typedef struct VM VM;
 
 typedef Value (*BuiltinFn)(VM *vm, Value *args, int nargs);
 
+/* PROTOTYPE (not yet the committed layout — see cvm/README.md's own
+ * "Value/type model" discussion before assuming this is permanent):
+ * `aux` holds T_STR/T_SYM's own length or T_BOX's own BOX_KIND_*,
+ * living as a plain top-level int32_t alongside `tag` instead of nested
+ * inside the union's own str/box sub-structs — the ONLY thing that used
+ * to force the union past 8 bytes (a pointer + int sub-struct pads to
+ * 16 for the pointer's own alignment). With the union back down to a
+ * plain 8-byte word, `tag` (4) + `aux` (4) + `as` (8) = 16 bytes total,
+ * down from 24 — see this file's own git history for the measured
+ * before/after effect on real cvm benchmarks. Unused (left as whatever
+ * — never read) for every tag other than T_STR/T_SYM/T_BOX. */
 struct Value {
   Tag tag;
+  int32_t aux;
   union {
     int64_t i;
     double f;
     int b;
-    struct {
-      const char *chars; /* not NUL-terminated-guaranteed; use len */
-      int len;
-    } str;
+    const char *chars; /* T_STR/T_SYM — not NUL-terminated-guaranteed; use `aux` for length */
     Pair *pair;
     Vector *vec;
     Bytevector *bv;
@@ -201,10 +223,7 @@ struct Value {
     Rational *rational;
     Complex *cplx;
     BuiltinFn builtin;
-    struct {
-      void *ptr;
-      int kind; /* BOX_KIND_* */
-    } box;
+    void *ptr; /* T_BOX — use `aux` for BOX_KIND_* */
   } as;
 };
 
@@ -411,8 +430,8 @@ static inline Value v_float(double f) {
 static inline Value v_str(const char *chars, int len) {
   Value v;
   v.tag = T_STR;
-  v.as.str.chars = chars;
-  v.as.str.len = len;
+  v.as.chars = chars;
+  v.aux = len;
   return v;
 }
 
@@ -558,8 +577,8 @@ static inline Value v_builtin(BuiltinFn fn) {
 static inline Value v_box(void *ptr, int kind) {
   Value v;
   v.tag = T_BOX;
-  v.as.box.ptr = ptr;
-  v.as.box.kind = kind;
+  v.as.ptr = ptr;
+  v.aux = kind;
   return v;
 }
 

@@ -32,6 +32,7 @@
     (should-match-native? '((atan 0))))
 
   (it "log/exp are inverses, and log's optional 2nd argument is an explicit base"
+    (should-match-native? '((log e)))
     (should-match-native? '((log (exp 1))))
     (should-match-native? '((log 8 2))))
 
@@ -48,6 +49,23 @@
     (should-match-native? '((> pi 3.14)))
     (should-match-native? '((< pi 3.15)))
     (should-match-native? '((> e 2.71)))
-    (should-match-native? '((< e 2.72)))))
+    (should-match-native? '((< e 2.72)))
+    (should-match-native? '(pi))
+    (should-match-native? '(e)))
+
+  (it "raises when given a non-number"
+    (should-raise? (lambda () (should-match-native? '((sin "x"))))))
+
+  (it "round-trips a float through its raw IEEE754 bit pattern"
+    ;; This one's an exact integer bit pattern, not a float -- direct
+    ;; should-equal? against the known-correct literal (same as the
+    ;; Crystal reference spec's own hardcoded expectation), not
+    ;; should-match-native?, since there's no floating-point formatting
+    ;; ambiguity to route around here.
+    (should-equal? (flonum->bits 1.0) 4607182418800017408)
+    (should-match-native? '((bits->flonum (flonum->bits 3.14))))
+    (should-match-native? '((bits->flonum (flonum->bits +inf.0))))
+    (should-match-native? '((bits->flonum (flonum->bits -inf.0))))
+    (should-match-native? '((bits->flonum (flonum->bits +nan.0))))))
 
 (spec-summary!)

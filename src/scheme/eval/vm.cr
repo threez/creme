@@ -57,30 +57,42 @@ module Scheme
     # was compiled under — standard lexical-scope capture — not wherever
     # it's being called FROM.
     property root_env : Env
-    # Whether an Interpreter::Frame currently exists on @call_stack for THIS
-    # activation — used by exec_call's tail-call path to tell "collapse
-    # into the existing interpreter frame" (already true) apart from "push
-    # a new one" (not yet true). Deliberately NOT reset by `reset` below —
-    # a tail-call reset REUSES the same @call_stack slot/identity across
-    # iterations, only a genuinely NEW activation (via VM#push_frame's
-    # pool-reuse branch) needs it cleared, which its callers do explicitly.
+    # Whether a REAL Frame, owned/popped by someone OTHER than
+    # this VM instance's own deliver_return, already exists for THIS
+    # activation — true only for VM#call's outermost frame (Interpreter#
+    # apply's BytecodeClosure/BytecodeCaseClosure bridge arms push a Frame
+    # before calling VM#call and pop it in their own `ensure`, exactly like
+    # the Lambda arm). Every other activation (VM#run's outermost, and any
+    # ordinary Scheme-to-Scheme call reached via dispatch_bytecode_call)
+    # never gets a real Frame at all any more — see CallFrame#call_pos —
+    # so this only ever matters for telling a self-tail-call on VM#call's
+    # own outermost frame "keep updating that real Frame in place" (already
+    # true) apart from "there's nothing real to update" (false, the common
+    # case). Deliberately NOT reset by `reset` below — a tail-call reset
+    # REUSES the same @call_stack slot/identity across iterations, only a
+    # genuinely NEW activation (via VM#push_frame's pool-reuse branch) needs
+    # it cleared, which its callers do explicitly.
     property? has_interp_frame : Bool = false
-    # Whether THIS VM's deliver_return is the one that should pop that
-    # frame — false for the one case where has_interp_frame is true but
-    # something ELSE already owns the push/pop (Interpreter#apply's
-    # BytecodeClosure/BytecodeCaseClosure arms push a Frame before calling
-    # VM#call and pop it in their own `ensure`, exactly like the Lambda arm
-    # — VM#call marks its outermost frame accordingly so deliver_return
-    # doesn't ALSO pop it, double-popping @call_stack).
-    property? owns_interp_frame : Bool = false
+    # Call-site position this activation was entered from — recorded on every
+    # push/tail-reset regardless of has_interp_frame/owns_interp_frame, so a
+    # backtrace can be SYNTHESIZED from this pooled frame (see
+    # Interpreter#call_stack_snapshot/VM#synthesize_frames) for the common
+    # case where dispatch_bytecode_call no longer eagerly maintains a real
+    # Frame per call at all (see its own doc comment). nil only
+    # for a frame that has never been the target of a call (e.g. VM#run's
+    # still-nameless outermost activation before its first tail-call).
+    property call_pos : SourcePos?
 
     def initialize(@chunk : Chunk, @base : Int32, @closure : BytecodeClosure?, @return_reg : Int32?, @root_env : Env)
     end
 
     # Overwrites this (pooled, reused) frame's fields for a new activation.
-    # Deliberately leaves has_interp_frame/owns_interp_frame untouched — see
-    # their own doc comments; every call site (VM#push_frame, exec_call's
-    # tail-call path) manages those two explicitly for its own scenario.
+    # Deliberately leaves has_interp_frame untouched — see its own doc
+    # comment; every call site (VM#push_frame, exec_call's tail-call path)
+    # manages it explicitly for its own scenario. call_pos is likewise left
+    # for the caller to set right after (mirroring chunk/base/closure/etc.,
+    # which callers overwrite via this same reset rather than via a
+    # constructor argument).
     def reset(chunk : Chunk, base : Int32, closure : BytecodeClosure?, return_reg : Int32?, root_env : Env) : Nil
       @chunk = chunk
       @base = base
@@ -160,13 +172,18 @@ module Scheme
     # Interpreter.push_current/pop_current lets SchemeError#initialize find
     # the active interpreter (to snapshot call_stack_snapshot/current_pos)
     # without needing an explicit reference threaded to every raise site.
+    # Interpreter.push_current_vm/pop_current_vm does the same for THIS VM
+    # instance, so call_stack_snapshot can synthesize its own uncaptured
+    # recursion (see synthesize_frames) the same way.
     def run(chunk : Chunk) : SchemeValue
       Interpreter.push_current(@interp)
+      Interpreter.push_current_vm(self)
       begin
         ensure_stack_size(chunk.num_registers)
         push_frame(chunk, 0, nil, nil, @root_env)
         sampling_execute
       ensure
+        Interpreter.pop_current_vm
         Interpreter.pop_current
       end
     end
@@ -175,12 +192,13 @@ module Scheme
     # apply, call-with-values, ...) calls back into a BytecodeClosure value —
     # runs the closure to completion in a fresh frame stack and returns its
     # result, bridging Interpreter#apply's convention to the VM.
-    # apply already pushed an Interpreter::Frame for this exact activation
+    # apply already pushed an Frame for this exact activation
     # (it does so for every closure it runs) — mark it so a later self-tail-call from
     # THIS closure correctly overwrites that frame instead of pushing a
     # second one on top of it.
     def call(closure : BytecodeClosure, args : Array(SchemeValue)) : SchemeValue
       Interpreter.push_current(@interp)
+      Interpreter.push_current_vm(self)
       begin
         ensure_stack_size(closure.chunk.num_registers)
         bind_args_from_array(closure.chunk, args, 0, @stack)
@@ -188,8 +206,27 @@ module Scheme
         top_frame.has_interp_frame = true
         sampling_execute
       ensure
+        Interpreter.pop_current_vm
         Interpreter.pop_current
       end
+    end
+
+    # Synthesizes the backtrace entries for every activation on THIS VM's own
+    # @frames that never got a real Frame (see
+    # dispatch_bytecode_call's own doc comment) — everything except a frame
+    # that already has one (has_interp_frame?, true only for VM#call's
+    # outermost activation, whose real Frame already lives in @call_stack —
+    # see Interpreter#call_stack_snapshot) and the still-untouched top-level
+    # program frame VM#run pushes before its first call (closure nil, nothing
+    # to name). Called only from call_stack_snapshot, itself only called when
+    # a SchemeError is actually being constructed — never on the hot path.
+    def synthesize_frames : Array(Frame)
+      result = [] of Frame
+      (0...@depth).each do |i|
+        f = @frames.unsafe_fetch(i)
+        result << Frame.new(f.chunk.name, f.call_pos) if f.closure && !f.has_interp_frame?
+      end
+      result
     end
 
     # Returns this VM to a clean, ready-to-reuse state so a single instance
@@ -228,7 +265,7 @@ module Scheme
         # this pooled slot is stale; callers (VM#run/call, exec_call) set
         # these to the correct values for their own scenario right after.
         frame.has_interp_frame = false
-        frame.owns_interp_frame = false
+        frame.call_pos = nil
       else
         @frames << CallFrame.new(chunk, base, closure, return_reg, root_env)
       end
@@ -569,6 +606,74 @@ module Scheme
               !cmp.nil? && cmp == 0
             end
             frame.ip += instr.b unless truthy
+          when Op::ForPrep
+            counter = @stack.unsafe_fetch(base + instr.a)
+            limit = @stack.unsafe_fetch(base + instr.c)
+            step = instr.d.to_i64
+            skip = if counter.is_a?(SchemeInt) && limit.is_a?(SchemeInt)
+              step > 0 ? counter.value > limit.value : counter.value < limit.value
+            else
+              cmp = @interp.num_compare2(counter.as(SchemeValue), limit.as(SchemeValue), step > 0 ? ">" : "<")
+              !cmp.nil? && (step > 0 ? cmp > 0 : cmp < 0)
+            end
+            frame.ip += instr.b if skip
+          when Op::ForLoop
+            x = @stack.unsafe_fetch(base + instr.a)
+            step = instr.d.to_i64
+            next_val = if x.is_a?(SchemeInt)
+              begin
+                SchemeInt.new(x.value + step)
+              rescue OverflowError
+                @interp.num_add(x, SchemeInt.new(step), "+")
+              end
+            else
+              @interp.num_add(x.as(SchemeValue), SchemeInt.new(step), "+")
+            end
+            @stack.unsafe_put(base + instr.a, next_val)
+            limit = @stack.unsafe_fetch(base + instr.c)
+            in_range = if next_val.is_a?(SchemeInt) && limit.is_a?(SchemeInt)
+              step > 0 ? next_val.value <= limit.value : next_val.value >= limit.value
+            else
+              cmp = @interp.num_compare2(next_val.as(SchemeValue), limit.as(SchemeValue), step > 0 ? "<=" : ">=")
+              !cmp.nil? && (step > 0 ? cmp <= 0 : cmp >= 0)
+            end
+            frame.ip += instr.b if in_range
+          when Op::ForLoopGuardedInc, Op::ForLoopGuardedDec
+            # ForLoop's counterpart for a counted loop recursing through a GLOBAL
+            # binding (see opcode.cr's own doc comment) — step is fixed +-1 by which of
+            # these two ops this is (freeing operand d, ForLoop's step slot, to instead
+            # name the recursed-to global — see get_global_cached below), rather than a
+            # general Int64 read from instr.d.
+            step = instr.op == Op::ForLoopGuardedInc ? 1_i64 : -1_i64
+            x = @stack.unsafe_fetch(base + instr.a)
+            next_val = if x.is_a?(SchemeInt)
+              begin
+                SchemeInt.new(x.value + step)
+              rescue OverflowError
+                @interp.num_add(x, SchemeInt.new(step), "+")
+              end
+            else
+              @interp.num_add(x.as(SchemeValue), SchemeInt.new(step), "+")
+            end
+            @stack.unsafe_put(base + instr.a, next_val)
+            limit = @stack.unsafe_fetch(base + instr.c)
+            in_range = if next_val.is_a?(SchemeInt) && limit.is_a?(SchemeInt)
+              step > 0 ? next_val.value <= limit.value : next_val.value >= limit.value
+            else
+              cmp = @interp.num_compare2(next_val.as(SchemeValue), limit.as(SchemeValue), step > 0 ? "<=" : ">=")
+              !cmp.nil? && (step > 0 ? cmp <= 0 : cmp >= 0)
+            end
+            # Redefinition guard: re-fetch the recursed-to global's CURRENT value and
+            # confirm it's still the exact closure that's executing right now — a
+            # mismatch (someone (set! foo ...)'d or re-`define`d it mid-loop) must not
+            # take the backward jump even if in_range holds, or the rest of the loop
+            # would silently keep running against a function nothing calls it anymore.
+            # A mismatch and ordinary range-exhaustion both just fall through here;
+            # TestGlobalIdentity (right after the loop) tells them apart.
+            still_current = Scheme.scheme_eqv?(get_global_cached(frame, frame.ip - 1, instr.d), closure_of(frame))
+            frame.ip += instr.b if in_range && still_current
+          when Op::TestGlobalIdentity
+            frame.ip += instr.b unless Scheme.scheme_eqv?(get_global_cached(frame, frame.ip - 1, instr.a), closure_of(frame))
           when Op::Closure
             @stack.unsafe_put(base + instr.a, make_closure(frame, frame.chunk.protos.unsafe_fetch(instr.b), instr.b))
           when Op::MakeCaseClosure
@@ -611,6 +716,325 @@ module Scheme
             result = exec_call_global(frame, instr, tail: true)
             return result unless result.nil?
             frame, base, instructions = refresh_frame
+          # Quickened Op::CallGlobal variants (see Chunk#requicken!'s own doc
+          # comment and Op::QCallGlobalAdd2's) -- each re-checks the call
+          # site's CURRENT global value against the exact expected builtin
+          # identity on every visit, computing directly (same int/generic
+          # split as the plain Op::Add/Sub/Mul/Cons arms above) on a match,
+          # or deopting back to Op::CallGlobal — permanently, for this call
+          # site — and falling through to the ordinary generic dispatch the
+          # instant that check fails (a genuine redefinition).
+          when Op::QCallGlobalAdd2
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(Builtin) && callee.same?(plus_builtin)
+              x = @stack.unsafe_fetch(base + instr.a + 1); y = @stack.unsafe_fetch(base + instr.a + 2)
+              @stack.unsafe_put(base + instr.c, if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
+                begin
+                  SchemeInt.new(x.value + y.value)
+                rescue OverflowError
+                  @interp.num_add(x, y, "+")
+                end
+              else
+                @interp.num_add(x, y, "+")
+              end)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          when Op::QCallGlobalSub2
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(Builtin) && callee.same?(minus_builtin)
+              x = @stack.unsafe_fetch(base + instr.a + 1); y = @stack.unsafe_fetch(base + instr.a + 2)
+              @stack.unsafe_put(base + instr.c, if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
+                begin
+                  SchemeInt.new(x.value - y.value)
+                rescue OverflowError
+                  @interp.num_sub(x, y, "-")
+                end
+              else
+                @interp.num_sub(x, y, "-")
+              end)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          when Op::QCallGlobalMul2
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(Builtin) && callee.same?(star_builtin)
+              x = @stack.unsafe_fetch(base + instr.a + 1); y = @stack.unsafe_fetch(base + instr.a + 2)
+              @stack.unsafe_put(base + instr.c, if x.is_a?(SchemeInt) && y.is_a?(SchemeInt)
+                begin
+                  SchemeInt.new(x.value * y.value)
+                rescue OverflowError
+                  @interp.num_mul(x, y, "*")
+                end
+              else
+                @interp.num_mul(x, y, "*")
+              end)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          when Op::QCallGlobalCons2
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(Builtin) && callee.same?(cons_builtin)
+              @stack.unsafe_put(base + instr.c, Cons.new(@stack.unsafe_fetch(base + instr.a + 1), @stack.unsafe_fetch(base + instr.a + 2)))
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          when Op::QCallGlobalCar1
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            arg = @stack.unsafe_fetch(base + instr.a + 1)
+            if callee.is_a?(Builtin) && callee.same?(car_builtin) && arg.is_a?(Cons)
+              @stack.unsafe_put(base + instr.c, arg.car)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          when Op::QCallGlobalCdr1
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            arg = @stack.unsafe_fetch(base + instr.a + 1)
+            if callee.is_a?(Builtin) && callee.same?(cdr_builtin) && arg.is_a?(Cons)
+              @stack.unsafe_put(base + instr.c, arg.cdr)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # N-ary counterparts of Add2/Sub2/Mul2 above (see quicken_callglobal_
+          # op's own comment) — instr.b (nargs) is whatever it already was on
+          # the original Op::CallGlobal instruction this was quickened from
+          # (requicken! only ever overwrites the op field), so it's read here
+          # exactly the same way the generic, unquickened path already does.
+          when Op::QCallGlobalAddN
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(Builtin) && callee.same?(plus_builtin)
+              arg_base = base + instr.a + 1
+              add_acc : SchemeValue = SchemeInt.new(0_i64)
+              instr.b.times do |i|
+                arg = @stack.unsafe_fetch(arg_base + i)
+                add_acc = if add_acc.is_a?(SchemeInt) && arg.is_a?(SchemeInt)
+                  begin
+                    SchemeInt.new(add_acc.value + arg.value)
+                  rescue OverflowError
+                    @interp.num_add(add_acc, arg, "+")
+                  end
+                else
+                  @interp.num_add(add_acc, arg, "+")
+                end
+              end
+              @stack.unsafe_put(base + instr.c, add_acc)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          when Op::QCallGlobalMulN
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(Builtin) && callee.same?(star_builtin)
+              arg_base = base + instr.a + 1
+              mul_acc : SchemeValue = SchemeInt.new(1_i64)
+              instr.b.times do |i|
+                arg = @stack.unsafe_fetch(arg_base + i)
+                mul_acc = if mul_acc.is_a?(SchemeInt) && arg.is_a?(SchemeInt)
+                  begin
+                    SchemeInt.new(mul_acc.value * arg.value)
+                  rescue OverflowError
+                    @interp.num_mul(mul_acc, arg, "*")
+                  end
+                else
+                  @interp.num_mul(mul_acc, arg, "*")
+                end
+              end
+              @stack.unsafe_put(base + instr.c, mul_acc)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # `-`'s own min-arity (1) means instr.b is always >= 1 here — see
+          # quicken_callglobal_op's own guard — so unlike AddN/MulN above
+          # (which both tolerate nargs == 0), this never runs with an empty
+          # arg_base range. nargs == 1 is unary negation (R7RS); anything
+          # more folds left starting from the first argument, same as the
+          # ordinary Builtin#sub this quickens away from.
+          when Op::QCallGlobalSubN
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(Builtin) && callee.same?(minus_builtin)
+              arg_base = base + instr.a + 1
+              nargs = instr.b
+              first = @stack.unsafe_fetch(arg_base)
+              sub_acc : SchemeValue = if nargs == 1
+                if first.is_a?(SchemeInt)
+                  begin
+                    SchemeInt.new(0_i64 - first.value)
+                  rescue OverflowError
+                    @interp.num_sub(SchemeInt.new(0_i64), first, "-")
+                  end
+                else
+                  # `first.as(SchemeValue)`, not bare `first`: inside this
+                  # `else`, Crystal's flow typing has narrowed `first` to
+                  # exclude SchemeInt (a single-variable `is_a?` check, unlike
+                  # the `&&`-joined checks elsewhere in this method, narrows
+                  # unambiguously) -- and num_sub's own body (num_binop3's
+                  # `a.as(SchemeInt)`) gets monomorphized per call-site
+                  # argument type, so a narrowed-to-exclude-SchemeInt
+                  # argument here would make THAT cast fail to compile, even
+                  # though this specific call can obviously never hit it at
+                  # runtime. Widening back to the full union sidesteps that
+                  # without changing anything about which overload runs.
+                  @interp.num_sub(SchemeInt.new(0_i64), first.as(SchemeValue), "-")
+                end
+              else
+                first
+              end
+              (1...nargs).each do |i|
+                arg = @stack.unsafe_fetch(arg_base + i)
+                sub_acc = if sub_acc.is_a?(SchemeInt) && arg.is_a?(SchemeInt)
+                  begin
+                    SchemeInt.new(sub_acc.value - arg.value)
+                  rescue OverflowError
+                    @interp.num_sub(sub_acc, arg, "-")
+                  end
+                else
+                  @interp.num_sub(sub_acc, arg, "-")
+                end
+              end
+              @stack.unsafe_put(base + instr.c, sub_acc)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # define-record-type field accessor (see QCallGlobalRecAcc's own
+          # opcode.cr doc comment, and RecordAccessor in record.cr). Goes
+          # straight from this op to the type-guarded direct field read —
+          # unlike a plain, unquickened Op::CallGlobal reaching the exact
+          # same RecordAccessor fast path only after first going through
+          # exec_call_global and dispatch_call's own BytecodeClosure-vs-not
+          # branch. On EITHER check failing, falls through to Op::CallGlobal
+          # for this one call (so it raises the exact same error the
+          # unquickened path always did) — a genuine redefinition (callee no
+          # longer a RecordAccessor at all) stays deopted, since re-quickening
+          # would just fail the same check again; a wrong-record-type
+          # argument does NOT stay deopted, since exec_call_global's own
+          # re-attempt at quickening sees the SAME still-valid accessor and
+          # requickens right back to this op for the next (possibly
+          # correctly-typed) call — exactly the behavior wanted, not
+          # something this needs to special-case.
+          when Op::QCallGlobalRecAcc
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            rec = @stack.unsafe_fetch(base + instr.a + 1)
+            if callee.is_a?(RecordAccessor) && rec.is_a?(SchemeRecord) && rec.type.same?(callee.record_type)
+              @stack.unsafe_put(base + instr.c, rec.fields.unsafe_fetch(callee.field_index))
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # define-record-type constructor (see QCallGlobalRecCtor's own
+          # opcode.cr doc comment, and RecordConstructor in record.cr) —
+          # the constructor-side counterpart of QCallGlobalRecAcc above,
+          # same reasoning: goes straight to building the record from
+          # stack registers, skipping exec_call_global/dispatch_call.
+          # Falls through to Op::CallGlobal on a kind or arity mismatch;
+          # an arity mismatch on an otherwise-still-valid constructor
+          # re-quickens right back here on the next call, same as RecAcc's
+          # own wrong-record-type case above.
+          when Op::QCallGlobalRecCtor
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            if callee.is_a?(RecordConstructor) && instr.b == callee.arity
+              arg_base = base + instr.a + 1
+              values = callee.field_slots.map { |slot| slot ? @stack.unsafe_fetch(arg_base + slot) : NIL.as(SchemeValue) }
+              @stack.unsafe_put(base + instr.c, SchemeRecord.new(callee.record_type, values).as(SchemeValue))
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # 2-arg string-append -- see opcode.cr's own comment on why this
+          # (unlike RecAcc/RecCtor above) identity-checks against ONE
+          # fixed known builtin, and only quickens the 2-arg shape.
+          when Op::QCallGlobalStrAppend2
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            x = @stack.unsafe_fetch(base + instr.a + 1)
+            y = @stack.unsafe_fetch(base + instr.a + 2)
+            if callee.is_a?(Builtin) && callee.same?(string_append_builtin) && x.is_a?(SchemeStr) && y.is_a?(SchemeStr)
+              @stack.unsafe_put(base + instr.c, SchemeStr.new(x.value + y.value))
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # 1-arg (implicit radix-10) number->string.
+          when Op::QCallGlobalNumToStr1
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            n = @stack.unsafe_fetch(base + instr.a + 1)
+            if callee.is_a?(Builtin) && callee.same?(number_to_string_builtin) && n.is_a?(SchemeInt)
+              @stack.unsafe_put(base + instr.c, SchemeStr.new(n.value.to_s))
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # (creme hash-table)'s hash-table-set! -- always exactly 3 args
+          # (table key value); see opcode.cr's own comment on why this
+          # checks a possibly-nil cached builtin rather than one always
+          # guaranteed present.
+          when Op::QCallGlobalHashSet
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            table = @stack.unsafe_fetch(base + instr.a + 1)
+            if callee.is_a?(Builtin) && callee.same?(hash_table_set_builtin) && table.is_a?(SchemeHashTable)
+              table.set(@stack.unsafe_fetch(base + instr.a + 2), @stack.unsafe_fetch(base + instr.a + 3))
+              @stack.unsafe_put(base + instr.c, NIL)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
+          # hash-table-ref -- the fast path only ever handles the KEY-
+          # FOUND case (whether called with 2 or 3 args); a miss (or the
+          # wrong table type) falls through to the ordinary Op::CallGlobal
+          # path, which already implements both arities' own correct
+          # "raise" / "return the default" behavior — same non-special-
+          # cased "re-quicken naturally on the next hit" shape as RecAcc's
+          # own wrong-record-type case.
+          when Op::QCallGlobalHashRef
+            instr_idx = frame.ip - 1
+            callee = get_global_cached(frame, instr_idx, instr.d)
+            table = @stack.unsafe_fetch(base + instr.a + 1)
+            found = if callee.is_a?(Builtin) && callee.same?(hash_table_ref_builtin) && table.is_a?(SchemeHashTable)
+              table.get?(@stack.unsafe_fetch(base + instr.a + 2))
+            else
+              nil
+            end
+            if found
+              @stack.unsafe_put(base + instr.c, found)
+            else
+              frame.chunk.requicken!(instr_idx, Op::CallGlobal)
+              exec_call_global(frame, instr, tail: false)
+              frame, base, instructions = refresh_frame
+            end
           when Op::CallLocal
             exec_call_local(frame, instr, tail: false)
             frame, base, instructions = refresh_frame
@@ -692,7 +1116,7 @@ module Scheme
             # so its "<name>: expected pair" error keeps its own backtrace frame
             # + position (see cxr_deopt). Own arm at the END of the chain —
             # appending, never inserting mid-chain (see the AddReturn arm above /
-            # doc/optimization.md).
+            # doc/optimization-crystal.md).
             v = @stack.unsafe_fetch(base + instr.b)
             code = instr.c
             while code != 1
@@ -736,7 +1160,7 @@ module Scheme
             # cheap, allocation-free case dispatch that handles every
             # SchemeValue type (including two ints) in one call. Own arm at
             # the END of the chain — appending, never inserting mid-chain
-            # (see the Cxr/Abs arms above / doc/optimization.md), even though
+            # (see the Cxr/Abs arms above / doc/optimization-crystal.md), even though
             # it's conceptually part of the TestEq family above.
             x = @stack.unsafe_fetch(base + instr.a); y = @stack.unsafe_fetch(base + instr.c)
             frame.ip += instr.b unless Scheme.scheme_eqv?(x, y)
@@ -1277,6 +1701,116 @@ module Scheme
       value
     end
 
+    # Cached identity of the well-known (scheme base) builtins Op::CallGlobal
+    # quickens a call site to (see Chunk#requicken!) — resolved lazily, once
+    # per VM instance, from the INTERPRETER's own base_env: the fixed,
+    # ORIGINAL Builtin object every top-level env's own "+"/"-"/etc. binding
+    # is a copy of at import time. Comparing a call site's CURRENT resolved
+    # value against this cached reference by IDENTITY (`same?`, never `==`
+    # or a name lookup) is this VM's counterpart to cvm/vm.c's own
+    # bi_plus/bi_minus/... C function pointer comparisons in
+    # quicken_callglobal_op — "was this call site's target ever redefined".
+    private def plus_builtin : Builtin
+      @plus_builtin ||= @interp.base_env.get("+").as(Builtin)
+    end
+
+    private def minus_builtin : Builtin
+      @minus_builtin ||= @interp.base_env.get("-").as(Builtin)
+    end
+
+    private def star_builtin : Builtin
+      @star_builtin ||= @interp.base_env.get("*").as(Builtin)
+    end
+
+    private def cons_builtin : Builtin
+      @cons_builtin ||= @interp.base_env.get("cons").as(Builtin)
+    end
+
+    private def car_builtin : Builtin
+      @car_builtin ||= @interp.base_env.get("car").as(Builtin)
+    end
+
+    private def cdr_builtin : Builtin
+      @cdr_builtin ||= @interp.base_env.get("cdr").as(Builtin)
+    end
+
+    private def string_append_builtin : Builtin
+      @string_append_builtin ||= @interp.base_env.get("string-append").as(Builtin)
+    end
+
+    private def number_to_string_builtin : Builtin
+      @number_to_string_builtin ||= @interp.base_env.get("number->string").as(Builtin)
+    end
+
+    # Unlike plus_builtin/car_builtin/etc. above, hash-table-set!/hash-
+    # table-ref don't live in @base_env at all -- (creme hash-table) is an
+    # ordinary library, only ever registered once a script actually
+    # imports it (see builtin_registration.cr's own lazy-registration doc
+    # comment), so there's no guarantee it exists yet the first time this
+    # is asked. `||=` on a nilable ivar re-tries the lookup every call
+    # until it succeeds (once the script's own import has actually run,
+    # which it always will have by the time any REAL hash-table-set!/-ref
+    # call site exists to ask about), then stays cached from then on, same
+    # as every other cached builtin here once resolved.
+    private def hash_table_set_builtin : Builtin?
+      @hash_table_set_builtin ||= @interp.libraries[["creme", "builtin", "hash-table"]]?.try(&.env.get?("hash-table-set!")).as?(Builtin)
+    end
+
+    private def hash_table_ref_builtin : Builtin?
+      @hash_table_ref_builtin ||= @interp.libraries[["creme", "builtin", "hash-table"]]?.try(&.env.get?("hash-table-ref")).as?(Builtin)
+    end
+
+    # (quicken_callglobal_op callee nargs) -> the QCallGlobal* op to rewrite
+    # this call site to, or nil for "not one of the handful of builtins this
+    # VM has a fused fast path for" (or an arity that doesn't match one of
+    # them) — that site just keeps paying this same cheap check every time,
+    # same as any inline cache that never gets past megamorphic.
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def quicken_callglobal_op(callee : SchemeValue, nargs : Int32) : Op?
+      return nil unless callee.is_a?(Builtin)
+      # cons/car/cdr have exactly one valid arity each (2/1/1, per R7RS) —
+      # no N-ary form exists to generalize, so they stay gated to the
+      # single nargs value they've always required.
+      return Op::QCallGlobalCons2 if nargs == 2 && callee.same?(cons_builtin)
+      return Op::QCallGlobalCar1 if nargs == 1 && callee.same?(car_builtin)
+      return Op::QCallGlobalCdr1 if nargs == 1 && callee.same?(cdr_builtin)
+      # +/-/* are genuinely variadic (R7RS min-arity 0/1/0) — 2 args keeps
+      # the original branch-free two-register read (by far the most common
+      # call shape); every other arity (0, 1, 3, 4, ...) falls to the N-ary
+      # form, which loops over instr.b registers instead. `-` needs at
+      # least 1 arg (its own min-arity) — an actual 0-arg call site to `-`
+      # is a real arity error, left unquickened so the ordinary
+      # Op::CallGlobal path raises it exactly as it always did.
+      return Op::QCallGlobalAdd2 if nargs == 2 && callee.same?(plus_builtin)
+      return Op::QCallGlobalSub2 if nargs == 2 && callee.same?(minus_builtin)
+      return Op::QCallGlobalMul2 if nargs == 2 && callee.same?(star_builtin)
+      return Op::QCallGlobalAddN if callee.same?(plus_builtin)
+      return Op::QCallGlobalMulN if callee.same?(star_builtin)
+      return Op::QCallGlobalSubN if nargs >= 1 && callee.same?(minus_builtin)
+      # Unlike every case above, this checks the callee's KIND
+      # (RecordAccessor), not its identity against one fixed known
+      # object — see QCallGlobalRecAcc's own opcode.cr doc comment for why
+      # that's correct here (a RecordAccessor carries everything the fast
+      # path needs on itself, read fresh at each call).
+      return Op::QCallGlobalRecAcc if nargs == 1 && callee.is_a?(RecordAccessor)
+      # Same reasoning as RecAcc above, for the constructor side.
+      return Op::QCallGlobalRecCtor if callee.is_a?(RecordConstructor) && nargs == callee.arity
+      # string-append/number->string: identity-checked like +/-/* above
+      # (both live in @base_env, unlike hash-table-set!/-ref below) —
+      # only their most common shape quickens (see opcode.cr's own
+      # comment on QCallGlobalStrAppend2/QCallGlobalNumToStr1).
+      return Op::QCallGlobalStrAppend2 if nargs == 2 && callee.same?(string_append_builtin)
+      return Op::QCallGlobalNumToStr1 if nargs == 1 && callee.same?(number_to_string_builtin)
+      # (creme hash-table): identity-checked against a lazily-cached,
+      # possibly-nil builtin (see hash_table_set_builtin/hash_table_ref_
+      # builtin's own comment for why) — `callee.same?(nil)` (Reference#
+      # same?'s own Nil overload) is simply always false, so this is safe
+      # to check unconditionally even before the library's ever imported.
+      return Op::QCallGlobalHashSet if nargs == 3 && callee.same?(hash_table_set_builtin)
+      return Op::QCallGlobalHashRef if (nargs == 2 || nargs == 3) && callee.same?(hash_table_ref_builtin)
+      nil
+    end
+
     private def closure_of(frame : CallFrame) : BytecodeClosure
       frame.closure || raise SchemeRuntimeError.new("internal: upvalue op in a frame with no closure")
     end
@@ -1310,7 +1844,6 @@ module Scheme
     private def deliver_return(val : SchemeValue) : SchemeValue?
       finished = top_frame
       close_upvalues(finished)
-      @interp.pop_frame if finished.owns_interp_frame?
       @depth -= 1
       if @depth == 0
         val
@@ -1510,9 +2043,20 @@ module Scheme
 
     # Op::CallGlobal / Op::TailCallGlobal — the callee is a global, resolved
     # from this instruction's own inline cache (same fast path + redefinition
-    # safety as GetGlobal), NOT read from register `a`.
+    # safety as GetGlobal), NOT read from register `a`. A non-tail call site
+    # (`tail: false` only — mirrors cvm/vm.c's own OP_CALLGLOBAL-only scope,
+    # never OP_TAILCALLGLOBAL) whose resolved callee is one of the handful
+    # of quickenable builtins gets rewritten in place (Chunk#requicken!) to
+    # the matching QCallGlobal* op before this call even completes, so every
+    # later visit to this same instruction skips straight to its own fused
+    # fast path instead of ever reaching here again.
     private def exec_call_global(frame : CallFrame, instr : Instruction, tail : Bool) : SchemeValue?
-      dispatch_call(frame, instr, get_global_cached(frame, frame.ip - 1, instr.d), tail)
+      instr_idx = frame.ip - 1
+      callee = get_global_cached(frame, instr_idx, instr.d)
+      if !tail && (qop = quicken_callglobal_op(callee, instr.b))
+        frame.chunk.requicken!(instr_idx, qop)
+      end
+      dispatch_call(frame, instr, callee, tail)
     end
 
     # Op::CallLocal / Op::TailCallLocal — the callee is a local, in register
@@ -1581,39 +2125,47 @@ module Scheme
       close_upvalues(frame) if tail
       bind_args(callee.chunk, nargs, new_base, @stack) { |i| @stack.unsafe_fetch(arg_base + i) }
       if tail
-        # Collapse into the SAME interpreter frame if one's already
-        # installed for this activation (the common case, so a tail loop
-        # shows one backtrace frame, not one per iteration); the two exceptions
-        # with nothing yet to overwrite are VM#run's still-nameless
-        # outermost activation, and VM#call's outermost activation (whose
-        # frame belongs to Interpreter#apply, not us — pushing our OWN
-        # here instead of overwriting keeps that ownership distinction
-        # intact, see CallFrame#owns_interp_frame).
-        if frame.has_interp_frame?
-          @interp.set_top_frame(callee.chunk.name, pos)
-        else
-          @interp.push_frame(callee.chunk.name, pos)
-          frame.owns_interp_frame = true
-        end
+        # Only an activation that already owns a REAL Frame
+        # (has_interp_frame?) needs it kept updated in place — that's now
+        # true only for VM#call's outermost activation (see VM#call: it
+        # marks its own frame has_interp_frame explicitly, since
+        # Interpreter#apply's bridge already pushed a real Frame for it
+        # before calling in). Every other activation (VM#run's outermost,
+        # and anything reached via an ordinary non-tail call below) never
+        # gets a real Frame at all any more — its backtrace entry is
+        # synthesized lazily from call_pos/chunk.name instead, see
+        # Interpreter#call_stack_snapshot/VM#synthesize_frames — so a plain
+        # tail self-call just updates call_pos below, same as any other
+        # field this reset overwrites.
+        @interp.set_top_frame(callee.chunk.name, pos) if frame.has_interp_frame?
         frame.reset(callee.chunk, new_base, callee, frame.return_reg, callee.root_env)
-        frame.has_interp_frame = true
+        frame.call_pos = pos
       else
-        @interp.push_frame(callee.chunk.name, pos)
+        # Deliberately NOT pushing a real Frame here any more —
+        # an ordinary (non-tail) Scheme-to-Scheme call's backtrace entry is
+        # now synthesized lazily, only if/when an error is actually raised,
+        # from this pooled frame's own chunk.name/call_pos (see CallFrame#
+        # call_pos and Interpreter#call_stack_snapshot/VM#synthesize_frames)
+        # instead of maintaining a real one eagerly on every single call.
         push_frame(callee.chunk, new_base, callee, instr.c, callee.root_env)
-        top_frame.has_interp_frame = true
-        top_frame.owns_interp_frame = true
+        top_frame.call_pos = pos
       end
       nil
     end
 
-    # Shape-guarded fast path for record accessors/mutators (see
-    # RecordAccessor/RecordMutator in record.cr): the accessor value
-    # carries its target record_type + field_index statically, so a
-    # matching-type call is just a type guard + a direct field load/store
-    # — skipping the per-call args-array allocation and the generic apply
-    # path (arity check, etc.) that every other builtin pays. An arity or
-    # type mismatch falls through to the generic path below, which raises
-    # with the accessor's own fn (identical message/semantics).
+    # Shape-guarded fast path for record accessors/mutators/constructors
+    # (see RecordAccessor/RecordMutator/RecordConstructor in record.cr):
+    # each carries its target record_type (plus a field_index or
+    # field_slots mapping) statically, so a matching-arity call is just a
+    # direct field load/store/build — skipping the per-call args-array
+    # allocation and the generic apply path (arity check, etc.) that every
+    # other builtin pays. An arity or type mismatch falls through to the
+    # generic path below, which raises with the accessor/mutator's own fn
+    # (identical message/semantics) — RecordConstructor's own arity is
+    # always exact (min_arity == max_arity == field_slots' constructor-
+    # arg count), so ITS mismatch case reaches the same generic path too,
+    # via the ordinary Builtin#fn every RecordConstructor still has.
+    # ameba:disable Metrics/CyclomaticComplexity
     private def dispatch_builtin_call(instr : Instruction, callee : SchemeValue, tail : Bool, caller_base : Int32, arg_base : Int32, nargs : Int32, pos : SourcePos?) : SchemeValue?
       if callee.is_a?(RecordAccessor) && nargs == 1
         rec = @stack.unsafe_fetch(arg_base)
@@ -1626,6 +2178,9 @@ module Scheme
           rec.fields[callee.field_index] = @stack.unsafe_fetch(arg_base + 1)
           return finish_call(tail, caller_base, instr, NIL)
         end
+      elsif callee.is_a?(RecordConstructor) && nargs == callee.arity
+        values = callee.field_slots.map { |slot| slot ? @stack.unsafe_fetch(arg_base + slot) : NIL.as(SchemeValue) }
+        return finish_call(tail, caller_base, instr, SchemeRecord.new(callee.record_type, values).as(SchemeValue))
       end
       args = Array(SchemeValue).new(nargs) { |i| @stack.unsafe_fetch(arg_base + i) }
       val = @interp.apply(callee, args, pos)

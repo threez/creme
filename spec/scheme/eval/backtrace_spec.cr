@@ -27,7 +27,7 @@ describe "backtraces" do
   end
 
   it "captures the raising builtin's own position for a non-tail call" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     ex = begin
       Scheme.run_source(interp, "(define (f x) (+ 1 (car x))) (f 5)", source_name: "prog.scm")
       nil
@@ -46,7 +46,7 @@ describe "backtraces" do
   end
 
   it "collapses deep tail recursion to a single frame instead of one per call" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     ex = begin
       Scheme.run_source(interp, "(define (loop n) (if (= n 0) (car 5) (loop (- n 1)))) (loop 50)")
       nil
@@ -58,7 +58,7 @@ describe "backtraces" do
   end
 
   it "reports the innermost sub-expression's own position, several non-tail operands deep" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     ex = begin
       Scheme.run_source(interp, <<-SCM, source_name: "prog.scm")
         (define (f x)
@@ -96,7 +96,7 @@ describe "backtraces" do
         (wrapper 5)
         SCHEME
 
-      interp = Scheme::Interpreter.new(library_search_path: [dir])
+      interp = Scheme::Interpreter.new(library_search_path: [dir, "./modules"])
       ex = begin
         Scheme.run_file(interp, File.join(dir, "main.scm"))
         nil

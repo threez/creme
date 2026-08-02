@@ -5,16 +5,20 @@
  * exactly: an alist (("status" . code) ("headers" . ((name . value)
  * ...)) ("body" . "...")).
  *
- * TLS/HTTPS is a deliberate scope cut, not an oversight: this project's
- * own spec suite (spec/scheme/modules/creme/http_spec.cr) spins up a
- * real local HTTP::Server and every single case hits plain
- * http://127.0.0.1:<port> -- there is zero HTTPS coverage anywhere to
- * even verify a TLS implementation against, and a real TLS stack is a
- * whole separate undertaking (this project already links OpenSSL for
- * (creme actor)'s HMAC handshake and (creme digest), but never touches
- * OpenSSL's own SSL/TLS layer). http-get/etc. abort with a clear
- * "https is not supported" message on an https:// URL rather than
- * silently doing something wrong.
+ * HTTPS: a real TLS client path on top of OpenSSL's SSL/TLS layer (this
+ * project already linked libcrypto for (creme actor)'s HMAC handshake and
+ * (creme digest), but never touched libssl until now -- see cvm/Makefile's
+ * own SSL_CFLAGS/SSL_LIBS). Verification is ALWAYS on: SSL_CTX_set_verify
+ * with SSL_VERIFY_PEER against the system's default trust store
+ * (SSL_CTX_set_default_verify_paths), plus explicit hostname verification
+ * via SSL_set1_host/X509_VERIFY_PARAM (cert validity alone never checks
+ * the hostname matches -- a separate, easy-to-forget step), plus SNI via
+ * SSL_set_tlsext_host_name so a name-based virtual host on the far end
+ * serves the right cert. There is no escape hatch to disable verification
+ * anywhere in this file -- an http-get against a URL with a bad/expired/
+ * mismatched cert fails loudly instead of silently trusting it. See
+ * conn_* below for the plain-socket/TLS-socket dispatch shared by every
+ * http-* builtin.
  *
  * Always sends "Connection: close" and reads the ENTIRE response by
  * draining the socket until the peer closes it, rather than tracking
@@ -32,12 +36,17 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 
 #include "http.h"
 
@@ -131,6 +140,7 @@ typedef struct {
   char *host;
   int port;
   char *path;
+  int https;
 } ParsedUrl;
 
 static void parse_url(const char *url, int len, ParsedUrl *out, const char *who) {
@@ -139,10 +149,8 @@ static void parse_url(const char *url, int len, ParsedUrl *out, const char *who)
     cvm_abort("%s: invalid url '%.*s': missing scheme", who, len, url);
   }
   int scheme_len = (int)(scheme_end - url);
-  if (scheme_len == 5 && memcmp(url, "https", 5) == 0) {
-    cvm_abort("%s: https is not supported by this cvm build (no TLS)", who);
-  }
-  if (!(scheme_len == 4 && memcmp(url, "http", 4) == 0)) {
+  int https = (scheme_len == 5 && memcmp(url, "https", 5) == 0);
+  if (!https && !(scheme_len == 4 && memcmp(url, "http", 4) == 0)) {
     cvm_abort("%s: invalid url '%.*s': unsupported scheme", who, len, url);
   }
 
@@ -159,7 +167,7 @@ static void parse_url(const char *url, int len, ParsedUrl *out, const char *who)
 
   const char *colon = memchr(host_port, ':', (size_t)host_port_len);
   int host_len = colon ? (int)(colon - host_port) : host_port_len;
-  int port = 80;
+  int port = https ? 443 : 80;
   if (colon) {
     char portbuf[16];
     int plen = host_port_len - host_len - 1;
@@ -172,6 +180,7 @@ static void parse_url(const char *url, int len, ParsedUrl *out, const char *who)
   out->host = dupn(host_port, host_len);
   out->port = port;
   out->path = dupn(path, path_len);
+  out->https = https;
 }
 
 /* ---- request headers (a Scheme (name . value) alist) ---------------- */
@@ -191,8 +200,8 @@ static HeaderLine *parse_headers_arg(Value v, const char *who) {
       cvm_abort("%s: expected (name . value) pair in headers", who);
     }
     HeaderLine *hl = GC_MALLOC(sizeof(HeaderLine));
-    hl->name = dupn(entry.as.pair->car.as.str.chars, entry.as.pair->car.as.str.len);
-    hl->value = dupn(entry.as.pair->cdr.as.str.chars, entry.as.pair->cdr.as.str.len);
+    hl->name = dupn(entry.as.pair->car.as.chars, entry.as.pair->car.aux);
+    hl->value = dupn(entry.as.pair->cdr.as.chars, entry.as.pair->cdr.aux);
     hl->next = NULL;
     *tail = hl;
     tail = &hl->next;
@@ -256,6 +265,92 @@ static void read_all_until_eof(int fd, HBuf *out) {
     if (r == 0) break;
     hbuf_puts(out, chunk, (int)r);
   }
+}
+
+/* ---- TLS: a plain-socket/SSL-socket Conn, dispatched on once at
+ * connect time so http_do's own request/response driver below doesn't
+ * need to know which one it's talking to. ---- */
+
+static pthread_once_t g_ssl_ctx_once = PTHREAD_ONCE_INIT;
+static SSL_CTX *g_ssl_ctx = NULL;
+
+static void ssl_ctx_init(void) {
+  SSL_library_init();
+  SSL_load_error_strings();
+  g_ssl_ctx = SSL_CTX_new(TLS_client_method());
+  if (!g_ssl_ctx) cvm_abort("http: failed to create an SSL context");
+  /* SSL_VERIFY_PEER (reject an invalid/untrusted cert) is the whole
+   * point of doing TLS at all -- there is deliberately no builtin or
+   * flag anywhere in this file to turn it off. Hostname verification
+   * (SSL_set1_host, per-connection, see connect_tls below) is a SEPARATE
+   * step SSL_VERIFY_PEER does not imply: a cert can be validly signed by
+   * a trusted CA for a totally different hostname than the one being
+   * dialed, and without SSL_set1_host that mismatch would go unchecked. */
+  SSL_CTX_set_verify(g_ssl_ctx, SSL_VERIFY_PEER, NULL);
+  if (!SSL_CTX_set_default_verify_paths(g_ssl_ctx)) {
+    cvm_abort("http: failed to load the system's default TLS trust store");
+  }
+}
+
+typedef struct {
+  int fd;
+  SSL *ssl; /* NULL for a plain (non-TLS) connection */
+} Conn;
+
+/* Connects + completes a TLS handshake against `host:port`, verifying
+ * both the certificate chain (via g_ssl_ctx's SSL_VERIFY_PEER) and that
+ * the certificate is actually for THIS host (SSL_set1_host -- a chain
+ * can be validly signed yet for an unrelated name, which cert-validity
+ * checking alone never catches). SNI (SSL_set_tlsext_host_name) so a
+ * name-based virtual host on the far end serves the matching cert in
+ * the first place. */
+static int connect_tls(Conn *c, const char *host, int port, const char *who) {
+  pthread_once(&g_ssl_ctx_once, ssl_ctx_init);
+  c->fd = connect_tcp(host, port);
+  if (c->fd < 0) return -1;
+  c->ssl = SSL_new(g_ssl_ctx);
+  if (!c->ssl) cvm_abort("%s: failed to create an SSL session", who);
+  SSL_set_fd(c->ssl, c->fd);
+  SSL_set_tlsext_host_name(c->ssl, host);
+  SSL_set1_host(c->ssl, host);
+  if (SSL_connect(c->ssl) != 1) {
+    unsigned long e = ERR_get_error();
+    char ebuf[256];
+    ERR_error_string_n(e, ebuf, sizeof(ebuf));
+    cvm_abort("%s: TLS handshake with %s:%d failed: %s", who, host, port, ebuf);
+  }
+  return 0;
+}
+
+static int conn_write_all(Conn *c, const char *buf, size_t n) {
+  if (!c->ssl) return write_all(c->fd, buf, n);
+  size_t left = n;
+  const char *p = buf;
+  while (left > 0) {
+    int w = SSL_write(c->ssl, p, (int)left);
+    if (w <= 0) return -1;
+    p += (size_t)w;
+    left -= (size_t)w;
+  }
+  return 0;
+}
+
+static void conn_read_all_until_eof(Conn *c, HBuf *out) {
+  if (!c->ssl) { read_all_until_eof(c->fd, out); return; }
+  char chunk[4096];
+  for (;;) {
+    int r = SSL_read(c->ssl, chunk, sizeof(chunk));
+    if (r <= 0) break; /* SSL_ERROR_ZERO_RETURN (clean close) or any other error: done either way */
+    hbuf_puts(out, chunk, r);
+  }
+}
+
+static void conn_close(Conn *c) {
+  if (c->ssl) {
+    SSL_shutdown(c->ssl);
+    SSL_free(c->ssl);
+  }
+  close(c->fd);
 }
 
 /* ---- response parsing -------------------------------------------------- */
@@ -332,7 +427,7 @@ static char *dechunk(const char *body, int body_len, int *out_len) {
 static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, int has_headers, Value body_v, int has_body, const char *who) {
   if (url_v.tag != T_STR) cvm_abort("%s: expected string, got a non-string value", who);
   ParsedUrl u;
-  parse_url(url_v.as.str.chars, url_v.as.str.len, &u, who);
+  parse_url(url_v.as.chars, url_v.aux, &u, who);
 
   HeaderLine *user_headers = NULL;
   if (has_headers) {
@@ -344,12 +439,18 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
   int req_body_len = 0;
   if (has_body) {
     if (body_v.tag != T_STR) cvm_abort("%s: expected a string body", who);
-    req_body = body_v.as.str.chars;
-    req_body_len = body_v.as.str.len;
+    req_body = body_v.as.chars;
+    req_body_len = body_v.aux;
   }
 
-  int fd = connect_tcp(u.host, u.port);
-  if (fd < 0) cvm_abort("%s: connection to %s:%d failed", who, u.host, u.port);
+  Conn conn;
+  if (u.https) {
+    if (connect_tls(&conn, u.host, u.port, who) != 0) cvm_abort("%s: connection to %s:%d failed", who, u.host, u.port);
+  } else {
+    conn.ssl = NULL;
+    conn.fd = connect_tcp(u.host, u.port);
+    if (conn.fd < 0) cvm_abort("%s: connection to %s:%d failed", who, u.host, u.port);
+  }
 
   HBuf req;
   hbuf_init(&req);
@@ -361,15 +462,15 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
   hbuf_putstr(&req, "\r\n");
   if (has_body && req_body_len > 0) hbuf_puts(&req, req_body, req_body_len);
 
-  if (write_all(fd, req.buf, (size_t)req.len) != 0) {
-    close(fd);
+  if (conn_write_all(&conn, req.buf, (size_t)req.len) != 0) {
+    conn_close(&conn);
     cvm_abort("%s: connection to %s:%d failed while sending the request", who, u.host, u.port);
   }
 
   HBuf resp;
   hbuf_init(&resp);
-  read_all_until_eof(fd, &resp);
-  close(fd);
+  conn_read_all_until_eof(&conn, &resp);
+  conn_close(&conn);
 
   int next;
   int status_line_end = find_line_end(resp.buf, resp.len, 0, &next);
@@ -465,7 +566,7 @@ static Value bi_http_patch(VM *vm, Value *args, int nargs) {
 
 static Value bi_http_request(VM *vm, Value *args, int nargs) {
   if (nargs < 2 || args[0].tag != T_STR) cvm_abort("http-request: expected (method url [headers [body]])");
-  char *method = dupn(args[0].as.str.chars, args[0].as.str.len);
+  char *method = dupn(args[0].as.chars, args[0].aux);
   return http_do(vm, method, args[1], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, nargs >= 4 ? args[3] : v_nil(), nargs >= 4, "http-request");
 }
 

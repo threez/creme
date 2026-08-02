@@ -50,6 +50,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "random"], Scheme::Builtins::RandomLibrary
+    register_library ["creme", "builtin", "random"], Scheme::Builtins::RandomLibrary
   end
 end

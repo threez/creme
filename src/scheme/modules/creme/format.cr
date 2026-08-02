@@ -94,6 +94,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "format"], Scheme::Builtins::FormatLibrary
+    register_library ["creme", "builtin", "format"], Scheme::Builtins::FormatLibrary
   end
 end

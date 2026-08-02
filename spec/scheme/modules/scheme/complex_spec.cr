@@ -1,7 +1,7 @@
 require "../../../spec_helper"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (scheme complex)) #{src}")
 end
 
@@ -11,7 +11,7 @@ end
 
 describe "(scheme complex)" do
   it "must be explicitly imported (not auto-imported like base)" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     expect_raises(Scheme::SchemeRuntimeError, /unbound variable: make-rectangular/) do
       Scheme.run_source(interp, "(make-rectangular 1 2)")
     end
@@ -43,7 +43,7 @@ describe "(scheme complex)" do
 
   describe "make-polar" do
     it "round-trips through real-part/imag-part" do
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       result = Scheme.run_source(interp, "(import (scheme complex)) (define p (make-polar 5 0)) (list (real-part p) (imag-part p))")
       result.write_string.should eq("(5.0 0.0)")
     end

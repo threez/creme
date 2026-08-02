@@ -85,6 +85,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "regex"], Scheme::Builtins::RegexLibrary
+    register_library ["creme", "builtin", "regex"], Scheme::Builtins::RegexLibrary
   end
 end

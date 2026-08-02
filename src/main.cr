@@ -1,5 +1,14 @@
 require "./scheme"
 
+# Reopens the stdlib's own `lib LibGC` (crystal/gc/boehm.cr) just to add the
+# two bdwgc functions it doesn't already bind, needed for the default-heap-
+# size tuning below -- see cvm/main.c's own equivalent GC_INIT()-adjacent
+# comment (same rationale, same libgc, same measured effect) for why.
+lib LibGC
+  fun expand_hp = GC_expand_hp(bytes : LibC::SizeT) : LibC::Int
+  fun get_heap_size = GC_get_heap_size : LibC::SizeT
+end
+
 def format_error(ex : Scheme::SchemeError) : String
   String.build do |io|
     if pos = ex.pos
@@ -17,39 +26,21 @@ def format_error(ex : Scheme::SchemeError) : String
   end
 end
 
+# # The interactive REPL is now the same shared (creme repl) library
+# # (modules/creme/repl.sld) that cvm/repl.scm and --self-hosted mode also
+# # delegate to, instead of Crystal-native hand-rolled line-reading/
+# # buffering/error-formatting -- one implementation for line-editing,
+# # live syntax highlighting, and paren-matching across all three runtimes.
 def repl(interp : Scheme::Interpreter) : Nil
-  buffer = ""
-  loop do
-    prompt = buffer.empty? ? "scheme> " : "   ...  "
-    print(prompt)
-    line = STDIN.gets(chomp: false)
-    if line.nil?
-      puts
-      break
-    end
-    buffer = buffer.empty? ? line : buffer + line
-    next if buffer.strip.empty?
-
-    begin
-      forms = Scheme::Reader.read_all(buffer, "<repl>")
-      buffer = ""
-      forms.each do |form|
-        result = Scheme::BytecodeCompiler.run_program(interp, [form], interp.global)
-        puts result.write_string
-      end
-    rescue Scheme::SchemeIncompleteError
-      # keep buffer, request continuation
-      next
-    rescue ex : Scheme::SchemeExit
-      exit(ex.code)
-    rescue ex : Scheme::SchemeError
-      buffer = ""
-      puts format_error(ex)
-    rescue ex
-      buffer = ""
-      puts "Internal error: #{ex.message}"
-    end
-  end
+  Scheme.run_source(interp, "(import (scheme process-context)) (import (creme repl)) (run-repl)")
+rescue ex : Scheme::SchemeExit
+  exit(ex.code)
+rescue ex : Scheme::SchemeError
+  STDERR.puts format_error(ex)
+  exit 1
+rescue ex
+  STDERR.puts "Internal error: #{ex.message}"
+  exit 1
 end
 
 def usage : Nil
@@ -168,13 +159,21 @@ end
 def dump_bytecode(path : String, strict : Bool = false) : Nil
   interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: !strict)
   src = File.read(path)
-  forms = Scheme.forms_for(interp, src, path)
-  forms.each_with_index do |form, i|
-    node = interp.analyze(form, interp.global)
-    chunk = Scheme::BytecodeCompiler.compile_program([node])
-    puts "; ---- top-level form #{i} ----" if forms.size > 1
-    Scheme::Disassembler.disassemble(chunk, "form #{i}")
-    Scheme::VM.new(interp, interp.global).run(chunk)
+  # Push the script's own directory, matching Scheme.run_file, so a relative
+  # (include "...") inside it resolves against where the script lives, not
+  # the process's CWD.
+  interp.push_load_dir(File.dirname(File.expand_path(path)))
+  begin
+    forms = Scheme.forms_for(interp, src, path)
+    forms.each_with_index do |form, i|
+      node = interp.analyze(form, interp.global)
+      chunk = Scheme::BytecodeCompiler.compile_program([node])
+      puts "; ---- top-level form #{i} ----" if forms.size > 1
+      Scheme::Disassembler.disassemble(chunk, "form #{i}")
+      Scheme::VM.new(interp, interp.global).run(chunk)
+    end
+  ensure
+    interp.pop_load_dir
   end
 end
 
@@ -461,6 +460,33 @@ end
 # constant between a _spec.cr file and src/main.cr.
 SELF_HOSTED_TOOLCHAIN_IMPORT = %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler)))
 
+# Pre-seeds ensure-library-loaded!'s own "already loaded" tracking
+# (compiler.sld's own mark-self-hosted-library-loaded!) for every
+# file-based library SELF_HOSTED_TOOLCHAIN_IMPORT above already loaded
+# NATIVELY (this whole toolchain import runs through Crystal's own real
+# import machinery, which the self-hosted compiler's own loader has no
+# way to know about) -- mirrors cvm/compiler-run.scm's own identical
+# pre-seeding, needed for the identical reason (that file's own header
+# comment): once compiler.sld's own file-reading (file-read, via (creme
+# file)) genuinely works under self-hosted too (previously silently
+# broken there, so ensure-library-loaded! always fell through to a
+# native-introspection fallback instead of ever actually re-reading a
+# library's own .sld source), a script that ALSO imports one of these
+# same libraries -- exactly what every spec/creme/*.scm file does,
+# transitively -- would otherwise have that library's source re-read
+# and re-run a SECOND time here too, re-executing (creme bytecode)'s own
+# (define-record-type <chunk> ...) and re-creating a nominally NEW,
+# disjoint record type that corrupts any chunk/fcomp object this SAME
+# reentrant self-hosted-compiler invocation is already holding from the
+# original, natively-loaded generation. (scheme lazy)/(scheme eval)/
+# (scheme cxr)/(creme bootstrap)/(creme regex) need no entry -- none has
+# a .sld file on disk, so the loader already no-ops for them regardless.
+SELF_HOSTED_TOOLCHAIN_MARK_LOADED = %(
+  (mark-self-hosted-library-loaded! '(creme peg))
+  (mark-self-hosted-library-loaded! '(creme bytecode))
+  (mark-self-hosted-library-loaded! '(creme compiler reader))
+  (mark-self-hosted-library-loaded! '(creme compiler compiler)))
+
 # Runs `path` through the self-hosted (creme compiler compiler) instead
 # of the native Crystal BytecodeCompiler run_script/Scheme.run_file uses —
 # for `creme --self-hosted`, an explicit opt-in rather than the
@@ -477,10 +503,24 @@ SELF_HOSTED_TOOLCHAIN_IMPORT = %((import (scheme lazy) (scheme eval) (scheme cxr
 def run_self_hosted(path : String) : Nil
   interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
   Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_IMPORT)
+  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_MARK_LOADED)
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
     interp.global.define("self-hosted-script-source", Scheme::SchemeStr.new(File.read(path)))
-    Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes self-hosted-script-source))", source_name: path)
+    # Passed through as compile-source-to-bytes' own optional 2nd (file
+    # path) argument -- lets a genuinely nested `(include ...)` (inside a
+    # let/lambda body, not just this file's own top level) resolve a
+    # relative path against THIS file's own directory (compiler.sld's own
+    # current-compiling-file/expand-include-form). A plain global (not
+    # string-interpolated into the source below) so there's no escaping
+    # to worry about.
+    interp.global.define("self-hosted-script-path", Scheme::SchemeStr.new(path))
+    # A marker only this path defines -- (creme introspection)'s `runtime`
+    # builtin checks whether it's bound in interp.global to report
+    # compiler = "self-hosted" vs "native" (see introspection.cr's
+    # `runtime` method). Its value is never inspected, only its presence.
+    interp.global.define("__creme_self_hosted__", Scheme::TRUE)
+    Scheme.run_source(interp, "(load-chunk-bytes (compile-source-to-bytes self-hosted-script-source self-hosted-script-path))", source_name: path)
   ensure
     interp.pop_load_dir
   end
@@ -494,17 +534,65 @@ rescue ex
   exit 1
 end
 
+# Interactive `creme --self-hosted` with no file argument: the same
+# shared (creme repl) library every other REPL entry point now delegates
+# to, run against a self-hosted-toolchain-loaded interpreter instead of a
+# script's contents -- this "falls out" of unifying the REPLs, since the
+# self-hosted toolchain load is identical to run_self_hosted's, just
+# followed by (run-repl) instead of compiling+running a file's source.
+def run_self_hosted_repl : Nil
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
+  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_IMPORT)
+  Scheme.run_source(interp, SELF_HOSTED_TOOLCHAIN_MARK_LOADED)
+  interp.global.define("__creme_self_hosted__", Scheme::TRUE)
+  Scheme.run_source(interp, "(import (scheme process-context)) (import (creme repl)) (run-repl)")
+rescue ex : Scheme::SchemeExit
+  exit(ex.code)
+rescue ex : Scheme::SchemeError
+  STDERR.puts format_error(ex)
+  exit 1
+rescue ex
+  STDERR.puts "Internal error: #{ex.message}"
+  exit 1
+end
+
 # Handles `creme --self-hosted <file.scm>` — split out of `main` purely to
-# keep that method's own top-level dispatch simple.
+# keep that method's own top-level dispatch simple. With no file argument
+# AND a real tty on stdin, starts the shared interactive REPL against the
+# self-hosted toolchain instead of erroring out (new capability that falls
+# out of unifying the REPLs). A piped/non-tty invocation without a file
+# argument keeps the existing required-path behavior unchanged (matches
+# spec/main_spec.cr's "--self-hosted requires a file argument" — with no
+# real terminal and no file to run, there is nothing useful to do).
 def handle_self_hosted(args : Array(String)) : Nil
   unless path = args[1]?
+    if STDIN.tty?
+      run_self_hosted_repl
+      return
+    end
     STDERR.puts "Usage: creme --self-hosted <file.scm>"
     exit 1
   end
   run_self_hosted(path)
 end
 
+# ameba:disable Metrics/CyclomaticComplexity
 def main : Nil
+  # Crystal's own runtime already ran GC.init (and honored an explicit
+  # GC_INITIAL_HEAP_SIZE env var, if set) before this method was ever
+  # called -- so, same as cvm/main.c, only step in with our own default
+  # when the caller didn't set one. Benchmarked (doc/optimization-crystal.md's
+  # own GC env-var section) across the same 9 competition/bench.scm
+  # workloads, median of 11 runs each: unset (libgc's own default) 0.342s
+  # total vs. 256M 0.265s (-22.6%), with 1G measuring the same as 256M (no
+  # further win). GC_ENABLE_INCREMENTAL was also tested and made things
+  # worse (+17%) -- not adopted, see that doc's dead-end note.
+  if !ENV["GC_INITIAL_HEAP_SIZE"]?
+    default_heap = LibC::SizeT.new(256 * 1024 * 1024)
+    heap_size = LibGC.get_heap_size
+    LibGC.expand_hp(default_heap - heap_size) if heap_size < default_heap
+  end
+
   args = ARGV
   if args.empty?
     if STDIN.tty?
@@ -512,7 +600,6 @@ def main : Nil
       # established ergonomics — (scheme base)/(scheme write) are
       # auto-imported so there's no friction typing expressions live.
       interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
-      puts "creme — Crystal Scheme interpreter. Ctrl-D or (exit) to quit."
       repl(interp)
     else
       run_piped_script

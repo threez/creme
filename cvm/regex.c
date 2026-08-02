@@ -29,7 +29,7 @@ static Value bi_regexp(VM *vm, Value *args, int nargs) {
   if (nargs != 1 || args[0].tag != T_STR) cvm_abort("regexp: expected a pattern string");
   int errcode;
   PCRE2_SIZE erroffset;
-  pcre2_code *re = pcre2_compile((PCRE2_SPTR)args[0].as.str.chars, (PCRE2_SIZE)args[0].as.str.len, 0, &errcode, &erroffset, NULL);
+  pcre2_code *re = pcre2_compile((PCRE2_SPTR)args[0].as.chars, (PCRE2_SIZE)args[0].aux, 0, &errcode, &erroffset, NULL);
   if (!re) {
     PCRE2_UCHAR errbuf[256];
     pcre2_get_error_message(errcode, errbuf, sizeof(errbuf));
@@ -40,17 +40,17 @@ static Value bi_regexp(VM *vm, Value *args, int nargs) {
 
 static Value bi_regexp_matches_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_BOX || args[0].as.box.kind != BOX_KIND_REGEX || args[1].tag != T_STR) {
+  if (nargs != 2 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_REGEX || args[1].tag != T_STR) {
     cvm_abort("regexp-matches?: expected (regexp string)");
   }
-  pcre2_code *re = (pcre2_code *)args[0].as.box.ptr;
+  pcre2_code *re = (pcre2_code *)args[0].as.ptr;
   /* Short-lived scratch space, freed immediately after use -- unlike the
    * compiled pattern itself (`re`, GC-owned via v_box, intentionally kept
    * alive for reuse across calls, matching this codebase's "leak
    * long-lived state, don't over-engineer" convention), this genuinely
    * has no reason to survive past this one call. */
   pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
-  int rc = pcre2_match(re, (PCRE2_SPTR)args[1].as.str.chars, (PCRE2_SIZE)args[1].as.str.len, 0, 0, md, NULL);
+  int rc = pcre2_match(re, (PCRE2_SPTR)args[1].as.chars, (PCRE2_SIZE)args[1].aux, 0, 0, md, NULL);
   pcre2_match_data_free(md);
   return v_bool(rc >= 0);
 }
@@ -58,12 +58,12 @@ static Value bi_regexp_matches_p(VM *vm, Value *args, int nargs) {
 static Value bi_regexp_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("regexp?: expected an argument");
-  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_REGEX);
+  return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_REGEX);
 }
 
 static pcre2_code *regex_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.as.box.kind != BOX_KIND_REGEX) cvm_abort("%s: expected a regexp", who);
-  return (pcre2_code *)v.as.box.ptr;
+  if (v.tag != T_BOX || v.aux != BOX_KIND_REGEX) cvm_abort("%s: expected a regexp", who);
+  return (pcre2_code *)v.as.ptr;
 }
 
 /* Matches `re` against subj[start..subj_len) once. Returns 1 with
@@ -106,15 +106,15 @@ static Value bi_regexp_search(VM *vm, Value *args, int nargs) {
   pcre2_code *re = regex_arg(args[0], "regexp-search");
   int ms, me;
   Value groups;
-  if (!regex_match_once(vm, re, args[1].as.str.chars, args[1].as.str.len, 0, &ms, &me, &groups)) return v_bool(0);
+  if (!regex_match_once(vm, re, args[1].as.chars, args[1].aux, 0, &ms, &me, &groups)) return v_bool(0);
   return groups;
 }
 
 static Value bi_regexp_extract(VM *vm, Value *args, int nargs) {
   if (nargs != 2 || args[1].tag != T_STR) cvm_abort("regexp-extract: expected (regexp string)");
   pcre2_code *re = regex_arg(args[0], "regexp-extract");
-  const char *subj = args[1].as.str.chars;
-  int len = args[1].as.str.len;
+  const char *subj = args[1].as.chars;
+  int len = args[1].aux;
   Value matches = v_nil();
   Value *collected = GC_MALLOC(sizeof(Value) * (size_t)(len + 1 ? len + 1 : 1));
   int n = 0;
@@ -141,13 +141,13 @@ static Value bi_regexp_replace(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 3 || args[1].tag != T_STR || args[2].tag != T_STR) cvm_abort("regexp-replace: expected (regexp string string)");
   pcre2_code *re = regex_arg(args[0], "regexp-replace");
-  const char *subj = args[2].as.str.chars;
-  int len = args[2].as.str.len;
+  const char *subj = args[2].as.chars;
+  int len = args[2].aux;
   int ms, me;
   Value groups;
   if (!regex_match_once(vm, re, subj, len, 0, &ms, &me, &groups)) return args[2];
-  const char *rep = args[1].as.str.chars;
-  int rep_len = args[1].as.str.len;
+  const char *rep = args[1].as.chars;
+  int rep_len = args[1].aux;
   int out_len = ms + rep_len + (len - me);
   char *out = GC_MALLOC((size_t)(out_len ? out_len : 1));
   memcpy(out, subj, (size_t)ms);
@@ -160,10 +160,10 @@ static Value bi_regexp_replace_all(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 3 || args[1].tag != T_STR || args[2].tag != T_STR) cvm_abort("regexp-replace-all: expected (regexp string string)");
   pcre2_code *re = regex_arg(args[0], "regexp-replace-all");
-  const char *subj = args[2].as.str.chars;
-  int len = args[2].as.str.len;
-  const char *rep = args[1].as.str.chars;
-  int rep_len = args[1].as.str.len;
+  const char *subj = args[2].as.chars;
+  int len = args[2].aux;
+  const char *rep = args[1].as.chars;
+  int rep_len = args[1].aux;
 
   char *out = NULL;
   int out_len = 0, out_cap = 0;
@@ -209,8 +209,8 @@ static Value bi_regexp_replace_all(VM *vm, Value *args, int nargs) {
 static Value bi_regexp_split(VM *vm, Value *args, int nargs) {
   if (nargs != 2 || args[1].tag != T_STR) cvm_abort("regexp-split: expected (regexp string)");
   pcre2_code *re = regex_arg(args[0], "regexp-split");
-  const char *subj = args[1].as.str.chars;
-  int len = args[1].as.str.len;
+  const char *subj = args[1].as.chars;
+  int len = args[1].aux;
   Value pieces = v_nil();
   Value *collected = GC_MALLOC(sizeof(Value) * (size_t)(len + 1));
   int n = 0;

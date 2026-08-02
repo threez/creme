@@ -2,7 +2,7 @@ require "../../spec_helper"
 require "file_utils"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -90,7 +90,7 @@ describe "R7RS §4.1.7 Inclusion (include/include-ci)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "triple.scm"), "(define (triple x) (* x 3))")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
       Scheme.run_source(interp, <<-SCM).write_string.should eq("15")
         (include "triple.scm")
@@ -106,7 +106,7 @@ describe "R7RS §4.1.7 Inclusion (include/include-ci)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "square.scm"), "(DEFINE (SQUARE X) (* X X))")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
       Scheme.run_source(interp, <<-SCM).write_string.should eq("25")
         (include-ci "square.scm")

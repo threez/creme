@@ -366,6 +366,158 @@ module Scheme
     # R7RS), unlike import/define-library/define-syntax/defmacro this can't
     # just be restricted to the top level.
     HelperFormLocal
+    # a=counter register, b=forward jump offset (patched to skip loop if zero-trip),
+    # c=limit register, d=step immediate (nonzero Int32). Range is INCLUSIVE of limit
+    # (Lua FORLOOP-style: counter == limit still runs) — a compiler lowering an
+    # exclusive-bound source test (e.g. `(< i n)`-continues) must adjust the limit
+    # register's value accordingly (e.g. n - 1 for an ascending exclusive range), the
+    # same way Lua's own compiler translates `for i=0,n-1 do`. Test if counter is
+    # already out of range w.r.t. limit given the step direction; if so, jump forward
+    # by b to skip the loop body entirely. Otherwise fall through into it. Runs once
+    # per loop entry, not per iteration.
+    ForPrep
+    # a=counter register, b=backward jump offset (to the instruction after ForPrep),
+    # c=limit register, d=step immediate (same nonzero Int32 that ForPrep has, same
+    # inclusive-of-limit convention). Runs at the end of each iteration: counter += d;
+    # if still in range vs limit, jump backward by b to the loop body top. Otherwise
+    # fall through to the loop's exit.
+    ForLoop
+    # ForLoop's counterpart for a counted loop whose self-tail-call recurses through a
+    # GLOBAL binding (an ordinary self-recursive `(define (f ...) ...)`, not a let-loop/do
+    # — see try_compile_counted_loop's own doc comment for why named-let/do never needed
+    # this: their loop name is always local, so it can't be reassigned by unrelated code
+    # mid-loop, unlike a global `define`). a=counter register, b=backward jump offset
+    # (same convention as ForLoop), c=limit register. Step is implicit — +1 for
+    # ForLoopGuardedInc, -1 for ForLoopGuardedDec (two opcodes instead of ForLoop's one
+    # general `d`-as-step, freeing `d` up for the operand below) — so this lowering only
+    # ever fires when the recognized step is exactly +-1; anything else falls back to the
+    # ordinary unfused TailCallGlobal path. `d` is a const-pool index (Crystal) / a
+    # pre-resolved global slot index (cvm — see loader.c's resolve_globals) naming the
+    # recursed-to function's own global binding, the same convention CallGlobal's own `d`
+    # already uses. Every iteration: counter += step; test in-range vs limit as usual;
+    # ALSO re-fetch the named global's current value and compare it (reference identity)
+    # against the closure that's currently executing — only take the backward jump if
+    # BOTH hold. A redefinition (identity mismatch) and ordinary range-exhaustion both
+    # just fall through to the same place (no jump) — TestGlobalIdentity, immediately
+    # following the loop, tells them apart.
+    ForLoopGuardedInc
+    ForLoopGuardedDec
+    # Runs once, right after a ForLoopGuardedInc/Dec loop exits (NOT hot — unlike the loop
+    # body, this pays for a real global fetch unconditionally, but only once per call, not
+    # once per iteration). a=const-pool index / global slot index, same convention as
+    # ForLoopGuardedInc/Dec's own `d`. b=forward jump offset. Re-fetches the named global's
+    # current value and compares it (reference identity) to the currently-executing
+    # closure: identical means the loop ran to genuine completion (fall through to the
+    # ordinary base-case value); different means it exited early because of a mid-loop
+    # redefinition (jump forward by b to a deopt block — the plain, unfused compilation of
+    # the original `if`, which re-dispatches through the (possibly new) global exactly the
+    # way this call would have worked without the optimization at all).
+    TestGlobalIdentity
+    # Runtime-only, from here down: NEVER emitted by BytecodeCompiler, and
+    # (unlike every op above) not part of the on-disk SCB1 format at all —
+    # nothing outside this same running VM ever needs to interpret one of
+    # these ordinals, so appending them after every real op is safe
+    # regardless of ordinal value. Op::CallGlobal's own arm (VM#exec_call_global)
+    # rewrites a call site to one of these in place (Chunk#requicken!,
+    # mirroring Chunk#patch_jump_to_here's existing "build a new Instruction,
+    # overwrite the array slot" technique) the first time that site's callee
+    # turns out to be one of a handful of well-known (scheme base) builtins
+    # with a matching argument count: the SAME call-site quickening cvm/vm.c
+    # already does (cvm/opcodes.h's own OP_QCALLGLOBAL_* — this is that
+    # mechanism's native-VM counterpart, since this VM never got one before).
+    # Each re-checks the call site's CURRENT global value against the exact
+    # builtin identity it quickened for, every time it runs, and deopts back
+    # to Op::CallGlobal — permanently, for that call site — the instant that
+    # check fails (a genuine redefinition), via the exact same generic
+    # dispatch_call path an unquickened Op::CallGlobal would have used.
+    QCallGlobalAdd2
+    QCallGlobalSub2
+    QCallGlobalMul2
+    QCallGlobalCons2
+    QCallGlobalCar1
+    QCallGlobalCdr1
+    # N-ary counterparts of Add2/Sub2/Mul2 above, for any call site whose
+    # argument count ISN'T exactly 2 (0, 1, 3, 4, ...) -- `cons`/`car`/`cdr`
+    # have no N-ary form to generalize (R7RS fixes their arity at exactly
+    # 2/1/1), so only +/-/* need one. Kept as separate ops from the Add2/
+    # Sub2/Mul2 family, rather than folding everything into one always-
+    # looping op, so the exactly-2-args case (by far the most common —
+    # every OTHER arity still needs this fallback, but 2 is what the
+    # non-generalized version already special-cased) keeps its existing
+    # branch-free two-register read with no loop overhead at all.
+    QCallGlobalAddN
+    QCallGlobalSubN
+    QCallGlobalMulN
+    # define-record-type field accessor call-site quickening (mirrors
+    # cvm/opcodes.h's own OP_QCALLGLOBAL_RECACC) -- a 1-arg call site whose
+    # global resolves to a RecordAccessor (record.cr) skips straight from
+    # this op to the type-guarded direct field read, bypassing BOTH
+    # exec_call_global's own dispatch (already a bit redundant here, since
+    # THIS op already re-fetches the global itself) and dispatch_call's
+    # BytecodeClosure-vs-not branch it would otherwise have to pass through
+    # first every single call. Unlike Add2/Sub2/etc., which identity-check
+    # the fetched global against ONE fixed, interpreter-wide known builtin
+    # (plus_builtin etc.), this checks only the KIND (`is_a?(RecordAccessor)`)
+    # — a RecordAccessor's own record_type/field_index, read fresh off
+    # whatever the global currently holds, are already everything the fast
+    # path needs, so there's no single canonical accessor object to compare
+    # identity against the way +/-/* have one. Falls through to
+    # Op::CallGlobal for one call the instant that kind check fails OR the
+    # argument turns out to be the wrong record type (see this op's own
+    # VM#execute arm for why only the former actually stays deopted --
+    # a wrong-record-type argument re-quickens right back to this same op
+    # on the very next call, which is exactly the wanted behavior, not
+    # something worth specially preventing).
+    QCallGlobalRecAcc
+    # define-record-type constructor call-site quickening -- the
+    # constructor-side counterpart of QCallGlobalRecAcc above, same
+    # reasoning throughout: a call site whose global resolves to a
+    # RecordConstructor (record.cr) with a matching arity skips straight
+    # from this op to building the SchemeRecord's fields array directly
+    # from the call's own stack registers, bypassing exec_call_global's
+    # dispatch and dispatch_call's BytecodeClosure-vs-not branch — the
+    # constructor's own field_slots/record_type, read fresh off whatever
+    # the global currently holds, are already everything the fast path
+    # needs, so (same as RecAcc) this checks KIND, not identity against
+    # one fixed known object. Falls through to Op::CallGlobal for one
+    # call on either a kind or arity mismatch; a genuine redefinition
+    # stays deopted, an arity mismatch on an otherwise-still-valid
+    # constructor re-quickens right back here on the next (correctly-
+    # arity) call, exactly like RecAcc's own wrong-record-type case.
+    QCallGlobalRecCtor
+    # 2-arg string-append and 1-arg (radix-10) number->string -- identity-
+    # checked against ONE fixed known Builtin the same way Add2/Sub2/etc.
+    # are (both live in @base_env, same as +/-/*), not KIND-checked like
+    # RecAcc/RecCtor above (there's no shape/type carrying the fast path's
+    # own logic the way a RecordAccessor/RecordConstructor does). Each
+    # still does REAL work (string concatenation / integer formatting),
+    # not a simple register read the way Add2's int fast path is -- the
+    # savings here are purely from skipping the args-array allocation and
+    # exec_call_global/dispatch_call's own dispatch layers, same as every
+    # op above, not from replacing the underlying work with something
+    # cheaper. Only the 2-arg (string-append) / 1-arg-no-radix (number->
+    # string) shapes quicken; string-append's 0/1/3+-arg forms and
+    # number->string's 2-arg (explicit radix) form always fall through to
+    # the ordinary Op::CallGlobal path, same as Add2 not touching a 3-arg
+    # `+` call site (see OP_QCALLGLOBAL_ADD3's cvm counterpart for that
+    # exact shape).
+    QCallGlobalStrAppend2
+    QCallGlobalNumToStr1
+    # (creme hash-table)'s hash-table-set!/hash-table-ref -- unlike every
+    # op above, these two builtins don't live in @base_env at all (they're
+    # only ever registered once a script actually imports (creme hash-
+    # table), see builtin_registration.cr's own lazy-registration doc
+    # comment) -- so their identity is cached from Interpreter#libraries
+    # instead, looked up once a call site's own callee first resolves to
+    # one, same lazy-and-then-stable caching shape as plus_builtin/etc.,
+    # just from a different registry. hash-table-set! quickens only at
+    # its one real arity (3); hash-table-ref quickens at both its 2- and
+    # 3-arg (explicit default) forms, since the fast path only ever
+    # handles the KEY-FOUND case either way -- a miss (or the wrong
+    # table type) falls through to the ordinary Op::CallGlobal path,
+    # which already implements both arities' own correct behavior.
+    QCallGlobalHashSet
+    QCallGlobalHashRef
   end
 
   # A single decoded bytecode instruction. `d`, when used (currently only by

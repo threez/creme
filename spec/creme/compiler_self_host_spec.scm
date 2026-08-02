@@ -1,12 +1,11 @@
 ;; ===========================================================================
 ;; A (creme spec)-based port of compiler_spec.cr's self-hosting cases -- the
 ;; self-hosted compiler compiling ITS OWN SOURCE (reader.sld, then
-;; compiler.sld) and the result still working correctly -- plus the one
-;; case that intentionally does NOT compare against native evaluation (a
-;; register-safety edge case where the two deliberately diverge). See
-;; modules/creme/spec.sld's own header comment for the framework this
-;; uses, and compiler_spec.scm's own header comment for the general
-;; should-match-native? approach used elsewhere in this project.
+;; compiler.sld) and the result still working correctly -- plus a register-
+;; safety case (see below). See modules/creme/spec.sld's own header comment
+;; for the framework this uses, and compiler_spec.scm's own header comment
+;; for the general should-match-native? approach used elsewhere in this
+;; project.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/compiler_self_host_spec.scm
@@ -22,18 +21,27 @@
         (creme compiler reader) (creme compiler compiler) (creme file) (creme string)
         (creme spec) (creme compiler spec-helper))
 
-;; The critical new safety case: a closure capturing a let-bound local,
-;; called AFTER several more sibling scopes have run and popped -- must
-;; still see the value at capture time, not whatever a later sibling
-;; scope's own local happens to reuse that register for. This is exactly
-;; the pattern the real Crystal BytecodeCompiler gets WRONG (verified
-;; empirically there: native evaluation returns 2, the last sibling
-;; scope's own value, instead of 42 -- pop_scope rolls next_reg back
-;; unconditionally, never consulting captured_registers, and upvalues are
-;; only closed at frame-return/tail-call time, never at ordinary lexical
-;; scope exit) -- so unlike every other case in this project's spec
-;; files, this asserts the bootstrap-compiled result directly against the
-;; CORRECT value, not against (a knowingly wrong) native evaluation.
+;; A closure capturing a let-bound local, called AFTER several more
+;; sibling scopes have run and popped, must still see the value at
+;; capture time, not whatever a later sibling scope's own local happens
+;; to reuse that register for. This USED to be a genuine bug in the real
+;; Crystal BytecodeCompiler too (native evaluation returned 2, the last
+;; sibling scope's own value, instead of 42 -- pop_scope rolled next_reg
+;; back unconditionally, never consulting captured_registers, and
+;; upvalues are only closed at frame-return/tail-call time, never at
+;; ordinary lexical scope exit) -- now fixed there too, generally
+;; (applied at every scope exit/mid-scope reclaim, which also required
+;; fixing compile_app's two general-path branches to reserve every call
+;; argument's register up front -- see bytecode_compiler.cr's own
+;; comments), see spec/scheme/compile/bytecode_vm_spec.cr's own
+;; "protects a captured local's register"/"keeps later call arguments
+;; in their own registers" cases, which exercise BytecodeCompiler
+;; directly and are the real regression tests for these fixes. This
+;; case here only ever tested the self-hosted compiler's own,
+;; independent implementation, which never had either bug -- hence
+;; still asserting against a hardcoded "42",
+;; not should-match-native?, since should-match-native? would only ever
+;; have compared two implementations that already agreed.
 ;;
 ;; Must run BEFORE the self-hosting describe block below: that block
 ;; permanently replaces the global compile-source-to-bytes/read-program
@@ -46,7 +54,7 @@
 ;; compile-source-to-bytes raised "unbound variable: char-downcase" from
 ;; deep inside compiling this test's own source -- unrelated to the
 ;; register-safety property this test actually checks).
-(describe "register safety (an edge case where bootstrap intentionally differs from native)"
+(describe "register safety (the self-hosted compiler's own implementation)"
   (it "protects a captured local's register across later sibling scopes"
     (should-equal?
       (write-to-string

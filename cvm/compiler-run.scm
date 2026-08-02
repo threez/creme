@@ -13,7 +13,7 @@
 ;;
 ;; Build once, then run any script directly:
 ;;   ./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc
-;;   ./cvm/cvm bench/creme.scm
+;;   ./cvm/cvm competition/scheme/bench/creme.scm
 ;;
 ;; `include`/`include-ci`: the self-hosted compiler itself deliberately
 ;; doesn't support these (reader.sld's own header comment -- real support
@@ -74,64 +74,111 @@
 ;; (scheme eval)'s `eval` (e.g. modules/creme/compiler/spec-helper.sld's
 ;; native-eval/native-eval-forms) should be read with that in mind when
 ;; run this way.
-;; `eval`'s optional second argument (an environment specifier, per R7RS
-;; (scheme eval)) is accepted and ignored: cvm has exactly ONE flat global
-;; table (vm->globals in vm.c/vm.h) with no per-library/per-scope
-;; separation at the C runtime level at all -- there is no isolated
-;; environment to actually evaluate `form` against even if one were
-;; passed, so honoring vs. ignoring the argument makes no observable
-;; difference given this architecture. See interaction-environment/
-;; scheme-report-environment/null-environment below for the same
-;; reasoning applied to the specifier-constructing side.
-(define (eval form . env) (load-chunk-bytes (chunk->bytes (compile-program (list form)))))
+;;
+;; `eval`'s optional second argument (an environment specifier) USED to
+;; be accepted and ignored entirely -- cvm/bootstrap.c's `make-
+;; environment`/`environment-copy-global!`/`load-chunk-bytes-into` (a
+;; genuinely separate child VM per environment, see cvm_new_empty_vm's
+;; own doc comment, vm.c) now give this real per-environment isolation:
+;; when `env` is supplied, the compiled form's bytecode loads and runs
+;; against THAT environment's own global table (load-chunk-bytes-into)
+;; instead of this program's own; compiling itself is unaffected either
+;; way (compile-program produces plain bytecode bytes, independent of
+;; any VM -- only the LOAD step, resolving GetGlobal/DefGlobal operands,
+;; needs to know which table to target).
+;; A fused opcode (e.g. Add for `(+ 1 2)` in call position) never
+;; consults any environment at all -- baked in identically at compile
+;; time regardless of which environment the compiled form eventually
+;; runs against -- so without help, `environment`'s own only/except
+;; filtering could never stop a CALL to an excluded fusable name, only a
+;; bare reference to it (e.g. `(eval '+ env)`). Fixed by temporarily
+;; telling the compiler's own fusion gate (mark-redefined!/
+;; unmark-redefined!, compiler.sld) to treat each fusable name NOT
+;; actually bound in the target environment as if it had been redefined
+;; -- for the duration of compiling THIS form only -- so it falls back
+;; to an ordinary GetGlobal+Call, which genuinely fails against that
+;; environment the same way a bare reference already does.
+(define (eval-excluded-fusable-names env)
+  (let loop ((names fusable-prim-names))
+    (cond
+      ((null? names) '())
+      ((environment-bound? env (symbol->string (car names))) (loop (cdr names)))
+      (else (cons (car names) (loop (cdr names)))))))
 
-;; (scheme repl)'s interaction-environment and (scheme r5rs)'s
-;; scheme-report-environment/null-environment, deliberately reduced to
-;; trivial stubs: since eval (above) ignores its environment argument
-;; entirely regardless of what's passed, these just need to return SOME
-;; value satisfying eval's calling convention -- there is no real
-;; environment object to construct, isolate, or distinguish between (a
-;; genuinely isolated null-environment that lacks `+`, e.g., would need
-;; per-environment global tables, a much bigger change nothing here
-;; currently needs). A plain symbol is enough; nothing inspects it.
-;; Concretely, this means a Crystal-side spec case that depends on real
-;; isolation (e.g. "null-environment lacks +", "environment's only/except
-;; import-set combinators actually restrict access") can't be ported to
-;; run under cvm this way -- see spec/creme/environments_spec.scm's own
-;; header comment on which cases it deliberately does NOT include.
-(define (interaction-environment) 'the-global-environment)
-(define (scheme-report-environment version) 'the-global-environment)
-(define (null-environment version) 'the-global-environment)
+(define (eval form . env)
+  (if (null? env)
+      (load-chunk-bytes (chunk->bytes (compile-program (list form))))
+      (let* ((target (car env))
+             (excluded (eval-excluded-fusable-names target)))
+        (for-each mark-redefined! excluded)
+        (let ((bytes
+                (dynamic-wind
+                  (lambda () #f)
+                  (lambda () (chunk->bytes (compile-program (list form))))
+                  (lambda () (for-each unmark-redefined! excluded)))))
+          (load-chunk-bytes-into target bytes)))))
 
-;; (scheme base)'s with-exception-handler/raise-continuable, absent from
-;; cvm as native C builtins -- built entirely atop dynamic-wind (a REAL
-;; cvm-native builtin, cvm/builtins.c) instead of adding a second control-
-;; flow mechanism in C: a plain top-level mutable list is the handler
-;; stack, with-exception-handler pushes/pops around thunk (via dynamic-
-;; wind, so an exception unwinding past it still restores the stack
-;; correctly), and raise-continuable pops the current handler off (so a
-;; handler that itself calls raise-continuable sees the NEXT-outer one,
-;; not itself -- R7RS's own requirement, avoiding infinite recursion),
-;; calls it, then pushes it back before returning the handler's own
-;; result as raise-continuable's own value -- an ordinary, non-escaping
-;; return, needing no continuation/longjmp machinery at all.
-(define exception-handler-stack '())
+;; (environment import-set ...) -- a fresh, otherwise-empty environment
+;; (make-environment) populated by importing each import-set, mirroring
+;; native's own `environment` (src/scheme/modules/scheme/eval.cr)
+;; exactly: only/except/prefix/rename all genuinely restrict/rename what
+;; ends up bound, not just alias a FEW extra names the way import!'s own
+;; runtime bridge (bi_import_bang, cvm/bootstrap.c) does for an ordinary
+;; top-level `(import ...)` -- see import-set-resolved-bindings
+;; (compiler.sld) for the actual only/except/prefix/rename resolution,
+;; reused here as the single source of truth for "which external name
+;; maps to which already-bound internal name" a given import-set means.
+;; `ensure-libraries-loaded!` first guarantees each spec's own library is
+;; actually loaded (as globals in THIS, the calling, environment) before
+;; copying any of its bindings out of it -- needed for a library this
+;; program imports for the FIRST time only via this environment call,
+;; not via its own top-level (import ...).
+(define (environment . import-sets)
+  (let ((env (make-environment)))
+    (ensure-libraries-loaded! import-sets)
+    (for-each
+      (lambda (spec)
+        (for-each
+          (lambda (binding)
+            (environment-copy-global! env (symbol->string (car binding)) (symbol->string (cdr binding))))
+          (import-set-resolved-bindings spec)))
+      import-sets)
+    env))
 
-(define (with-exception-handler handler thunk)
-  (dynamic-wind
-    (lambda () (set! exception-handler-stack (cons handler exception-handler-stack)))
-    thunk
-    (lambda () (set! exception-handler-stack (cdr exception-handler-stack)))))
+;; (null-environment version) -- R7RS: only syntax, no procedures. cvm
+;; has no global bindings for special forms at all to begin with (`if`/
+;; `lambda`/`define`/... are handled by the compiler directly, never as
+;; vm->globals entries) -- so a genuinely EMPTY environment (make-
+;; environment, no import-sets applied) already IS exactly "no
+;; procedures, only syntax", with no extra bookkeeping needed.
+(define (null-environment . version) (make-environment))
 
-(define (raise-continuable obj)
-  (if (null? exception-handler-stack)
-      (error "raise-continuable: no exception handler installed" obj)
-      (let ((handler (car exception-handler-stack))
-            (rest (cdr exception-handler-stack)))
-        (set! exception-handler-stack rest)
-        (let ((result (handler obj)))
-          (set! exception-handler-stack (cons handler rest))
-          result))))
+;; (scheme-report-environment version) -- mirrors native's own
+;; deliberate non-isolation here (r5rs.cr's own comment: "wraps
+;; @base_env ... not any Scheme-defined additions" -- i.e. shares a
+;; REAL, already-populated environment rather than building an isolated
+;; one). current-environment (cvm/bootstrap.c) wraps THIS running
+;; program's own VM directly (not a copy) -- eval-ing against it behaves
+;; exactly like eval's own 1-arg form. (scheme repl)'s
+;; interaction-environment is the exact same idea (native's own
+;; interpreter.cr: literally @global) -- both just call this.
+(define (interaction-environment) (current-environment))
+(define (scheme-report-environment . version) (current-environment))
+
+;; (scheme base)'s with-exception-handler/raise-continuable/raise USED
+;; to have no native C builtin at all here -- with-exception-handler/
+;; raise-continuable were defined as plain Scheme right here (a mutable
+;; handler-stack list atop dynamic-wind), meaning a precompiled
+;; --emit-cvm program could never use them (only scripts running through
+;; THIS compiler-mode driver could). All three are now genuine cvm-native
+;; builtins (cvm/builtins.c's bi_with_exception_handler/
+;; bi_raise_continuable/bi_raise, backed by vm->exc_handlers -- see
+;; cvm/vm.h's own UNWIND_EXC_HANDLER doc comment) -- defining them again
+;; here would just SHADOW those via this file's own top-level `define`
+;; (cvm's flat global table lets a later define overwrite an earlier
+;; binding by name, same mechanism the REPL relies on for redefinition),
+;; silently reverting to the old, narrower behavior for every script run
+;; through compiler mode. Deliberately not redefined here anymore.
 
 ;; (scheme read)'s `read` has no native C implementation (cvm/builtins.c's
 ;; ports are char-level -- read-char/peek-char/read-line -- not a full
@@ -192,6 +239,33 @@
                (list form)))
          forms)))
 
+;; (scheme load)'s `load` -- absent as a cvm builtin entirely until now
+;; (unlike eval/open-input-string/read just above, which this file
+;; already defines). Reads, compiles, and runs `filename`'s own forms
+;; via the SAME primitives the target script's own compile-and-run line
+;; below uses (read-program/expand-includes/compile-program/chunk->bytes/
+;; load-chunk-bytes) -- a relative filename resolves against
+;; current-load-dir, a simple save/restore variable (not a general
+;; stack -- nested load-within-load is rare enough not to need one)
+;; mirroring native's own load.cr, which resolves against "the running
+;; script's own directory" the same way expand-includes already does for
+;; `include`. The optional 2nd (environment) argument is accepted and
+;; ignored, same convention `eval` above already established -- cvm has
+;; exactly one flat global table, so there is no isolated environment to
+;; actually load `filename`'s definitions against regardless of what's
+;; passed.
+(define current-load-dir "")
+
+(define (load filename . env)
+  (let* ((full (path-join current-load-dir filename))
+         (saved-dir current-load-dir))
+    (set! current-load-dir (dirname full))
+    (let* ((forms (expand-includes (read-program (read-whole-file full)) current-load-dir))
+           (result (load-chunk-bytes (chunk->bytes (compile-program forms full) (required-native-families-list)))))
+      (set! current-load-dir saved-dir)
+      result)))
+
 (define target (cvm-target-path))
-(define forms (expand-includes (read-program (read-whole-file target)) (dirname target)))
-(load-chunk-bytes (chunk->bytes (compile-program forms)))
+(set! current-load-dir (dirname target))
+(define forms (expand-includes (read-program (read-whole-file target)) current-load-dir))
+(load-chunk-bytes (chunk->bytes (compile-program forms target) (required-native-families-list)))

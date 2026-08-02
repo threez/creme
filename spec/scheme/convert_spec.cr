@@ -157,14 +157,14 @@ describe "Scheme.bind" do
   end
 
   it "bulk-defines converted bindings into a fresh child of interp.global" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     env = Scheme.bind(interp, {"x" => 5})
     env.parent.should be(interp.global)
     env.get("x").as(Scheme::SchemeInt).value.should eq(5_i64)
   end
 
   it "isolates bindings from interp.global" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.bind(interp, {"x" => 5})
     expect_raises(Scheme::SchemeRuntimeError, /unbound variable: x/) do
       interp.global.get("x")
@@ -172,7 +172,7 @@ describe "Scheme.bind" do
   end
 
   it "isolates bindings between two separate bind calls" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     env1 = Scheme.bind(interp, {"x" => 1})
     env2 = Scheme.bind(interp, {"x" => 2})
     env1.get("x").as(Scheme::SchemeInt).value.should eq(1_i64)

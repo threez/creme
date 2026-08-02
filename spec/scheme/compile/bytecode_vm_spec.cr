@@ -9,7 +9,7 @@ require "../../spec_helper"
 # form — required for define-syntax/import to correctly affect later forms'
 # analysis, exactly like the tree-walker's own per-form loop.
 private def vm_run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   forms = Scheme::Reader.read_all(src)
   Scheme::BytecodeCompiler.run_program(interp, forms)
 end
@@ -58,6 +58,27 @@ describe "BytecodeCompiler + VM" do
     it "handles a large self-tail-recursive named-let loop without stack growth" do
       w("(let loop ((i 0) (acc 0)) (if (= i 1000000) acc (loop (+ i 1) (+ acc i))))")
         .should eq("499999500000")
+    end
+
+    it "evaluates a counted loop's carried variables simultaneously, not sequentially" do
+      # `a`'s step reads `b`'s OLD value (and vice versa isn't true here) —
+      # the counted-loop lowering's direct-write optimization (bytecode_
+      # compiler.cr's try_compile_counted_loop) must still evaluate every
+      # step expression against the PRE-iteration bindings, exactly like a
+      # real tail call would, not let an early direct write into `a`'s own
+      # register affect what `b`'s (or a later iteration's `a`'s) step sees.
+      # a: 0,1,3,7,15 (a' = a+b); b: 1,2,4,8,16 (b' = b*2) after 4 steps.
+      w("(let loop ((i 0) (a 0) (b 1)) (if (= i 4) (list a b) (loop (+ i 1) (+ a b) (* b 2))))")
+        .should eq("(15 16)")
+    end
+
+    it "handles mutually-referencing carried variables (neither is direct-write-safe)" do
+      # Both a's and b's step expressions read the OTHER's old value (a' =
+      # a+b, b' = a — b trails one step behind a), so neither may be written
+      # directly — both must go through a temp register, exactly like the
+      # pre-optimization path always did: (0,1)->(1,0)->(1,1)->(2,1).
+      w("(let loop ((i 0) (a 0) (b 1)) (if (= i 3) (list a b) (loop (+ i 1) (+ a b) a)))")
+        .should eq("(2 1)")
     end
 
     it "handles rest args" do
@@ -127,6 +148,65 @@ describe "BytecodeCompiler + VM" do
     it "memoizes a zero-upvalue clause inside case-lambda the same way" do
       w("(define f (case-lambda (() 'none) ((x) (lambda () 'inner))))" \
         "(eq? (f 1) (f 2))").should eq("#t")
+    end
+
+    # Regression test for a genuine bug (not a deliberate cut): a closure
+    # capturing a let-bound local, called AFTER several more SIBLING
+    # scopes have run and popped, used to see whatever the LAST sibling
+    # scope's own local happened to reuse that register for (2) instead
+    # of the value at capture time (42). FunctionCompiler#pop_scope
+    # rolled next_reg back to saved_next_reg unconditionally, never
+    # consulting captured_registers — and upvalues are only closed at
+    # frame-return/tail-call time (vm.cr's close_upvalues call sites),
+    # never at ordinary lexical scope exit — so a later sibling scope's
+    # own local silently landed in the same register, overwriting the
+    # captured local's still-open upvalue. Fixed via pop_scope/
+    # reclaim_to#floor_respecting_captures, applied generally (every
+    # scope exit and every mid-scope reclaim, not just one narrow call
+    # site) — this initially broke compile_app's two general-path
+    # branches (their per-argument alloc_reg calls relied on "nothing
+    # shrinks next_reg between these allocations, so they stay
+    # contiguous", which a non-leaf argument's own captured-register
+    # floor could violate), fixed at the root by having both branches
+    # reserve every argument's register up front, in one batch, before
+    # compiling any argument's own expression — mirroring self-hosted
+    # compiler.sld's compile-ordinary-app!, which already did this and
+    # was never vulnerable to begin with.
+    it "protects a captured local's register across later sibling scopes" do
+      w("(define (h)" \
+        "  (define snap #f)" \
+        "  (let ((x 42)) (set! snap (lambda () x)))" \
+        "  (let ((y 1)) (set! y (+ y 1)))" \
+        "  (let ((z 2)) (set! z (* z 2)))" \
+        "  (let ((w 3)) (set! w (- w 1)))" \
+        "  (snap))" \
+        "(h)").should eq("42")
+    end
+
+    # Regression test for the OTHER genuine bug the fix above initially
+    # introduced (then fixed at the root — see this describe block's own
+    # header): compile_app's two general-path branches used to allocate
+    # one register per call argument via repeated top-level alloc_reg
+    # calls, one argument at a time, relying on "nothing shrinks next_reg
+    # between these allocations, so they stay contiguous". A non-leaf
+    # FIRST argument (here, a self-recursive named-let, whose own `loop`
+    # binding is captured as an upvalue by its own body) used to leave
+    # next_reg higher than expected once ITS OWN scope popped (correctly
+    # protecting the captured register) — shifting where the SECOND and
+    # THIRD arguments landed, one slot later than the Call/TailCall op
+    # expected, so the 3rd argument (`name`) was never actually written
+    # where the op reads it, and the op instead read the still-live
+    # closure register in its place. Fixed by reserving every argument's
+    # register up front, in one batch, before compiling any argument's
+    # own expression (see bytecode_compiler.cr's compile_app).
+    it "keeps later call arguments in their own registers when an earlier, non-leaf argument captures one internally" do
+      w(%((define (full-name n names)
+             (string-append
+               (let loop ((names names))
+                 (if (null? (cdr names)) (car names) (string-append (car names) " > " (loop (cdr names)))))
+               " -- "
+               n))
+           (full-name "leaf" (list "a" "b" "c")))).should eq(%("a > b > c -- leaf"))
     end
   end
 

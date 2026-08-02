@@ -113,7 +113,7 @@ module Scheme
     # introspection for annotations on individual constants (only on
     # types/methods/ivars), so these still need an explicit env.define here
     # rather than a @[Scheme::SchemeFn]-style annotation.
-    register_library ["creme", "math"] do |env|
+    register_library ["creme", "builtin", "math"] do |env|
       names = register_module(Scheme::Builtins::MathLibrary, env) +
               register_module(Scheme::Builtins::MathExtra, env)
       env.define("pi", SchemeFloat.new(Math::PI))

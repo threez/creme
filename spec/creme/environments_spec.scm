@@ -6,29 +6,18 @@
 ;; should-match-native? approach.
 ;;
 ;; interaction-environment/scheme-report-environment/null-environment and
-;; eval's optional 2nd (environment specifier) argument used to be a
-;; deliberate cvm gap -- cvm has exactly ONE flat global table (vm->globals
-;; in vm.c/vm.h), so cvm/compiler-run.scm's own interaction-environment/
-;; scheme-report-environment/null-environment are DELIBERATE STUBS (see
-;; that file's own comment): they return a plain symbol satisfying eval's
-;; calling convention, but eval itself ignores whatever environment
-;; specifier it's given and always evaluates against the one real global
-;; table -- there is no isolation to honor either way.
-;;
-;; Because of that stub, this file deliberately does NOT port every case
-;; from ch06_12_environments_eval_spec.cr -- specifically excluded:
-;;   - "null-environment ... has only syntax, no procedures" (its OWN
-;;     `+`-is-unbound-there assertion requires real isolation cvm's stub
-;;     can't provide)
-;;   - "environment's import sets support only/except/prefix/rename" and
-;;     the general (environment '(scheme base))-as-a-real-restricted-
-;;     import-set case (same reason -- (environment ...) itself isn't
-;;     implemented in cvm at all, since a non-isolating stub would be
-;;     actively misleading rather than simply absent)
-;; Every case actually included here only checks that eval/interaction-
-;; environment/scheme-report-environment/null-environment exist, accept
-;; the right arity, and evaluate correctly against the (only) global
-;; table -- exactly what cvm's stub can honestly provide.
+;; eval's optional 2nd (environment specifier) argument USED to be a
+;; deliberate cvm gap -- cvm/compiler-run.scm's own versions of these were
+;; non-isolating stubs, since cvm has exactly ONE flat global table. Now
+;; fixed for real (a genuinely separate child VM per environment -- see
+;; cvm/README.md's own "environment/eval" section and cvm/vm.c's
+;; cvm_new_empty_vm), so every isolation-dependent case this file used to
+;; exclude now has FULL, unweakened coverage in
+;; spec/creme/r7rs/ch06_12_environments_eval_spec.scm instead (including
+;; "null-environment ... has only syntax, no procedures" and "environment's
+;; import sets support only/except/prefix/rename"). This file is now
+;; redundant with that one but kept as-is (a narrower, still-valid subset)
+;; rather than deleted.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/environments_spec.scm

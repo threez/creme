@@ -121,6 +121,19 @@ module Scheme
       @instructions[instr_index] = Instruction.new(old.op, old.a, offset, old.c, old.d)
     end
 
+    # Rewrites an already-live instruction's own opcode in place, keeping
+    # every operand as-is — VM#exec_call_global's own call-site quickening
+    # (installing a QCallGlobal* op the first time a call site's target
+    # resolves to a well-known builtin, or deopting back to Op::CallGlobal
+    # the instant a later visit finds it's been redefined). Same "build a
+    # new Instruction, overwrite the array slot" technique
+    # patch_jump_to_here already uses just above, for the same reason: this
+    # struct's own fields have no setters.
+    def requicken!(instr_index : Int32, op : Op) : Nil
+      old = @instructions[instr_index]
+      @instructions[instr_index] = Instruction.new(op, old.a, old.b, old.c, old.d)
+    end
+
     # Reuse an existing identical constant to keep the pool small for hot
     # loops with repeated literals — not required for correctness, just
     # avoids pool bloat. Deliberately restricted to atomic, genuinely

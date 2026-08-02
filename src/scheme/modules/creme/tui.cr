@@ -501,6 +501,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "tui"], Scheme::Builtins::Tui
+    register_library ["creme", "builtin", "tui"], Scheme::Builtins::Tui
   end
 end

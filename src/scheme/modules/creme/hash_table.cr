@@ -190,6 +190,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "hash-table"], Scheme::Builtins::HashTable
+    register_library ["creme", "builtin", "hash-table"], Scheme::Builtins::HashTable
   end
 end

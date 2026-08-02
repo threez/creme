@@ -90,9 +90,11 @@
 
 (define-library (creme compiler compiler)
   (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form
-          define-syntax-expand-form mark-self-hosted-library-loaded! import!-apply-aliases!)
+          define-syntax-expand-form mark-self-hosted-library-loaded! import!-apply-aliases!
+          required-native-families-list mark-redefined! unmark-redefined! fusable-prim-names)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
-          (creme bytecode) (creme bootstrap) (creme introspection) (creme compiler reader))
+          (creme bytecode) (creme bootstrap) (creme introspection) (creme compiler reader)
+          (creme file))
   (begin
 
     ;; ---------------------------------------------------------------------
@@ -301,21 +303,53 @@
       (chunk-emit! (fcomp-chunk fc) 'LoadK dest (chunk-add-const! (fcomp-chunk fc) datum) 0 0)
       (finish-tail! fc dest tail?))
 
+    ;; When compiling a specific library's own body (current-library-
+    ;; visible-names non-#f), a free-variable name this library never
+    ;; imported/defined itself is compiled against a MANGLED global name
+    ;; instead of the real one -- guaranteed to never be genuinely bound
+    ;; process-wide, so the library's own definition still compiles and
+    ;; loads successfully (matching native's own observed behavior: a
+    ;; library loads fine even referencing something it can't see), and
+    ;; only actually CALLING through to it raises "unbound variable", at
+    ;; the R7RS-mandated moment -- not a moment earlier. See current-
+    ;; library-visible-names' own doc comment for the full mechanism.
+    (define (global-ref-name fc name)
+      (if (and current-library-visible-names
+               (not (fcomp-lookup-local fc name))
+               (not (fcomp-resolve-upvalue! fc name))
+               (not (memq name current-library-visible-names)))
+          (string-append current-library-mangle-prefix ":" (symbol->string name))
+          name))
+
+    ;; `tail?`: when true, this read is immediately returned -- dest is
+    ;; discarded the instant the call returns, so there's nothing to gain by
+    ;; materializing the value there first. A local just Returns straight
+    ;; from its own register (Return already accepts any register, no new
+    ;; op needed); an upvalue/global has no register to already be in, so
+    ;; ReturnUpval/ReturnGlobal resolve and deliver directly, skipping the
+    ;; register write GetUpval/GetGlobal would otherwise need -- mirrors
+    ;; bytecode_compiler.cr's compile_name_read exactly (previously this
+    ;; always emitted Move/GetUpval/GetGlobal + a separate trailing Return,
+    ;; a real extra-instruction codegen gap in every tail-position variable
+    ;; reference, not just the local case).
     (define (compile-var-ref! fc name dest tail?)
       (let ((local (fcomp-lookup-local fc name)))
         (cond
           (local
-           (chunk-emit! (fcomp-chunk fc) 'Move dest local 0 0)
-           (finish-tail! fc dest tail?))
+           (if tail?
+               (chunk-emit! (fcomp-chunk fc) 'Return local 0 0 0)
+               (chunk-emit! (fcomp-chunk fc) 'Move dest local 0 0)))
           (else
            (let ((up (fcomp-resolve-upvalue! fc name)))
              (cond
                (up
-                (chunk-emit! (fcomp-chunk fc) 'GetUpval dest up 0 0)
-                (finish-tail! fc dest tail?))
+                (if tail?
+                    (chunk-emit! (fcomp-chunk fc) 'ReturnUpval up 0 0 0)
+                    (chunk-emit! (fcomp-chunk fc) 'GetUpval dest up 0 0)))
                (else
-                (chunk-emit! (fcomp-chunk fc) 'GetGlobal dest (chunk-add-const! (fcomp-chunk fc) name) 0 0)
-                (finish-tail! fc dest tail?))))))))
+                (if tail?
+                    (chunk-emit! (fcomp-chunk fc) 'ReturnGlobal (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)) 0 0 0)
+                    (chunk-emit! (fcomp-chunk fc) 'GetGlobal dest (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)) 0 0)))))))))
 
     ;; ---------------------------------------------------------------------
     ;; syntax-rules macros -- non-hygienic (plain substitution, no renaming),
@@ -461,8 +495,25 @@
     ;; both backends (there is no way to target an arbitrary non-global
     ;; environment) -- fine here, since everything this is used for only
     ;; ever needs ordinary global-scope bindings anyway.
+    ;; Passes the CURRENT required-native-families-list (accumulated so
+    ;; far, forward reference -- see this section's own convention on why
+    ;; that's fine) into chunk->bytes, not just an implicit empty list: a
+    ;; file-based library's own top-level (begin ...) body can genuinely
+    ;; call a native builtin directly (not just via a nested `import`,
+    ;; which ensure-library-loaded! -- the only caller of THIS
+    ;; procedure -- already processes first, per-clause, in file order,
+    ;; so by the time a library's OWN begin clause runs, any earlier
+    ;; import clause's own required families are already recorded here).
+    ;; Needed for e.g. (creme spec)'s own top-level ANSI-color-detection
+    ;; code, which calls (creme term)'s stdout-tty? and (scheme
+    ;; process-context)'s environment accessors immediately at library-
+    ;; load time -- without this, that call would abort on an unbound
+    ;; variable, caught and silently swallowed by compile-import!'s own
+    ;; (guard (e (#t #f)) ...), leaving the WHOLE library's exports
+    ;; (spec-describe!/spec-it!/etc) undefined with no visible error until
+    ;; a much later, more confusing "unbound variable: spec-describe!".
     (define (run-compiled-forms! forms)
-      (load-chunk-bytes (chunk->bytes (compile-program forms))))
+      (load-chunk-bytes (chunk->bytes (compile-program forms) (required-native-families-list))))
 
     ;; define-syntax's own "value" is unspecified, same convention as
     ;; define/set!: nothing reads a non-tail define-syntax's dest.
@@ -757,37 +808,121 @@
     ;; wrapping the rest of the body, giving them genuine local bindings
     ;; instead of silently becoming global defines the instant they're
     ;; nested one level deeper than the top-level program.
+    ;;
+    ;; `include`/`include-ci` forms are ALSO flattened in here (splicing
+    ;; the named file's own top-level forms in place, same as a nested
+    ;; `begin`'s own contents) -- this is what gives `include` genuine
+    ;; R7RS body-position support (usable inside a `let`/`lambda` body,
+    ;; not just at a file's own top level, which cvm/compiler-run.scm's
+    ;; separate expand-includes already handled): flatten-begins runs
+    ;; for every scope-introducing body (compile-scoped-body!'s own
+    ;; hoist-internal-defines call), unlike compile-program's direct
+    ;; compile-body! call for the outermost program (which cvm/
+    ;; compiler-run.scm's own pre-pass already covers). See
+    ;; current-compiling-file/expand-include-form (below dirname/
+    ;; path-join/ascii-foldcase-string's own definitions further down
+    ;; this file, fine as forward references -- nothing calls either
+    ;; until long after the whole library body has finished loading).
     (define (flatten-begins forms)
       (cond
         ((null? forms) '())
         ((and (pair? (car forms)) (eq? (car (car forms)) 'begin))
          (append (flatten-begins (cdr (car forms))) (flatten-begins (cdr forms))))
+        ((and (pair? (car forms)) (or (eq? (car (car forms)) 'include) (eq? (car (car forms)) 'include-ci)))
+         (append (expand-include-form (car forms)) (flatten-begins (cdr forms))))
         (else (cons (car forms) (flatten-begins (cdr forms))))))
 
+    ;; The file currently being compiled -- set (with save/restore, so a
+    ;; NESTED compile-program call, e.g. ensure-library-loaded!'s own
+    ;; run-compiled-forms! reentrant while the outer program's own
+    ;; compile-program call is still in progress processing an `(import
+    ;; ...)` form, doesn't leave the OUTER file's own current-compiling-
+    ;; file clobbered once that nested call returns) by compile-program's
+    ;; own optional 2nd argument. Defaults to "" (an `include` inside a
+    ;; program compiled without ever passing a file path -- e.g. `eval`'s
+    ;; one-off single-form compiles -- simply has no directory to resolve
+    ;; a relative path against, matching what dirname/path-join already
+    ;; do for an empty string).
+    (define current-compiling-file "")
+
+    ;; Non-#f only while compiling a SPECIFIC library's own top-level
+    ;; body (ensure-library-loaded!, further down) -- a list of symbols
+    ;; this library is actually allowed to see as free variables (its own
+    ;; top-level defines, union'd with whatever its own `import` clauses
+    ;; resolved). #f (the default, for ordinary top-level/REPL/script
+    ;; compiles) means "no restriction," matching every behavior this
+    ;; compiler had before this pair of variables existed. See compile-
+    ;; var-ref!'s own use of these, and ensure-library-loaded!'s save/
+    ;; restore around processing one library's clauses, for the full
+    ;; mechanism (cvm/README.md's own "environment/eval" section has the
+    ;; complete design rationale for why this is a compile-time-only
+    ;; masking trick rather than genuine runtime isolation).
+    (define current-library-visible-names #f)
+    (define current-library-mangle-prefix #f)
+
+    ;; Splices `form` = (include "path" ...) / (include-ci "path" ...)'s
+    ;; own named file(s)' top-level forms in, resolved relative to
+    ;; current-compiling-file's own directory -- include-ci additionally
+    ;; fold-cases the source first (ascii-foldcase-string, the same
+    ;; ASCII-only simplification ensure-library-loaded!'s own include-ci
+    ;; handling already uses). Recurses through flatten-begins itself (not
+    ;; just read-program) so a nested include-of-include is ALSO expanded,
+    ;; correctly resolved against ITS OWN file's directory (current-
+    ;; compiling-file is updated to the included file's own path for the
+    ;; duration of that nested flatten-begins call, then restored).
+    (define (expand-include-form form)
+      (let ((fold-case? (eq? (car form) 'include-ci))
+            (dir (dirname current-compiling-file)))
+        (apply append
+          (map (lambda (relpath)
+                 (let* ((full (path-join dir relpath))
+                        (src (file-read full))
+                        (saved current-compiling-file))
+                   (set! current-compiling-file full)
+                   (let ((forms (flatten-begins (read-program (if fold-case? (ascii-foldcase-string src) src)))))
+                     (set! current-compiling-file saved)
+                     forms)))
+               (cdr form)))))
+
+    ;; Only used now to gather the SET of names a body's own top-level
+    ;; `define`s introduce (for letrec*'s own pre-declaration bindings,
+    ;; see hoist-internal-defines below) -- NOT to separate defines from
+    ;; other forms into two reordered lists the way this used to (see
+    ;; that function's own doc comment for why reordering was a genuine
+    ;; bug). `rest` (non-define forms) is no longer produced or used.
     (define (partition-defines forms)
       (if (null? forms)
-          (cons '() '())
-          (let ((rest (partition-defines (cdr forms))))
-            (if (and (pair? (car forms)) (eq? (car (car forms)) 'define))
-                (cons (cons (car forms) (car rest)) (cdr rest))
-                (cons (car rest) (cons (car forms) (cdr rest)))))))
+          '()
+          (if (and (pair? (car forms)) (eq? (car (car forms)) 'define))
+              (cons (car forms) (partition-defines (cdr forms)))
+              (partition-defines (cdr forms)))))
 
-    (define (define-form->letrec-binding d)
-      (let* ((sig (cadr d))
-             (name (if (pair? sig) (car sig) sig))
-             (val-expr (if (pair? sig) (cons 'lambda (cons (cdr sig) (cddr d))) (caddr d))))
-        (list name val-expr)))
+    (define (define-form-name d)
+      (let ((sig (cadr d))) (if (pair? sig) (car sig) sig)))
+
+    (define (define-form-val-expr d)
+      (let ((sig (cadr d)))
+        (if (pair? sig) (cons 'lambda (cons (cdr sig) (cddr d))) (caddr d))))
+
+    ;; The IN-PLACE replacement for a `define` once its name is already
+    ;; letrec*-pre-declared (hoist-internal-defines below): an ordinary
+    ;; assignment, evaluated exactly where the original `define` sat in
+    ;; the body's own source order -- this is the actual fix for the
+    ;; evaluation-order bug that function's own doc comment describes.
+    (define (define-form->set!-form d)
+      (list 'set! (define-form-name d) (define-form-val-expr d)))
 
     ;; Internal define-values desugars into a hidden temp holding the
     ;; multi-value result as a list (call-with-values + the `list`
     ;; procedure), followed by one ordinary (define name (list-ref/-tail
     ;; tmp i)) per formal -- reusing the exact plain-define shape
-    ;; hoist-internal-defines/define-form->letrec-binding already knows how
-    ;; to fold into a letrec* binding (whose sequential-evaluation
-    ;; semantics, see compile-letrec!, guarantee the temp is assigned
-    ;; before any derived binding reads it). Top-level define-values keeps
-    ;; its own existing Destructure-based compile-define-values! --
-    ;; unrelated to this, only used for the internal/hoisted case.
+    ;; hoist-internal-defines/define-form->set!-form already knows how to
+    ;; fold into a letrec*-preceded set! sequence (whose in-order
+    ;; evaluation, see hoist-internal-defines' own doc comment, guarantees
+    ;; the temp is assigned before any derived binding reads it). Top-
+    ;; level define-values keeps its own existing Destructure-based
+    ;; compile-define-values! -- unrelated to this, only used for the
+    ;; internal/hoisted case.
     (define (define-values->define-forms expr)
       (let* ((parsed (parse-formals (cadr expr)))
              (fixed (car parsed))
@@ -816,15 +951,54 @@
             (else form))
           form))
 
+    ;; Folds a body's own top-level internal defines into a letrec* --
+    ;; needed so a define anywhere in the body can be referenced by a
+    ;; nested lambda defined EARLIER in the same body (ordinary mutual
+    ;; recursion, e.g. even?/odd?), which a plain sequential compile
+    ;; (each define landing in whatever register is next, no forward
+    ;; visibility) can't give for free.
+    ;;
+    ;; USED to build this by bucketing forms into two SEPARATE lists --
+    ;; defines (become letrec*'s own bindings, evaluated ALL BEFORE the
+    ;; body) and rest (become the body, run AFTER every binding) -- which
+    ;; silently REORDERED a body that interleaves defines and plain
+    ;; expressions: a `define` appearing textually AFTER some expression
+    ;; had its own initializer moved to evaluate BEFORE that expression
+    ;; instead. Confirmed as a genuine, reproducible bug (cvm/README.md's
+    ;; own "Known bugs" section, found while porting (creme actor)):
+    ;;   (define worker 42)
+    ;;   (register! worker)        ; a plain expression
+    ;;   (define found (lookup))   ; define AFTER an expression
+    ;;   found
+    ;; used to compile as `(letrec* ((worker 42) (found (lookup)))
+    ;; (register! worker) found)` -- (lookup)'s call ran as part of the
+    ;; letrec*'s OWN bindings, i.e. BEFORE (register! worker) ever ran,
+    ;; instead of after it as the source order requires.
+    ;;
+    ;; Fixed by keeping letrec* ONLY for forward-reference visibility
+    ;; (every defined name pre-declared, bound to an unspecified
+    ;; placeholder #f) and replacing each `define` IN PLACE, in the
+    ;; body's own original order, with an ordinary `set!` to that
+    ;; already-declared name -- exactly what a `define` actually does at
+    ;; the point it runs, once its name already has a location to assign
+    ;; into. Every non-define form is left untouched, so the full
+    ;; interleaved sequence -- defines-turned-set!s and plain
+    ;; expressions alike -- now evaluates in the exact order the source
+    ;; wrote it in, while nested lambdas defined anywhere in the body
+    ;; still see every other define's name from the start (as letrec*
+    ;; intends), just not yet assigned until its own set! runs.
     (define (hoist-internal-defines forms)
       (let* ((flat (flatten-begins (map expand-definition-form (flatten-begins forms))))
-             (parts (partition-defines flat))
-             (defines (car parts))
-             (rest (cdr parts)))
+             (defines (partition-defines flat)))
         (if (null? defines)
             forms
-            (list (cons 'letrec* (cons (map define-form->letrec-binding defines)
-                                        (if (null? rest) (list (list 'quote '())) rest)))))))
+            (list (cons 'letrec*
+                    (cons (map (lambda (d) (list (define-form-name d) #f)) defines)
+                          (map (lambda (form)
+                                 (if (and (pair? form) (eq? (car form) 'define))
+                                     (define-form->set!-form form)
+                                     form))
+                               flat)))))))
 
     ;; Saves/restores macro-table around the body -- same snapshot/restore
     ;; compile-let-syntax! already uses (see its own header comment for
@@ -1159,10 +1333,11 @@
     ;; satisfied (else always matches), compiling only ITS body; the other
     ;; clauses are never even looked at by compile-expr!, exactly like the
     ;; #ifdef-style compile-time conditional this is meant to be. Only a
-    ;; small, honestly-hardcoded feature set is recognized (this compiler
-    ;; has no library registry to query the way the real analyzer does) --
-    ;; (library ...) requirements are conservatively treated as unsatisfied
-    ;; rather than guessed at.
+    ;; small, honestly-hardcoded feature identifier set is recognized
+    ;; (this compiler has no live library REGISTRY the way the real
+    ;; analyzer does) -- but (library ...) requirements are genuinely
+    ;; checked (feature-satisfied?'s own 'library case, below), not just
+    ;; guessed at or always rejected.
     (define cond-expand-known-features (list 'else 'r7rs 'creme 'creme.cr))
 
     (define (feature-satisfied? req)
@@ -1171,7 +1346,20 @@
         ((eq? (car req) 'and) (sr-all? feature-satisfied? (cdr req)))
         ((eq? (car req) 'or) (sr-any? feature-satisfied? (cdr req)))
         ((eq? (car req) 'not) (not (feature-satisfied? (cadr req))))
-        ((eq? (car req) 'library) #f)
+        ;; (library (name ...)) -- USED to be unconditionally #f (this
+        ;; compiler has no live library registry to query, unlike
+        ;; native's own real Interpreter). library-export-alist
+        ;; (defined further below in this same file, fine as a forward
+        ;; reference -- nothing calls feature-satisfied? before the
+        ;; whole body finishes loading) already answers exactly this
+        ;; question for any OTHER purpose (resolving what a library
+        ;; exports) via the same file-then-native-fallback check
+        ;; ensure-library-loaded!/import-set-resolved-bindings rely on,
+        ;; so reusing it here needs no new logic at all: a library
+        ;; genuinely exists (real .sld file, or a native family
+        ;; introspection recognizes) exactly when it has a non-#f
+        ;; export alist.
+        ((eq? (car req) 'library) (and (library-export-alist (cadr req)) #t))
         (else #f)))
 
     (define (sr-all? pred lst) (or (null? lst) (and (pred (car lst)) (sr-all? pred (cdr lst)))))
@@ -1374,7 +1562,15 @@
             (begin
               (fcomp-declare-local! child-fc rest (fcomp-alloc-reg! child-fc))
               (chunk-has-rest-set! child-chunk #t)))
-        (compile-scoped-body! child-fc body-forms (fcomp-alloc-reg! child-fc) #t)
+        ;; A plain self-recursive (define (f params...) body) gets the same
+        ;; counted-loop fusion a let-loop/do already would (see
+        ;; try-compile-global-counted-loop!'s own doc comment) -- tried
+        ;; first, falling back unconditionally to the ordinary
+        ;; compile-scoped-body! path the moment it declines. Never even
+        ;; attempted for a rest-arg lambda -- the recognizer's arity-based
+        ;; self-call matching doesn't account for one.
+        (or (and (not rest) (try-compile-global-counted-loop! child-fc (string->symbol proc-name) fixed body-forms))
+            (compile-scoped-body! child-fc body-forms (fcomp-alloc-reg! child-fc) #t))
         (let ((proto-idx (chunk-add-proto! (fcomp-chunk fc) child-chunk)))
           (chunk-emit! (fcomp-chunk fc) 'Closure dest proto-idx 0 0)
           (finish-tail! fc dest tail?))))
@@ -1560,6 +1756,77 @@
     (define (upvalue-operand fc expr)
       (and (symbol? expr) (not (fcomp-lookup-local fc expr)) (fcomp-resolve-upvalue! fc expr)))
 
+    ;; ---------------------------------------------------------------------
+    ;; Counted-loop recognizer helpers -- the raw-s-expression analogues of
+    ;; bytecode_compiler.cr's contains_lambda?/references_name?/step_delta/
+    ;; split_tail_self_call, backing try-compile-counted-loop! below. This
+    ;; compiler has no typed Node AST to pattern-match against (unlike
+    ;; native), so contains-lambda?/references-name? just walk the raw pair
+    ;; structure directly -- deliberately NOT quote/quasiquote-aware,
+    ;; treating ANY textual occurrence of `lambda`/`case-lambda` (or, for
+    ;; references-name?, the given name) as a hit even inside quoted data.
+    ;; That's a strict superset of the real "creates a closure"/"is
+    ;; referenced" condition -- it only ever costs a missed optimization
+    ;; (declining to lower a loop that was actually safe), never an unsafe
+    ;; lowering, and sidesteps a whole class of quote-handling complexity
+    ;; the native Node-based walk never needed either (see that file's own
+    ;; contains_lambda? doc comment for the full rationale this mirrors).
+    ;; ---------------------------------------------------------------------
+
+    (define (contains-lambda? expr)
+      (cond
+        ((pair? expr) (or (eq? (car expr) 'lambda) (eq? (car expr) 'case-lambda)
+                           (contains-lambda? (car expr)) (contains-lambda? (cdr expr))))
+        (else #f)))
+
+    (define (references-name? expr name)
+      (cond
+        ((eq? expr name) #t)
+        ((pair? expr) (or (references-name? (car expr) name) (references-name? (cdr expr) name)))
+        (else #f)))
+
+    ;; The raw-sexpr analogue of comparison_op_of: test-expr a 2-arg call
+    ;; resolving (via fusable-head?, the same shadow-check compile-fused-
+    ;; test!'s own fusion gate uses) to one of the 5 numeric comparisons
+    ;; (excluding eq?, not a counted-loop-shaped test) -> that PrimOp
+    ;; symbol, else #f.
+    (define (counted-loop-comparison-op fc test-expr)
+      (and (pair? test-expr)
+           (= (length (cdr test-expr)) 2)
+           (let ((entry (fusable-head? fc (car test-expr) 2)))
+             (and entry (memq (fp-op entry) '(NumLt NumLe NumGt NumGe NumEq)) (fp-op entry)))))
+
+    ;; The raw-sexpr analogue of step_delta: step-expr is exactly
+    ;; `(+ counter-name k)`/`(- counter-name k)` for a literal integer k (via
+    ;; imm-literal-int) -> the signed step, else #f. Deliberately doesn't
+    ;; gate on fusable-head? here (unlike counted-loop-comparison-op above)
+    ;; -- a shadowed/redefined +/- just makes this a non-constant-step loop,
+    ;; correctly declined by returning #f regardless.
+    (define (counted-loop-step-delta step-expr counter-name)
+      (and (pair? step-expr)
+           (memq (car step-expr) '(+ -))
+           (= (length (cdr step-expr)) 2)
+           (eq? (cadr step-expr) counter-name)
+           (let ((k (imm-literal-int (caddr step-expr))))
+             (and k (if (eq? (car step-expr) '+) k (- k))))))
+
+    ;; The raw-sexpr analogue of split_tail_self_call: if `branch` is (or,
+    ;; via one top-level (begin ...), ends in) a call `(loop-name arg...)`
+    ;; of exactly `arity` args, returns (cons prefix-forms call-form) --
+    ;; else #f, the caller's cue to try the OTHER branch instead.
+    (define (split-tail-self-call branch loop-name arity)
+      (let* ((is-begin (and (pair? branch) (eq? (car branch) 'begin)))
+             (body (and is-begin (cdr branch)))
+             (prefix (cond ((not is-begin) '())
+                           ((null? body) #f)
+                           (else (reverse (cdr (reverse body))))))
+             (last (cond ((not is-begin) branch)
+                         ((null? body) #f)
+                         (else (car (reverse body))))))
+        (and prefix last
+             (pair? last) (eq? (car last) loop-name) (= (length (cdr last)) arity)
+             (cons prefix last))))
+
     ;; Leaf-argument register reuse (mirrors bytecode_compiler.cr's
     ;; local_register_of?/last_non_leaf): returns the register holding
     ;; expr's value. When reuse-ok? and expr is a bare LOCAL-variable
@@ -1631,6 +1898,28 @@
     (define redefined-fusable-globals '())
     (define (mark-redefined! name)
       (if (fused-prim-name? name) (set! redefined-fusable-globals (cons name redefined-fusable-globals))))
+
+    ;; The inverse of mark-redefined! -- removes every occurrence of name
+    ;; (mark-redefined! doesn't dedupe, so more than one may be present).
+    ;; Exported (alongside mark-redefined! and fusable-prim-names below)
+    ;; so `eval` (cvm/compiler-run.scm) can temporarily disable fusion for
+    ;; exactly the fusable names a target `environment` excludes via its
+    ;; own only/except import-set, for the duration of one compile, then
+    ;; restore afterward -- see that function's own doc comment for why
+    ;; fusion needs this at all (a fused opcode never consults ANY
+    ;; environment, unlike an ordinary GetGlobal+Call).
+    (define (unmark-redefined! name)
+      (set! redefined-fusable-globals
+        (let loop ((names redefined-fusable-globals))
+          (cond
+            ((null? names) '())
+            ((eq? (car names) name) (loop (cdr names)))
+            (else (cons (car names) (loop (cdr names))))))))
+
+    ;; Every name fused-prim-table can ever act on (cxr names like `cadr`
+    ;; are a separate, pattern-recognized family -- cxr-name? -- not
+    ;; enumerable from a fixed table, and not covered by this list).
+    (define fusable-prim-names (map fp-name fused-prim-table))
 
     (define (fusable-call? fc fn-expr nargs)
       (and (symbol? fn-expr)
@@ -1804,7 +2093,7 @@
         (cond
           (local (cons 'local local))
           ((fcomp-resolve-upvalue! fc name) => (lambda (up) (cons 'upvalue up)))
-          (else (cons 'global (chunk-add-const! (fcomp-chunk fc) name))))))
+          (else (cons 'global (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)))))))
 
     (define (call-op-for kind tail?)
       (cond
@@ -2083,23 +2372,517 @@
                     (if rest (defglobal! ch rest r))))
               (if tail? (compile-literal-datum! fc '() dest #t))))))
 
+    ;; ---------------------------------------------------------------------
+    ;; Counted-loop recognizer + lowering -- the self-hosted analogue of
+    ;; bytecode_compiler.cr's try_compile_counted_loop (see that file's own
+    ;; doc comment for the full rationale). Recognizes `(let loop ((p
+    ;; init)...) (if test base-case (begin ...prefix... (loop step...))))`
+    ;; -- or the equivalent shape `do` desugars into, see compile-do! above
+    ;; -- as a "simple counted loop": one bound variable (the counter)
+    ;; stepped by a compile-time-constant integer add/sub, tested against a
+    ;; loop-invariant bound, with no lambda/case-lambda literal anywhere in
+    ;; the body and loop-name referenced nowhere but that one recognized
+    ;; tail call. When every condition holds, lowers directly to Op::
+    ;; ForPrep/Op::ForLoop over plain mutable registers instead of a
+    ;; closure+Call/TailCall. recognize-counted-loop returns #f (no side
+    ;; effects at all) the instant any condition fails, so compile-named-
+    ;; let! can try it first and fall back to its existing unconditional
+    ;; body on #f.
+    ;; ---------------------------------------------------------------------
+
+    (define (index-of x lst)
+      (let loop ((l lst) (i 0))
+        (cond ((null? l) #f) ((eq? (car l) x) i) (else (loop (cdr l) (+ i 1))))))
+
+    (define (any-pred? pred lst)
+      (and (pair? lst) (or (pred (car lst)) (any-pred? pred (cdr lst)))))
+
+    (define (all-pred? pred lst)
+      (or (null? lst) (and (pred (car lst)) (all-pred? pred (cdr lst)))))
+
+    ;; A local `filter` -- (scheme base) doesn't provide one and this
+    ;; library's own import list has no library that does either (SRFI-1's
+    ;; `filter`/`remove` aren't R7RS base), so this stays self-contained
+    ;; rather than adding a new import for two small call sites.
+    (define (filter-keep pred lst)
+      (cond ((null? lst) '())
+            ((pred (car lst)) (cons (car lst) (filter-keep pred (cdr lst))))
+            (else (filter-keep pred (cdr lst)))))
+
+    (define (indices-below n)
+      (let loop ((i (- n 1)) (acc '()))
+        (if (< i 0) acc (loop (- i 1) (cons i acc)))))
+
+    (define (escape-safe? expr loop-name)
+      (and (not (contains-lambda? expr)) (not (references-name? expr loop-name))))
+
+    ;; Parses `body` as exactly one (if test conseq [alt]) form, peeling a
+    ;; leading (not ...) test the same way compile-if! does -- returns
+    ;; (list test then-branch else-branch), or #f if body isn't this shape.
+    ;; A missing alt means "evaluate to NIL", the common no-accumulator
+    ;; "for-each"-style loop shape (e.g. `(let loop ((i 0)) (if (< i n)
+    ;; (begin ...(loop (+ i 1))))))`) -- only ever reachable as the
+    ;; non-recursive branch, since there's nowhere else for a recursive
+    ;; call to appear with no alt at all.
+    (define (counted-loop-if-shape body)
+      (and (= (length body) 1)
+           (pair? (car body))
+           (eq? (caar body) 'if)
+           (let* ((if-expr (car body))
+                  (raw-test (cadr if-expr))
+                  (raw-conseq (caddr if-expr))
+                  (raw-alt (if (pair? (cdddr if-expr)) (cadddr if-expr) (list 'quote '())))
+                  (peeled? (and (pair? raw-test) (eq? (car raw-test) 'not)
+                                (pair? (cdr raw-test)) (null? (cddr raw-test)))))
+             (list (if peeled? (cadr raw-test) raw-test)
+                   (if peeled? raw-alt raw-conseq)
+                   (if peeled? raw-conseq raw-alt)))))
+
+    ;; Recognizes test's counter: a 2-arg comparison (via counted-loop-
+    ;; comparison-op) whose first arg is one of the loop's own bound names.
+    ;; Returns (list cmp-op counter-index counter-name bound-expr), or #f.
+    (define (counted-loop-counter fc test names)
+      (and (pair? test)
+           (let ((cmp-op (counted-loop-comparison-op fc test)))
+             (and cmp-op
+                  (let* ((counter-candidate (cadr test))
+                         (counter-name (and (symbol? counter-candidate) counter-candidate))
+                         (counter-index (and counter-name (index-of counter-name names))))
+                    (and counter-index (list cmp-op counter-index counter-name (caddr test))))))))
+
+    ;; Translates whatever the source test means into Op::ForPrep/Op::
+    ;; ForLoop's own INCLUSIVE-of-limit convention (opcode.cr's own doc
+    ;; comment) -- the limit register always holds a value such that
+    ;; "continue while step > 0 ? counter <= limit : counter >= limit"
+    ;; reproduces the source's exact iteration count. #f for any (cmp-op,
+    ;; step-direction, branch-position) combination this recognizer doesn't
+    ;; confidently handle.
+    (define (counted-loop-limit-delta recurse-in-conseq? cmp-op step)
+      (if recurse-in-conseq?
+          (cond ((and (eq? cmp-op 'NumLt) (> step 0)) -1)
+                ((and (eq? cmp-op 'NumLe) (> step 0)) 0)
+                ((and (eq? cmp-op 'NumGt) (< step 0)) 1)
+                ((and (eq? cmp-op 'NumGe) (< step 0)) 0)
+                (else #f))
+          (cond ((and (eq? cmp-op 'NumGe) (> step 0)) -1)
+                ((and (eq? cmp-op 'NumLe) (< step 0)) 1)
+                ((and (eq? cmp-op 'NumEq) (or (= step 1) (= step -1))) (if (> step 0) -1 1))
+                (else #f))))
+
+    ;; The full recognizer -- returns #f the instant any condition fails
+    ;; (no side effects, safe to call speculatively), or a bundle
+    ;; (list names inits counter-index counter-name bound-expr limit-delta
+    ;;       step prefix call-args base-branch)
+    ;; for compile-counted-loop! to lower.
+    (define (recognize-counted-loop fc loop-name bindings body)
+      (let ((shape (counted-loop-if-shape body)))
+        (and shape
+             (let* ((test (car shape)) (then-branch (cadr shape)) (else-branch (caddr shape))
+                    (names (map car bindings)) (inits (map cadr bindings)) (arity (length names))
+                    (counter-info (counted-loop-counter fc test names)))
+               (and counter-info
+                    (let* ((cmp-op (car counter-info)) (counter-index (cadr counter-info))
+                           (counter-name (caddr counter-info)) (bound-expr (cadddr counter-info)))
+                      (and (all-pred? (lambda (p) (not (references-name? bound-expr p))) names)
+                           (not (contains-lambda? bound-expr))
+                           (let* ((then-split (split-tail-self-call then-branch loop-name arity))
+                                  (recurse-in-conseq? (and then-split #t))
+                                  (split (or then-split (split-tail-self-call else-branch loop-name arity))))
+                             (and split
+                                  (let* ((base-branch (if then-split else-branch then-branch))
+                                         (prefix (car split))
+                                         (call-args (cdr (cdr split))))
+                                    (and (escape-safe? base-branch loop-name)
+                                         (all-pred? (lambda (s) (escape-safe? s loop-name)) prefix)
+                                         (all-pred? (lambda (a) (escape-safe? a loop-name)) call-args)
+                                         (let ((step (counted-loop-step-delta (list-ref call-args counter-index) counter-name)))
+                                           (and step (not (= step 0))
+                                                (let ((limit-delta (counted-loop-limit-delta recurse-in-conseq? cmp-op step)))
+                                                  (and limit-delta
+                                                       (list names inits counter-index counter-name bound-expr
+                                                             limit-delta step prefix call-args base-branch))))))))))))))))
+
+    ;; Lowers a recognized shape (see recognize-counted-loop above) directly
+    ;; to Op::ForPrep/Op::ForLoop over persistent registers -- reserves one
+    ;; register per bound variable in the CURRENT fcomp (fcomp-declare-
+    ;; local! directly onto the already-computed init register, exactly
+    ;; compile-plain-let!'s own idiom -- no child closure, no Call/TailCall
+    ;; at all), compiles the recurse-branch's prefix statements and the
+    ;; non-counter carried variables' step expressions directly against
+    ;; those same registers every iteration (applying the same direct-
+    ;; write-when-nothing-else-reads-it optimization bytecode_compiler.cr's
+    ;; own try_compile_counted_loop applies, computed inline here rather
+    ;; than as a later pass), and compiles the base-branch as the loop's
+    ;; result expression once it falls through.
+    (define (compile-counted-loop! fc shape dest tail?)
+      (let ((names (list-ref shape 0)) (inits (list-ref shape 1)) (counter-index (list-ref shape 2))
+            (bound-expr (list-ref shape 4)) (limit-delta (list-ref shape 5)) (step (list-ref shape 6))
+            (prefix (list-ref shape 7)) (call-args (list-ref shape 8)) (base-branch (list-ref shape 9)))
+        (let* ((ch (fcomp-chunk fc))
+               (init-regs (map (lambda (init) (let ((r (fcomp-alloc-reg! fc))) (compile-expr! fc init r #f) r)) inits)))
+          (fcomp-push-scope! fc)
+          (for-each (lambda (n r) (fcomp-declare-local! fc n r)) names init-regs)
+          (let ((limit-reg (fcomp-alloc-reg! fc)))
+            (compile-expr! fc bound-expr limit-reg #f)
+            (fcomp-declare-local! fc (fresh-symbol! "for-limit-") limit-reg)
+            (if (not (= limit-delta 0)) (chunk-emit! ch 'AddImm limit-reg limit-reg limit-delta 0))
+            (let* ((counter-reg (list-ref init-regs counter-index))
+                   (prep-instr (chunk-emit! ch 'ForPrep counter-reg 0 limit-reg step))
+                   (body-start (length (chunk-instrs ch))))
+              (for-each
+                (lambda (stmt)
+                  (let ((mark (fcomp-next-reg fc)) (r (fcomp-alloc-reg! fc)))
+                    (compile-expr! fc stmt r #f)
+                    (fcomp-reclaim-to! fc mark)))
+                prefix)
+              (let ((mark4 (fcomp-next-reg fc)))
+                (let* ((other (filter-keep (lambda (i) (not (= i counter-index))) (indices-below (length names))))
+                       (needs-temp
+                         (filter-keep
+                           (lambda (i)
+                             (any-pred?
+                               (lambda (j) (and (not (= j i)) (references-name? (list-ref call-args j) (list-ref names i))))
+                               other))
+                           other))
+                       (direct (filter-keep (lambda (i) (not (memv i needs-temp))) other))
+                       (temp-pairs
+                         (map (lambda (i) (let ((r (fcomp-alloc-reg! fc))) (compile-expr! fc (list-ref call-args i) r #f) (cons i r)))
+                              needs-temp)))
+                  (for-each (lambda (i) (compile-expr! fc (list-ref call-args i) (list-ref init-regs i) #f)) direct)
+                  (for-each
+                    (lambda (p)
+                      (let ((i (car p)) (r (cdr p)))
+                        (if (not (= (list-ref init-regs i) r)) (chunk-emit! ch 'Move (list-ref init-regs i) r 0 0))))
+                    temp-pairs))
+                (fcomp-reclaim-to! fc mark4))
+              (let ((loop-instr (chunk-emit! ch 'ForLoop counter-reg 0 limit-reg step)))
+                (chunk-patch-jump-to! ch loop-instr body-start)
+                (chunk-patch-jump-to-here! ch prep-instr)
+                (compile-expr! fc base-branch dest tail?)
+                (fcomp-pop-scope! fc)))))))
+
+    ;; ---------------------------------------------------------------------
+    ;; Extends the same counted-loop recognizer (recognize-counted-loop
+    ;; above) to an ordinary self-recursive (define (f params...) body) --
+    ;; mirrors bytecode_compiler.cr's try_compile_global_counted_loop
+    ;; byte-for-byte; see its own doc comment for the full rationale.
+    ;; Unlike a let-loop/do, f's own name is a mutable GLOBAL, so lowering
+    ;; straight to registers the same way would silently stop honoring a
+    ;; mid-loop (set! f ...)/re-`define`. Two extra hard requirements on
+    ;; top of recognize-counted-loop's own make this safe: the step must
+    ;; be exactly +-1 (Op::ForLoopGuardedInc/Dec only have room for a
+    ;; global reference by dropping the plain loop's general step operand
+    ;; -- see opcode.cr's own doc comment), and proc-name must resolve to
+    ;; neither a local nor an upvalue from child-fc's own scope (i.e. it
+    ;; would otherwise compile as a global call) -- an internal (define (f
+    ;; ...) ...) or a named-let's own loop name never qualifies.
+    ;;
+    ;; child-fc already has `fixed` declared as its own param registers
+    ;; (compile-lambda! calls this right after declaring them, before
+    ;; falling back to compile-scoped-body!) -- unlike the let-loop/do
+    ;; path, there's no inits/Move-in step at all: the loop's "initial
+    ;; values" are simply the function's own incoming arguments, already
+    ;; exactly where they need to be. Returns #t (having emitted the
+    ;; child's whole body, tail position, into dest) or #f (having emitted
+    ;; nothing at all, safe to fall back to compile-scoped-body!).
+    ;;
+    ;; When recognized: the counted loop still runs entirely in registers,
+    ;; but every iteration re-checks (by pointer identity, not eqv?/
+    ;; equal?) that the global is still bound to the exact closure that's
+    ;; running, and deopts the instant it isn't -- falls through to a
+    ;; REAL, ordinary (unfused) compilation of the original `if`, exactly
+    ;; what would have run without this optimization at all.
+    ;; ---------------------------------------------------------------------
+    (define (compile-global-counted-loop! child-fc proc-name fixed shape body-forms dest)
+      (let ((counter-index (list-ref shape 2)) (bound-expr (list-ref shape 4))
+            (limit-delta (list-ref shape 5)) (step (list-ref shape 6))
+            (prefix (list-ref shape 7)) (call-args (list-ref shape 8)) (base-branch (list-ref shape 9)))
+        (let* ((ch (fcomp-chunk child-fc))
+               (param-regs (map (lambda (p) (fcomp-lookup-local child-fc p)) fixed))
+               (limit-reg (fcomp-alloc-reg! child-fc)))
+          (compile-expr! child-fc bound-expr limit-reg #f)
+          (fcomp-declare-local! child-fc (fresh-symbol! "for-limit-") limit-reg)
+          (if (not (= limit-delta 0)) (chunk-emit! ch 'AddImm limit-reg limit-reg limit-delta 0))
+          ;; ForPrep is unconditionally shared with the plain (let-loop/do)
+          ;; lowering and ALWAYS reads its own 4th operand as the real step
+          ;; for its zero-trip check (vm.cr/vm.c) -- it has no "guarded"
+          ;; flavor of its own to imply the step from, so it must get the
+          ;; genuine step here even though the terminal loop op below gets
+          ;; a global const index in that same operand slot instead.
+          (let* ((counter-reg (list-ref param-regs counter-index))
+                 (prep-instr (chunk-emit! ch 'ForPrep counter-reg 0 limit-reg step))
+                 (body-start (length (chunk-instrs ch))))
+            (for-each
+              (lambda (stmt)
+                (let ((mark (fcomp-next-reg child-fc)) (r (fcomp-alloc-reg! child-fc)))
+                  (compile-expr! child-fc stmt r #f)
+                  (fcomp-reclaim-to! child-fc mark)))
+              prefix)
+            (let ((mark4 (fcomp-next-reg child-fc)))
+              (let* ((other (filter-keep (lambda (i) (not (= i counter-index))) (indices-below (length fixed))))
+                     (needs-temp
+                       (filter-keep
+                         (lambda (i)
+                           (any-pred?
+                             (lambda (j) (and (not (= j i)) (references-name? (list-ref call-args j) (list-ref fixed i))))
+                             other))
+                         other))
+                     (direct (filter-keep (lambda (i) (not (memv i needs-temp))) other))
+                     (temp-pairs
+                       (map (lambda (i) (let ((r (fcomp-alloc-reg! child-fc))) (compile-expr! child-fc (list-ref call-args i) r #f) (cons i r)))
+                            needs-temp)))
+                (for-each (lambda (i) (compile-expr! child-fc (list-ref call-args i) (list-ref param-regs i) #f)) direct)
+                (for-each
+                  (lambda (p)
+                    (let ((i (car p)) (r (cdr p)))
+                      (if (not (= (list-ref param-regs i) r)) (chunk-emit! ch 'Move (list-ref param-regs i) r 0 0))))
+                  temp-pairs))
+              (fcomp-reclaim-to! child-fc mark4))
+            (let* ((loop-op (if (> step 0) 'ForLoopGuardedInc 'ForLoopGuardedDec))
+                   (name-const (chunk-add-const! ch proc-name))
+                   (loop-instr (chunk-emit! ch loop-op counter-reg 0 limit-reg name-const)))
+              (chunk-patch-jump-to! ch loop-instr body-start)
+              (chunk-patch-jump-to-here! ch prep-instr)
+              (let ((deopt-instr (chunk-emit! ch 'TestGlobalIdentity name-const 0 0 0)))
+                (compile-expr! child-fc base-branch dest #t)
+                ;; Deopt block -- reachable only via TestGlobalIdentity's
+                ;; forward jump, the instant the global's been reassigned
+                ;; mid-loop. Simply the ordinary, unfused compilation of the
+                ;; whole original `if`, using the SAME param-regs (already
+                ;; holding exactly what the next recursive call's arguments
+                ;; would be) -- re-testing the base case fresh, or
+                ;; tail-calling whatever proc-name is bound to NOW if it's
+                ;; still recursing.
+                (chunk-patch-jump-to-here! ch deopt-instr)
+                (compile-expr! child-fc (car body-forms) dest #t)))))))
+
+    (define (try-compile-global-counted-loop! child-fc proc-name fixed body-forms)
+      (let ((shape (recognize-counted-loop child-fc proc-name (map (lambda (p) (list p #f)) fixed) body-forms)))
+        (and shape
+             (let ((step (list-ref shape 6)))
+               (and (or (= step 1) (= step -1))
+                    (not (fcomp-lookup-local child-fc proc-name))
+                    (not (fcomp-resolve-upvalue! child-fc proc-name))
+                    (begin
+                      (compile-global-counted-loop! child-fc proc-name fixed shape body-forms (fcomp-alloc-reg! child-fc))
+                      #t))))))
+
+    ;; ---------------------------------------------------------------------
+    ;; General (non-counted) loop closure elimination -- mirrors bytecode_
+    ;; compiler.cr's detect_general_loop_shape/detect_general_cond_loop_
+    ;; shape/emit_general_loop/emit_general_cond_loop/try_compile_general_
+    ;; loop byte-for-byte, adapted to this compiler's own s-expression/
+    ;; register-fcomp primitives. Generalizes recognize-counted-loop by
+    ;; dropping the counter/step/limit requirements entirely (termination
+    ;; isn't provable here, unlike a numeric range) -- covers a self-tail-
+    ;; recursive named-let/do that walks something other than a counter
+    ;; (e.g. `(cdr ...)`), the shape hashtable-test's own `scan` actually
+    ;; uses via `cond`. Tried as a fallback in compile-named-let! right
+    ;; after recognize-counted-loop declines -- `do` desugars to a named-
+    ;; let in this compiler too, so this one wiring point covers both.
+    ;; ---------------------------------------------------------------------
+
+    ;; Recognizes a plain (if test recurse-branch base-branch) or (if test
+    ;; base-branch recurse-branch) shape whose one branch self-tail-
+    ;; recurses and the other doesn't. Returns (list test recurse-in-
+    ;; conseq? prefix call-args base-branch), or #f.
+    (define (general-if-loop-shape loop-name names body)
+      (let ((shape (counted-loop-if-shape body)))
+        (and shape
+             (let* ((test (car shape)) (then-branch (cadr shape)) (else-branch (caddr shape))
+                    (arity (length names)))
+               (and (escape-safe? test loop-name)
+                    (let* ((then-split (split-tail-self-call then-branch loop-name arity))
+                           (recurse-in-conseq? (and then-split #t))
+                           (split (or then-split (split-tail-self-call else-branch loop-name arity))))
+                      (and split
+                           (let* ((base-branch (if then-split else-branch then-branch))
+                                  (prefix (car split))
+                                  (call-args (cdr (cdr split))))
+                             (and (escape-safe? base-branch loop-name)
+                                  (all-pred? (lambda (s) (escape-safe? s loop-name)) prefix)
+                                  (all-pred? (lambda (a) (escape-safe? a loop-name)) call-args)
+                                  (list test recurse-in-conseq? prefix call-args base-branch))))))))))
+
+    ;; Recognizes `(cond clause...)` bodies whose LAST clause self-tail-
+    ;; recurses (unconditionally via `else`, or with its own real test) and
+    ;; every earlier clause is an ordinary, non-recursive, lambda-free
+    ;; guard (a plain (test body...) clause -- no else/=> before the last
+    ;; position). Returns (list earlier-clauses recurse-test prefix call-
+    ;; args), or #f. recurse-test is #f for an unconditional (else ...)
+    ;; final clause.
+    (define (general-cond-loop-shape loop-name names clauses)
+      (and (pair? clauses)
+           (let* ((arity (length names))
+                  (earlier (reverse (cdr (reverse clauses))))
+                  (last (car (reverse clauses)))
+                  (last-test (car last))
+                  (last-body (cdr last)))
+             (and (pair? last-body)
+                  (not (eq? (car last-body) '=>))
+                  (all-pred? (lambda (c) (and (not (eq? (car c) 'else))
+                                              (pair? (cdr c))
+                                              (not (eq? (cadr c) '=>))))
+                             earlier)
+                  (let* ((last-branch (if (= (length last-body) 1) (car last-body) (cons 'begin last-body)))
+                         (split (split-tail-self-call last-branch loop-name arity)))
+                    (and split
+                         (let ((prefix (car split)) (call-args (cdr (cdr split))))
+                           (and (or (eq? last-test 'else) (escape-safe? last-test loop-name))
+                                (all-pred? (lambda (s) (escape-safe? s loop-name)) prefix)
+                                (all-pred? (lambda (a) (escape-safe? a loop-name)) call-args)
+                                (all-pred?
+                                  (lambda (c) (and (escape-safe? (car c) loop-name)
+                                                    (all-pred? (lambda (f) (escape-safe? f loop-name)) (cdr c))))
+                                  earlier)
+                                (list earlier (if (eq? last-test 'else) #f last-test) prefix call-args)))))))))
+
+    ;; Compiles the recurse-step shared by both emitters below: the
+    ;; prefix statements, then every loop-carried parameter's new value --
+    ;; direct-writing into its own register when nothing else reads it,
+    ;; otherwise routing through a temp register first (needs-temp path,
+    ;; same discipline as compile-counted-loop! above) -- then a backward
+    ;; Jmp to loop-start.
+    (define (emit-general-recurse-step! fc ch names param-regs prefix call-args loop-start)
+      (for-each
+        (lambda (stmt)
+          (let ((mark (fcomp-next-reg fc)) (r (fcomp-alloc-reg! fc)))
+            (compile-expr! fc stmt r #f)
+            (fcomp-reclaim-to! fc mark)))
+        prefix)
+      (let ((mark2 (fcomp-next-reg fc)))
+        (let* ((all (indices-below (length names)))
+               (needs-temp
+                 (filter-keep
+                   (lambda (i)
+                     (any-pred? (lambda (j) (and (not (= j i)) (references-name? (list-ref call-args j) (list-ref names i)))) all))
+                   all))
+               (direct (filter-keep (lambda (i) (not (memv i needs-temp))) all))
+               (temp-pairs (map (lambda (i) (let ((r (fcomp-alloc-reg! fc))) (compile-expr! fc (list-ref call-args i) r #f) (cons i r))) needs-temp)))
+          (for-each (lambda (i) (compile-expr! fc (list-ref call-args i) (list-ref param-regs i) #f)) direct)
+          (for-each (lambda (p) (if (not (= (list-ref param-regs (car p)) (cdr p))) (chunk-emit! ch 'Move (list-ref param-regs (car p)) (cdr p) 0 0))) temp-pairs))
+        (fcomp-reclaim-to! fc mark2))
+      (let ((back-instr (chunk-emit! ch 'Jmp 0 0 0 0)))
+        (chunk-patch-jump-to! ch back-instr loop-start)))
+
+    ;; Lowers a recognized general-if-loop shape (see general-if-loop-shape
+    ;; above) to plain mutable registers plus an ordinary per-iteration
+    ;; test (compile-fused-test!/TestFalse, same as compile-if-branches!
+    ;; uses) and a backward Jmp -- there's no numeric range to fuse into
+    ;; Op::ForPrep/ForLoop here. param-regs are the loop-carried registers,
+    ;; already declared/initialized by the caller.
+    (define (emit-general-loop! fc shape names param-regs dest tail?)
+      (let ((test (list-ref shape 0)) (recurse-in-conseq? (list-ref shape 1))
+            (prefix (list-ref shape 2)) (call-args (list-ref shape 3)) (base-branch (list-ref shape 4)))
+        (let* ((ch (fcomp-chunk fc))
+               (loop-start (length (chunk-instrs ch)))
+               (jmp-false (or (compile-fused-test! fc test)
+                              (let ((mark (fcomp-next-reg fc)) (test-reg (fcomp-alloc-reg! fc)))
+                                (compile-expr! fc test test-reg #f)
+                                (let ((instr (chunk-emit! ch 'TestFalse test-reg 0 0 0)))
+                                  (fcomp-reclaim-to! fc mark)
+                                  instr)))))
+          (if recurse-in-conseq?
+              (begin
+                (emit-general-recurse-step! fc ch names param-regs prefix call-args loop-start)
+                (chunk-patch-jump-to-here! ch jmp-false)
+                (compile-expr! fc base-branch dest tail?))
+              (begin
+                (compile-expr! fc base-branch dest tail?)
+                (let ((jmp-end (if tail? #f (chunk-emit! ch 'Jmp 0 0 0 0))))
+                  (chunk-patch-jump-to-here! ch jmp-false)
+                  (emit-general-recurse-step! fc ch names param-regs prefix call-args loop-start)
+                  (if jmp-end (chunk-patch-jump-to-here! ch jmp-end))))))))
+
+    ;; Lowers a recognized general-cond-loop shape (see general-cond-loop-
+    ;; shape above): every earlier clause compiles as an ordinary cond exit
+    ;; (mirrors compile-cond!'s own per-clause pattern), threading a plain
+    ;; list of pending "jump past the loop" instructions to patch once the
+    ;; whole loop has been emitted; the final (possibly-guarded) clause
+    ;; recurses via emit-general-recurse-step! back to loop-start.
+    (define (emit-general-cond-loop! fc shape names param-regs dest tail?)
+      (let ((earlier (list-ref shape 0)) (recurse-test (list-ref shape 1))
+            (prefix (list-ref shape 2)) (call-args (list-ref shape 3)))
+        (let* ((ch (fcomp-chunk fc))
+               (loop-start (length (chunk-instrs ch))))
+          (let emit-earlier ((clauses earlier) (end-jumps '()))
+            (if (null? clauses)
+                (begin
+                  (if recurse-test
+                      (let* ((mark (fcomp-next-reg fc)) (test-reg (fcomp-alloc-reg! fc)))
+                        (compile-expr! fc recurse-test test-reg #f)
+                        (fcomp-reclaim-to! fc mark)
+                        (let ((jmp-false2 (chunk-emit! ch 'TestFalse test-reg 0 0 0)))
+                          (emit-general-recurse-step! fc ch names param-regs prefix call-args loop-start)
+                          (chunk-patch-jump-to-here! ch jmp-false2)
+                          (compile-literal-datum! fc '() dest tail?)))
+                      (emit-general-recurse-step! fc ch names param-regs prefix call-args loop-start))
+                  (for-each (lambda (j) (chunk-patch-jump-to-here! ch j)) end-jumps))
+                (let* ((clause (car clauses)) (test (car clause)) (body (cdr clause))
+                       (mark (fcomp-next-reg fc)) (test-reg (fcomp-alloc-reg! fc)))
+                  (compile-expr! fc test test-reg #f)
+                  (fcomp-reclaim-to! fc mark)
+                  (let ((jmp-false (chunk-emit! ch 'TestFalse test-reg 0 0 0)))
+                    (compile-scoped-body! fc body dest tail?)
+                    (let ((jmp-end (if tail? #f (chunk-emit! ch 'Jmp 0 0 0 0))))
+                      (chunk-patch-jump-to-here! ch jmp-false)
+                      (emit-earlier (cdr clauses) (if jmp-end (cons jmp-end end-jumps) end-jumps))))))))))
+
+    ;; Shared init-register setup for both general-loop shapes -- mirrors
+    ;; compile-counted-loop!'s own opening (fcomp-declare-local! directly
+    ;; onto the already-computed init register, no child closure at all).
+    (define (compile-general-loop-init! fc names inits shape dest tail? emitter)
+      (let* ((init-regs (map (lambda (init) (let ((r (fcomp-alloc-reg! fc))) (compile-expr! fc init r #f) r)) inits)))
+        (fcomp-push-scope! fc)
+        (for-each (lambda (n r) (fcomp-declare-local! fc n r)) names init-regs)
+        (emitter fc shape names init-regs dest tail?)
+        (fcomp-pop-scope! fc)))
+
+    ;; Tries general-if-loop-shape first, then general-cond-loop-shape
+    ;; (mirrors try_compile_general_loop's own dispatch order) -- #f the
+    ;; instant neither matches (no side effects), so compile-named-let!
+    ;; can fall back to its existing closure-based path unconditionally.
+    (define (try-compile-general-loop! fc loop-name bindings body dest tail?)
+      (let* ((names (map car bindings)) (inits (map cadr bindings))
+             (if-shape (general-if-loop-shape loop-name names body)))
+        (cond
+          (if-shape
+           (compile-general-loop-init! fc names inits if-shape dest tail? emit-general-loop!)
+           #t)
+          ((and (= (length body) 1) (pair? (car body)) (eq? (caar body) 'cond))
+           (let ((cond-shape (general-cond-loop-shape loop-name names (cdr (car body)))))
+             (and cond-shape
+                  (begin
+                    (compile-general-loop-init! fc names inits cond-shape dest tail? emit-general-cond-loop!)
+                    #t))))
+          (else #f))))
+
     ;; (let loop ((n v) ...) body...) -- loop's OWN register is declared
     ;; before its lambda body is compiled, so the lambda can resolve it as an
     ;; upvalue capturing itself (ordinary letrec-style self-reference), then
-    ;; it's called immediately with the initial values.
+    ;; it's called immediately with the initial values. Tries the counted-
+    ;; loop fast path first (see recognize-counted-loop/compile-counted-
+    ;; loop! above), then the general (non-counted) loop fast path (see
+    ;; try-compile-general-loop! above) -- falls back unconditionally to the
+    ;; closure-based path below the moment both decline.
     (define (compile-named-let! fc loop-name bindings body dest tail?)
-      (let* ((names (map car bindings))
-             (val-exprs (map cadr bindings))
-             (loop-reg (fcomp-alloc-reg! fc)))
-        (fcomp-push-scope! fc)
-        (fcomp-declare-local! fc loop-name loop-reg)
-        (compile-lambda! fc names body loop-reg #f "named-let")
-        (let ((arg-regs (map (lambda (v) (fcomp-alloc-reg! fc)) val-exprs)))
-          (for-each (lambda (v r) (compile-expr! fc v r #f)) val-exprs arg-regs)
-          (fcomp-pop-scope! fc)
-          (if tail?
-              (chunk-emit! (fcomp-chunk fc) 'TailCall loop-reg (length val-exprs) 0 0)
-              (chunk-emit! (fcomp-chunk fc) 'Call loop-reg (length val-exprs) dest 0)))))
+      (let ((shape (recognize-counted-loop fc loop-name bindings body)))
+        (cond
+          (shape (compile-counted-loop! fc shape dest tail?))
+          ((try-compile-general-loop! fc loop-name bindings body dest tail?) #t)
+          (else
+           (let* ((names (map car bindings))
+                  (val-exprs (map cadr bindings))
+                  (loop-reg (fcomp-alloc-reg! fc)))
+             (fcomp-push-scope! fc)
+             (fcomp-declare-local! fc loop-name loop-reg)
+             (compile-lambda! fc names body loop-reg #f "named-let")
+             (let ((arg-regs (map (lambda (v) (fcomp-alloc-reg! fc)) val-exprs)))
+               (for-each (lambda (v r) (compile-expr! fc v r #f)) val-exprs arg-regs)
+               (fcomp-pop-scope! fc)
+               (if tail?
+                   (chunk-emit! (fcomp-chunk fc) 'TailCall loop-reg (length val-exprs) 0 0)
+                   (chunk-emit! (fcomp-chunk fc) 'Call loop-reg (length val-exprs) dest 0))))))))
 
     (define (compile-let! fc expr dest tail?)
       (let ((second (cadr expr)))
@@ -2195,6 +2978,28 @@
     (define (mark-self-hosted-library-loaded! name)
       (set! self-hosted-loaded-libraries (cons name self-hosted-loaded-libraries)))
 
+    ;; Mirrors cvm_emitter.cr's own required_families computation (the
+    ;; native --emit-cvm path), just reimplemented here for THIS compiler's
+    ;; own self-hosted programs: every library name of the exact shape
+    ;; (creme builtin <family>) ever reached by ensure-library-loaded!
+    ;; below (which only gets here for a library with no .sld file on
+    ;; disk -- i.e. a native/builtin one, see that function's own doc
+    ;; comment) is a real, native builtin family the compiled program
+    ;; transitively depends on, and is recorded here (deduped) so
+    ;; compile-source-to-bytes/compiler-run.scm can pass a REAL required-
+    ;; families list into chunk->bytes instead of an empty/hardcoded one --
+    ;; letting cvm's own import-gated native builtin registration (main.c)
+    ;; work correctly even for a program compiled entirely by THIS
+    ;; self-hosted compiler (cvm's "compiler mode"), not just one compiled
+    ;; natively via --emit-cvm.
+    (define required-native-families '())
+    (define (record-required-native-family! name)
+      (if (and (= (length name) 3) (eq? (car name) 'creme) (eq? (cadr name) 'builtin))
+          (let ((fam (symbol->string (caddr name))))
+            (if (not (member fam required-native-families string=?))
+                (set! required-native-families (cons fam required-native-families))))))
+    (define (required-native-families-list) required-native-families)
+
     ;; Strips only/except/prefix/rename wrapping down to the bare
     ;; library-name import-set underneath (these all nest one <import-set>
     ;; inside another, per R7RS's own grammar).
@@ -2242,6 +3047,43 @@
                               (cons spec spec)))
                         (cdr (car cs))))
                   (else (loop (cdr cs)))))))))
+
+    ;; The FULL (external . internal) binding list a given import-set
+    ;; contributes -- unlike import-set-alias-defines above (which only
+    ;; computes the handful of EXTRA aliases a prefix/rename import-set
+    ;; needs beyond what a plain top-level `(import ...)` already brings
+    ;; in via native import!/ensure-libraries-loaded!), this is a
+    ;; complete, from-scratch resolution used by `environment`
+    ;; (cvm/compiler-run.scm) to populate a genuinely fresh, otherwise-
+    ;; empty environment -- there is no ambient "already imported"
+    ;; baseline to lean on there, so only/except need REAL filtering
+    ;; here (not the no-op passthrough import-set-alias-defines's own
+    ;; only/except cases use, which rely on native import! having
+    ;; already applied the filter for real at the top level).
+    (define (import-set-resolved-bindings spec)
+      (cond
+        ((eq? (car spec) 'only)
+         (let ((inner (import-set-resolved-bindings (cadr spec)))
+               (names (cddr spec)))
+           (filter (lambda (pair) (memq (car pair) names)) inner)))
+        ((eq? (car spec) 'except)
+         (let ((inner (import-set-resolved-bindings (cadr spec)))
+               (names (cddr spec)))
+           (filter (lambda (pair) (not (memq (car pair) names))) inner)))
+        ((eq? (car spec) 'prefix)
+         (let* ((inner (import-set-resolved-bindings (cadr spec)))
+                (prefix-str (symbol->string (caddr spec))))
+           (map (lambda (pair)
+                  (cons (string->symbol (string-append prefix-str (symbol->string (car pair)))) (cdr pair)))
+                inner)))
+        ((eq? (car spec) 'rename)
+         (let* ((inner (import-set-resolved-bindings (cadr spec)))
+                (renames (cddr spec)))
+           (map (lambda (pair)
+                  (let ((hit (assq (car pair) renames)))
+                    (if hit (cons (cadr hit) (cdr pair)) pair)))
+                inner)))
+        (else (or (library-export-alist spec) '()))))
 
     ;; #t if `name` already resolves as a global RIGHT NOW (called only at
     ;; compile time, directly from import-set-alias-defines below -- never
@@ -2313,7 +3155,31 @@
                          (hit (and exports (assq from exports))))
                     (cons (list 'define to (if hit (cdr hit) from))
                           (loop (cdr rs))))))))))
-        (else '())))
+        ;; A bare library-name import-set (no only/except/prefix/rename
+        ;; filter at all) -- e.g. plain `(import (some-lib))`. Genuinely
+        ;; distinct gap from the prefix/rename cases above: those exist
+        ;; to alias a name the IMPORT-SET itself renames/prefixes, but a
+        ;; library can ALSO rename its own export internally (`(export
+        ;; (rename internal-add public-add))`), and nothing consumed
+        ;; library-export-alist's already-correct (external . internal)
+        ;; parsing of that for a bare import at all before this -- so
+        ;; `public-add` was never actually bound as a global under cvm's
+        ;; self-hosted-loader-only path (native Crystal's own real
+        ;; import! already handles this correctly, via global-bound?'s
+        ;; same "already handled natively" skip below, which is why this
+        ;; gap was invisible under plain ./bin/creme/--self-hosted). Only
+        ;; the genuinely-renamed exports need a define here -- a plain
+        ;; (name . name) entry needs no alias at all.
+        (else
+         (let ((exports (library-export-alist spec)))
+           (if exports
+               (let loop ((es exports))
+                 (cond
+                   ((null? es) '())
+                   ((eq? (car (car es)) (cdr (car es))) (loop (cdr es)))
+                   ((global-bound? (car (car es))) (loop (cdr es)))
+                   (else (cons (list 'define (car (car es)) (cdr (car es))) (loop (cdr es))))))
+               '())))))
 
     ;; (creme dao) -> "modules/creme/dao.sld" -- mirrors import.cr's own
     ;; File.join(dir, "a/b/c.sld") convention, just against this project's
@@ -2324,11 +3190,65 @@
             (string-append acc ".sld")
             (loop (cdr parts) (string-append acc "/" (symbol->string (car parts)))))))
 
+    ;; dirname/path-join -- mirrors cvm/compiler-run.scm's own pair
+    ;; exactly (that file's own copy resolves the TARGET SCRIPT's own
+    ;; top-level `include` forms; this one resolves an `include`/
+    ;; `include-ci` declaration nested inside a separately-loaded
+    ;; library's own body, see ensure-library-loaded! below -- kept as a
+    ;; small separate copy here rather than shared, since the two run in
+    ;; different contexts (this compiler vs. that file's own driver) and
+    ;; the logic is a few lines either way).
+    (define (dirname path)
+      (let loop ((i (- (string-length path) 1)))
+        (cond
+          ((< i 0) "")
+          ((char=? (string-ref path i) #\/) (substring path 0 i))
+          (else (loop (- i 1))))))
+
+    (define (path-join dir name)
+      (if (string=? dir "") name (string-append dir "/" name)))
+
+    (define (library-dirname name) (dirname (library-name->path name)))
+
+    ;; include-ci's own `#!fold-case` contract -- ASCII-only ("(scheme
+    ;; char)" isn't imported here, so no string-foldcase to reach for;
+    ;; char->integer/integer->char are plain (scheme base)), and folds
+    ;; the WHOLE source blindly rather than identifiers only (a real
+    ;; #!fold-case reader wouldn't touch a string/char literal's own
+    ;; contents) -- an honest simplification, not attempted precisely,
+    ;; matching this project's existing house style of narrower-but-
+    ;; documented scope cuts elsewhere in this same file.
+    (define (ascii-foldcase-string s)
+      (list->string
+        (map (lambda (c)
+               (let ((n (char->integer c)))
+                 (if (and (>= n 65) (<= n 90)) (integer->char (+ n 32)) c)))
+             (string->list s))))
+
     ;; #f (rather than letting a missing file abort the whole process --
     ;; cvm_abort/an uncaught SchemeRuntimeError with no active guard here
     ;; would kill the entire run, not just fail this one lookup) when the
     ;; file can't be read -- the signal that `name` is an ordinary
     ;; Crystal/cvm-native library instead, with nothing further to do.
+    ;; Deliberately uses read-whole-file (a cvm-only native builtin), NOT
+    ;; the genuinely-portable file-read from (creme file) -- under cvm this
+    ;; really reads the file, so ensure-library-loaded! actually reentrant-
+    ;; compiles a library's own .sld source there (as it always has); under
+    ;; native/--self-hosted, read-whole-file is unbound, so the guard below
+    ;; always catches that and returns #f, meaning ensure-library-loaded!
+    ;; falls back to record-required-native-family! and NEVER reentrant-
+    ;; recompiles a library's body there -- relying instead on native's own
+    ;; real import having already defined everything for real. That fallback
+    ;; is load-bearing: switching this to file-read (which DOES work under
+    ;; native/self-hosted once (creme file) is imported) makes self-hosted
+    ;; actually attempt to recompile foundational libraries like (scheme
+    ;; base) from source for the first time ever -- a previously totally
+    ;; unexercised path that breaks even a bare (display ...) call, plus
+    ;; corrupts libraries like (creme sxql) whose defmacro transformers
+    ;; run at compile time and don't tolerate a second, independent
+    ;; reentrant definition of their own helpers. See expand-include-form
+    ;; and process-library-clause!'s own include branch below for the
+    ;; narrow, deliberate uses of file-read instead.
     (define (try-read-whole-file path)
       (guard (e (#t #f)) (read-whole-file path)))
 
@@ -2348,6 +3268,179 @@
     ;; clauses in one file (R7RS allows repeating either) are handled
     ;; correctly for free -- every clause is processed, in the file's own
     ;; order, by this same for-each.
+    ;; One library declaration -- import/begin (as before), plus include/
+    ;; include-ci (splices the named file's own top-level forms in,
+    ;; treated exactly like a begin clause's own body -- R7RS's own
+    ;; wording, "as if they appeared inline in a begin declaration";
+    ;; include-ci additionally fold-cases the source first, see ascii-
+    ;; foldcase-string's own doc comment) and cond-expand (picks the
+    ;; first satisfied clause the SAME way compile-cond-expand! does at
+    ;; the expression level, feature-satisfied?, then re-dispatches its
+    ;; own declarations through this SAME function -- so a cond-expand
+    ;; clause containing import/begin/include/a further nested
+    ;; cond-expand all just work, matching R7RS's "splices ... in place"
+    ;; wording literally rather than only handling one declaration kind
+    ;; inside it). `name` is threaded through only so include/include-ci
+    ;; can resolve a relative path against THIS library's own directory.
+    (define (process-library-clause! name clause)
+      (cond
+        ((eq? (car clause) 'import) (ensure-libraries-loaded! (cdr clause)))
+        ((eq? (car clause) 'begin) (run-compiled-forms! (cdr clause)))
+        ((or (eq? (car clause) 'include) (eq? (car clause) 'include-ci))
+         (let ((fold-case? (eq? (car clause) 'include-ci)))
+           (for-each
+             (lambda (relpath)
+               (let ((src (file-read (path-join (library-dirname name) relpath))))
+                 (run-compiled-forms! (read-program (if fold-case? (ascii-foldcase-string src) src)))))
+             (cdr clause))))
+        ((eq? (car clause) 'cond-expand)
+         (let loop ((cx-clauses (cdr clause)))
+           (if (pair? cx-clauses)
+               (if (feature-satisfied? (car (car cx-clauses)))
+                   (for-each (lambda (c) (process-library-clause! name c)) (cdr (car cx-clauses)))
+                   (loop (cdr cx-clauses))))))
+        (else #f)))
+
+    ;; Walks a library's own declarations the SAME way process-library-
+    ;; clause! does (import/begin/include/include-ci/cond-expand, cond-
+    ;; expand recursing through matched clauses the identical way), but
+    ;; purely to COLLECT rather than compile+run: returns (cons specs
+    ;; body-forms) -- `specs` the full list of import-sets this library's
+    ;; own `import` clauses mention (in file order), `body-forms` its own
+    ;; begin-clause forms plus (still-unexpanded) include/include-ci
+    ;; clauses, later fully spliced via flatten-begins (which already
+    ;; knows how to expand both) once current-compiling-file is pointed
+    ;; at this library's own file -- see library-visible-names below, the
+    ;; only caller. A parallel traversal (not process-library-clause!
+    ;; itself) since that function has side effects (real compiling) this
+    ;; one must not trigger a second time.
+    (define (library-clause-specs&forms clauses)
+      (let loop ((clauses clauses) (specs '()) (forms '()))
+        (if (null? clauses)
+            (cons (reverse specs) (reverse forms))
+            (let ((clause (car clauses)))
+              (cond
+                ((eq? (car clause) 'import) (loop (cdr clauses) (append (reverse (cdr clause)) specs) forms))
+                ((eq? (car clause) 'begin) (loop (cdr clauses) specs (append (reverse (cdr clause)) forms)))
+                ((or (eq? (car clause) 'include) (eq? (car clause) 'include-ci))
+                 (loop (cdr clauses) specs (cons clause forms)))
+                ((eq? (car clause) 'cond-expand)
+                 (let scan ((cx-clauses (cdr clause)))
+                   (if (pair? cx-clauses)
+                       (if (feature-satisfied? (car (car cx-clauses)))
+                           (let ((nested (library-clause-specs&forms (cdr (car cx-clauses)))))
+                             (loop (cdr clauses) (append (reverse (car nested)) specs) (append (reverse (cdr nested)) forms)))
+                           (scan (cdr cx-clauses)))
+                       (loop (cdr clauses) specs forms))))
+                (else (loop (cdr clauses) specs forms)))))))
+
+    ;; Every name ONE top-level form itself binds as a real global, if
+    ;; any -- a dedicated, minimal recognizer (NOT expand-definition-
+    ;; form/record-type->define-forms, which desugar define-record-type/
+    ;; define-values into an INTERNAL, vector-based fake-record shape for
+    ;; hoist-internal-defines' own letrec* folding, and critically don't
+    ;; generate a binding for the type name itself -- top-level define-
+    ;; record-type genuinely binds ALL of type-name/ctor/pred/accessors/
+    ;; mutators as real globals, per cvm/vm.c's build_record_bindings
+    ;; "bindings, in the same order: type, ctor, pred, then per field").
+    ;; define-syntax/defmacro names are included defensively too (a
+    ;; top-level define-syntax genuinely binds a real T_MACRO global,
+    ;; per Op::HelperForm kind 3) -- over-including a name here only
+    ;; makes this library's own visibility restriction slightly less
+    ;; strict, never wrong in the other direction, so when in doubt this
+    ;; leans toward including rather than mangling a legitimate own name.
+    (define (top-level-form-names form)
+      (if (not (pair? form))
+          '()
+          (cond
+            ((eq? (car form) 'define)
+             (let ((sig (cadr form))) (list (if (pair? sig) (car sig) sig))))
+            ((eq? (car form) 'define-values)
+             (let ((parsed (parse-formals (cadr form))))
+               (if (cdr parsed) (append (car parsed) (list (cdr parsed))) (car parsed))))
+            ((eq? (car form) 'define-record-type)
+             (let* ((type-name (cadr form))
+                    (ctor-spec (caddr form))
+                    (ctor-name (car ctor-spec))
+                    (pred-name (cadddr form))
+                    (field-specs (cddddr form)))
+               (append
+                 (list type-name ctor-name pred-name)
+                 (apply append
+                   (map (lambda (spec) (if (pair? (cddr spec)) (list (cadr spec) (caddr spec)) (list (cadr spec))))
+                        field-specs)))))
+            ((or (eq? (car form) 'define-syntax) (eq? (car form) 'defmacro))
+             (list (cadr form)))
+            (else '()))))
+
+    ;; The full (own top-level defines UNION resolved-import external
+    ;; names) set current-library-visible-names is bound to while
+    ;; compiling `name`'s own body -- see that variable's own doc
+    ;; comment, and compile-var-ref!'s global-ref-name, for how it's
+    ;; used. Imported names reuse import-set-resolved-bindings (already
+    ;; real only/except/prefix/rename resolution, proven by
+    ;; `environment`'s own use of it) -- note this only needs each
+    ;; dependency's DECLARED export list (library-export-alist, which
+    ;; just re-reads a .sld's own `export` clause / the native fallback
+    ;; table), not for it to already be loaded, so this can run
+    ;; independently of/before ensure-libraries-loaded! actually loads
+    ;; any of them.
+    (define (library-visible-names name clauses)
+      (let* ((collected (library-clause-specs&forms clauses))
+             (specs (car collected))
+             (saved-file current-compiling-file)
+             (own-forms (begin
+                          (set! current-compiling-file (library-name->path name))
+                          (let ((r (flatten-begins (cdr collected))))
+                            (set! current-compiling-file saved-file)
+                            r)))
+             (own-names (apply append (map top-level-form-names own-forms)))
+             (imported-names
+               (apply append
+                 (map (lambda (spec) (map car (import-set-resolved-bindings spec))) specs))))
+        (append own-names imported-names)))
+
+    ;; The recursive step: load whatever THIS library itself imports
+    ;; first (a library's own top-level body can reference its own
+    ;; dependencies' bindings, so those must already exist), then compile
+    ;; +run its own (begin ...) body via run-compiled-forms! -- which,
+    ;; being just an ordinary call into THIS SAME compiler, registers any
+    ;; define-syntax/defmacro the body contains into macro-table exactly
+    ;; the same way a textually-local one would (compile-form!'s own
+    ;; dispatch does that automatically while compiling the body -- no
+    ;; separate pre-scan needed) and defines its ordinary procedures as
+    ;; real globals via the usual DefGlobal path. Multiple import/begin
+    ;; clauses in one file (R7RS allows repeating either) are handled
+    ;; correctly for free -- every clause is processed, in the file's own
+    ;; order, by this same for-each.
+    ;; A name with no .sld file on disk is only ever legitimate here as a
+    ;; native-builtin pseudo-library of the (creme builtin <family>)
+    ;; shape (every real (scheme ...)/(creme ...) library this project
+    ;; ships DOES have a real .sld wrapper file -- these innermost names
+    ;; are what such a wrapper itself imports, see record-required-
+    ;; native-family!'s own matching shape check above). Deliberately NOT
+    ;; using library-export-alist's native fallback to decide "is this
+    ;; real" here -- cvm's own library-exports builtin (cvm/bootstrap.c)
+    ;; is a small, hand-maintained table covering only the one native
+    ;; library a spec actually needs only/except/prefix/rename against
+    ;; ((creme regex) today), NOT a general "does this native family
+    ;; exist" oracle -- treating its #f as "unknown" would wrongly reject
+    ;; almost every real (creme builtin <family>) name.
+    ;; Only meaningful under cvm, where read-whole-file (try-read-whole-
+    ;; file's own probe) is a genuine builtin -- there, "no src" reliably
+    ;; means "no .sld file exists on disk for this name" (global-bound?
+    ;; 'read-whole-file is how we tell we're actually running there).
+    ;; Under native/--self-hosted, read-whole-file is ALWAYS unbound
+    ;; regardless of whether a real .sld exists (that's the whole point
+    ;; of the try-read-whole-file/file-read split above) -- so "no src"
+    ;; there carries no information about whether `name` is real, and
+    ;; this check must never fire, or it would reject perfectly ordinary
+    ;; libraries like (scheme base) that should-match-native?/differential
+    ;; specs compile reentrant under native (e.g. compiler_libraries_spec.scm).
+    (define (unknown-native-library-name? name)
+      (and (global-bound? 'read-whole-file)
+           (not (and (pair? name) (= (length name) 3) (eq? (car name) 'creme) (eq? (cadr name) 'builtin)))))
+
     (define (ensure-library-loaded! name)
       (if (not (self-hosted-library-loaded? name))
           (let ((src (try-read-whole-file (library-name->path name))))
@@ -2362,14 +3455,36 @@
                   (let* ((forms (read-program src))
                          (lib-form (car forms))
                          (clauses (cddr lib-form)))
-                    (for-each
-                      (lambda (clause)
-                        (cond
-                          ((eq? (car clause) 'import) (ensure-libraries-loaded! (cdr clause)))
-                          ((eq? (car clause) 'begin) (run-compiled-forms! (cdr clause)))
-                          (else #f)))
-                      clauses)))
-                #f))))
+                    ;; current-library-visible-names/mangle-prefix and the
+                    ;; fused-prim exclusion (mark-redefined!, the same
+                    ;; mechanism eval's own except/only fix uses) are all
+                    ;; scoped to compiling THIS library's own clauses --
+                    ;; dynamic-wind-protected so a mid-library compile
+                    ;; error can't leave fusion permanently disabled for
+                    ;; names this library merely happened to exclude.
+                    (let* ((visible (library-visible-names name clauses))
+                           (excluded-fusable
+                             (let loop ((ns fusable-prim-names))
+                               (cond
+                                 ((null? ns) '())
+                                 ((memq (car ns) visible) (loop (cdr ns)))
+                                 (else (cons (car ns) (loop (cdr ns)))))))
+                           (saved-visible current-library-visible-names)
+                           (saved-prefix current-library-mangle-prefix))
+                      (dynamic-wind
+                        (lambda ()
+                          (set! current-library-visible-names visible)
+                          (set! current-library-mangle-prefix (library-name->path name))
+                          (for-each mark-redefined! excluded-fusable))
+                        (lambda ()
+                          (for-each (lambda (clause) (process-library-clause! name clause)) clauses))
+                        (lambda ()
+                          (set! current-library-visible-names saved-visible)
+                          (set! current-library-mangle-prefix saved-prefix)
+                          (for-each unmark-redefined! excluded-fusable))))))
+                (if (unknown-native-library-name? name)
+                    (error "import: unknown library" name)
+                    (record-required-native-family! name))))))
 
     ;; (import spec ...) -- top level only, same restriction the real
     ;; compiler enforces. Desugars into an ordinary call to (creme
@@ -2509,7 +3624,17 @@
                  (val-expr (if (pair? sig) (cons 'lambda (cons (cdr sig) (cddr expr))) (caddr expr)))
                  (ch (fcomp-chunk fc))
                  (val-reg (fcomp-alloc-reg! fc)))
-            (compile-expr! fc val-expr val-reg #f)
+            ;; (define f (lambda ...)) / (define (f ...) ...) sugar -- name
+            ;; the closure after its own binding (mirrors bytecode_
+            ;; compiler.cr's analyzer.cr renaming an anonymous LambdaNode
+            ;; to its define target's name), calling compile-lambda!
+            ;; directly rather than through the generic compile-expr!
+            ;; 'lambda dispatch, which always hardcodes "lambda" as the
+            ;; proc-name -- try-compile-global-counted-loop! needs the REAL
+            ;; name to recognize a self-recursive tail call back to it.
+            (if (and (pair? val-expr) (eq? (car val-expr) 'lambda))
+                (compile-lambda! fc (cadr val-expr) (cddr val-expr) val-reg #f (symbol->string name))
+                (compile-expr! fc val-expr val-reg #f))
             (defglobal! ch name val-reg)
             (compile-literal-datum! fc name dest tail?))))
 
@@ -2597,14 +3722,36 @@
             (chunk-emit! ch 'HelperForm dest form-idx 2 0)
             (if tail? (chunk-emit! ch 'Return dest 0 0 0)))))
 
-    (define (compile-program forms)
-      (let* ((ch (make-chunk "program"))
+    ;; Optional 2nd argument: the file `forms` was read from, letting a
+    ;; NESTED `(include ...)` inside a body (flatten-begins/expand-
+    ;; include-form, above) resolve a relative path against ITS own
+    ;; directory. Saved/restored around the whole compile (not just set
+    ;; unconditionally) since compile-program can be called reentrantly
+    ;; while an OUTER compile-program call is still in progress
+    ;; (ensure-library-loaded!'s own run-compiled-forms!, triggered from
+    ;; compile-import!'s eager compile-time execution of an `(import
+    ;; ...)` form partway through the outer program's own body) -- without
+    ;; the restore, the OUTER file's own current-compiling-file would
+    ;; stay clobbered with the library's path for the rest of that outer
+    ;; compile. Omitting the argument entirely (existing 1-arg callers,
+    ;; e.g. `eval`'s one-off single-form compiles) leaves whatever
+    ;; current-compiling-file already was untouched.
+    (define (compile-program forms . file)
+      (let* ((saved current-compiling-file)
+             (ch (make-chunk "program"))
              (fc (make-fcomp ch #f)))
+        (if (not (null? file)) (set! current-compiling-file (car file)))
         (compile-body! fc forms (fcomp-alloc-reg! fc) #t)
+        (set! current-compiling-file saved)
         ch))
 
     ;; Public entry point: compiles every top-level form in `source` (via
     ;; (creme compiler reader)'s read-program) into SCB1 bytes -- a
-    ;; bytevector ready for (creme bootstrap)'s load-chunk-bytes.
-    (define (compile-source-to-bytes source)
-      (chunk->bytes (compile-program (read-program source))))))
+    ;; bytevector ready for (creme bootstrap)'s load-chunk-bytes. Optional
+    ;; 2nd argument: see compile-program's own doc comment.
+    (define (compile-source-to-bytes source . file)
+      (chunk->bytes
+        (if (null? file)
+            (compile-program (read-program source))
+            (compile-program (read-program source) (car file)))
+        (required-native-families-list)))))

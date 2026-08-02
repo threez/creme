@@ -2,10 +2,23 @@ require "../../../../spec_helper"
 
 private def load_toolchain(interp : Scheme::Interpreter) : Nil
   Scheme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
+  # Pre-seeds ensure-library-loaded!'s own tracking for every file-based
+  # library just loaded NATIVELY above -- see src/main.cr's
+  # SELF_HOSTED_TOOLCHAIN_MARK_LOADED's own doc comment for why this is
+  # needed now that compiler.sld's own file-reading (file-read) genuinely
+  # works reentrant here too: without it, a script that ALSO imports one
+  # of these same libraries has its source re-read and re-run a SECOND
+  # time, corrupting an in-progress record type (e.g. (creme bytecode)'s
+  # own <chunk>).
+  Scheme.run_source(interp, %(
+    (mark-self-hosted-library-loaded! '(creme peg))
+    (mark-self-hosted-library-loaded! '(creme bytecode))
+    (mark-self-hosted-library-loaded! '(creme compiler reader))
+    (mark-self-hosted-library-loaded! '(creme compiler compiler))))
 end
 
 private def native_eval(source : String) : String
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (scheme lazy) (scheme eval)) #{source}").write_string
 end
 
@@ -238,6 +251,19 @@ describe "bootstrap-compiler module" do
       "(define (deep n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc (* (+ i 1) (- i 1) (+ i i))))))) (deep 200)",
       "(define f (case-lambda ((a) (list 'one a)) ((a b) (+ a b)) ((a b . rest) (list a b rest)))) (list (f 1) (f 1 2) (f 1 2 3 4))",
       "(define p (make-parameter 1)) (define (g) (parameterize ((p 10)) (+ (p) (p)))) (list (g) (g) (p))",
+      # Regression: hoist-internal-defines (modules/creme/compiler/
+      # compiler.sld) used to bucket a body's own forms into "all
+      # defines" (folded into letrec*'s bindings, evaluated before
+      # anything else) and "everything else" (the body, run after) --
+      # silently reordering a body that interleaves defines and plain
+      # expressions. `found`'s own initializer used to run BEFORE
+      # register! (since it was bucketed as a "definition", moved ahead
+      # of the body), even though `found`'s own `define` appears
+      # textually after register! in the source. See that function's
+      # own doc comment for the full explanation and fix (letrec* now
+      # only pre-declares names; each define is replaced in place, in
+      # original order, with an ordinary set!).
+      "(define registry '()) (define (register! x) (set! registry (cons x registry))) (define (f) (define worker 42) (register! worker) (define found registry) found) (f)",
       # Internal (define ...) hoisted into a letrec* in every body position
       # that introduces a scope, not just lambda/let bodies directly --
       # cond clauses (else and plain), case clauses (desugars into cond),
@@ -260,19 +286,26 @@ describe "bootstrap-compiler module" do
     ].each { |src| check(interp, src) }
   end
 
-  # The critical new safety case: a closure capturing a let-bound local,
-  # called AFTER several more sibling scopes have run and popped -- must
-  # still see the value at capture time, not whatever a later sibling
-  # scope's own local happens to reuse that register for. This is exactly
-  # the pattern the real Crystal BytecodeCompiler gets WRONG (verified
-  # empirically: native evaluation returns 2, the last sibling scope's own
-  # value, instead of 42 -- pop_scope rolls next_reg back unconditionally,
-  # never consulting captured_registers, and upvalues are only closed at
-  # frame-return/tail-call time per vm.cr's close_upvalues call sites, never
-  # at ordinary lexical scope exit) -- so this can't use check()'s
-  # bootstrap-vs-native comparison; the bootstrap-compiled result must be
-  # asserted directly against the correct value instead.
-  it "protects a captured local's register across later sibling scopes (unlike native evaluation)" do
+  # A closure capturing a let-bound local, called AFTER several more
+  # sibling scopes have run and popped, must still see the value at
+  # capture time, not whatever a later sibling scope's own local happens
+  # to reuse that register for. This USED to be a genuine bug in the real
+  # Crystal BytecodeCompiler too (FunctionCompiler#pop_scope rolled
+  # next_reg back unconditionally, never consulting captured_registers,
+  # and upvalues are only closed at frame-return/tail-call time per
+  # vm.cr's close_upvalues call sites, never at ordinary lexical scope
+  # exit) -- now fixed there too, generally (pop_scope/reclaim_to#floor_
+  # respecting_captures applies at every scope exit and mid-scope
+  # reclaim, not just one narrow call site -- doing so also required
+  # fixing compile_app's two general-path branches to reserve every call
+  # argument's register up front, see bytecode_compiler.cr's own comment
+  # there for why) -- see spec/scheme/compile/bytecode_vm_spec.cr's own
+  # "protects a captured local's register"/"keeps later call arguments
+  # in their own registers" cases, which exercise BytecodeCompiler
+  # directly and are the real regression tests for this; this one still
+  # just checks the self-hosted compiler's own, independent
+  # implementation, which never had either bug.
+  it "protects a captured local's register across later sibling scopes" do
     interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     src = <<-SCM
@@ -434,7 +467,7 @@ describe "bootstrap-compiler module" do
       "(define-library (compiler-spec-generated)
          (export greet)
          (import (scheme base))
-         (begin (define (greet name) (string-append \\\"hi \\\" name))))")
+         (begin (define (greet name) (string-append \\"hi \\" name))))")
     (import (compiler-spec-generated))
     (define result (greet "Ada"))
     (delete-file "./modules/compiler-spec-generated.sld")

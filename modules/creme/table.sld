@@ -65,7 +65,8 @@
 (define-library (creme table)
   (export bordered-style borderless-style make-bordered-style
           make-borderless-style table-style table->string)
-  (import (scheme base) (scheme write) (scheme cxr) (creme string) (only (creme extra) filter))
+  (import (scheme base) (scheme write) (scheme cxr)
+          (only (creme string) string-join string-repeat) (only (creme extra) filter))
   (begin
     ;; (0 1 ... n-1), for indexed list-ref access — kept local rather than
     ;; pulling in (creme extra)'s iota, to keep this module's imports minimal.
@@ -73,15 +74,47 @@
       (let loop ((i (- n 1)) (acc '()))
         (if (< i 0) acc (loop (- i 1) (cons i acc)))))
 
-    ;; Column i's width: the widest cell across every row at that index.
+    ;; A cell's width as it actually occupies terminal columns, skipping any
+    ;; embedded ANSI SGR escape sequence ("\x1b;[...m", R7RS's own #\escape
+    ;; named character through the next 'm') -- a caller that colorizes cell
+    ;; text (e.g. competition/bench.scm's per-column gradient) needs
+    ;; column-widths/pad-cell sized against what's actually VISIBLE, not
+    ;; against invisible escape bytes: a border segment is built from
+    ;; ordinary repeated dash characters with no invisible bytes of its own
+    ;; to absorb that inflation, so sizing borders off the raw (escape-
+    ;; inclusive) string length leaves them visibly wider than the padded
+    ;; cell text above/below — a real misalignment, not a cosmetic one. A
+    ;; plain cell with no escape sequence measures exactly as string-length
+    ;; would (the scan below never finds a #\escape to skip past).
+    (define (visible-length s)
+      (let ((len (string-length s)))
+        (let loop ((i 0) (n 0))
+          (cond ((= i len) n)
+                ((char=? (string-ref s i) #\escape)
+                 (let skip ((j (+ i 1)))
+                   (cond ((= j len) n)
+                         ((char=? (string-ref s j) #\m) (loop (+ j 1) n))
+                         (else (skip (+ j 1))))))
+                (else (loop (+ i 1) (+ n 1)))))))
+
+    ;; Column i's width: the widest cell (by visible-length) across every
+    ;; row at that index.
     (define (column-widths rows)
-      (map (lambda (i) (apply max (map (lambda (row) (string-length (list-ref row i))) rows)))
+      (map (lambda (i) (apply max (map (lambda (row) (visible-length (list-ref row i))) rows)))
            (range (length (car rows)))))
 
+    ;; Pads by VISIBLE length, not raw string-length -- (creme string)'s
+    ;; string-pad/string-pad-right pad against a Crystal String's own
+    ;; .size (every byte, escape sequences included), which would under-pad
+    ;; an already-colorized cell by exactly its escape overhead. Built
+    ;; directly here instead (plain space characters, no other dependency)
+    ;; so this stays correct for both plain and colorized cells alike.
     (define (pad-cell cell width align)
-      (if (eq? align 'left)
-          (string-pad-right cell width " ")
-          (string-pad cell width " ")))
+      (let* ((deficit (max 0 (- width (visible-length cell))))
+             (padding (make-string deficit #\space)))
+        (if (eq? align 'left)
+            (string-append cell padding)
+            (string-append padding cell))))
 
     (define (non-empty? s) (> (string-length s) 0))
 

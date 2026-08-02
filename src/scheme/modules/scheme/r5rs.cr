@@ -36,8 +36,8 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "r5rs"] do |env|
-      base = @libraries[["scheme", "base"]]
+    register_library ["creme", "builtin", "r5rs"] do |env|
+      base = @libraries[["creme", "builtin", "base"]]
       SchemeLibrary.import_bindings(env, base.exports.map { |external, internal| {external, base, internal} })
       base.exports.keys + register_module(Scheme::Builtins::R5rsLibrary, env)
     end

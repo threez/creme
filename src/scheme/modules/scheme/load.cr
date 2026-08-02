@@ -39,6 +39,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "load"], Scheme::Builtins::Load
+    register_library ["creme", "builtin", "load"], Scheme::Builtins::Load
   end
 end

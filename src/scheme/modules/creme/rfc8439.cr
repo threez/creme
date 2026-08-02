@@ -124,6 +124,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "rfc8439"], Scheme::Builtins::Rfc8439Library
+    register_library ["creme", "builtin", "rfc8439"], Scheme::Builtins::Rfc8439Library
   end
 end

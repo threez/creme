@@ -86,13 +86,61 @@ module Scheme
       r
     end
 
+    # Reserves `n` contiguous registers in one bump, returning the first —
+    # equivalent to calling alloc_reg n times and taking its first result,
+    # just without the N separate calls/bounds-checks or an intermediate
+    # array of results. Used where a whole contiguous run (a call's own
+    # anchor+args, or callee+args) is reserved up front before any of it is
+    # compiled into — see compile_app below.
+    def alloc_regs(n : Int32) : Int32
+      r = @next_reg
+      @next_reg += n
+      @chunk.num_registers = @next_reg if @next_reg > @chunk.num_registers
+      r
+    end
+
     def push_scope : Nil
       @scope = CompilerScope.new(@scope, @next_reg)
     end
 
+    # Raises `floor` past the highest register >= `at_or_above` that some
+    # closure captured as a `from_parent_local` upvalue (captured_
+    # registers, above), if any — shared by pop_scope and reclaim_to
+    # below, both of which would otherwise let a LATER sibling scope's
+    # (or a later statement's/argument's own disposable temp's) register
+    # reuse silently corrupt a still-open upvalue: such an upvalue stays
+    # open (a live Value* into that very register) until frame-return/
+    # tail-call time, not until whatever produced it merely finishes, so
+    # reusing the register before then overwrites the closure's captured
+    # value out from under it.
+    #
+    # Applying this at every pop_scope/reclaim_to call site (not just one
+    # narrow one) was tried and initially caused real regressions in
+    # compile_app's two general-path branches below: those allocate one
+    # register per call argument via repeated top-level alloc_reg calls,
+    # documented as relying on "nothing shrinks next_reg between these
+    # allocations, so they stay contiguous" — a non-leaf argument (e.g. a
+    # let/letrec with its own captured-register floor) could leave
+    # next_reg higher than expected once ITS OWN scope popped, shifting
+    # where a LATER argument's register landed and silently breaking
+    # that contiguity (the Call/TailCall op then read the wrong
+    # registers as its arguments at runtime). Fixed at the root instead
+    # of narrowing this floor's own use: both branches now reserve every
+    # argument's register up front, in one batch, before compiling any
+    # argument's own expression (mirroring self-hosted compiler.sld's
+    # compile-ordinary-app!, which already did this and was never
+    # vulnerable to begin with) — so no argument's own scope-popping can
+    # ever retroactively shift a sibling argument's already-fixed
+    # register number. With that in place, applying this floor generally
+    # here is safe and verified clean across the full spec suite.
+    private def floor_respecting_captures(floor : Int32, at_or_above : Int32) : Int32
+      highest_captured = @captured_registers.select { |reg| reg >= at_or_above }.max?
+      highest_captured && highest_captured + 1 > floor ? highest_captured + 1 : floor
+    end
+
     def pop_scope : Nil
       cur = @scope || raise "internal: pop_scope with no active scope"
-      @next_reg = cur.saved_next_reg
+      @next_reg = floor_respecting_captures(cur.saved_next_reg, cur.saved_next_reg)
       @scope = cur.parent
     end
 
@@ -107,11 +155,15 @@ module Scheme
     # Reclaims registers back down to `mark` — EXCEPT never below the
     # current scope's persistent_high_water (see CompilerScope's doc
     # comment), so a mid-scope reclaim can never hand out a persistent
-    # local's own register to some later, unrelated temp. Safe to call
-    # unconditionally (no scope at all — true top level — just uses `mark`
-    # directly, since nothing declare_local'd there needs protecting).
+    # local's own register to some later, unrelated temp — nor below any
+    # register >= mark some closure captured as an upvalue while
+    # compiling whatever is being reclaimed here (floor_respecting_
+    # captures, above). Safe to call unconditionally (no scope at all —
+    # true top level — just uses `mark` directly, since nothing declare_
+    # local'd there needs protecting).
     def reclaim_to(mark : Int32) : Nil
       floor = @scope.try(&.persistent_high_water) || mark
+      floor = floor_respecting_captures(floor, mark)
       @next_reg = mark > floor ? mark : floor
     end
 
@@ -734,7 +786,647 @@ module Scheme
       fc.pop_scope
     end
 
+    # The recognized shape of a "simple counted loop" (see try_compile_
+    # counted_loop below): `prefix` are the recurse-branch's own leading
+    # (non-tail, side-effecting) statements, and `call` is its trailing
+    # self-tail-call to the loop's own name.
+    private record CountedLoopCall, prefix : Array(Node), call : AppNode
+
+    # If `branch` is (or ends in, via a single top-level Begin) an AppNode
+    # calling `loop_name` with exactly `arity` args, splits it into its
+    # leading statements and that call. Returns nil for anything else
+    # (a plain value, a nested if, a call to something other than
+    # loop_name, wrong arity, ...) — the caller's cue to try the OTHER
+    # branch instead, or give up and fall back to the ordinary closure path.
+    private def split_tail_self_call(branch : Node, loop_name : String, arity : Int32) : CountedLoopCall?
+      prefix = [] of Node
+      last = branch
+      if branch.is_a?(BeginNode)
+        return nil if branch.body.empty?
+        prefix = branch.body[0...-1]
+        last = branch.body.last
+      end
+      return nil unless last.is_a?(AppNode)
+      # A named-let/do's own recursive reference to its loop name is
+      # lexically addressed (analyzer.cr's analyze_named_let extends the
+      # scope with loop_name as its own one-name frame), so it resolves to
+      # a LocalRefNode, not a VarRefNode — despite LocalRefNode's own doc
+      # comment describing it as "only for param/rest slots", a named-let's
+      # hidden loop-procedure binding is exactly that from the analyzer's
+      # perspective. A plain self-recursive `(define (f ...) ...)`'s own
+      # reference to `f` resolves to a GlobalRefNode instead (the analyzer
+      # already knows `f` at the point it analyzes f's own body, since a
+      # top-level define's name is visible process-wide from then on) —
+      # try_compile_global_counted_loop is the only caller that can ever
+      # reach this arm, since named-let/do's own loop name is never a
+      # global.
+      callee = last.callee
+      callee_name = case callee
+                    when VarRefNode    then callee.name
+                    when LocalRefNode  then callee.name
+                    when GlobalRefNode then callee.name
+                    else                    return nil
+                    end
+      return nil unless callee_name == loop_name
+      return nil unless last.args.size == arity
+      CountedLoopCall.new(prefix, last)
+    end
+
+    # If `arg` is exactly `(+ counter_name k)`/`(- counter_name k)` for a
+    # nonzero integer literal `k` that fits an Int32, the step this
+    # recursive call advances `counter_name` by (negative for `-`) — else
+    # nil, telling the recognizer this param isn't (or isn't provably) a
+    # simple constant-step counter.
+    private def step_delta(arg : Node, counter_name : String) : Int32?
+      return nil unless arg.is_a?(PrimCallNode) && arg.args.size == 2
+      first = arg.args[0]
+      name = case first
+             when VarRefNode   then first.name
+             when LocalRefNode then first.name
+             else                   return nil
+             end
+      return nil unless name == counter_name
+      second = arg.args[1]
+      return nil unless second.is_a?(LiteralNode)
+      value = second.value
+      return nil unless value.is_a?(SchemeInt)
+      k = value.value
+      return nil if k == 0 || k > Int32::MAX.to_i64 || k < Int32::MIN.to_i64
+      case arg.op
+      when PrimOp::Add then k.to_i32
+      when PrimOp::Sub then -k.to_i32
+      else                  nil
+      end
+    end
+
+    # The recognized shape of a "simple counted loop" (see detect_counted_
+    # loop_shape below) — everything try_compile_counted_loop/try_compile_
+    # global_counted_loop need to know to LOWER the loop, already validated
+    # against every hard requirement.
+    private record CountedLoopShape,
+      counter_index : Int32,
+      step : Int32,
+      limit_delta : Int32,
+      bound_node : Node,
+      split : CountedLoopCall,
+      base_branch : Node
+
+    # Tries to recognize `(let loop ((p init)...) (if test base-case
+    # (begin ...prefix... (loop step...))))` — or the equivalent shape
+    # `compile_do` synthesizes for `do`, or a plain self-recursive `(define
+    # (f params...) body)` (see try_compile_global_counted_loop) — as a
+    # "simple counted loop": one bound variable (the "counter") stepped by
+    # a compile-time-constant integer add/sub, tested against a
+    # loop-invariant bound, with no lambda/case-lambda literal anywhere in
+    # the body (the syntactic escape-safety condition — see contains_
+    # lambda?'s own doc comment) and `loop_name` referenced nowhere but that
+    # one recognized tail call. Returns nil — the caller's cue to fall back
+    # to its own ordinary (non-fused) path — the moment any condition
+    # fails; every check is a hard requirement, not a best-effort heuristic.
+    #
+    # Other bound variables (accumulators like a running sum or count) are
+    # NOT required to fit any particular shape — they just become ordinary
+    # persistent registers, recomputed from a fresh temp each iteration
+    # exactly the way a real tail call's arg-evaluation-then-rebind already
+    # works, so arbitrary accumulator step expressions are fine; only the
+    # counter's own step must be this constant-integer shape, since that's
+    # the one Op::ForLoop/Op::ForLoopGuardedInc/Dec themselves need to
+    # understand.
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def detect_counted_loop_shape(loop_name : String, params : Array(String), body : Array(Node)) : CountedLoopShape?
+      return nil unless body.size == 1 && body[0].is_a?(IfNode)
+      if_node = body[0].as(IfNode)
+      # A missing alt (`(if test conseq)`, no else) means "evaluate to NIL" —
+      # the common no-accumulator "for-each"-style loop shape (e.g.
+      # `(let loop ((i 0)) (if (< i n) (begin ...(loop (+ i 1))))))`, only
+      # ever reachable as the non-recursive branch: with no explicit alt
+      # there is nowhere else for a recursive call to appear.
+      alt : Node = if_node.alt || LiteralNode.new(NIL)
+
+      test, inverted = peel_not(if_node.test)
+      then_branch = inverted ? alt : if_node.conseq
+      else_branch = inverted ? if_node.conseq : alt
+
+      cmp_op = comparison_op_of(test)
+      return nil unless cmp_op && cmp_op != Op::IsEq
+      cmp = test.as(PrimCallNode)
+      counter_candidate = cmp.args[0]
+      counter_name = case counter_candidate
+                     when VarRefNode   then counter_candidate.name
+                     when LocalRefNode then counter_candidate.name
+                     else                   return nil
+                     end
+      counter_index = params.index(counter_name)
+      return nil unless counter_index
+      bound_node = cmp.args[1]
+      return nil if params.any? { |param| references_name?(bound_node, param) }
+      return nil if contains_lambda?(bound_node)
+
+      recurse_in_conseq, split, base_branch =
+        if s = split_tail_self_call(then_branch, loop_name, params.size)
+          {true, s, else_branch}
+        elsif s = split_tail_self_call(else_branch, loop_name, params.size)
+          {false, s, then_branch}
+        else
+          return nil
+        end
+
+      return nil if contains_lambda?(base_branch) || references_name?(base_branch, loop_name)
+      split.prefix.each do |stmt|
+        return nil if contains_lambda?(stmt) || references_name?(stmt, loop_name)
+      end
+      split.call.args.each do |arg|
+        return nil if contains_lambda?(arg) || references_name?(arg, loop_name)
+      end
+
+      step = step_delta(split.call.args[counter_index], counter_name)
+      return nil unless step && step != 0
+
+      # Translate whatever the source test means into Op::ForPrep/Op::ForLoop's
+      # own INCLUSIVE-of-limit convention (see opcode.cr's doc comment) — the
+      # limit register always holds a value such that "continue while step > 0
+      # ? counter <= limit : counter >= limit" reproduces the source's exact
+      # iteration count.
+      limit_delta = if recurse_in_conseq
+                      case cmp_op
+                      when Op::NumLt then return nil unless step > 0
+                      -1
+                      when Op::NumLe then return nil unless step > 0
+                      0
+                      when Op::NumGt then return nil unless step < 0
+                      1
+                      when Op::NumGe then return nil unless step < 0
+                      0
+                      else return nil
+                      end
+                    else
+                      case cmp_op
+                      when Op::NumGe then return nil unless step > 0
+                      -1
+                      when Op::NumLe then return nil unless step < 0
+                      1
+                      when Op::NumEq then return nil unless step == 1 || step == -1
+                      step > 0 ? -1 : 1
+                      else return nil
+                      end
+                    end
+
+      CountedLoopShape.new(counter_index, step, limit_delta, bound_node, split, base_branch)
+    end
+
+    # Shared by try_compile_counted_loop/try_compile_global_counted_loop: once a
+    # CountedLoopShape is recognized and `param_regs` already hold the loop's current
+    # values (either freshly Move'd-in from inits, or — for the global case — a
+    # function's own already-bound param registers), emits the limit-register setup,
+    # ForPrep, the per-iteration prefix/step-expression evaluation, and the terminal
+    # ForLoop/ForLoopGuardedInc/Dec — but NOT the base-case compile at the end, since the
+    # two callers differ there (plain vs guarded-with-a-deopt-fallback). `d_value` is the
+    # terminal loop instruction's own `d`: ForLoop's step immediate for the plain
+    # (unguarded) case, or a global-name const-pool index for the guarded case
+    # (ForLoopGuardedInc/Dec ignore it as a step — it's implicit in which of the two ops
+    # `loop_op` is — see opcode.cr's own doc comment). ForPrep, by contrast, ALWAYS gets
+    # the real shape.step regardless of `d_value` — it's shared unconditionally between
+    # both lowerings and its own zero-trip check (vm.cr/vm.c) has no "guarded" flavor to
+    # imply the step from, so it must see the genuine step every time. Returns
+    # {counter_reg, limit_reg} for the caller to finish with.
+    private def emit_counted_loop(fc : FunctionCompiler, params : Array(String), param_regs : Array(Int32),
+                                  shape : CountedLoopShape, loop_op : Op, d_value : Int32) : {Int32, Int32}
+      mark2 = fc.next_reg
+      limit_tmp = fc.alloc_reg
+      compile_expr(fc, shape.bound_node, limit_tmp, false)
+      fc.reclaim_to(mark2)
+      limit_reg = fc.declare_local("%for-limit-#{@loop_counter += 1}")
+      fc.emit(Op::Move, limit_reg, limit_tmp) unless limit_reg == limit_tmp
+      fc.emit(Op::AddImm, limit_reg, limit_reg, shape.limit_delta) unless shape.limit_delta == 0
+
+      counter_reg = param_regs[shape.counter_index]
+      # ForPrep is unconditionally shared between the plain and guarded lowerings and
+      # ALWAYS reads its own `d` as the real step for its zero-trip check (vm.cr/vm.c) —
+      # unlike the terminal loop op, it has no "guarded" flavor of its own to imply the
+      # step, so it must always get shape.step here even when `d_value` (below) is
+      # actually a global const index for the guarded case.
+      prep_ip = fc.emit(Op::ForPrep, counter_reg, 0, limit_reg, shape.step)
+      body_start = fc.chunk.instructions.size
+
+      shape.split.prefix.each do |stmt|
+        mark3 = fc.next_reg
+        discard = fc.alloc_reg
+        compile_expr(fc, stmt, discard, false)
+        fc.reclaim_to(mark3)
+      end
+
+      # Every carried variable's new value must be computed from every OTHER
+      # carried variable's OLD value — Scheme's simultaneous-rebind semantics
+      # (`(loop step...)` evaluates all step exprs against the current
+      # bindings before any of them takes effect) — but that only actually
+      # requires a temp register + deferred Move for a variable some OTHER
+      # step expression still reads (needs_temp, below): if nothing else's
+      # step expression references params[i] at all, nothing downstream can
+      # observe whether its own register was overwritten early or late, so
+      # its step expression can just target param_regs[i] directly — no
+      # temp, no Move, exactly what a plain mutable local (Lua's own `acc =
+      # acc + x`) costs. The common case (one accumulator, e.g. build-list's
+      # `acc`/vector-sum-test's running sum) always qualifies as direct.
+      mark4 = fc.next_reg
+      other = (0...params.size).reject { |i| i == shape.counter_index }
+      needs_temp = other.select do |i|
+        other.any? { |j| j != i && references_name?(shape.split.call.args[j], params[i]) }
+      end
+      direct = other - needs_temp
+      temp_pairs = needs_temp.map { |i| r = fc.alloc_reg; compile_expr(fc, shape.split.call.args[i], r, false); {i, r} }
+      direct.each { |i| compile_expr(fc, shape.split.call.args[i], param_regs[i], false) }
+      temp_pairs.each { |i, reg| fc.emit(Op::Move, param_regs[i], reg) unless param_regs[i] == reg }
+      fc.reclaim_to(mark4)
+
+      loop_ip = fc.emit(loop_op, counter_reg, 0, limit_reg, d_value)
+      fc.chunk.instructions[loop_ip] = Instruction.new(loop_op, counter_reg, body_start - (loop_ip + 1), limit_reg, d_value)
+      fc.chunk.patch_jump_to_here(prep_ip)
+      {counter_reg, limit_reg}
+    end
+
+    # Recognizes and lowers a let-loop/do counted loop directly to Op::ForPrep/Op::
+    # ForLoop over plain mutable registers (no closure, no per-iteration Call/TailCall).
+    # See detect_counted_loop_shape's own doc comment for the recognized shape and every
+    # hard requirement; returns false — emitting NOTHING, safe to retry via the ordinary
+    # compile_lambda+Call/TailCall path — the moment any of them fails.
+    private def try_compile_counted_loop(fc : FunctionCompiler, loop_name : String, params : Array(String),
+                                         inits : Array(Node), body : Array(Node), dst : Int32, tail : Bool) : Bool
+      shape = detect_counted_loop_shape(loop_name, params, body)
+      return false unless shape
+
+      fc.push_scope
+      mark = fc.next_reg
+      init_regs = inits.map { |init| r = fc.alloc_reg; compile_expr(fc, init, r, false); r }
+      fc.reclaim_to(mark)
+      param_regs = params.map_with_index do |param, i|
+        reg = fc.declare_local(param)
+        fc.emit(Op::Move, reg, init_regs[i]) unless reg == init_regs[i]
+        reg
+      end
+
+      emit_counted_loop(fc, params, param_regs, shape, Op::ForLoop, shape.step)
+      compile_expr(fc, shape.base_branch, dst, tail)
+      fc.pop_scope
+      true
+    end
+
+    # Extends the same recognized shape (detect_counted_loop_shape) to an ordinary
+    # self-recursive `(define (f params...) body)` — unlike a let-loop/do, `f`'s own name
+    # is a mutable GLOBAL, so lowering straight to registers the same way would silently
+    # stop honoring a mid-loop `(set! f ...)`/re-`define`. Two extra hard requirements on
+    # top of the base shape make this safe: the step must be exactly +-1
+    # (ForLoopGuardedInc/Dec only have room for a global reference by dropping ForLoop's
+    # general step operand — see opcode.cr's own doc comment), and `name` must resolve to
+    # :global from THIS function's own scope (not shadowed by a same-named param/local/
+    # upvalue) — otherwise the recursive call wouldn't even compile to CallGlobal to
+    # begin with. `fc` here is already the function's OWN FunctionCompiler (compile_lambda
+    # has already pushed its scope and declared `params` as fc's own registers 0..), so —
+    # unlike the let-loop/do path — there's no inits/Move-in step at all: the loop's
+    # "initial values" are simply the function's own incoming arguments, already exactly
+    # where they need to be.
+    #
+    # When recognized: the counted loop still runs entirely in registers, but every
+    # iteration re-checks (by pointer identity, not eqv?/equal?) that the global is still
+    # bound to the exact closure that's running, and deopts the instant it isn't — falls
+    # through to a REAL, ordinary (unfused) compilation of the original `if`, exactly what
+    # would have run without this optimization at all (see opcode.cr's ForLoopGuardedInc/
+    # Dec and TestGlobalIdentity doc comments for the full mechanism).
+    private def try_compile_global_counted_loop(fc : FunctionCompiler, name : String, params : Array(String),
+                                                body : Array(Node), tail : Bool) : Bool
+      return false unless tail
+      shape = detect_counted_loop_shape(name, params, body)
+      return false unless shape
+      return false unless shape.step == 1 || shape.step == -1
+      kind, _ = resolve_variable(fc, name)
+      return false unless kind == :global
+
+      param_regs = params.map { |param| fc.resolve_local(param) || raise "try_compile_global_counted_loop: param '#{param}' isn't a declared local" }
+      loop_op = shape.step > 0 ? Op::ForLoopGuardedInc : Op::ForLoopGuardedDec
+      name_const = fc.chunk.add_const(SchemeSym.of(name))
+      emit_counted_loop(fc, params, param_regs, shape, loop_op, name_const)
+
+      deopt_ip = fc.emit(Op::TestGlobalIdentity, name_const, 0)
+      dst = fc.alloc_reg
+      compile_expr(fc, shape.base_branch, dst, tail)
+      # Deopt block — reachable only via TestGlobalIdentity's forward jump, the instant
+      # the global's been reassigned mid-loop. Simply the ordinary, unfused compilation
+      # of the whole original `if`, using the SAME param_regs (already holding exactly
+      # what the next recursive call's arguments would be) — re-testing the base case
+      # fresh, or tail-calling whatever `name` is bound to NOW if it's still recursing.
+      fc.chunk.patch_jump_to_here(deopt_ip)
+      compile_expr(fc, body[0], dst, tail)
+      true
+    end
+
+    # The recognized shape of a "general" (non-counted) self-tail-recursive
+    # loop (see try_compile_general_loop below): like CountedLoopShape, but
+    # for a named-let/do whose recursion isn't a simple numeric counter
+    # (e.g. it walks a list via `(cdr ...)`, not incrementing/decrementing
+    # toward a limit) — `test`/`recurse_in_conseq` are enough to replay
+    # compile_if's own then/else derivation at emission time (see
+    # emit_general_loop), since termination isn't provable in general here
+    # the way it is for a counted loop, so there's no ForPrep/ForLoop-style
+    # fused range check to set up — just an ordinary per-iteration test.
+    private record GeneralLoopShape,
+      test : Node,
+      recurse_in_conseq : Bool,
+      split : CountedLoopCall,
+      base_branch : Node
+
+    # Tries to recognize `(let loop ((p init)...) (if test recurse-branch
+    # base-branch))` (either branch order) as a "general" self-tail-
+    # recursive loop: NOT a numeric counted loop (try_compile_counted_loop
+    # already tried and failed, or this wouldn't be reached — see
+    # compile_named_let/compile_do's own ordering), but still provably
+    # non-escaping the exact same way a counted loop is — `loop_name`
+    # referenced nowhere but the one recognized tail call, no lambda/case-
+    # lambda literal anywhere in the body (contains_lambda?) — so it's
+    # still safe to lower to plain mutable registers instead of allocating
+    # a real Closure every time the enclosing function runs. Returns nil —
+    # the caller's cue to fall back to its own ordinary (closure-based)
+    # path — the moment any condition fails, same discipline as
+    # detect_counted_loop_shape.
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def detect_general_loop_shape(loop_name : String, params : Array(String), body : Array(Node)) : GeneralLoopShape?
+      return nil unless body.size == 1 && body[0].is_a?(IfNode)
+      if_node = body[0].as(IfNode)
+      alt : Node = if_node.alt || LiteralNode.new(NIL)
+
+      test, inverted = peel_not(if_node.test)
+      then_branch = inverted ? alt : if_node.conseq
+      else_branch = inverted ? if_node.conseq : alt
+
+      return nil if contains_lambda?(test) || references_name?(test, loop_name)
+
+      recurse_in_conseq, split, base_branch =
+        if s = split_tail_self_call(then_branch, loop_name, params.size)
+          {true, s, else_branch}
+        elsif s = split_tail_self_call(else_branch, loop_name, params.size)
+          {false, s, then_branch}
+        else
+          return nil
+        end
+
+      return nil if contains_lambda?(base_branch) || references_name?(base_branch, loop_name)
+      split.prefix.each do |stmt|
+        return nil if contains_lambda?(stmt) || references_name?(stmt, loop_name)
+      end
+      split.call.args.each do |arg|
+        return nil if contains_lambda?(arg) || references_name?(arg, loop_name)
+      end
+
+      GeneralLoopShape.new(test, recurse_in_conseq, split, base_branch)
+    end
+
+    # Lowers a recognized GeneralLoopShape to plain mutable registers plus
+    # an ordinary per-iteration test-and-branch (no ForPrep/ForLoop — there's
+    # no numeric range to fuse into one instruction, just a ordinary test
+    # each time round, same as compile_if's own generic path) and a
+    # backward Op::Jmp closing the loop — mirrors emit_counted_loop's own
+    # prefix/needs_temp/direct simultaneous-rebind handling for the
+    # loop-carried parameters exactly, generalized from "counter + one
+    # accumulator" to N arbitrary loop-carried values (there's no
+    # "counter" here at all — every param is just an ordinary accumulator).
+    # Unlike emit_counted_loop (whose caller compiles the base branch
+    # separately afterward, since ForLoop's own fallthrough-on-exit makes
+    # that always the next thing to compile), this compiles the base
+    # branch itself, in whichever position (before/after the recurse body)
+    # the source's own branch order puts it — the two control-flow shapes
+    # aren't interchangeable the way ForLoop's single fallthrough is.
+    private def emit_general_loop(fc : FunctionCompiler, params : Array(String), param_regs : Array(Int32),
+                                  shape : GeneralLoopShape, dst : Int32, tail : Bool) : Nil
+      loop_start = fc.chunk.instructions.size
+
+      jmp_false = compile_fused_test(fc, shape.test, "if") || begin
+        mark = fc.next_reg
+        test_reg = fc.alloc_reg
+        compile_expr(fc, shape.test, test_reg, false)
+        fc.reclaim_to(mark)
+        jmp = fc.emit(Op::TestFalse, test_reg, 0)
+        fc.chunk.tag_sample(jmp, "if")
+        jmp
+      end
+
+      emit_recurse_step = -> do
+        shape.split.prefix.each do |stmt|
+          mark = fc.next_reg
+          discard = fc.alloc_reg
+          compile_expr(fc, stmt, discard, false)
+          fc.reclaim_to(mark)
+        end
+
+        mark2 = fc.next_reg
+        all = (0...params.size).to_a
+        needs_temp = all.select do |i|
+          all.any? { |j| j != i && references_name?(shape.split.call.args[j], params[i]) }
+        end
+        direct = all - needs_temp
+        temp_pairs = needs_temp.map { |i| r = fc.alloc_reg; compile_expr(fc, shape.split.call.args[i], r, false); {i, r} }
+        direct.each { |i| compile_expr(fc, shape.split.call.args[i], param_regs[i], false) }
+        temp_pairs.each { |i, reg| fc.emit(Op::Move, param_regs[i], reg) unless param_regs[i] == reg }
+        fc.reclaim_to(mark2)
+
+        # A backward jump — patch_jump_to_here only ever computes a FORWARD
+        # target (@instructions.size at call time), so this instruction is
+        # built directly instead, same technique emit_counted_loop's own
+        # loop_ip already uses for its own backward-jumping terminal op.
+        back_ip = fc.emit(Op::Jmp, 0, 0)
+        fc.chunk.instructions[back_ip] = Instruction.new(Op::Jmp, 0, loop_start - (back_ip + 1), 0, 0)
+      end
+
+      # The recurse body always ends in an unconditional backward jump, so
+      # it never falls through — unlike compile_if's own conseq, it never
+      # needs its own jmp-to-end. The base branch is the only path that can
+      # ever fall through past this whole construct, so it's the only one
+      # that (when not in tail position) needs one.
+      if shape.recurse_in_conseq
+        emit_recurse_step.call
+        fc.chunk.patch_jump_to_here(jmp_false)
+        compile_expr(fc, shape.base_branch, dst, tail)
+      else
+        compile_expr(fc, shape.base_branch, dst, tail)
+        jmp_end = fc.emit(Op::Jmp, 0, 0) unless tail
+        fc.chunk.patch_jump_to_here(jmp_false)
+        emit_recurse_step.call
+        fc.chunk.patch_jump_to_here(jmp_end) if jmp_end
+      end
+    end
+
+    # The recognized shape of a "general" loop whose body is a `cond`
+    # rather than a plain `if` (see detect_general_cond_loop_shape below)
+    # — e.g. hashtable-test's own `scan`: `(cond (guard1 exit1) (guard2
+    # exit2) (else (scan (cdr entries))))`. Scoped narrowly to the common
+    # idiom this actually targets, not general if/cond-chain peeling: only
+    # the LAST clause may recurse (either unconditionally, an `else`, or
+    # with its own real test — `recurse_test`, nil for the `else` case),
+    # and every EARLIER clause must be an ordinary, non-recursive,
+    # lambda-free guard (`earlier_clauses`, compiled via the exact same
+    # compile_cond_result plain `cond` clauses already use). A recursive
+    # clause buried in the MIDDLE of a cond, or a nested if/cond a level
+    # deeper than this, simply isn't recognized — falls back to the
+    # ordinary closure-based path, same as any other shape this recognizer
+    # declines.
+    private record GeneralCondLoopShape,
+      earlier_clauses : Array(CondClause),
+      recurse_test : Node?,
+      split : CountedLoopCall
+
+    private def cond_clause_safe_for_loop?(clause : CondClause, loop_name : String) : Bool
+      return false if clause.throw_msg
+      if t = clause.test
+        return false if contains_lambda?(t) || references_name?(t, loop_name)
+      end
+      if a = clause.arrow
+        return false if contains_lambda?(a) || references_name?(a, loop_name)
+      end
+      clause.body.each do |stmt|
+        return false if contains_lambda?(stmt) || references_name?(stmt, loop_name)
+      end
+      true
+    end
+
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def detect_general_cond_loop_shape(loop_name : String, params : Array(String), body : Array(Node)) : GeneralCondLoopShape?
+      return nil unless body.size == 1 && body[0].is_a?(CondNode)
+      node = body[0].as(CondNode)
+      return nil if node.clauses.empty?
+      last = node.clauses.last
+      return nil if last.arrow || last.throw_msg || last.body.empty?
+      # An earlier `else` would make the final (possibly-recursive) clause
+      # unreachable dead code — reject rather than risk silently dropping
+      # the recursion (shouldn't normally parse this way anyway).
+      earlier = node.clauses[0...-1]
+      return nil if earlier.any? { |clause| clause.test.nil? }
+
+      last_branch : Node = last.body.size == 1 ? last.body[0] : BeginNode.new(last.body)
+      return nil unless split = split_tail_self_call(last_branch, loop_name, params.size)
+
+      if t = last.test
+        return nil if contains_lambda?(t) || references_name?(t, loop_name)
+      end
+      split.prefix.each do |stmt|
+        return nil if contains_lambda?(stmt) || references_name?(stmt, loop_name)
+      end
+      split.call.args.each do |arg|
+        return nil if contains_lambda?(arg) || references_name?(arg, loop_name)
+      end
+      return nil unless earlier.all? { |clause| cond_clause_safe_for_loop?(clause, loop_name) }
+
+      GeneralCondLoopShape.new(earlier, last.test, split)
+    end
+
+    # Lowers a recognized GeneralCondLoopShape the same way emit_general_
+    # loop does for a plain `if` — plain mutable registers, an ordinary
+    # per-iteration test chain (reusing compile_cond_result for each
+    # earlier, non-recursive clause, exactly like an ordinary `cond`
+    # compiles), and a backward Op::Jmp closing the loop. Earlier clauses
+    # that don't match jump past BOTH the remaining earlier clauses AND
+    # the recursive clause's own handling (`end_jumps`, patched once at
+    # the very end) — mirrors compile_cond_clauses' own per-clause
+    # jmp_false/jmp_end structure, just reimplemented as an explicit loop
+    # here rather than reusing that method's own recursive-index calling
+    # convention (whose "ran out of clauses" base case is hardcoded to
+    # emit NIL, not "fall through to the recursive clause").
+    private def emit_general_cond_loop(fc : FunctionCompiler, params : Array(String), param_regs : Array(Int32),
+                                       shape : GeneralCondLoopShape, dst : Int32, tail : Bool) : Nil
+      loop_start = fc.chunk.instructions.size
+      end_jumps = [] of Int32
+
+      shape.earlier_clauses.each do |clause|
+        # guaranteed by detect_general_cond_loop_shape (no earlier else)
+        test = clause.test || raise "emit_general_cond_loop: earlier clause has no test (should've been rejected as an else)"
+        mark = fc.next_reg
+        test_reg = fc.alloc_reg
+        compile_expr(fc, test, test_reg, false)
+        fc.reclaim_to(mark)
+        jmp_false = fc.emit(Op::TestFalse, test_reg, 0)
+        fc.chunk.tag_sample(jmp_false, "cond")
+        compile_cond_result(fc, clause, test_reg, dst, tail)
+        end_jumps << fc.emit(Op::Jmp, 0, 0) unless tail
+        fc.chunk.patch_jump_to_here(jmp_false)
+      end
+
+      emit_recurse_step = -> do
+        shape.split.prefix.each do |stmt|
+          mark = fc.next_reg
+          discard = fc.alloc_reg
+          compile_expr(fc, stmt, discard, false)
+          fc.reclaim_to(mark)
+        end
+
+        mark2 = fc.next_reg
+        all = (0...params.size).to_a
+        needs_temp = all.select do |i|
+          all.any? { |j| j != i && references_name?(shape.split.call.args[j], params[i]) }
+        end
+        direct = all - needs_temp
+        temp_pairs = needs_temp.map { |i| r = fc.alloc_reg; compile_expr(fc, shape.split.call.args[i], r, false); {i, r} }
+        direct.each { |i| compile_expr(fc, shape.split.call.args[i], param_regs[i], false) }
+        temp_pairs.each { |i, reg| fc.emit(Op::Move, param_regs[i], reg) unless param_regs[i] == reg }
+        fc.reclaim_to(mark2)
+
+        back_ip = fc.emit(Op::Jmp, 0, 0)
+        fc.chunk.instructions[back_ip] = Instruction.new(Op::Jmp, 0, loop_start - (back_ip + 1), 0, 0)
+      end
+
+      if test = shape.recurse_test
+        # The final clause has a real test, not a bare `else` — same
+        # "no cond clause matched" semantics as ordinary cond: NIL.
+        mark = fc.next_reg
+        test_reg = fc.alloc_reg
+        compile_expr(fc, test, test_reg, false)
+        fc.reclaim_to(mark)
+        jmp_false = fc.emit(Op::TestFalse, test_reg, 0)
+        emit_recurse_step.call
+        fc.chunk.patch_jump_to_here(jmp_false)
+        emit_nil(fc, dst)
+        fc.emit(Op::Return, dst) if tail
+      else
+        emit_recurse_step.call
+      end
+
+      end_jumps.each { |j| fc.chunk.patch_jump_to_here(j) }
+    end
+
+    # Recognizes and lowers a let-loop/do's self-tail-recursive loop to
+    # plain mutable registers (no per-call Closure allocation, no per-
+    # iteration Call/TailCall) when it's NOT a numeric counted loop (see
+    # try_compile_counted_loop, always tried first — this is strictly the
+    # fallback for a shape that recognizer can't fuse into ForPrep/ForLoop,
+    # e.g. a named-let that recurses by walking a list via `(cdr ...)`
+    # rather than incrementing/decrementing a counter toward a limit).
+    # Tries the plain-`if` shape first, then the `cond` shape (see
+    # detect_general_cond_loop_shape). Returns false — emitting NOTHING,
+    # safe to retry via the ordinary compile_lambda+Call/TailCall path —
+    # the moment NEITHER recognizer matches.
+    private def try_compile_general_loop(fc : FunctionCompiler, loop_name : String, params : Array(String),
+                                         inits : Array(Node), body : Array(Node), dst : Int32, tail : Bool) : Bool
+      if_shape = detect_general_loop_shape(loop_name, params, body)
+      cond_shape = detect_general_cond_loop_shape(loop_name, params, body) unless if_shape
+      return false unless if_shape || cond_shape
+
+      fc.push_scope
+      mark = fc.next_reg
+      init_regs = inits.map { |init| r = fc.alloc_reg; compile_expr(fc, init, r, false); r }
+      fc.reclaim_to(mark)
+      param_regs = params.map_with_index do |param, i|
+        reg = fc.declare_local(param)
+        fc.emit(Op::Move, reg, init_regs[i]) unless reg == init_regs[i]
+        reg
+      end
+
+      if if_shape
+        emit_general_loop(fc, params, param_regs, if_shape, dst, tail)
+      elsif cond_shape
+        emit_general_cond_loop(fc, params, param_regs, cond_shape, dst, tail)
+      end
+      fc.pop_scope
+      true
+    end
+
     private def compile_named_let(fc : FunctionCompiler, node : NamedLetNode, dst : Int32, tail : Bool) : Nil
+      return if try_compile_counted_loop(fc, node.loop_name, node.params, node.inits, node.body, dst, tail)
+      return if try_compile_general_loop(fc, node.loop_name, node.params, node.inits, node.body, dst, tail)
       fc.push_scope
       loop_reg = fc.declare_local(node.loop_name)
       compile_lambda(fc, node.params, nil, node.body, node.loop_name, loop_reg)
@@ -768,15 +1460,18 @@ module Scheme
     # gensym'd (not a valid Scheme identifier prefix) so it can never
     # collide with a real `var`.
     private def compile_do(fc : FunctionCompiler, node : DoNode, dst : Int32, tail : Bool) : Nil
-      fc.push_scope
       loop_name = "%do-loop-#{@loop_counter += 1}"
-      loop_reg = fc.declare_local(loop_name)
       dummy_src = Cons.new(NIL, NIL)
       step_args = node.names.map_with_index do |name, i|
         node.steps[i] || VarRefNode.new(name)
       end.map(&.as(Node))
       step_call = AppNode.new(VarRefNode.new(loop_name), step_args, dummy_src)
       loop_body = IfNode.new(node.test, BeginNode.new(node.results), BeginNode.new(node.commands + [step_call.as(Node)]))
+      return if try_compile_counted_loop(fc, loop_name, node.names, node.inits, [loop_body.as(Node)], dst, tail)
+      return if try_compile_general_loop(fc, loop_name, node.names, node.inits, [loop_body.as(Node)], dst, tail)
+
+      fc.push_scope
+      loop_reg = fc.declare_local(loop_name)
       compile_lambda(fc, node.names, nil, [loop_body.as(Node)], loop_name, loop_reg)
       mark = fc.next_reg
       call_base = fc.alloc_reg
@@ -1044,7 +1739,16 @@ module Scheme
       child.declare_local(rest_name) if rest_name
       child.chunk.param_count = params.size
       child.chunk.has_rest = !rest_name.nil?
-      compile_body(child, body, tail: true)
+      # A plain self-recursive `(define (f params...) body)` gets the same counted-loop
+      # fusion a let-loop/do already would (see try_compile_global_counted_loop's own
+      # doc comment) — tried first since, like try_compile_counted_loop, it either
+      # lowers the whole body itself and returns true, or emits nothing and returns
+      # false the instant any of its hard requirements fails, safe to fall back to the
+      # ordinary compile_body path. Never even attempted for a rest-arg lambda — the
+      # recognizer's arity-based self-call matching doesn't account for one.
+      if rest_name || !try_compile_global_counted_loop(child, name, params, body, true)
+        compile_body(child, body, tail: true)
+      end
       append_return_sentinel(child)
       child.pop_scope
       proto_idx = fc.chunk.add_proto(child.chunk)
@@ -1346,6 +2050,191 @@ module Scheme
       when LiteralNode, VarRefNode, LocalRefNode, GlobalRefNode then true
       when PrimCallNode                                         then node.args.all? { |arg| leaf_node?(arg) }
       else                                                           false
+      end
+    end
+
+    # Whether `node` (recursively, through every compound Node type in
+    # ast.cr) contains a `lambda`/`case-lambda` literal anywhere — the
+    # syntactic escape-safety condition a counted-loop lowering (see
+    # compile_named_let/compile_do's fast-path recognizer) relies on: if no
+    # closure is ever created inside a loop's body, nothing can capture a
+    # per-iteration register binding, so it's safe to reuse plain mutable
+    # registers across iterations instead of allocating a real closure each
+    # time. Conservative on anything it can't inspect (HelperFormNode's raw
+    # Cons form) — reports `true` (contains a lambda) so the recognizer
+    # declines rather than risk lowering something unsafe.
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def contains_lambda?(node : Node) : Bool
+      case node
+      when LambdaNode, CaseLambdaNode
+        true
+      when ThrowNode, LiteralNode, VarRefNode, LocalRefNode, GlobalRefNode
+        false
+      when IfNode
+        contains_lambda?(node.test) || contains_lambda?(node.conseq) ||
+          (node.alt.try { |alt| contains_lambda?(alt) } || false)
+      when BeginNode
+        node.body.any? { |child| contains_lambda?(child) }
+      when DefineNode
+        contains_lambda?(node.value)
+      when LetNode, LetStarNode, LetrecNode
+        # Plain let/let*/letrec create no closure of their own (no Op::Closure
+        # is ever emitted for them — their body compiles directly inline into
+        # the current function), so recursing through them is safe.
+        node.inits.any? { |child| contains_lambda?(child) } || node.body.any? { |child| contains_lambda?(child) }
+      when NamedLetNode, DoNode
+        # Unlike plain let, these DO desugar into a real closure (compile_
+        # named_let/compile_do both call compile_lambda for the loop
+        # procedure) — treated the same as an explicit lambda literal, since
+        # that's what they compile to. A nested countable loop inside this
+        # one is deliberately out of scope for the counted-loop recognizer
+        # (see its own doc comment) rather than something worth threading
+        # escape-safety through.
+        true
+      when SetBangNode
+        contains_lambda?(node.value)
+      when WhenNode
+        contains_lambda?(node.test) || node.body.any? { |child| contains_lambda?(child) }
+      when AndNode, OrNode
+        node.exprs.any? { |child| contains_lambda?(child) }
+      when CondNode
+        node.clauses.any? do |clause|
+          (clause.test.try { |test| contains_lambda?(test) } || false) ||
+            clause.body.any? { |child| contains_lambda?(child) } ||
+            (clause.arrow.try { |arrow| contains_lambda?(arrow) } || false)
+        end
+      when CaseNode
+        contains_lambda?(node.key) || node.clauses.any? do |clause|
+          clause.body.any? { |child| contains_lambda?(child) } ||
+            (clause.arrow.try { |arrow| contains_lambda?(arrow) } || false)
+        end
+      when PrimCallNode
+        node.args.any? { |child| contains_lambda?(child) }
+      when DefineValuesNode
+        contains_lambda?(node.producer)
+      when LetValuesNode
+        node.binders.any? { |binder| contains_lambda?(binder.producer) } || node.body.any? { |child| contains_lambda?(child) }
+      when QuasiquoteNode
+        qq_contains_lambda?(node.template)
+      when DelayNode
+        contains_lambda?(node.thunk)
+      when GuardNode
+        node.clauses.any? do |clause|
+          (clause.test.try { |test| contains_lambda?(test) } || false) ||
+            clause.body.any? { |child| contains_lambda?(child) } ||
+            (clause.arrow.try { |arrow| contains_lambda?(arrow) } || false)
+        end || node.body.any? { |child| contains_lambda?(child) }
+      when ParameterizeNode
+        node.bindings.any? { |binding| contains_lambda?(binding.param) || contains_lambda?(binding.value) } ||
+          node.body.any? { |child| contains_lambda?(child) }
+      when AppNode
+        contains_lambda?(node.callee) || node.args.any? { |child| contains_lambda?(child) }
+      else
+        # HelperFormNode (raw, uninterpreted Cons) or anything future — can't
+        # prove it's lambda-free, so decline conservatively.
+        true
+      end
+    end
+
+    private def qq_contains_lambda?(template : QQTemplate) : Bool
+      case template
+      when QQConst      then false
+      when QQHole       then contains_lambda?(template.node)
+      when QQSpliceItem then contains_lambda?(template.node)
+      when QQList       then template.items.any? { |item| qq_contains_lambda?(item) } || qq_contains_lambda?(template.tail)
+      when QQVector     then template.items.any? { |item| qq_contains_lambda?(item) }
+      else                   true
+      end
+    end
+
+    # Whether `name` is referenced (read OR written — includes SetBangNode's
+    # own target) anywhere in `node`, recursively through every compound Node
+    # type. Used alongside contains_lambda? to prove a counted-loop's own
+    # loop-name binding never escapes: with no lambda literal in the body
+    # (contains_lambda? false), the only way `name` could still matter beyond
+    # the one recognized tail self-call is an ordinary reference somewhere
+    # else in the body — which this walks for directly. Conservative on
+    # anything it can't inspect, same as contains_lambda?.
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def references_name?(node : Node, name : String) : Bool
+      case node
+      when ThrowNode, LiteralNode
+        false
+      when VarRefNode
+        node.name == name
+      when LocalRefNode
+        node.name == name
+      when GlobalRefNode
+        node.name == name
+      when IfNode
+        references_name?(node.test, name) || references_name?(node.conseq, name) ||
+          (node.alt.try { |alt| references_name?(alt, name) } || false)
+      when BeginNode
+        node.body.any? { |child| references_name?(child, name) }
+      when DefineNode
+        references_name?(node.value, name)
+      when LetNode, LetStarNode, LetrecNode
+        node.inits.any? { |child| references_name?(child, name) } || node.body.any? { |child| references_name?(child, name) }
+      when NamedLetNode
+        node.inits.any? { |child| references_name?(child, name) } || node.body.any? { |child| references_name?(child, name) }
+      when DoNode
+        node.inits.any? { |child| references_name?(child, name) } ||
+          node.steps.any? { |child| child.try { |step| references_name?(step, name) } || false } ||
+          references_name?(node.test, name) ||
+          node.results.any? { |child| references_name?(child, name) } ||
+          node.commands.any? { |child| references_name?(child, name) }
+      when SetBangNode
+        node.name == name || references_name?(node.value, name)
+      when WhenNode
+        references_name?(node.test, name) || node.body.any? { |child| references_name?(child, name) }
+      when AndNode, OrNode
+        node.exprs.any? { |child| references_name?(child, name) }
+      when CondNode
+        node.clauses.any? do |clause|
+          (clause.test.try { |test| references_name?(test, name) } || false) ||
+            clause.body.any? { |child| references_name?(child, name) } ||
+            (clause.arrow.try { |arrow| references_name?(arrow, name) } || false)
+        end
+      when CaseNode
+        references_name?(node.key, name) || node.clauses.any? do |clause|
+          clause.body.any? { |child| references_name?(child, name) } ||
+            (clause.arrow.try { |arrow| references_name?(arrow, name) } || false)
+        end
+      when PrimCallNode
+        node.args.any? { |child| references_name?(child, name) }
+      when DefineValuesNode
+        references_name?(node.producer, name)
+      when LetValuesNode
+        node.binders.any? { |binder| references_name?(binder.producer, name) } ||
+          node.body.any? { |child| references_name?(child, name) }
+      when QuasiquoteNode
+        qq_references_name?(node.template, name)
+      when DelayNode
+        references_name?(node.thunk, name)
+      when GuardNode
+        node.clauses.any? do |clause|
+          (clause.test.try { |test| references_name?(test, name) } || false) ||
+            clause.body.any? { |child| references_name?(child, name) } ||
+            (clause.arrow.try { |arrow| references_name?(arrow, name) } || false)
+        end || node.body.any? { |child| references_name?(child, name) }
+      when ParameterizeNode
+        node.bindings.any? { |binding| references_name?(binding.param, name) || references_name?(binding.value, name) } ||
+          node.body.any? { |child| references_name?(child, name) }
+      when AppNode
+        references_name?(node.callee, name) || node.args.any? { |child| references_name?(child, name) }
+      else
+        true
+      end
+    end
+
+    private def qq_references_name?(template : QQTemplate, name : String) : Bool
+      case template
+      when QQConst      then false
+      when QQHole       then references_name?(template.node, name)
+      when QQSpliceItem then references_name?(template.node, name)
+      when QQList       then template.items.any? { |item| qq_references_name?(item, name) } || qq_references_name?(template.tail, name)
+      when QQVector     then template.items.any? { |item| qq_references_name?(item, name) }
+      else                   true
       end
     end
 
@@ -1906,11 +2795,20 @@ module Scheme
           return
         end
         mark = fc.next_reg
-        anchor = fc.alloc_reg
-        # Args go in the contiguous run right above the anchor (anchor+1..),
-        # exactly as the general path below — nothing shrinks next_reg between
-        # these allocations, so they stay contiguous.
-        node.args.each { |arg| compile_expr(fc, arg, fc.alloc_reg, false) }
+        # anchor, then args in the contiguous run right above it
+        # (anchor+1..), reserved for the WHOLE run in one alloc_regs bump —
+        # BEFORE compiling ANY argument's own expression — exactly like the
+        # generic-callee path below and self-hosted compiler.sld's own
+        # compile-ordinary-app! — a non-leaf argument (e.g. a let/letrec
+        # with its own captured-register floor) can otherwise leave
+        # next_reg higher than expected once its own scope pops, shifting
+        # where a LATER argument's register lands and breaking this
+        # contiguity (verified empirically: this is what made generalizing
+        # pop_scope's captured-register floor unsafe here, even though the
+        # self-hosted compiler's own general version of that same floor is
+        # safe — it already reserves this way).
+        anchor = fc.alloc_regs(1 + node.args.size)
+        node.args.each_with_index { |arg, i| compile_expr(fc, arg, anchor + 1 + i, false) }
         ip = if tail
                fc.emit(op, anchor, node.args.size, 0, operand, pos: node.pos)
              else
@@ -1921,11 +2819,15 @@ module Scheme
         return
       end
       mark = fc.next_reg
-      callee_reg = fc.alloc_reg
+      # callee_reg, then args contiguous immediately after it, for Call/
+      # TailCall — reserved together in one alloc_regs bump BEFORE compiling
+      # EITHER the callee or any argument's own expression — same reasoning
+      # as the bare-callee path above: a non-leaf callee or argument (its
+      # own nested call/let/lambda) could otherwise shift where a later
+      # register lands once its own scope pops.
+      callee_reg = fc.alloc_regs(1 + node.args.size)
       compile_expr(fc, node.callee, callee_reg, false)
-      node.args.each { |arg| r = fc.alloc_reg; compile_expr(fc, arg, r, false) }
-      # Args must be contiguous immediately after callee_reg for Call/TailCall
-      # — true here since nothing shrinks next_reg between these allocations.
+      node.args.each_with_index { |arg, i| compile_expr(fc, arg, callee_reg + 1 + i, false) }
       if tail
         ip = fc.emit(Op::TailCall, callee_reg, node.args.size, pos: node.pos)
         fc.chunk.tag_sample(ip, "call", call_src)

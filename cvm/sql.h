@@ -1,6 +1,5 @@
 /* (creme sql) — sql-open/sql-close/sql-connection?/sql-execute/sql-query/
- * sql-scalar, via the sqlite3 C API directly (not facil.io — facil.io has
- * no SQL engine of its own). See sql.c's own header comment for scope
+ * sql-scalar, via the sqlite3 C API directly. See sql.c's own header comment for scope
  * (single connection, matching cvm's single-threaded design — no reader/
  * writer WAL split like the real sql.cr needs for concurrent real-file
  * access). */

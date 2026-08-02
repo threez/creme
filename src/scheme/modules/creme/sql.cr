@@ -374,6 +374,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "sql"], Scheme::Builtins::SqlLibrary
+    register_library ["creme", "builtin", "sql"], Scheme::Builtins::SqlLibrary
   end
 end

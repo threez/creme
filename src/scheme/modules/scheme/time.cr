@@ -29,6 +29,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "time"], Scheme::Builtins::SchemeTime
+    register_library ["creme", "builtin", "scheme-time"], Scheme::Builtins::SchemeTime
   end
 end

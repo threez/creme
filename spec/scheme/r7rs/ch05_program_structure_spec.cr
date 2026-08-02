@@ -2,7 +2,7 @@ require "../../spec_helper"
 require "file_utils"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -30,7 +30,7 @@ describe "R7RS §5.2 Import declarations" do
   end
 
   it "(except import-set identifier ...) imports everything except the listed identifiers" do
-    interp = Scheme::Interpreter.new(auto_import_base: false)
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
     expect_raises(Scheme::SchemeRuntimeError, /unbound variable: \+/) do
       Scheme.run_source(interp, "(import (except (scheme base) +)) (+ 1 2)")
     end
@@ -163,7 +163,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "triple.scm"), "(define (triple x) (* x 3))")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
       Scheme.run_source(interp, <<-SCM).write_string.should eq("6")
         (define-library (test include-lib)
@@ -183,7 +183,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "quad.scm"), "(DEFINE (QUADRUPLE X) (* X 4))")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
       Scheme.run_source(interp, <<-SCM).write_string.should eq("8")
         (define-library (test include-ci-lib)

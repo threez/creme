@@ -18,11 +18,35 @@
 module Scheme
   module ChunkSerializer
     MAGIC = "SCB1"
+    # A single format-version byte, written immediately after MAGIC.
+    # Bump this (in lockstep with modules/creme/bytecode.sld's own
+    # writer, and cvm/loader.c's/chunk_deserializer.cr's own readers)
+    # whenever the on-disk chunk layout itself changes in a way an
+    # older reader couldn't safely parse -- so a stale precompiled
+    # .cvmc (or a load-chunk-bytes blob built by a different creme/cvm
+    # release) fails with a clean, actionable "re-emit this" error
+    # instead of a reader silently misinterpreting bytes it wasn't
+    # written for. See CHANGELOG.md/cvm/STABILITY.md for the
+    # compatibility policy this exists to support.
+    FORMAT_VERSION = 1_u8
 
     TAG_INT = 0_u8; TAG_FLOAT = 1_u8; TAG_RATIONAL = 2_u8; TAG_COMPLEX = 3_u8
     TAG_SYM     = 4_u8; TAG_STR = 5_u8; TAG_BOOL = 6_u8; TAG_NIL  = 7_u8
     TAG_CHAR = 8_u8; TAG_PAIR = 9_u8; TAG_VECTOR = 10_u8; TAG_BLOB    = 11_u8
     TAG_BUILTIN = 12_u8
+    # Datum labels (R7RS #n=/#n#) -- only ever emitted for a Cons/
+    # SchemeVector reached more than once while serializing ONE top-level
+    # datum (a chunk const, or one QQ_CONST template's own literal
+    # fragment -- see write_datum's own doc comment for the two-pass
+    # scheme that decides this), so an ordinary, unshared literal
+    # round-trips through byte-identical output to before these tags
+    # existed. TAG_LABEL_DEF precedes that value's own ordinary tag+bytes
+    # the FIRST time it's written (marking "this pointer may be
+    # referenced again"); TAG_LABEL_REF stands alone (replacing a whole
+    # datum) for every later encounter of the SAME pointer, whether via a
+    # genuine cycle (a value reachable from its own contents) or a
+    # separate, non-cyclic shared reference elsewhere in the same datum.
+    TAG_LABEL_DEF = 13_u8; TAG_LABEL_REF = 14_u8
 
     CDK_INT = 0_u8; CDK_CHAR = 1_u8; CDK_SYM  = 2_u8
     CDK_BOOL = 3_u8; CDK_NIL = 4_u8
@@ -30,9 +54,12 @@ module Scheme
     QQ_CONST = 0_u8; QQ_HOLE = 1_u8; QQ_SPLICE = 2_u8
     QQ_LIST   = 3_u8; QQ_VECTOR = 4_u8
 
-    def self.serialize(chunk : Chunk) : Bytes
+    def self.serialize(chunk : Chunk, required_families : Array(String) = [] of String) : Bytes
       io = IO::Memory.new
       io.write(MAGIC.to_slice)
+      io.write_byte(FORMAT_VERSION)
+      write_i32(io, required_families.size.to_i32)
+      required_families.each { |name| write_string(io, name) }
       write_chunk(io, chunk)
       io.to_slice
     end
@@ -160,10 +187,80 @@ module Scheme
       end
     end
 
+    # Per-top-level-datum bookkeeping for the two-pass label-assignment
+    # scheme below -- fresh for every write_datum call (R7RS: "a datum
+    # label's scope is only the outermost datum it appears in"), NOT
+    # shared across separate chunk consts/QQ_CONST literals.
+    private struct DatumShareState
+      getter counts : Hash(UInt64, Int32)
+      getter labels = {} of UInt64 => Int32
+      getter written = {} of UInt64 => Bool
+      property next_label = 0
+
+      def initialize(@counts)
+      end
+    end
+
+    # First pass: counts how many times each distinct Cons/SchemeVector
+    # pointer (keyed by object_id -- both are `class`es, so this is
+    # genuine reference identity, not structural equality) is reached
+    # while walking `v`. Re-entering a pointer already in `counts` --
+    # whether because it's a genuine cycle still mid-traversal, or a
+    # separate later reference to already-fully-walked shared
+    # substructure -- stops further descent there (same reasoning cvm's
+    # own cvm_equal/write_value_shared use for the identical problem):
+    # this is what makes the pass terminate on a circular datum instead
+    # of recursing forever. Every scalar tag (ints, symbols, strings, …)
+    # is untouched -- only pairs/vectors can be shared/cyclic here.
+    private def self.count_datum_visits(v : SchemeValue, counts : Hash(UInt64, Int32)) : Nil
+      return unless v.is_a?(Cons) || v.is_a?(SchemeVector)
+      id = v.object_id
+      if counts.has_key?(id)
+        counts[id] += 1
+        return
+      end
+      counts[id] = 1
+      case v
+      when Cons
+        count_datum_visits(v.car, counts)
+        count_datum_visits(v.cdr, counts)
+      when SchemeVector
+        v.value.each { |item| count_datum_visits(item, counts) }
+      end
+    end
+
     # Recursively serializes any SchemeValue that can appear as a chunk
-    # constant, a quasiquote literal fragment, or a nested pair/vector datum.
-    # ameba:disable Metrics/CyclomaticComplexity
+    # constant, a quasiquote literal fragment, or a nested pair/vector
+    # datum. Runs count_datum_visits once up front, then delegates to
+    # write_datum_rec (below), which threads that same state through
+    # every recursive call so a pointer visited >=2 times gets a
+    # TAG_LABEL_DEF the first time and a bare TAG_LABEL_REF (no
+    # re-serialized contents at all) every time after -- see
+    # TAG_LABEL_DEF/TAG_LABEL_REF's own doc comment above for the wire
+    # shape, and cvm/loader.c's read_datum for the matching reader side.
     private def self.write_datum(io : IO, v : SchemeValue) : Nil
+      counts = {} of UInt64 => Int32
+      count_datum_visits(v, counts)
+      write_datum_rec(io, v, DatumShareState.new(counts))
+    end
+
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def self.write_datum_rec(io : IO, v : SchemeValue, state : DatumShareState) : Nil
+      if (v.is_a?(Cons) || v.is_a?(SchemeVector)) && state.counts[v.object_id] >= 2
+        id = v.object_id
+        if state.written[id]?
+          io.write_byte(TAG_LABEL_REF)
+          write_i32(io, state.labels[id])
+          return
+        end
+        label = state.labels[id]? || (state.labels[id] = state.next_label.tap { state.next_label += 1 })
+        io.write_byte(TAG_LABEL_DEF)
+        write_i32(io, label)
+        state.written[id] = true
+        # Falls through below to write this datum's own ordinary
+        # tag+contents -- the label prefix above is additive, not a
+        # replacement for the normal encoding.
+      end
       case v
       when SchemeInt
         io.write_byte(TAG_INT)
@@ -177,8 +274,8 @@ module Scheme
         write_i64(io, v.denominator)
       when SchemeComplex
         io.write_byte(TAG_COMPLEX)
-        write_datum(io, v.real)
-        write_datum(io, v.imag)
+        write_datum_rec(io, v.real, state)
+        write_datum_rec(io, v.imag, state)
       when SchemeSym
         io.write_byte(TAG_SYM)
         write_string(io, v.name)
@@ -195,12 +292,12 @@ module Scheme
         write_i64(io, v.value.ord.to_i64)
       when Cons
         io.write_byte(TAG_PAIR)
-        write_datum(io, v.car)
-        write_datum(io, v.cdr)
+        write_datum_rec(io, v.car, state)
+        write_datum_rec(io, v.cdr, state)
       when SchemeVector
         io.write_byte(TAG_VECTOR)
         write_i32(io, v.value.size.to_i32)
-        v.value.each { |item| write_datum(io, item) }
+        v.value.each { |item| write_datum_rec(io, item, state) }
       when SchemeBlob
         io.write_byte(TAG_BLOB)
         write_i32(io, v.value.size.to_i32)

@@ -318,9 +318,9 @@ static Value bi_json_read(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_STR) cvm_abort("json-read: expected string, got a non-string value");
   JReader r;
-  r.s = args[0].as.str.chars;
+  r.s = args[0].as.chars;
   r.pos = 0;
-  r.len = args[0].as.str.len;
+  r.len = args[0].aux;
   Value result = json_parse_value(&r);
   jr_skip_ws(&r);
   if (r.pos != r.len) cvm_abort("json-read: invalid json: unexpected trailing content");
@@ -395,7 +395,7 @@ static void json_write_value(GBuf *w, Value v, const char *who) {
       return;
     }
     case T_STR:
-      json_write_string(w, v.as.str.chars, v.as.str.len);
+      json_write_string(w, v.as.chars, v.aux);
       return;
     case T_CHAR: {
       char c = (char)v.as.i;
@@ -419,7 +419,7 @@ static void json_write_value(GBuf *w, Value v, const char *who) {
           Value entry = cur.as.pair->car;
           if (!first) gbuf_putc(w, ',');
           first = 0;
-          json_write_string(w, entry.as.pair->car.as.str.chars, entry.as.pair->car.as.str.len);
+          json_write_string(w, entry.as.pair->car.as.chars, entry.as.pair->car.aux);
           gbuf_putc(w, ':');
           json_write_value(w, entry.as.pair->cdr, who);
         }

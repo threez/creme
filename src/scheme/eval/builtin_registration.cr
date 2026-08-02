@@ -96,6 +96,15 @@ module Scheme
       {% LIB_DECLS << {name, nil, block} %}
     end
 
+    # Rather than eagerly constructing every native library at Interpreter
+    # construction time (regardless of whether the running script ever
+    # imports it — see this file's header comment), install_all_libraries
+    # just stashes each entry's constructor away in @pending_libraries,
+    # keyed by name; resolve_library (import.cr) actually invokes one only
+    # when a program first (import ...)s that name. (creme builtin base)/
+    # (creme builtin write) are the sole exception — they're registered
+    # directly via install_builtin_libraries, never through this macro-
+    # collected LIB_DECLS path at all, so they stay eager unconditionally.
     macro finished
       private def install_all_libraries : Nil
         {% for entry in LIB_DECLS %}
@@ -103,12 +112,21 @@ module Scheme
              mod = entry[1]
              block = entry[2] %}
           {% if mod %}
-            register_computed_library({{name}}) { |env| register_module({{mod}}, env) }
+            register_pending_library({{name}}) { |env| register_module({{mod}}, env) }
           {% else %}
-            register_computed_library({{name}}) {{block}}
+            register_pending_library({{name}}) {{block}}
           {% end %}
         {% end %}
       end
+    end
+
+    # Stashes a not-yet-constructed native library's own constructor block
+    # away by name, without running it. `& block : Env -> Array(String)`
+    # (an explicitly-typed captured block, rather than a plain `yield`-only
+    # block) is what makes the block itself storable as a Proc value here
+    # instead of only usable for an immediate yield.
+    private def register_pending_library(name : Array(String), &block : Env -> Array(String)) : Nil
+      @pending_libraries[name] = block
     end
 
     # Builds a fresh Env, yields it to `block` which populates it and
@@ -118,6 +136,22 @@ module Scheme
       env = Env.new
       exports = yield env
       register_library(name, env, exports.to_h { |export_name| {export_name, export_name} })
+    end
+
+    # Looks up an already-constructed native/file-based library, or — if
+    # `name` is still sitting in @pending_libraries (a native library whose
+    # LIB_DECLS-declared constructor hasn't run yet) — removes it from
+    # there and actually constructs it now, caching the result in
+    # @libraries exactly as if it had been built eagerly. Returns nil if
+    # `name` is neither already registered nor pending (i.e. it's either a
+    # file-based .sld library, not yet loaded, or genuinely unknown).
+    private def construct_pending_library(name : Array(String)) : SchemeLibrary?
+      if library = @libraries[name]?
+        return library
+      end
+      ctor = @pending_libraries.delete(name)
+      return nil unless ctor
+      register_computed_library(name, &ctor)
     end
   end
 end

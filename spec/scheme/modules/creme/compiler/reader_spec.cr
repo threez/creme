@@ -70,12 +70,12 @@ describe "bootstrap-reader module" do
 
   # Every real .scm/.sld file in the repo, read by both readers and
   # compared -- a much wider sweep than the hand-picked cases above.
-  # bench/racket.scm is excluded: it's `#lang racket`, not Scheme, and the
-  # NATIVE reader rejects it too.
+  # competition/racket/bench/racket.scm is excluded: it's `#lang racket`,
+  # not Scheme, and the NATIVE reader rejects it too.
   it "matches the native reader on every example/module source file in the repo" do
     interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     load_reader(interp)
-    files = (Dir.glob("examples/**/*.scm") + Dir.glob("modules/**/*.sld") + Dir.glob("bench/**/*.scm"))
+    files = (Dir.glob("examples/**/*.scm") + Dir.glob("modules/**/*.sld") + Dir.glob("competition/**/*.scm"))
       .reject(&.includes?("racket.scm"))
     files.size.should be > 0
     files.each { |path| check(interp, File.read(path)) }

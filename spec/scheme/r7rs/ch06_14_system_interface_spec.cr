@@ -2,7 +2,7 @@ require "../../spec_helper"
 require "file_utils"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -16,7 +16,7 @@ describe "R7RS §6.14 System interface" do
     Dir.mkdir_p(dir)
     begin
       File.write(File.join(dir, "triple.scm"), "(define (triple x) (* x 3))")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       interp.push_load_dir(dir)
       Scheme.run_source(interp, <<-SCM).write_string.should eq("15")
         (import (scheme load))
@@ -33,7 +33,7 @@ describe "R7RS §6.14 System interface" do
     Dir.mkdir_p(dir)
     begin
       path = File.join(dir, "probe.txt")
-      interp = Scheme::Interpreter.new
+      interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
       Scheme.run_source(interp, <<-SCM).write_string.should eq("(#f #t #f)")
         (import (scheme file))
         (define path "#{path}")
@@ -54,7 +54,7 @@ describe "R7RS §6.14 System interface" do
   end
 
   it "exit raises a catchable Scheme::SchemeExit rather than terminating the host process, per this implementation's embedding contract" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     expect_raises(Scheme::SchemeExit) do
       Scheme.run_source(interp, "(import (scheme process-context)) (exit)")
     end

@@ -95,6 +95,31 @@ module Scheme
     # reachable).
     property library_search_path : Array(String)
 
+    # Set (and reset to nil right after) only by CVMEmitter.emit
+    # (cvm_emitter.cr), around its own per-library second analyze pass over
+    # a library's body forms — maps that ONE library's own internal
+    # (non-exported) top-level names to a qualified form, so cvm's flat,
+    # name-interned global table (no per-library namespacing at all — see
+    # cvm/vm.c's cvm_global_intern) can't have two libraries' same-named
+    # private helpers silently clobber each other's slot. Consulted by
+    # Analyzer's cvm_global_name helper. nil (the default, and the state
+    # for every real interpreter session/REPL) makes analysis behave
+    # exactly as it always has — this property only ever matters during
+    # that one emitter-internal analyze pass.
+    property cvm_rename : Hash(String, String)? = nil
+
+    # Set (and reset to false right after) only by CVMEmitter.emit, for the
+    # whole duration of a --emit-cvm compile. cond_expand_matches?'s `library`
+    # case consults this to answer "(library (creme builtin X))" as false
+    # whenever X is a 3-segment (creme builtin ...) FFI family name, even
+    # though the NATIVE bin/creme process doing this compile always has that
+    # family registered for itself -- cvm, the actual target runtime the
+    # emitted chunk will execute on, never does. Without this, a library's
+    # own `(cond-expand ((library (creme builtin X)) ...) (else ...))` (e.g.
+    # modules/creme/raft.sld) would wrongly pick the FFI branch based on the
+    # COMPILING process's own capabilities rather than the TARGET's.
+    property emitting_for_cvm : Bool = false
+
     # Real R7RS parameter objects backing current-output-port/
     # current-input-port/current-error-port, so `(parameterize
     # ((current-output-port p)) ...)` genuinely redirects display/write/
@@ -171,6 +196,7 @@ module Scheme
       @global = Env.new
       @load_dirs = [] of String
       @libraries = {} of Array(String) => SchemeLibrary
+      @pending_libraries = {} of Array(String) => Proc(Env, Array(String))
       @libraries_loading = Set(Array(String)).new
       @eval_depth = 0
       @step_count = 0
@@ -222,6 +248,15 @@ module Scheme
     # everything.
     getter libraries : Hash(Array(String), SchemeLibrary)
 
+    # Read-only view of native libraries declared (via register_library)
+    # but not yet constructed — see builtin_registration.cr's
+    # register_pending_library/construct_pending_library. Needed for the
+    # same inherit_from reason as @libraries: a spawned actor's Interpreter
+    # must start with the same "not yet built" set as its parent, so it can
+    # still lazily construct a family the parent hasn't touched, without
+    # re-constructing (or losing access to) one the parent already has.
+    getter pending_libraries : Hash(Array(String), Proc(Env, Array(String)))
+
     # Lightweight constructor for a spawned actor's own Fiber (see (creme
     # actor)'s `spawn`): gets its own independent per-fiber execution state —
     # required since eval-depth/step-count/call-stack bookkeeping (and
@@ -260,6 +295,7 @@ module Scheme
       @base_env = parent.base_env
       @global = Env.new(parent.global)
       @libraries = parent.libraries.dup
+      @pending_libraries = parent.pending_libraries.dup
       @load_dirs = parent.load_dirs.dup
       @libraries_loading = Set(Array(String)).new
       @eval_depth = 0
@@ -349,6 +385,8 @@ module Scheme
       @global = Env.new(parent.global)
       @libraries.clear
       @libraries.merge!(parent.libraries)
+      @pending_libraries.clear
+      @pending_libraries.merge!(parent.pending_libraries)
       @libraries_loading.clear
       @load_dirs.clear
       @load_dirs.concat(parent.load_dirs)
@@ -404,7 +442,8 @@ module Scheme
     #     the resolved builtin's name, `(define first car)` makes `(first x)`
     #     fuse exactly like `(car x)` with no dedicated alias machinery.
     private def install_cxr_conveniences : Nil
-      cxr_env = @libraries[["scheme", "cxr"]].env
+      cxr_lib = construct_pending_library(["creme", "builtin", "cxr"]) || raise "install_cxr_conveniences: (creme builtin cxr) is missing"
+      cxr_env = cxr_lib.env
       %w[caddr cdddr cadddr].each { |name| @base_env.define(name, cxr_env.get(name)) }
       {"first" => "car", "second" => "cadr", "third" => "caddr", "rest" => "cdr"}.each do |alias_name, target|
         @base_env.define(alias_name, @base_env.get(target))
@@ -435,7 +474,7 @@ module Scheme
     # derived (from each library's own annotated modules) rather than held in
     # a hand-maintained SCHEME_*_EXPORTS constant.
     def library_export_names(name : Array(String)) : Array(String)
-      @libraries[name].exports.keys
+      (@libraries[name]? || resolve_library(name)).exports.keys
     end
 
     # Safe-by-default entry point for embedding untrusted/semi-trusted guest
@@ -450,16 +489,24 @@ module Scheme
     # modules/scheme/base.cr) — leaving it true here would silently hand
     # guest code a working base environment no matter what allowed_libraries
     # said.
+    # library_search_path defaults to ["./modules"] (not []) even here:
+    # gating which libraries a guest program may reach is allowed_libraries'
+    # job alone, not library_search_path's — plenty of R7RS standard names
+    # (e.g. (scheme inexact)) are thin file-based frontends bundled with the
+    # interpreter itself now (see modules/scheme/*.sld), not guest-supplied
+    # files, so a host that widens allowed_libraries to name one must still
+    # be able to actually resolve it.
     def self.sandboxed(
       allowed_libraries : Array(String) = [] of String,
       max_steps : Int32? = 100_000,
       max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH,
+      library_search_path : Array(String) = ["./modules"],
       stdout : IO = IO::Memory.new,
       stdin : IO = IO::Memory.new,
       stderr : IO = IO::Memory.new,
       auto_import_base : Bool = false,
     ) : Interpreter
-      new(max_eval_depth: max_eval_depth, max_steps: max_steps, allowed_libraries: allowed_libraries, stdout: stdout, stdin: stdin, stderr: stderr, auto_import_base: auto_import_base)
+      new(max_eval_depth: max_eval_depth, max_steps: max_steps, allowed_libraries: allowed_libraries, library_search_path: library_search_path, stdout: stdout, stdin: stdin, stderr: stderr, auto_import_base: auto_import_base)
     end
 
     # ---- Evaluation (trampolined) --------------------------------------------
@@ -504,8 +551,48 @@ module Scheme
       end
     end
 
+    # Same push/pop/current pattern as @@current_stacks above, but for the
+    # innermost VM instance currently executing on this fiber — VM#run/#call
+    # register themselves here for their own duration. Lets call_stack_snapshot
+    # below synthesize that VM's own uncaptured recursion (see
+    # VM#synthesize_frames) without needing every raise site to thread a VM
+    # reference through, exactly like @@current_stacks does for the
+    # interpreter itself. A builtin→closure bridge call (Interpreter#apply's
+    # BytecodeClosure/BytecodeCaseClosure arms) nests a new VM#call inside
+    # whatever VM (if any) was already current — push/pop naturally restores
+    # the outer one when the inner one returns.
+    @@current_vm_stacks = {} of Fiber => Array(VM)
+
+    def self.current_vm : VM?
+      @@stacks_mutex.synchronize { @@current_vm_stacks[Fiber.current]? }.try(&.last?)
+    end
+
+    def self.push_current_vm(vm : VM) : Nil
+      @@stacks_mutex.synchronize { (@@current_vm_stacks[Fiber.current] ||= [] of VM) << vm }
+    end
+
+    def self.pop_current_vm : Nil
+      @@stacks_mutex.synchronize do
+        stack = @@current_vm_stacks[Fiber.current]?
+        next unless stack
+        stack.pop?
+        @@current_vm_stacks.delete(Fiber.current) if stack.empty?
+      end
+    end
+
+    # @call_stack already holds every REAL Interpreter::Frame — pushed by
+    # Interpreter#apply for builtin calls/builtin→closure bridges, and by
+    # set_top_frame for VM#call's own outermost self-tail-recursion (see
+    # CallFrame#has_interp_frame). What it does NOT hold any more is a plain
+    # Scheme-to-Scheme call made from within the currently active VM (see
+    # dispatch_bytecode_call's own doc comment) — append those, synthesized
+    # from that VM's own pooled call frames, after the real ones.
     def call_stack_snapshot : Array(Frame)
-      @call_stack.dup
+      frames = @call_stack.dup
+      if vm = Interpreter.current_vm
+        frames.concat(vm.synthesize_frames)
+      end
+      frames
     end
 
     # Lets Interpreter#apply push/pop a Frame onto whichever Interpreter is
@@ -527,19 +614,10 @@ module Scheme
       @current_pos = pos
     end
 
-    # Pushes/pops an Interpreter::Frame around each call for backtraces (see
-    # eval/vm.cr's exec_call/deliver_return) — exposed publicly since the VM
-    # is a separate class from Interpreter and drives @call_stack from there.
-    def push_frame(name : String, pos : SourcePos?) : Nil
-      @call_stack << Frame.new(name, pos)
-    end
-
-    def pop_frame : Nil
-      @call_stack.pop
-    end
-
-    # Overwrites the top frame in place — backs tail-call collapsing (a
-    # self-tail-recursive loop of N iterations shows up as ONE frame, not N).
+    # Overwrites the top frame in place — backs tail-call collapsing for
+    # VM#call's outermost activation (the one real Interpreter::Frame case
+    # dispatch_bytecode_call still keeps live, see CallFrame#has_interp_frame):
+    # a self-tail-recursive loop of N iterations shows up as ONE frame, not N.
     def set_top_frame(name : String, pos : SourcePos?) : Nil
       @call_stack[-1] = Frame.new(name, pos) unless @call_stack.empty?
     end
@@ -958,7 +1036,20 @@ module Scheme
           !cond_expand_matches?(args[0])
         when "library"
           raise SchemeRuntimeError.new("cond-expand: library expects 1 argument") unless args.size == 1
-          @libraries.has_key?(SchemeLibrary.parse_library_name(args[0]))
+          # A library counts as "importable" whether it's already registered
+          # (a native family, or a file-based one already imported earlier in
+          # this same program) or merely resolvable right now off
+          # library_search_path — most R7RS standard names (e.g. (scheme
+          # base)) are thin file-based frontends over a native `(creme
+          # builtin ...)` family now (see modules/scheme/*.sld) and aren't
+          # pre-registered in @libraries until something actually imports
+          # them, so a plain has_key? check alone would wrongly report a
+          # perfectly importable library as absent. resolve_library has the
+          # useful side effect of actually registering it on success, same
+          # as a real import would.
+          libname = SchemeLibrary.parse_library_name(args[0])
+          return false if emitting_for_cvm && libname.size == 3 && libname[0] == "creme" && libname[1] == "builtin"
+          @libraries.has_key?(libname) || !!(resolve_library(libname) rescue nil)
         else
           raise SchemeRuntimeError.new("cond-expand: unknown requirement '#{head.name}'")
         end

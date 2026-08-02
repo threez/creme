@@ -337,6 +337,247 @@ describe "main.cr (CLI)" do
           File.delete(file.path)
         end
       end
+
+      # Regression test for the flagship case cvm/bootstrap.c's
+      # bi_expand_if_macro exists for: a syntax-rules macro EXPORTED from a
+      # .sld library, used by an importing script, compiled entirely ahead
+      # of time via --emit-cvm (not cvm's own compiler-mode/REPL bridge,
+      # which spec/scheme/modules/creme/bootstrap_spec.cr already covers).
+      # --emit-cvm's own emitter (cvm_emitter.cr) re-analyzes each imported
+      # library's body a second time purely for cvm's benefit
+      # (Interpreter#library_body_forms_for_cvm) -- this confirms a
+      # library-defined macro survives that second pass and is fully
+      # expanded away before the resulting chunk ever runs, matching plain
+      # Crystal-native execution's own macro-then-compile order.
+      it "expands a syntax-rules macro exported from an imported .sld library" do
+        lib_dir = File.join("modules", "main_spec_cvm_macro_lib")
+        Dir.mkdir_p(lib_dir)
+        lib_file = File.join(lib_dir, "greet.sld")
+        File.write(lib_file, <<-SCHEME)
+          (define-library (main_spec_cvm_macro_lib greet)
+            (export my-if)
+            (import (scheme base))
+            (begin
+              (define-syntax my-if
+                (syntax-rules ()
+                  ((_ c t e) (cond (c t) (else e)))))))
+          SCHEME
+
+        file = File.tempfile("main_spec_cvm_macro", ".scm") do |io|
+          io.print(<<-SCHEME)
+            (import (scheme base) (scheme write) (main_spec_cvm_macro_lib greet))
+            (display (my-if #t 'yes 'no))
+            (newline)
+            (display (my-if #f 'yes 'no))
+            (newline)
+            SCHEME
+        end
+        begin
+          out, err, status = run_cli(["--cvm", file.path])
+          status.success?.should be_true
+          out.should eq("yes\nno\n")
+          err.strip.should eq("")
+        ensure
+          File.delete(file.path)
+          File.delete(lib_file)
+          Dir.delete(lib_dir)
+        end
+      end
+
+      # Regression test: collect_library_body_forms_for_cvm (import.cr) used
+      # to raise on `include`/`include-ci` inside a define-library, so any
+      # library using either couldn't be compiled via --emit-cvm at all.
+      # Covers a nested relative include too (helper.scm itself includes
+      # nested/deep.scm) to exercise the @load_dirs push this fix also
+      # needed in library_body_forms_for_cvm -- without it, the nested
+      # include would resolve against the wrong directory.
+      it "inlines include/include-ci declarations inside an imported .sld library" do
+        lib_dir = File.join("modules", "main_spec_cvm_include_lib")
+        nested_dir = File.join(lib_dir, "nested")
+        Dir.mkdir_p(nested_dir)
+        lib_file = File.join(lib_dir, "lib.sld")
+        helper_file = File.join(lib_dir, "helper.scm")
+        deep_file = File.join(nested_dir, "deep.scm")
+        File.write(lib_file, <<-SCHEME)
+          (define-library (main_spec_cvm_include_lib lib)
+            (export greet loud-greet)
+            (import (scheme base))
+            (include "helper.scm"))
+          SCHEME
+        File.write(helper_file, <<-SCHEME)
+          (define (greet name) (string-append "hi " name))
+          (include "nested/deep.scm")
+          SCHEME
+        File.write(deep_file, <<-SCHEME)
+          (define (loud-greet name) (string-append (greet name) "!"))
+          SCHEME
+
+        file = File.tempfile("main_spec_cvm_include", ".scm") do |io|
+          io.print(<<-SCHEME)
+            (import (scheme base) (scheme write) (main_spec_cvm_include_lib lib))
+            (display (loud-greet "world"))
+            (newline)
+            SCHEME
+        end
+        begin
+          out, err, status = run_cli(["--cvm", file.path])
+          status.success?.should be_true
+          out.should eq("hi world!\n")
+          err.strip.should eq("")
+        ensure
+          File.delete(file.path)
+          File.delete(lib_file)
+          File.delete(helper_file)
+          File.delete(deep_file)
+          Dir.delete(nested_dir)
+          Dir.delete(lib_dir)
+        end
+      end
+
+      # Regression test: cvm's global table is one flat, name-interned array
+      # with no per-library namespacing (cvm/vm.c's cvm_global_intern) --
+      # before cvm_emitter.cr qualified a library's own internal
+      # (non-exported) top-level names, two libraries each defining a
+      # private helper of the same name would silently clobber each
+      # other's global slot under --emit-cvm (last DefGlobal wins), even
+      # though the exact same program runs correctly under native (non-cvm)
+      # execution, where each library keeps a genuinely separate Env.
+      it "keeps two libraries' same-named internal (non-exported) helpers from colliding under --emit-cvm" do
+        lib_a_dir = File.join("modules", "main_spec_cvm_collide_a")
+        lib_b_dir = File.join("modules", "main_spec_cvm_collide_b")
+        Dir.mkdir_p(lib_a_dir)
+        Dir.mkdir_p(lib_b_dir)
+        lib_a_file = File.join(lib_a_dir, "lib.sld")
+        lib_b_file = File.join(lib_b_dir, "lib.sld")
+        File.write(lib_a_file, <<-SCHEME)
+          (define-library (main_spec_cvm_collide_a lib)
+            (export entry-a)
+            (import (scheme base))
+            (begin
+              (define (helper x) (+ x 100))
+              (define (entry-a n) (helper n))))
+          SCHEME
+        File.write(lib_b_file, <<-SCHEME)
+          (define-library (main_spec_cvm_collide_b lib)
+            (export entry-b)
+            (import (scheme base))
+            (begin
+              (define (helper x) (* x 1000))
+              (define (entry-b n) (helper n))))
+          SCHEME
+
+        file = File.tempfile("main_spec_cvm_collide", ".scm") do |io|
+          io.print(<<-SCHEME)
+            (import (scheme base) (scheme write) (main_spec_cvm_collide_a lib) (main_spec_cvm_collide_b lib))
+            (display (entry-a 1))
+            (newline)
+            (display (entry-b 1))
+            (newline)
+            SCHEME
+        end
+        begin
+          out, err, status = run_cli(["--cvm", file.path])
+          status.success?.should be_true
+          out.should eq("101\n1000\n")
+          err.strip.should eq("")
+        ensure
+          File.delete(file.path)
+          File.delete(lib_a_file)
+          File.delete(lib_b_file)
+          Dir.delete(lib_a_dir)
+          Dir.delete(lib_b_dir)
+        end
+      end
+
+      # (creme ffi)'s generic dlopen/libffi bridge (src/scheme/modules/
+      # creme/ffi.cr, cvm/creme_ffi.c) -- calls libm's real `sqrt` and
+      # libc's real `abs`/`strlen`/`malloc`/`free` by name at runtime,
+      # covering every MVP marshalled type (double, int32, string, and a
+      # round-tripped pointer) on both backends identically, plus
+      # ffi-pointer-ref/ffi-pointer-set!/ffi-type-size -- real struct-field
+      # read/write at an explicit byte offset into the same malloc'd buffer --
+      # plus ffi-gc-malloc/ffi-gc-free, a GC-heap-backed allocation source
+      # needing no matching libc free.
+      it "calls real native libc/libm functions by name via ffi-open/ffi-function/ffi-call" do
+        # Sonames are platform-specific -- FreeBSD (this project's own dev
+        # environment) uses BSD-style single-digit versioning, Linux/glibc
+        # uses libX.so.6, Darwin has no libm/libc soname convention at all
+        # (everything lives in libSystem).
+        libm_soname = {% if flag?(:freebsd) %}
+                        "libm.so.5"
+                      {% elsif flag?(:linux) %}
+                        "libm.so.6"
+                      {% else %}
+                        "libSystem.dylib"
+                      {% end %}
+        libc_soname = {% if flag?(:freebsd) %}
+                        "libc.so.7"
+                      {% elsif flag?(:linux) %}
+                        "libc.so.6"
+                      {% else %}
+                        "libSystem.dylib"
+                      {% end %}
+        file = File.tempfile("main_spec_ffi", ".scm") do |io|
+          io.print(<<-SCHEME)
+            (import (scheme base) (scheme write) (creme ffi))
+            (define libm (ffi-open "#{libm_soname}"))
+            (define c-sqrt (ffi-function libm "sqrt" 'double '(double)))
+            (display (ffi-call c-sqrt (list 16.0)))
+            (newline)
+
+            (define libc (ffi-open "#{libc_soname}"))
+            (display (ffi-call (ffi-function libc "abs" 'int32 '(int32)) (list -42)))
+            (newline)
+            (display (ffi-call (ffi-function libc "strlen" 'int64 '(string)) (list "hello world")))
+            (newline)
+
+            (define c-malloc (ffi-function libc "malloc" 'pointer '(int64)))
+            (define c-free (ffi-function libc "free" 'void '(pointer)))
+            (define p (ffi-call c-malloc (list 16)))
+            (display (ffi-pointer? p))
+            (newline)
+            (display (ffi-null-pointer? p))
+            (newline)
+
+            (display (ffi-type-size 'int32))
+            (newline)
+            (display (ffi-type-size 'int64))
+            (newline)
+            (ffi-pointer-set! p 0 'int32 42)
+            (ffi-pointer-set! p 8 'double 2.5)
+            (display (ffi-pointer-ref p 0 'int32))
+            (newline)
+            (display (ffi-pointer-ref p 8 'double))
+            (newline)
+
+            (ffi-call c-free (list p))
+
+            (define gp (ffi-gc-malloc 16))
+            (display (ffi-pointer? gp))
+            (newline)
+            (ffi-pointer-set! gp 0 'int64 777)
+            (display (ffi-pointer-ref gp 0 'int64))
+            (newline)
+            (ffi-gc-free gp)
+
+            (ffi-close libm)
+            (ffi-close libc)
+            SCHEME
+        end
+        begin
+          out, err, status = run_cli([file.path])
+          status.success?.should be_true
+          out.should eq("4.0\n42\n11\n#t\n#f\n4\n8\n42\n2.5\n#t\n777\n")
+          err.strip.should eq("")
+
+          cvm_out, cvm_err, cvm_status = run_cli(["--cvm", file.path])
+          cvm_status.success?.should be_true
+          cvm_out.should eq("4.0\n42\n11\n#t\n#f\n4\n8\n42\n2.5\n#t\n777\n")
+          cvm_err.strip.should eq("")
+        ensure
+          File.delete(file.path)
+        end
+      end
     end
   end
 end

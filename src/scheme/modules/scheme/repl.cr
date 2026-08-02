@@ -20,6 +20,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "repl"], Scheme::Builtins::ReplLibrary
+    register_library ["creme", "builtin", "repl"], Scheme::Builtins::ReplLibrary
   end
 end

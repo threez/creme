@@ -119,6 +119,40 @@ module Scheme
     end
   end
 
+  # A record constructor (the `(ctor field...)` of a define-record-type) as
+  # a dedicated Builtin subtype, the constructor-side counterpart of
+  # RecordAccessor/RecordMutator above: VM#dispatch_call recognizes it and
+  # builds the SchemeRecord's fields array directly from the call's own
+  # stack registers, skipping BOTH the per-call args-array allocation the
+  # generic apply path pays AND the field-name lookup
+  # (`field_names.map { |fname| ctor_fields.index(fname) }`) the plain-
+  # Builtin version used to redo from scratch on every single call —
+  # `field_slots` below precomputes that mapping once, at define-record-
+  # type time, instead.
+  #
+  # `field_slots[i]` is the constructor ARGUMENT index (0-based, always <
+  # `arity`) that fills record field slot `i`, or nil if that field isn't
+  # one of the constructor's own parameters (left NIL in the record,
+  # matching plain Builtin constructors' existing behavior for a field
+  # declared but omitted from the `(ctor field...)` spec — see
+  # record_spec.cr's own coverage of that case). `arity` is `ctor_fields.
+  # size` — kept as its own field rather than derived from field_slots
+  # (whose length is field_names.size, a different, unrelated count) since
+  # nothing about field_slots alone determines it in general (a
+  # constructor could legally list fewer fields than the type declares).
+  class RecordConstructor < Builtin
+    getter record_type : SchemeRecordType
+    getter field_slots : Array(Int32?)
+    getter arity : Int32
+
+    def initialize(name : String, @record_type : SchemeRecordType, @field_slots : Array(Int32?), @arity : Int32)
+      super(name, arity, arity) do |args|
+        values = @field_slots.map { |slot| slot ? args[slot] : NIL.as(SchemeValue) }
+        SchemeRecord.new(record_type, values).as(SchemeValue)
+      end
+    end
+  end
+
   # The condition object attached to SchemeError#payload by the `error`
   # builtin (see modules/scheme/base.cr) — a plain SchemeRecord of this type, so
   # `guard` can hand callers structured access to the message/irritants via
@@ -178,13 +212,8 @@ module Scheme
       record_type = SchemeRecordType.new(type_name, field_names)
       env.define(type_name, record_type)
 
-      env.define(ctor_name.name, Builtin.new(ctor_name.name, ctor_fields.size, ctor_fields.size) do |args|
-        values = field_names.map do |fname|
-          idx = ctor_fields.index(fname)
-          idx ? args[idx] : NIL.as(SchemeValue)
-        end
-        SchemeRecord.new(record_type, values).as(SchemeValue)
-      end)
+      field_slots = field_names.map { |fname| ctor_fields.index(fname) }
+      env.define(ctor_name.name, RecordConstructor.new(ctor_name.name, record_type, field_slots, ctor_fields.size))
 
       env.define(pred_name.name, Builtin.new(pred_name.name, 1, 1) do |args|
         v = args[0]

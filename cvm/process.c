@@ -28,6 +28,7 @@
 #include <poll.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <gc.h>
@@ -45,9 +46,9 @@ static void pr_buf_grow(char **buf, size_t *cap, size_t len, size_t extra) {
 
 static char *pr_cstring(Value s, const char *who) {
   if (s.tag != T_STR) cvm_abort("%s: expected a string", who);
-  char *cs = GC_MALLOC((size_t)s.as.str.len + 1);
-  memcpy(cs, s.as.str.chars, (size_t)s.as.str.len);
-  cs[s.as.str.len] = 0;
+  char *cs = GC_MALLOC((size_t)s.aux + 1);
+  memcpy(cs, s.as.chars, (size_t)s.aux);
+  cs[s.aux] = 0;
   return cs;
 }
 
@@ -148,6 +149,30 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
   return result;
 }
 
+/* (sleep-ms! milliseconds) -- real nanosleep(2), matching native Crystal's
+ * own sleep-ms! contract (src/scheme/modules/creme/process.cr) exactly:
+ * an exact non-negative integer count of milliseconds, unspecified return.
+ * cvm actors (actor.c) are real OS threads (one pthread each, not a
+ * green-thread scheduler), so blocking here only blocks the ONE calling
+ * thread -- exactly like native's sleep! only yields the calling fiber --
+ * never the whole process. Exists so portable Scheme code (e.g. (creme
+ * raft-scheme)'s election/heartbeat tickers) has a real timer primitive to
+ * call under cvm at all; before this, cvm had no sleep of any kind. */
+static Value bi_sleep_ms(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  if (nargs != 1 || args[0].tag != T_INT || args[0].as.i < 0)
+    cvm_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
+  struct timespec req;
+  req.tv_sec = args[0].as.i / 1000;
+  req.tv_nsec = (args[0].as.i % 1000) * 1000000L;
+  while (nanosleep(&req, &req) != 0 && errno == EINTR) {
+    /* interrupted by a signal -- nanosleep already refilled req with the
+     * remaining time, so just retry until the full duration has elapsed */
+  }
+  return v_nil();
+}
+
 void cvm_register_process_builtins(VM *vm) {
   cvm_register_builtin(vm, "process-run", bi_process_run);
+  cvm_register_builtin(vm, "sleep-ms!", bi_sleep_ms);
 }

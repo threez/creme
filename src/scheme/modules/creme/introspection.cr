@@ -43,16 +43,52 @@ module Scheme::Builtins::Introspection
     Scheme.a_to_list(v.fields)
   end
 
-  # Whether STDOUT is attached to an actual terminal (as opposed to a pipe
-  # or a redirected file) -- so a script (e.g. (creme spec)'s runner) can
-  # decide whether ANSI color codes would help or would just corrupt piped/
-  # redirected output with escape sequences. No args: always asks about
-  # this process's own STDOUT specifically, not an arbitrary port -- there's
-  # no general notion of "the underlying fd" for a Scheme string/output
-  # port here, so this deliberately isn't `port-tty?` taking a port arg.
-  @[Scheme::SchemeFn("stdout-tty?", min: 0, max: 0)]
-  def stdout_tty_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(STDOUT.tty?)
+  # The runtime this script is currently executing under -- an alist:
+  #   ((vm . "crystal"|"cvm") (compiler . "native"|"self-hosted")
+  #    (version . "0.1.0") (os . <uname -s>) (arch . <uname -m>))
+  # `vm` is always "crystal" here (cvm's own copy, cvm/builtins.c's
+  # bi_runtime, always answers "cvm" instead -- there's no other engine
+  # this Crystal-side implementation could possibly be running under).
+  # `compiler` distinguishes native Crystal's own tree-walking evaluator
+  # from `creme --self-hosted` (both run inside this SAME Interpreter/
+  # process) via a marker only run_self_hosted (src/main.cr) defines in
+  # interp.global right before running the user's script -- see that
+  # method's own comment. `version` is a hardcoded literal (0.1.0) --
+  # this project has no other canonical version yet; keep this in sync
+  # BY HAND with cvm/builtins.c's bi_runtime's own copy of the same
+  # literal. `os`/`arch` shell out to the real `uname` binary rather than
+  # add a LibC binding, so they read exactly what running `uname -s`/
+  # `uname -m` yourself would show.
+  @[Scheme::SchemeFn("runtime", min: 0, max: 0)]
+  def runtime(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    compiler = interp.global.get?("__creme_self_hosted__") ? "self-hosted" : "native"
+    os = uname_field("-s")
+    arch = uname_field("-m")
+    Scheme.a_to_list([
+      Cons.new(SchemeSym.of("vm"), SchemeStr.new("crystal")).as(SchemeValue),
+      Cons.new(SchemeSym.of("compiler"), SchemeStr.new(compiler)).as(SchemeValue),
+      Cons.new(SchemeSym.of("version"), SchemeStr.new("0.1.0")).as(SchemeValue), # keep in sync with cvm/builtins.c's bi_runtime
+      Cons.new(SchemeSym.of("os"), SchemeStr.new(os)).as(SchemeValue),
+      Cons.new(SchemeSym.of("arch"), SchemeStr.new(arch)).as(SchemeValue),
+    ])
+  end
+
+  # Every name currently bound in the top-level global environment -- the
+  # same Env `(interaction-environment)` wraps (see modules/scheme/repl.cr)
+  # and the REPL evaluates against -- as a list of strings. Backs REPL tab
+  # completion: reflects the LIVE binding set (re-reads interp.global.
+  # local_names on every call), not a snapshot taken once at import time, so
+  # a `define` since the last call already shows up.
+  @[Scheme::SchemeFn("bound-names", min: 0, max: 0)]
+  def bound_names(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    Scheme.a_to_list(interp.global.local_names.map { |name| SchemeStr.new(name).as(SchemeValue) })
+  end
+
+  private def uname_field(flag : String) : String
+    io = IO::Memory.new
+    status = ::Process.run("uname", [flag], output: io)
+    raise SchemeRuntimeError.new("runtime: `uname #{flag}` failed") unless status.success?
+    io.to_s.chomp
   end
 
   # An already-registered library's own export alist -- a list of (external
@@ -78,6 +114,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "introspection"], Scheme::Builtins::Introspection
+    register_library ["creme", "builtin", "introspection"], Scheme::Builtins::Introspection
   end
 end

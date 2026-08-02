@@ -4,16 +4,36 @@
 /.shards/
 *.dwarf
 crystal-run-*.tm.core
-/bench/bench.html
-/bench/prof.html
+/competition/bench.html
+/competition/bench/prof.html
+/competition/lua/bench/monotonic.so
 
 /cvm/cvm
+/cvm/cvm-sanitize
+/cvm/fuzz-loader
 /cvm/cvm.dSYM/
 /cvm/*.o
 /cvm/vendor/
 /cvm/repl.cvmc
 /cvm/compiler-run.cvmc
+/cvm/fuzz/corpus/
+/cvm/crash-*
+/cvm/oom-*
+/cvm/timeout-*
+
+# (creme ffi)'s small precompiled dlopen/libffi shim (see ffi_shim.c's own
+# header comment) -- built by the root Makefile's ffi_shim.o rule, same
+# convention as /cvm/*.o above.
+/src/scheme/modules/creme/ffi_shim.o
 
 # Libraries don't need dependency lock
 # Dependencies will be locked in applications that use them
 /shard.lock
+
+# SQLite test-db files (e.g. spec/scheme/modules/raft_scheme_spec.cr's own
+# on-disk store) -- WAL-mode leaves -shm/-wal siblings behind even after
+# the main file is cleaned up by spec teardown.
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal

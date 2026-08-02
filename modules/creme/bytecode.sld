@@ -36,8 +36,10 @@
 ;;   (chunk-find-upval-index ch name)  -> an existing upvalue's index, or #f
 ;;   (op-ordinal name)                 -> the opcode's raw enum ordinal
 ;;   (chunk->bytes ch)                 -> a bytevector: "SCB1" magic +
-;;                                         the chunk, ready for (creme
-;;                                         bootstrap)'s load-chunk-bytes
+;;                                         an empty required-families
+;;                                         section + the chunk, ready for
+;;                                         (creme bootstrap)'s
+;;                                         load-chunk-bytes
 ;;
 ;; FRAGILE DEPENDENCY: the op-ordinals table below must exactly match
 ;; src/scheme/compile/opcode.cr's Op enum declaration order -- SCB1
@@ -55,7 +57,7 @@
           chunk-has-rest chunk-has-rest-set!
           chunk-num-registers chunk-num-registers-set!
           chunk-name chunk-name-set!
-          chunk-emit! chunk-patch-jump-to-here!
+          chunk-emit! chunk-patch-jump-to-here! chunk-patch-jump-to!
           chunk-add-const! chunk-add-proto! chunk-add-upval! chunk-find-upval-index
           op-ordinal
           chunk->bytes)
@@ -102,9 +104,18 @@
         (chunk-instrs-set! ch (cons instr (chunk-instrs ch)))
         instr))
 
+    ;; Patches `instr`'s own `b` (offset) field to jump to an EXPLICIT
+    ;; `target` instruction index -- forward (target > this instruction's
+    ;; own idx) or backward (target <= it, a negative offset), unlike
+    ;; chunk-patch-jump-to-here! below, which only ever targets the chunk's
+    ;; current end. Used by a counted-loop's own ForLoop op to jump back to
+    ;; its ForPrep-following body start (`target` = that index, captured via
+    ;; `(length (chunk-instrs ch))` right after ForPrep was emitted).
+    (define (chunk-patch-jump-to! ch instr target)
+      (instr-b-set! instr (- target (+ (instr-idx instr) 1))))
+
     (define (chunk-patch-jump-to-here! ch instr)
-      (let ((target (length (chunk-instrs ch))))
-        (instr-b-set! instr (- target (+ (instr-idx instr) 1)))))
+      (chunk-patch-jump-to! ch instr (length (chunk-instrs ch))))
 
     (define (chunk-add-const! ch value)
       (let ((idx (length (chunk-consts ch))))
@@ -175,7 +186,9 @@
         (list 'ParamPush 110) (list 'ParamPop 111)
         (list 'PushHandler 112) (list 'PopHandler 113) (list 'GuardReraise 114)
         (list 'Quasiquote 115) (list 'MakePromise 116)
-        (list 'HelperForm 117) (list 'HelperFormLocal 118)))
+        (list 'HelperForm 117) (list 'HelperFormLocal 118)
+        (list 'ForPrep 119) (list 'ForLoop 120)
+        (list 'ForLoopGuardedInc 121) (list 'ForLoopGuardedDec 122) (list 'TestGlobalIdentity 123)))
 
     (define (op-ordinal name)
       (if (hash-table-contains? op-ordinal-table name)
@@ -298,8 +311,29 @@
       (write-i32! sink 0)
       (write-i32! sink 0))
 
-    (define (chunk->bytes ch)
-      (let ((sink (make-sink)))
+    ;; `required-families` (optional, defaults to '()): a list of plain
+    ;; strings -- native (creme builtin <name>) family names the caller
+    ;; already knows the chunk transitively depends on (e.g. compiler.sld's
+    ;; own required-native-families-list) -- written into the
+    ;; required-families section right after the SCB1 magic, so cvm's
+    ;; main.c can decide which cvm_register_*_builtins functions to call
+    ;; before running this chunk (see that file's own header comment on
+    ;; import-gated native builtin registration). Most callers (bytecode_
+    ;; spec.scm's own direct chunk->bytes tests, spec-helper.sld's native-
+    ;; eval, run-compiled-forms! above) don't pass this at all and get the
+    ;; prior empty-list behavior unchanged.
+    (define (chunk->bytes ch . opts)
+      (let ((required-families (if (pair? opts) (car opts) '()))
+            (sink (make-sink)))
         (sink-push-bytes! sink (map char->integer (string->list "SCB1")))
+        ;; Format-version byte, right after the magic -- mirrors
+        ;; chunk_serializer.cr's own FORMAT_VERSION exactly (same
+        ;; numeric value, bumped in lockstep whenever either writer's
+        ;; on-disk chunk layout changes in a way an older reader
+        ;; couldn't safely parse). See that constant's own doc comment
+        ;; for the compatibility policy this exists to support.
+        (sink-push-byte! sink 1)
+        (write-i32! sink (length required-families))
+        (for-each (lambda (name) (write-string! sink name)) required-families)
         (write-chunk! sink ch)
         (sink->bytevector sink)))))

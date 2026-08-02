@@ -1,7 +1,7 @@
 /* The dispatch loop — the C counterpart of src/scheme/eval/vm.cr's #execute
  * (fetch/decode/dispatch over an explicit CallFrame stack, non-tail calls
  * push a new register window, tail calls reuse the current frame's window).
- * Only implements the exact opcode subset bench/creme.scm compiles to — see
+ * Only implements the exact opcode subset competition/scheme/bench/creme.scm compiles to — see
  * cvm/README.md.
  *
  * Dispatch uses computed goto (GCC/Clang's `&&label`/`goto *ptr` extension)
@@ -91,8 +91,10 @@ int cvm_is_condition(VM *vm, Value v) {
  * returns. The caller MUST have already confirmed vm->n_handlers > 0 --
  * this only pops/jumps, it doesn't fall back to aborting the process. */
 _Noreturn void cvm_raise_condition(VM *vm, Value condition) {
-  GuardHandler *h = &vm->handlers[--vm->n_handlers];
+  int idx = --vm->n_handlers;
+  GuardHandler *h = &vm->handlers[idx];
   vm->pending_condition = condition;
+  vm->pending_handler_idx = idx;
   longjmp(h->buf, 1);
 }
 
@@ -124,6 +126,21 @@ _Noreturn void cvm_abort(const char *fmt, ...) {
   fputs(buf, stderr);
   fputc('\n', stderr);
   exit(1);
+}
+
+/* See vm.h's own doc comment. Note: the guard-handler branch inside
+ * cvm_abort above (cvm_make_condition) itself calls GC_MALLOC a few
+ * times -- if the heap is exhausted badly enough that even THAT few-
+ * dozen-byte allocation fails, this callback re-enters recursively. A
+ * script running deeply enough under a `guard` to hit that is already
+ * in a genuinely catastrophic OOM state no allocator-level fix can fully
+ * paper over; falling through to cvm_abort's other two (allocation-free)
+ * branches -- actor unwind's fixed-size abort_message buffer, or the
+ * plain print+exit(1) -- remains the eventual, correct backstop either
+ * way. */
+void *cvm_gc_oom_handler(size_t bytes_requested) {
+  cvm_abort("cvm: out of memory (GC allocation of %zu bytes failed)", bytes_requested);
+  return NULL; /* unreachable -- cvm_abort never returns */
 }
 
 int cvm_global_intern(VM *vm, const char *name, int len) {
@@ -166,18 +183,78 @@ int cvm_global_intern(VM *vm, const char *name, int len) {
  * new_base arithmetic measures from. */
 static Chunk g_empty_root_chunk;
 
+/* See vm.h's own doc comment. */
+VM *cvm_alloc_vm(int stack_cap, int frames_cap) {
+  if (stack_cap <= 0) stack_cap = CVM_DEFAULT_STACK_CAP;
+  if (frames_cap <= 0) frames_cap = CVM_DEFAULT_FRAMES_CAP;
+  VM *vm = GC_MALLOC(sizeof(VM));
+  vm->stack = GC_MALLOC(sizeof(Value) * (size_t)stack_cap);
+  vm->stack_cap = stack_cap;
+  vm->frames = GC_MALLOC(sizeof(Frame) * (size_t)frames_cap);
+  vm->frames_cap = frames_cap;
+  return vm;
+}
+
 /* cvm_run_chunk (the normal top-level entry point) sets up frame 0 by
  * hand before ever calling cvm_dispatch; cvm_apply(vm, fn, ...) --
  * actor.c's own way of starting a spawned actor's thunk -- assumes that
  * SAME setup already happened (it reads vm->frames[vm->depth - 1]),
  * which a bare GC_MALLOC'd VM (depth left at its zero-init default)
  * does NOT have. Give every child VM the same minimal frame 0
- * cvm_run_chunk would, so cvm_apply can be called on it directly. */
+ * cvm_run_chunk would, so cvm_apply can be called on it directly.
+ * Inherits the PARENT's own stack_cap/frames_cap (not the bare
+ * defaults) -- an actor spawned by a resource-limited script should
+ * stay under that same limit, not silently regain the full default the
+ * instant it's spawned. */
 VM *cvm_new_child_vm(VM *parent) {
-  VM *vm = GC_MALLOC(sizeof(VM));
+  VM *vm = cvm_alloc_vm(parent->stack_cap, parent->frames_cap);
   memcpy(vm->globals, parent->globals, sizeof(GlobalCell) * (size_t)parent->n_globals);
   vm->n_globals = parent->n_globals;
 
+  /* current-output-port/current-input-port's own Parameter objects
+   * (T_PARAMETER values) got memcpy'd above by POINTER, same as every
+   * other global -- meaning this new VM's copy would otherwise still
+   * reference the PARENT's exact same Parameter, letting one actor's
+   * parameterize/with-output-to-file redirect a sibling's default port
+   * (a genuine cross-thread bug, not just wrong scoping). Give this VM
+   * its own fresh pair and re-point the two global slots at them,
+   * overwriting what the memcpy above brought over. */
+  cvm_init_current_ports(vm);
+  int cop_slot = cvm_global_intern(vm, "current-output-port", 20);
+  vm->globals[cop_slot].value = v_parameter(vm->current_output_param);
+  vm->globals[cop_slot].bound = 1;
+  int cip_slot = cvm_global_intern(vm, "current-input-port", 19);
+  vm->globals[cip_slot].value = v_parameter(vm->current_input_param);
+  vm->globals[cip_slot].bound = 1;
+
+  cvm_setup_frame0(vm);
+
+  /* Propagate --profile's own state onto this child VM too -- a spawned
+   * actor, or one of (creme mux)'s worker-pool/inline dispatch VMs, runs
+   * Scheme code on THIS VM instance, never the parent's, so without this
+   * cvm_profiler_tick would never fire here at all and every sample
+   * would silently come from wherever the ORIGINAL top-level thread
+   * happened to be (for a spawn-then-block-forever program, essentially
+   * nothing useful). `shared_vm_samples` is a shared POINTER (see its
+   * own doc comment, vm.h) -- every VM descended from one profiled
+   * top-level VM accumulates into the SAME buffer; `vm_countdown` is
+   * reseeded fresh here so each thread's own sampling stays
+   * independently jittered rather than all starting in lockstep. A
+   * no-op when profiling isn't enabled (the common case): every field
+   * here just copies zero/NULL, identical to before this existed. */
+  vm->profiler.enabled = parent->profiler.enabled;
+  vm->profiler.vm_interval = parent->profiler.vm_interval;
+  vm->profiler.vm_countdown = vm->profiler.enabled ? 1 + rand() % (2 * vm->profiler.vm_interval) : 0;
+  vm->profiler.shared_vm_samples = parent->profiler.shared_vm_samples;
+
+  return vm;
+}
+
+/* Shared by cvm_new_child_vm (above) and cvm_new_empty_vm (below) -- the
+ * minimal frame 0 a freshly built VM needs before cvm_apply/
+ * cvm_run_loaded_chunk can be called on it at all (see cvm_new_child_vm's
+ * own doc comment for why). */
+void cvm_setup_frame0(VM *vm) {
   Frame *f0 = &vm->frames[0];
   f0->chunk = &g_empty_root_chunk;
   f0->base = 0;
@@ -186,7 +263,36 @@ VM *cvm_new_child_vm(VM *parent) {
   f0->return_reg = -1;
   f0->n_opened = 0;
   vm->depth = 1;
+}
 
+/* (scheme eval)'s environment/null-environment/eval-2-arg target -- unlike
+ * cvm_new_child_vm (used for a spawned actor's own VM, which inherits
+ * every existing global by value/pointer), this starts with a completely
+ * EMPTY global table: no memcpy at all. Correct for null-environment
+ * (R7RS: only syntax, no procedures -- and cvm has no global bindings
+ * for special forms to begin with, since those are handled by the
+ * compiler directly, so an empty table already IS "no procedures, only
+ * syntax" with no extra bookkeeping needed) and for `environment`'s own
+ * import-sets, which populate this VM's globals themselves afterward
+ * (see cvm/compiler-run.scm's own `environment`) via
+ * environment-copy-global! (bootstrap.c) -- copying each requested
+ * name's CURRENT value from the calling VM, not re-importing/
+ * re-compiling anything. */
+VM *cvm_new_empty_vm(void) {
+  VM *vm = cvm_alloc_vm(0, 0);
+  cvm_setup_frame0(vm);
+  /* Suppresses cvm_register_required_builtins' own "always register
+   * base+write on first use" auto-registration (main.c) for THIS vm --
+   * load-chunk-bytes-into (bootstrap.c) calls that on every eval into an
+   * environment, and this VM must stay genuinely empty until
+   * environment-copy-global! explicitly populates it, or a
+   * null-environment would silently regain every base builtin (`+`
+   * included) the instant anything was eval'd into it. A required
+   * native FAMILY beyond base/write (e.g. "math") referenced by a form
+   * evaluated into a custom `environment` can still leak in this way --
+   * a narrower, known limitation, not hit by anything this project's
+   * own spec suite exercises. */
+  vm->base_write_registered = 1;
   return vm;
 }
 
@@ -471,6 +577,17 @@ int num_ge(Value x, Value y) {
   return as_double(x, ">=") >= as_double(y, ">=");
 }
 
+/* OP_FORLOOPGUARDEDINC/DEC and OP_TESTGLOBALIDENTITY's shared redefinition check (see
+ * opcodes.h's own doc comment): is `slot`'s CURRENT value still the exact closure
+ * `frame` is executing right now? Pointer identity, not eq?/equal? -- a mid-loop (set!
+ * foo ...)/re-`define` always rebinds to a genuinely distinct Closure object, so this
+ * can't false-negative; a false positive would require the global to be reassigned to
+ * literally the same object, which is behaviorally a no-op anyway. */
+static int global_is_current_closure(VM *vm, int slot, Frame *frame) {
+  GlobalCell *cell = &vm->globals[slot];
+  return cell->bound && cell->value.tag == T_CLOSURE && cell->value.as.closure == frame->closure;
+}
+
 /* `=` DOES accept complex operands (R7RS) -- checked before the exact/
  * float real-number paths below, comparing real/imag component-wise
  * (recursing into num_eq itself, same promotion rules either component
@@ -495,6 +612,66 @@ int num_eq(Value x, Value y) {
   return as_double(x, "=") == as_double(y, "=");
 }
 
+/* ---- fast_* inline wrappers ----
+ * num_add/num_sub/num_mul/num_lt/num_le/num_gt/num_ge/num_eq each carry a
+ * real T_INT/T_INT fast path already, but the function AS A WHOLE also
+ * handles float/rational/complex (GMP mpq_init/mpq_clear calls and all),
+ * so it's too large for the compiler to inline at every OP_ADD/OP_TESTLT/
+ * etc. call site in cvm_dispatch below — confirmed via `objdump -dr vm.o`:
+ * cvm_dispatch has real out-of-line `callq`s to these on every arithmetic/
+ * comparison instruction, even for two plain fixnums. src/scheme/eval/
+ * vm.cr's own Op::Add/Op::TestLtImm arms already avoid exactly this by
+ * inlining their own int/int fast path directly in the dispatch loop
+ * instead of routing through a shared helper — these mirror that here.
+ * Each one is `static inline` and trivially small (a tag check + either an
+ * overflow-checked op or a plain comparison), so -O2 inlines it at every
+ * call site for free, falling through to the real num_* function (same
+ * abort messages, same float/rational/complex semantics, same behavior on
+ * an int/int overflow) the instant either operand isn't a plain fixnum. */
+static inline Value fast_add(Value x, Value y) {
+  if (x.tag == T_INT && y.tag == T_INT) {
+    int64_t r;
+    if (!__builtin_add_overflow(x.as.i, y.as.i, &r)) return v_int(r);
+  }
+  return num_add(x, y);
+}
+
+static inline Value fast_sub(Value x, Value y) {
+  if (x.tag == T_INT && y.tag == T_INT) {
+    int64_t r;
+    if (!__builtin_sub_overflow(x.as.i, y.as.i, &r)) return v_int(r);
+  }
+  return num_sub(x, y);
+}
+
+static inline Value fast_mul(Value x, Value y) {
+  if (x.tag == T_INT && y.tag == T_INT) {
+    int64_t r;
+    if (!__builtin_mul_overflow(x.as.i, y.as.i, &r)) return v_int(r);
+  }
+  return num_mul(x, y);
+}
+
+static inline int fast_lt(Value x, Value y) {
+  return (x.tag == T_INT && y.tag == T_INT) ? x.as.i < y.as.i : num_lt(x, y);
+}
+
+static inline int fast_le(Value x, Value y) {
+  return (x.tag == T_INT && y.tag == T_INT) ? x.as.i <= y.as.i : num_le(x, y);
+}
+
+static inline int fast_gt(Value x, Value y) {
+  return (x.tag == T_INT && y.tag == T_INT) ? x.as.i > y.as.i : num_gt(x, y);
+}
+
+static inline int fast_ge(Value x, Value y) {
+  return (x.tag == T_INT && y.tag == T_INT) ? x.as.i >= y.as.i : num_ge(x, y);
+}
+
+static inline int fast_eq(Value x, Value y) {
+  return (x.tag == T_INT && y.tag == T_INT) ? x.as.i == y.as.i : num_eq(x, y);
+}
+
 /* ---- eqv? ----
  * Mirrors Scheme.scheme_eqv? for every tag this prototype has: numbers/
  * chars/bools/nil compare by value, strings/symbols by content (this
@@ -515,13 +692,23 @@ int cvm_eqv(Value a, Value b) {
     return a.as.b == b.as.b;
   case T_INT:
     return a.as.i == b.as.i;
-  case T_FLOAT:
-    return a.as.f == b.as.f;
+  case T_FLOAT: {
+    /* Bit-pattern compare, not ==: IEEE 754 == treats 0.0 and -0.0 as
+     * equal, but R7RS eqv? must distinguish them (they have different
+     * signs and thus different exactness-preserving representations).
+     * NaN bit patterns aren't canonical across platforms, but this
+     * codebase's own nan? users never rely on eqv?/equal? for NaN
+     * identity, so that's not a concern here. */
+    uint64_t abits, bbits;
+    memcpy(&abits, &a.as.f, sizeof(abits));
+    memcpy(&bbits, &b.as.f, sizeof(bbits));
+    return abits == bbits;
+  }
   case T_CHAR:
     return a.as.i == b.as.i;
   case T_STR:
   case T_SYM:
-    return a.as.str.len == b.as.str.len && memcmp(a.as.str.chars, b.as.str.chars, (size_t)a.as.str.len) == 0;
+    return a.aux == b.aux && memcmp(a.as.chars, b.as.chars, (size_t)a.aux) == 0;
   case T_PAIR:
     return a.as.pair == b.as.pair;
   case T_VECTOR:
@@ -549,7 +736,7 @@ int cvm_eqv(Value a, Value b) {
   case T_BUILTIN:
     return a.as.builtin == b.as.builtin;
   case T_BOX:
-    return a.as.box.ptr == b.as.box.ptr;
+    return a.as.ptr == b.as.ptr;
   case T_RATIONAL:
     return mpq_equal(a.as.rational->q, b.as.rational->q);
   case T_COMPLEX:
@@ -593,6 +780,10 @@ static void close_upvalues(Frame *f) {
 static void run_unwind_action(VM *vm, UnwindAction *a) {
   if (a->kind == UNWIND_DYNAMIC_WIND) {
     cvm_apply(vm, a->after, NULL, 0);
+    return;
+  }
+  if (a->kind == UNWIND_EXC_HANDLER) {
+    vm->n_exc_handlers = a->mark;
     return;
   }
   for (int i = 0; i < a->n; i++) a->params[i]->value = a->saved[i];
@@ -649,7 +840,7 @@ static Closure *make_closure(VM *vm, Frame *frame, int proto_idx) {
  * name (ctor field...) pred (field accessor [mutator])...). */
 
 static int sym_eq(Value a, Value b) {
-  return a.as.str.len == b.as.str.len && memcmp(a.as.str.chars, b.as.str.chars, (size_t)a.as.str.len) == 0;
+  return a.aux == b.aux && memcmp(a.as.chars, b.as.chars, (size_t)a.aux) == 0;
 }
 
 static Value list_ref(Value lst, int i) {
@@ -827,7 +1018,7 @@ static Value call_record_callable(RecordCallable *rc, Value *args, int nargs) {
   switch (rc->kind) {
   case RC_CTOR: {
     if (nargs != rc->n_ctor_args) {
-      cvm_abort("%.*s: expected %d argument(s), got %d", rc->type->name.as.str.len, rc->type->name.as.str.chars, rc->n_ctor_args, nargs);
+      cvm_abort("%.*s: expected %d argument(s), got %d", rc->type->name.aux, rc->type->name.as.chars, rc->n_ctor_args, nargs);
     }
     SchemeRecord *r = GC_MALLOC(sizeof(SchemeRecord));
     r->type = rc->type;
@@ -844,13 +1035,13 @@ static Value call_record_callable(RecordCallable *rc, Value *args, int nargs) {
   case RC_ACCESSOR: {
     if (nargs != 1) cvm_abort("record accessor: expected 1 argument");
     Value v = args[0];
-    if (v.tag != T_RECORD || v.as.record->type != rc->type) cvm_abort("record accessor: expected a %.*s record", rc->type->name.as.str.len, rc->type->name.as.str.chars);
+    if (v.tag != T_RECORD || v.as.record->type != rc->type) cvm_abort("record accessor: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
     return v.as.record->fields[rc->field_index];
   }
   case RC_MUTATOR: {
     if (nargs != 2) cvm_abort("record mutator: expected 2 arguments");
     Value v = args[0];
-    if (v.tag != T_RECORD || v.as.record->type != rc->type) cvm_abort("record mutator: expected a %.*s record", rc->type->name.as.str.len, rc->type->name.as.str.chars);
+    if (v.tag != T_RECORD || v.as.record->type != rc->type) cvm_abort("record mutator: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
     v.as.record->fields[rc->field_index] = args[1];
     return v_nil();
   }
@@ -863,22 +1054,69 @@ static Value call_record_callable(RecordCallable *rc, Value *args, int nargs) {
 /* ---- pairs / cxr ---- */
 
 Value cvm_cons(VM *vm, Value car, Value cdr) {
-  (void)vm;
-  Pair *p = GC_MALLOC(sizeof(Pair));
+  if (!vm->pair_freelist) {
+    vm->pair_freelist = GC_malloc_many(sizeof(Pair));
+    if (!vm->pair_freelist) cvm_abort("cons: out of memory");
+  }
+  Pair *p = (Pair *)vm->pair_freelist;
+  vm->pair_freelist = GC_NEXT(p);
   p->car = car;
   p->cdr = cdr;
   return v_pair(p);
 }
 
+/* Op::Cxr/Op::Abs/Op::CmpZero's shared `d` operand: a const-pool index
+ * the compiler points at the real, named builtin to fall back to on a
+ * fast-path miss (bytecode_compiler.cr's builtin_idx/compiler.sld's
+ * builtin-idx) -- mirrors vm.cr's own unary_prim_deopt exactly, giving
+ * the deopted call the SAME error/behavior a normal (non-fused) call to
+ * that builtin would, instead of a generic internal-sounding abort.
+ * The const itself takes one of two shapes depending on which compiler
+ * produced this chunk: native's cvm_emitter.cr serializes a real
+ * `Builtin` object as TAG_BUILTIN (loader.c's resolve_builtin_const
+ * already turns that into a directly-callable T_BUILTIN Value at load
+ * time), but the self-hosted compiler (compiler.sld) only ever has the
+ * accessor's bare NAME available at compile time, so it stores a plain
+ * symbol (TAG_SYM) instead -- resolve it to the actual bound global
+ * here, the same lookup OP_GETGLOBAL itself would do. Bounds/type-
+ * checked (not just trusted) since `d`, like every other Instruction
+ * operand, comes straight from the bytecode file with no dedicated
+ * loader-time validation of its own (see loader.c's resolve_globals for
+ * why an unchecked const-pool index is a real hazard, not a hypothetical
+ * one -- this is the exact same class of bug, just on the deopt path
+ * instead of global resolution). */
+static Value cxr_abs_cmpzero_deopt_target(VM *vm, Chunk *chunk, int idx) {
+  if (idx < 0 || idx >= chunk->n_consts) {
+    cvm_abort("cvm: bad deopt-target const index %d (n_consts=%d)", idx, chunk->n_consts);
+  }
+  Value c = chunk->consts[idx];
+  if (c.tag == T_BUILTIN) return c;
+  if (c.tag == T_SYM || c.tag == T_STR) {
+    int slot = cvm_global_intern(vm, c.as.chars, c.aux);
+    if (!vm->globals[slot].bound) {
+      cvm_abort("cvm: deopt target '%.*s' is not bound", c.aux, c.as.chars);
+    }
+    return vm->globals[slot].value;
+  }
+  cvm_abort("cvm: bad deopt-target constant (tag %d)", c.tag);
+  return v_nil(); /* unreachable */
+}
+
 /* Mirrors Op::Cxr's own loop in vm.cr exactly (see opcode.cr's doc comment):
  * bit 1 (LSB-first) => car, 0 => cdr, terminated by the sentinel `code==1`.
- * Deopts to the real builtin on a non-pair in the Crystal VM; this
- * prototype just aborts instead (see cvm/README.md — never hit by this
- * bench). */
-static Value exec_cxr(Value v, int code) {
+ * On the first non-pair, deopts to the real accessor builtin (see
+ * cxr_abs_cmpzero_deopt_target's own doc comment) instead of hard-
+ * aborting -- called on the ORIGINAL argument (`orig`, not whatever `v`
+ * partway through the chain), exactly mirroring vm.cr's own
+ * unary_prim_deopt (which re-reads the source register itself, not the
+ * fast-path's own local), so the deopted call sees exactly what a
+ * genuine (non-fused) call to that accessor would. */
+static Value exec_cxr(VM *vm, Chunk *chunk, Value v, int code, int deopt_const_idx) {
+  Value orig = v;
   while (code != 1) {
     if (v.tag != T_PAIR) {
-      cvm_abort("cxr: expected pair (fast-path deopt not implemented in this prototype)");
+      Value builtin = cxr_abs_cmpzero_deopt_target(vm, chunk, deopt_const_idx);
+      return cvm_apply(vm, builtin, &orig, 1);
     }
     v = (code & 1) ? v.as.pair->car : v.as.pair->cdr;
     code >>= 1;
@@ -983,8 +1221,8 @@ static int cvm_case_dispatch(Value key, CaseDispatchTable *table) {
     break;
   case T_SYM:
     tag = CDK_SYM;
-    sval = key.as.str.chars;
-    sval_len = key.as.str.len;
+    sval = key.as.chars;
+    sval_len = key.aux;
     break;
   case T_BOOL:
     tag = CDK_BOOL;
@@ -1010,7 +1248,7 @@ static int cvm_case_dispatch(Value key, CaseDispatchTable *table) {
 
 /* ---- call machinery ---- */
 
-static void bind_args(VM *vm, Chunk *callee, int nargs, int new_base, Value *stack, int arg_base) {
+static inline __attribute__((always_inline)) void bind_args(VM *vm, Chunk *callee, int nargs, int new_base, Value *stack, int arg_base) {
   int fixed = callee->param_count;
   if (callee->has_rest) {
     if (nargs < fixed) cvm_abort("%s: expected at least %d argument(s), got %d", callee->name, fixed, nargs);
@@ -1032,7 +1270,7 @@ static void bind_args(VM *vm, Chunk *callee, int nargs, int new_base, Value *sta
  * a reentrant call from a builtin (see cvm_apply) — either way, "done" means
  * depth has unwound back to whatever it was right before this dispatch's
  * own outermost frame was pushed. */
-static int deliver_return(VM *vm, Value val, Value *out, int target_depth) {
+static inline __attribute__((always_inline)) int deliver_return(VM *vm, Value val, Value *out, int target_depth) {
   Frame *finished = &vm->frames[vm->depth - 1];
   close_upvalues(finished);
   vm->depth--;
@@ -1044,15 +1282,91 @@ static int deliver_return(VM *vm, Value val, Value *out, int target_depth) {
   return 0;
 }
 
+/* Fast path for a tail call whose callee is the CURRENTLY-EXECUTING closure
+ * -- i.e. a self-recursive tail call (the hottest call site in tight
+ * recursive loops like nqueens's `safe?`, fib, tak, or any named-let/loop
+ * lowered to a self-call). When callee == frame->closure, everything
+ * dispatch_call's generic tail-T_CLOSURE arm would compute is already known:
+ * frame->chunk/closure/base are all unchanged (a tail call reuses the same
+ * register window), and that window was already stack-cap-validated when
+ * this frame was first set up -- so the tag-check chain, the redundant cap
+ * check, and the chunk/closure/base rewrites are all pure overhead here.
+ * All that genuinely still has to happen is closing any upvalues this frame
+ * opened (their backing registers are about to be overwritten by the new
+ * args), rebinding the args in place (arg_base is always ABOVE new_base, so
+ * the forward copy shifts them down correctly -- the exact same copy
+ * dispatch_call's bind_args already does for every tail call), and jumping
+ * back to ip 0.
+ *
+ * Returns 1 and does all of the above if this was a self-tail-call; returns
+ * 0 (touching nothing) otherwise, so the caller falls through to the
+ * generic dispatch_call. `frame->closure` NULL (a top-level, non-closure
+ * frame) can never equal a real callee closure, so that case correctly
+ * returns 0. */
+static inline __attribute__((always_inline)) int try_self_tail_call(VM *vm, Frame *frame, Instruction *ins, Value callee, Value *stack) {
+  if (callee.tag != T_CLOSURE || callee.as.closure != frame->closure) return 0;
+  if (frame->n_opened) close_upvalues(frame);
+  bind_args(vm, frame->chunk, ins->b, frame->base, stack, frame->base + ins->a + 1);
+  frame->ip = 0;
+  return 1;
+}
+
 /* Returns 1 if this call delivered the target frame's return (mirrors
  * deliver_return's own signal), writing the result into *out. `callee` is
  * already resolved by the caller (register / global / local / upvalue —
  * see opcode.cr's Call-family doc comment: `a` is always just the
  * contiguous arg anchor regardless of how the callee itself was found). */
-static int dispatch_call(VM *vm, Frame *frame, Instruction *ins, Value callee, int tail, Value *out, int target_depth) {
+static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *frame, Instruction *ins, Value callee, int tail, Value *out, int target_depth) {
   int caller_base = frame->base;
   int nargs = ins->b;
   int arg_base = caller_base + ins->a + 1;
+
+  /* T_CLOSURE and T_BUILTIN checked first (each ends in a real `return`,
+   * genuinely skipping every check below for the two overwhelmingly
+   * common cases) -- unlike reordering alone, this measurably matters:
+   * with every tag check as an independent `if` (not an else-if chain),
+   * a T_CLOSURE call used to still evaluate all four rarer checks below
+   * on its way here regardless of which one came "first" textually,
+   * since none of them being false stops the next one from running.
+   * Confirmed via repeated isolated timing on a call-heavy benchmark:
+   * ~5% faster with the common cases genuinely short-circuiting the
+   * rest, where merely reordering the same independent `if`s (still
+   * falling through all of them either way) measured no difference at
+   * all. */
+  if (callee.tag == T_CLOSURE) {
+    Closure *cl = callee.as.closure;
+    int new_base = tail ? caller_base : caller_base + frame->chunk->num_registers;
+    if (new_base + cl->chunk->num_registers > vm->stack_cap) cvm_abort("cvm: register stack exhausted (stack_cap=%d)", vm->stack_cap);
+    if (tail) close_upvalues(frame);
+    bind_args(vm, cl->chunk, nargs, new_base, vm->stack, arg_base);
+    if (tail) {
+      frame->chunk = cl->chunk;
+      frame->closure = cl;
+      frame->base = new_base;
+      frame->ip = 0;
+      /* return_reg carries over unchanged, matching CallFrame#reset. */
+    } else {
+      if (vm->depth >= vm->frames_cap) cvm_abort("cvm: call depth exceeded (frames_cap=%d)", vm->frames_cap);
+      Frame *nf = &vm->frames[vm->depth];
+      nf->chunk = cl->chunk;
+      nf->base = new_base;
+      nf->closure = cl;
+      nf->ip = 0;
+      nf->return_reg = ins->c;
+      nf->n_opened = 0;
+      vm->depth++;
+    }
+    return 0;
+  }
+
+  if (callee.tag == T_BUILTIN) {
+    Value result = callee.as.builtin(vm, &vm->stack[arg_base], nargs);
+    if (tail) {
+      return deliver_return(vm, result, out, target_depth);
+    }
+    vm->stack[caller_base + ins->c] = result;
+    return 0;
+  }
 
   if (callee.tag == T_CASE_CLOSURE) {
     /* Mirrors BytecodeCaseClosure#select_clause exactly: first clause (in
@@ -1070,7 +1384,12 @@ static int dispatch_call(VM *vm, Frame *frame, Instruction *ins, Value callee, i
       }
     }
     if (!matched) cvm_abort("case-lambda: no matching clause for %d argument(s)", nargs);
-    callee = v_closure(matched);
+    /* Recurse once with the matched clause resolved to a plain closure --
+     * still skips T_RECORD_CALLABLE/T_CONTINUATION/T_PARAMETER below on
+     * this second pass, since it lands directly in the T_CLOSURE arm
+     * above. Rare enough (case-lambda calls are cold relative to plain
+     * closure/builtin calls) that a second dispatch_call call is fine. */
+    return dispatch_call(vm, frame, ins, v_closure(matched), tail, out, target_depth);
   }
 
   if (callee.tag == T_RECORD_CALLABLE) {
@@ -1097,41 +1416,6 @@ static int dispatch_call(VM *vm, Frame *frame, Instruction *ins, Value callee, i
     return 0;
   }
 
-  if (callee.tag == T_CLOSURE) {
-    Closure *cl = callee.as.closure;
-    int new_base = tail ? caller_base : caller_base + frame->chunk->num_registers;
-    if (new_base + cl->chunk->num_registers > CVM_STACK_CAP) cvm_abort("cvm: register stack exhausted (CVM_STACK_CAP=%d)", CVM_STACK_CAP);
-    if (tail) close_upvalues(frame);
-    bind_args(vm, cl->chunk, nargs, new_base, vm->stack, arg_base);
-    if (tail) {
-      frame->chunk = cl->chunk;
-      frame->closure = cl;
-      frame->base = new_base;
-      frame->ip = 0;
-      /* return_reg carries over unchanged, matching CallFrame#reset. */
-    } else {
-      if (vm->depth >= CVM_FRAMES_CAP) cvm_abort("cvm: call depth exceeded (CVM_FRAMES_CAP=%d)", CVM_FRAMES_CAP);
-      Frame *nf = &vm->frames[vm->depth];
-      nf->chunk = cl->chunk;
-      nf->base = new_base;
-      nf->closure = cl;
-      nf->ip = 0;
-      nf->return_reg = ins->c;
-      nf->n_opened = 0;
-      vm->depth++;
-    }
-    return 0;
-  }
-
-  if (callee.tag == T_BUILTIN) {
-    Value result = callee.as.builtin(vm, &vm->stack[arg_base], nargs);
-    if (tail) {
-      return deliver_return(vm, result, out, target_depth);
-    }
-    vm->stack[caller_base + ins->c] = result;
-    return 0;
-  }
-
   cvm_abort("cvm: attempt to call a non-procedure value");
   return 0; /* unreachable */
 }
@@ -1141,6 +1425,61 @@ static int dispatch_call(VM *vm, Frame *frame, Instruction *ins, Value callee, i
 #if defined(__GNUC__) || defined(__clang__)
 #define CVM_COMPUTED_GOTO 1
 #endif
+
+/* Installs a (possibly quickened) opcode into an already-live instruction —
+ * see opcodes.h's OP_QCALLGLOBAL_* doc comment. Plain `int` writes/reads of
+ * `ins->op` are otherwise used everywhere else (including on every single
+ * dispatch, so those must stay a bare read — no atomics there), but THIS
+ * write is reachable from more than one actor's pthread at once when the
+ * same Chunk's closure is shared across actors (cvm_new_child_vm memcpy's
+ * the parent's globals, Value pointers and all — see actor.c). That's
+ * still a benign race even so: every racing writer independently computes
+ * the exact same target opcode for a given instruction (a pure function of
+ * the chunk + the global slot's current content), so the only thing that
+ * could go wrong without an atomic write is a torn/out-of-thin-air value
+ * from a genuine data race, not a wrong-but-plausible one — a single
+ * relaxed atomic store rules that out for free. */
+#if defined(__GNUC__) || defined(__clang__)
+#define CVM_QUICKEN(insptr, newop) __atomic_store_n(&(insptr)->op, (newop), __ATOMIC_RELAXED)
+#else
+#define CVM_QUICKEN(insptr, newop) ((insptr)->op = (newop))
+#endif
+
+/* Decides whether an OP_CALLGLOBAL call site is a candidate for quickening
+ * (see opcodes.h's OP_QCALLGLOBAL_* doc comment): `callee` is the global's
+ * CURRENT value (checked fresh every time this still-generic call site
+ * runs, so a call site that starts out calling a user closure and is later
+ * redefined to `+` still gets picked up), `nargs` is that call site's own
+ * fixed argument count. Returns -1 for "not one of the handful of
+ * primitives cvm has a fused fast path for" (or an arity that doesn't
+ * match one of them) — that site just keeps paying this same cheap check
+ * every time, same as any inline cache that never gets past megamorphic. */
+static inline int quicken_callglobal_op(Value callee, int nargs) {
+  if (callee.tag == T_RECORD_CALLABLE) {
+    if (nargs == 1 && callee.as.record_callable->kind == RC_ACCESSOR) return OP_QCALLGLOBAL_RECACC;
+    if (callee.as.record_callable->kind == RC_CTOR && nargs == callee.as.record_callable->n_ctor_args) return OP_QCALLGLOBAL_RECCTOR;
+    return -1;
+  }
+  if (callee.tag != T_BUILTIN) return -1;
+  if (nargs == 2) {
+    if (callee.as.builtin == bi_plus) return OP_QCALLGLOBAL_ADD2;
+    if (callee.as.builtin == bi_minus) return OP_QCALLGLOBAL_SUB2;
+    if (callee.as.builtin == bi_star) return OP_QCALLGLOBAL_MUL2;
+    if (callee.as.builtin == bi_cons) return OP_QCALLGLOBAL_CONS2;
+    if (callee.as.builtin == bi_modulo) return OP_QCALLGLOBAL_MOD2;
+    if (callee.as.builtin == bi_string_append) return OP_QCALLGLOBAL_STRAPPEND2;
+    if (callee.as.builtin == bi_hash_table_ref) return OP_QCALLGLOBAL_HASHREF;
+  } else if (nargs == 1) {
+    if (callee.as.builtin == bi_car) return OP_QCALLGLOBAL_CAR1;
+    if (callee.as.builtin == bi_cdr) return OP_QCALLGLOBAL_CDR1;
+    if (callee.as.builtin == bi_number_to_string) return OP_QCALLGLOBAL_NUMTOSTR1;
+  } else if (nargs == 3) {
+    if (callee.as.builtin == bi_plus) return OP_QCALLGLOBAL_ADD3;
+    if (callee.as.builtin == bi_hash_table_set) return OP_QCALLGLOBAL_HASHSET;
+    if (callee.as.builtin == bi_hash_table_ref) return OP_QCALLGLOBAL_HASHREF;
+  }
+  return -1;
+}
 
 /* The shared dispatch core, entered either fresh (cvm_run_chunk, always at
  * depth 0) or reentrantly (cvm_apply, called from a builtin like map/apply/
@@ -1157,7 +1496,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   Instruction *ins;
 
 #ifdef CVM_COMPUTED_GOTO
-  static const void *dispatch_table[OP_COUNT] = {
+  static const void *dispatch_table[OP_QUICK_COUNT] = {
       [OP_LOADK] = &&L_OP_LOADK, [OP_LOADNIL] = &&L_OP_LOADNIL, [OP_LOADTRUE] = &&L_OP_LOADTRUE,
       [OP_LOADFALSE] = &&L_OP_LOADFALSE, [OP_MOVE] = &&L_OP_MOVE, [OP_GETUPVAL] = &&L_OP_GETUPVAL,
       [OP_GETGLOBAL] = &&L_OP_GETGLOBAL, [OP_DEFGLOBAL] = &&L_OP_DEFGLOBAL, [OP_ADD] = &&L_OP_ADD,
@@ -1211,6 +1550,16 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       [OP_PARAMPUSH] = &&L_OP_PARAMPUSH, [OP_PARAMPOP] = &&L_OP_PARAMPOP,
       [OP_PUSHHANDLER] = &&L_OP_PUSHHANDLER, [OP_POPHANDLER] = &&L_OP_POPHANDLER, [OP_GUARDRERAISE] = &&L_OP_GUARDRERAISE,
       [OP_MAKEPROMISE] = &&L_OP_MAKEPROMISE, [OP_HELPERFORMLOCAL] = &&L_OP_HELPERFORMLOCAL,
+      [OP_FORPREP] = &&L_OP_FORPREP, [OP_FORLOOP] = &&L_OP_FORLOOP,
+      [OP_FORLOOPGUARDEDINC] = &&L_OP_FORLOOPGUARDEDINC, [OP_FORLOOPGUARDEDDEC] = &&L_OP_FORLOOPGUARDEDDEC,
+      [OP_TESTGLOBALIDENTITY] = &&L_OP_TESTGLOBALIDENTITY,
+      [OP_QCALLGLOBAL_ADD2] = &&L_OP_QCALLGLOBAL_ADD2, [OP_QCALLGLOBAL_SUB2] = &&L_OP_QCALLGLOBAL_SUB2,
+      [OP_QCALLGLOBAL_MUL2] = &&L_OP_QCALLGLOBAL_MUL2, [OP_QCALLGLOBAL_CONS2] = &&L_OP_QCALLGLOBAL_CONS2,
+      [OP_QCALLGLOBAL_CAR1] = &&L_OP_QCALLGLOBAL_CAR1, [OP_QCALLGLOBAL_CDR1] = &&L_OP_QCALLGLOBAL_CDR1,
+      [OP_QCALLGLOBAL_RECACC] = &&L_OP_QCALLGLOBAL_RECACC, [OP_QCALLGLOBAL_RECCTOR] = &&L_OP_QCALLGLOBAL_RECCTOR,
+      [OP_QCALLGLOBAL_ADD3] = &&L_OP_QCALLGLOBAL_ADD3, [OP_QCALLGLOBAL_MOD2] = &&L_OP_QCALLGLOBAL_MOD2,
+      [OP_QCALLGLOBAL_STRAPPEND2] = &&L_OP_QCALLGLOBAL_STRAPPEND2, [OP_QCALLGLOBAL_NUMTOSTR1] = &&L_OP_QCALLGLOBAL_NUMTOSTR1,
+      [OP_QCALLGLOBAL_HASHSET] = &&L_OP_QCALLGLOBAL_HASHSET, [OP_QCALLGLOBAL_HASHREF] = &&L_OP_QCALLGLOBAL_HASHREF,
   };
 #define CASE(op) L_##op:
 #define NEXT()                                          \
@@ -1268,10 +1617,10 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_ADD)
-    stack[base + ins->a] = num_add(stack[base + ins->b], stack[base + ins->c]);
+    stack[base + ins->a] = fast_add(stack[base + ins->b], stack[base + ins->c]);
     NEXT();
   CASE(OP_SUB)
-    stack[base + ins->a] = num_sub(stack[base + ins->b], stack[base + ins->c]);
+    stack[base + ins->a] = fast_sub(stack[base + ins->b], stack[base + ins->c]);
     NEXT();
   CASE(OP_CONS)
     stack[base + ins->a] = cvm_cons(vm, stack[base + ins->b], stack[base + ins->c]);
@@ -1280,13 +1629,13 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     stack[base + ins->a] = v_bool(stack[base + ins->b].tag == T_NIL);
     NEXT();
   CASE(OP_NUMEQ)
-    stack[base + ins->a] = v_bool(num_eq(stack[base + ins->b], stack[base + ins->c]));
+    stack[base + ins->a] = v_bool(fast_eq(stack[base + ins->b], stack[base + ins->c]));
     NEXT();
   CASE(OP_ADDIMM)
-    stack[base + ins->a] = num_add(stack[base + ins->b], v_int(ins->c));
+    stack[base + ins->a] = fast_add(stack[base + ins->b], v_int(ins->c));
     NEXT();
   CASE(OP_SUBIMM)
-    stack[base + ins->a] = num_sub(stack[base + ins->b], v_int(ins->c));
+    stack[base + ins->a] = fast_sub(stack[base + ins->b], v_int(ins->c));
     NEXT();
   CASE(OP_MULIMM) {
     Value x = stack[base + ins->b];
@@ -1297,38 +1646,38 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_TESTLTIMM)
-    if (!num_lt(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
+    if (!fast_lt(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTEQIMM)
-    if (!num_eq(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
+    if (!fast_eq(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTLT)
-    if (!num_lt(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
+    if (!fast_lt(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTLTUP)
-    if (!num_lt(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
+    if (!fast_lt(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTEQUP)
-    if (!num_eq(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
+    if (!fast_eq(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTEQ)
-    if (!num_eq(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
+    if (!fast_eq(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTLEUP)
-    if (!num_le(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
+    if (!fast_le(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTGTUP)
-    if (!num_gt(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
+    if (!fast_gt(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTGEUP)
-    if (!num_ge(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
+    if (!fast_ge(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTISEQUP)
     if (!cvm_eqv(stack[base + ins->a], upvalue_get(frame->closure->upvalues[ins->c]))) frame->ip += ins->b;
     NEXT();
   CASE(OP_THROW) {
     Value msg = frame->chunk->consts[ins->a];
-    cvm_abort("%.*s", msg.as.str.len, msg.as.str.chars);
+    cvm_abort("%.*s", msg.aux, msg.as.chars);
   }
   CASE(OP_TESTFALSE)
     if (v_falsy(stack[base + ins->a])) frame->ip += ins->b;
@@ -1336,13 +1685,49 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   CASE(OP_JMP)
     frame->ip += ins->b;
     NEXT();
+  CASE(OP_FORPREP) {
+    /* Skip the loop body entirely if it wouldn't run even once (INCLUSIVE
+     * of limit, Lua FORLOOP-style — see opcodes.h's own doc comment). */
+    Value counter = stack[base + ins->a];
+    Value limit = stack[base + ins->c];
+    int skip = ins->d > 0 ? fast_gt(counter, limit) : fast_lt(counter, limit);
+    if (skip) frame->ip += ins->b;
+    NEXT();
+  }
+  CASE(OP_FORLOOP) {
+    Value next_val = fast_add(stack[base + ins->a], v_int(ins->d));
+    stack[base + ins->a] = next_val;
+    Value limit = stack[base + ins->c];
+    int in_range = ins->d > 0 ? fast_le(next_val, limit) : fast_ge(next_val, limit);
+    if (in_range) frame->ip += ins->b;
+    NEXT();
+  }
+  CASE(OP_FORLOOPGUARDEDINC)
+  CASE(OP_FORLOOPGUARDEDDEC) {
+    /* Same shape as OP_FORLOOP, but step is implicit (+1/-1 by which of these two this
+     * is -- see opcodes.h's own doc comment) instead of a general ins->d, freeing d up
+     * to instead name the recursed-to global slot for the redefinition guard below. */
+    int64_t step = (ins->op == OP_FORLOOPGUARDEDINC) ? 1 : -1;
+    Value next_val = fast_add(stack[base + ins->a], v_int(step));
+    stack[base + ins->a] = next_val;
+    Value limit = stack[base + ins->c];
+    int in_range = step > 0 ? fast_le(next_val, limit) : fast_ge(next_val, limit);
+    int still_current = global_is_current_closure(vm, ins->d, frame);
+    if (in_range && still_current) frame->ip += ins->b;
+    NEXT();
+  }
+  CASE(OP_TESTGLOBALIDENTITY)
+    if (!global_is_current_closure(vm, ins->a, frame)) frame->ip += ins->b;
+    NEXT();
   CASE(OP_CXR)
-    stack[base + ins->a] = exec_cxr(stack[base + ins->b], ins->c);
+    stack[base + ins->a] = exec_cxr(vm, frame->chunk, stack[base + ins->b], ins->c, ins->d);
     NEXT();
   CASE(OP_ABS) {
     Value v = stack[base + ins->b];
     if (v.tag != T_INT || v.as.i == INT64_MIN) {
-      cvm_abort("abs: not a (non-INT64_MIN) integer (deopt not implemented in this prototype)");
+      Value builtin = cxr_abs_cmpzero_deopt_target(vm, frame->chunk, ins->d);
+      stack[base + ins->a] = cvm_apply(vm, builtin, &v, 1);
+      NEXT();
     }
     stack[base + ins->a] = v_int(v.as.i < 0 ? -v.as.i : v.as.i);
     NEXT();
@@ -1350,7 +1735,9 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
   CASE(OP_CMPZERO) {
     Value v = stack[base + ins->b];
     if (v.tag != T_INT) {
-      cvm_abort("zero?/positive?/negative?: not an integer (deopt not implemented in this prototype)");
+      Value builtin = cxr_abs_cmpzero_deopt_target(vm, frame->chunk, ins->d);
+      stack[base + ins->a] = cvm_apply(vm, builtin, &v, 1);
+      NEXT();
     }
     int result;
     switch (ins->c) {
@@ -1414,7 +1801,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       RecordBindings rb = build_record_bindings(form);
       for (int i = 0; i < rb.count; i++) {
         Value name = rb.names[i];
-        int slot = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
+        int slot = cvm_global_intern(vm, name.as.chars, name.aux);
         vm->globals[slot].value = rb.values[i];
         vm->globals[slot].bound = 1;
       }
@@ -1430,7 +1817,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
       if (parts.tag != T_PAIR) cvm_abort("%s: malformed form", kind);
       Value name = parts.as.pair->car;
       if (name.tag != T_SYM) cvm_abort("%s: name must be a symbol", kind);
-      int slot = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
+      int slot = cvm_global_intern(vm, name.as.chars, name.aux);
       vm->globals[slot].value = v_macro(form.as.pair);
       vm->globals[slot].bound = 1;
       /* eval_define_syntax/eval_defmacro both return the macro's own name
@@ -1572,31 +1959,31 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_MUL)
-    stack[base + ins->a] = num_mul(stack[base + ins->b], stack[base + ins->c]);
+    stack[base + ins->a] = fast_mul(stack[base + ins->b], stack[base + ins->c]);
     NEXT();
   CASE(OP_NUMLT)
-    stack[base + ins->a] = v_bool(num_lt(stack[base + ins->b], stack[base + ins->c]));
+    stack[base + ins->a] = v_bool(fast_lt(stack[base + ins->b], stack[base + ins->c]));
     NEXT();
   CASE(OP_NUMGE)
-    stack[base + ins->a] = v_bool(num_ge(stack[base + ins->b], stack[base + ins->c]));
+    stack[base + ins->a] = v_bool(fast_ge(stack[base + ins->b], stack[base + ins->c]));
     NEXT();
   CASE(OP_NUMLTIMM)
-    stack[base + ins->a] = v_bool(num_lt(stack[base + ins->b], v_int(ins->c)));
+    stack[base + ins->a] = v_bool(fast_lt(stack[base + ins->b], v_int(ins->c)));
     NEXT();
   CASE(OP_NUMGTIMM)
-    stack[base + ins->a] = v_bool(num_gt(stack[base + ins->b], v_int(ins->c)));
+    stack[base + ins->a] = v_bool(fast_gt(stack[base + ins->b], v_int(ins->c)));
     NEXT();
   CASE(OP_NUMEQIMM)
-    stack[base + ins->a] = v_bool(num_eq(stack[base + ins->b], v_int(ins->c)));
+    stack[base + ins->a] = v_bool(fast_eq(stack[base + ins->b], v_int(ins->c)));
     NEXT();
   CASE(OP_ADDUP)
-    stack[base + ins->a] = num_add(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c]));
+    stack[base + ins->a] = fast_add(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c]));
     NEXT();
   CASE(OP_NUMGEUP)
-    stack[base + ins->a] = v_bool(num_ge(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
+    stack[base + ins->a] = v_bool(fast_ge(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
     NEXT();
   CASE(OP_NUMLEUP)
-    stack[base + ins->a] = v_bool(num_le(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
+    stack[base + ins->a] = v_bool(fast_le(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
     NEXT();
   CASE(OP_ISPAIR)
     stack[base + ins->a] = v_bool(stack[base + ins->b].tag == T_PAIR);
@@ -1630,8 +2017,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value sv = stack[base + ins->b];
     if (sv.tag != T_STR) cvm_abort("string-ref: not a string");
     int idx = ins->c;
-    if (idx < 0 || idx >= sv.as.str.len) cvm_abort("string-ref: index %d out of range", idx);
-    stack[base + ins->a] = v_char((unsigned char)sv.as.str.chars[idx]);
+    if (idx < 0 || idx >= sv.aux) cvm_abort("string-ref: index %d out of range", idx);
+    stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
   }
   CASE(OP_STRREF) {
@@ -1640,8 +2027,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value idxv = stack[base + ins->c];
     if (idxv.tag != T_INT) cvm_abort("string-ref: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.as.str.len) cvm_abort("string-ref: index %d out of range", idx);
-    stack[base + ins->a] = v_char((unsigned char)sv.as.str.chars[idx]);
+    if (idx < 0 || idx >= sv.aux) cvm_abort("string-ref: index %d out of range", idx);
+    stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
   }
   /* string-set! mutates the underlying buffer in place — safe here
@@ -1656,20 +2043,20 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value idxv = stack[base + ins->b];
     if (idxv.tag != T_INT) cvm_abort("string-set!: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.as.str.len) cvm_abort("string-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) cvm_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
     if (ch.tag != T_CHAR) cvm_abort("string-set!: not a character");
-    ((char *)sv.as.str.chars)[idx] = (char)ch.as.i;
+    ((char *)sv.as.chars)[idx] = (char)ch.as.i;
     NEXT();
   }
   CASE(OP_STRSETIMM) {
     Value sv = stack[base + ins->a];
     if (sv.tag != T_STR) cvm_abort("string-set!: not a string");
     int idx = ins->b;
-    if (idx < 0 || idx >= sv.as.str.len) cvm_abort("string-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) cvm_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
     if (ch.tag != T_CHAR) cvm_abort("string-set!: not a character");
-    ((char *)sv.as.str.chars)[idx] = (char)ch.as.i;
+    ((char *)sv.as.chars)[idx] = (char)ch.as.i;
     NEXT();
   }
   CASE(OP_STRREFUP) {
@@ -1678,8 +2065,8 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value idxv = stack[base + ins->c];
     if (idxv.tag != T_INT) cvm_abort("string-ref: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.as.str.len) cvm_abort("string-ref: index %d out of range", idx);
-    stack[base + ins->a] = v_char((unsigned char)sv.as.str.chars[idx]);
+    if (idx < 0 || idx >= sv.aux) cvm_abort("string-ref: index %d out of range", idx);
+    stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
   }
   CASE(OP_STRSETUP) {
@@ -1688,18 +2075,18 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     Value idxv = stack[base + ins->b];
     if (idxv.tag != T_INT) cvm_abort("string-set!: not an integer index");
     int idx = (int)idxv.as.i;
-    if (idx < 0 || idx >= sv.as.str.len) cvm_abort("string-set!: index %d out of range", idx);
+    if (idx < 0 || idx >= sv.aux) cvm_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
     if (ch.tag != T_CHAR) cvm_abort("string-set!: not a character");
-    ((char *)sv.as.str.chars)[idx] = (char)ch.as.i;
+    ((char *)sv.as.chars)[idx] = (char)ch.as.i;
     stack[base + ins->d] = sv;
     NEXT();
   }
   CASE(OP_TESTGE)
-    if (!num_ge(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
+    if (!fast_ge(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTGTIMM)
-    if (!num_gt(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
+    if (!fast_gt(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTISEQ)
     if (!cvm_eqv(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
@@ -1720,31 +2107,31 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_NUMLE)
-    stack[base + ins->a] = v_bool(num_le(stack[base + ins->b], stack[base + ins->c]));
+    stack[base + ins->a] = v_bool(fast_le(stack[base + ins->b], stack[base + ins->c]));
     NEXT();
   CASE(OP_NUMGT)
-    stack[base + ins->a] = v_bool(num_gt(stack[base + ins->b], stack[base + ins->c]));
+    stack[base + ins->a] = v_bool(fast_gt(stack[base + ins->b], stack[base + ins->c]));
     NEXT();
   CASE(OP_NUMLEIMM)
-    stack[base + ins->a] = v_bool(num_le(stack[base + ins->b], v_int(ins->c)));
+    stack[base + ins->a] = v_bool(fast_le(stack[base + ins->b], v_int(ins->c)));
     NEXT();
   CASE(OP_NUMGEIMM)
-    stack[base + ins->a] = v_bool(num_ge(stack[base + ins->b], v_int(ins->c)));
+    stack[base + ins->a] = v_bool(fast_ge(stack[base + ins->b], v_int(ins->c)));
     NEXT();
   CASE(OP_SUBUP)
-    stack[base + ins->a] = num_sub(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c]));
+    stack[base + ins->a] = fast_sub(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c]));
     NEXT();
   CASE(OP_MULUP)
-    stack[base + ins->a] = num_mul(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c]));
+    stack[base + ins->a] = fast_mul(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c]));
     NEXT();
   CASE(OP_NUMLTUP)
-    stack[base + ins->a] = v_bool(num_lt(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
+    stack[base + ins->a] = v_bool(fast_lt(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
     NEXT();
   CASE(OP_NUMGTUP)
-    stack[base + ins->a] = v_bool(num_gt(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
+    stack[base + ins->a] = v_bool(fast_gt(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
     NEXT();
   CASE(OP_NUMEQUP)
-    stack[base + ins->a] = v_bool(num_eq(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
+    stack[base + ins->a] = v_bool(fast_eq(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
     NEXT();
   CASE(OP_ISEQIMM)
     stack[base + ins->a] = v_bool(stack[base + ins->b].tag == T_INT && stack[base + ins->b].as.i == ins->c);
@@ -1753,16 +2140,16 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     stack[base + ins->a] = v_bool(cvm_eqv(stack[base + ins->b], upvalue_get(frame->closure->upvalues[ins->c])));
     NEXT();
   CASE(OP_TESTLE)
-    if (!num_le(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
+    if (!fast_le(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTGT)
-    if (!num_gt(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
+    if (!fast_gt(stack[base + ins->a], stack[base + ins->c])) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTLEIMM)
-    if (!num_le(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
+    if (!fast_le(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTGEIMM)
-    if (!num_ge(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
+    if (!fast_ge(stack[base + ins->a], v_int(ins->c))) frame->ip += ins->b;
     NEXT();
   CASE(OP_TESTISEQIMM)
     if (!(stack[base + ins->a].tag == T_INT && stack[base + ins->a].as.i == ins->c)) frame->ip += ins->b;
@@ -1810,12 +2197,264 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     base = frame->base;
     NEXT();
   CASE(OP_TAILCALL)
-    if (dispatch_call(vm, frame, ins, stack[base + ins->a], 1, &final_result, target_depth)) return final_result;
-    frame = &vm->frames[vm->depth - 1];
-    base = frame->base;
+    {
+      Value callee = stack[base + ins->a];
+      if (!try_self_tail_call(vm, frame, ins, callee, stack)) {
+        if (dispatch_call(vm, frame, ins, callee, 1, &final_result, target_depth)) return final_result;
+        frame = &vm->frames[vm->depth - 1];
+        base = frame->base;
+      }
+    }
     NEXT();
   CASE(OP_CALLGLOBAL) {
     GlobalCell *cell = &vm->globals[ins->d];
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    int qop = quicken_callglobal_op(cell->value, ins->b);
+    if (qop >= 0) CVM_QUICKEN(ins, qop);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  /* Quickened OP_CALLGLOBAL variants (see opcodes.h's OP_QCALLGLOBAL_* doc
+   * comment) -- each re-checks the global's CURRENT value is still the
+   * exact expected builtin before taking the fast path, and permanently
+   * deopts back to a plain OP_CALLGLOBAL (falling back to the exact same
+   * generic call this instruction visit, not just on the next one) the
+   * instant that check fails. Argument registers are exactly what
+   * dispatch_call's own arg_base convention already puts them at for any
+   * CallGlobal-shaped instruction: ins->a+1, ins->a+2, ... — see
+   * dispatch_call's own `arg_base` computation above. */
+  CASE(OP_QCALLGLOBAL_ADD2) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_plus) {
+      stack[base + ins->c] = fast_add(stack[base + ins->a + 1], stack[base + ins->a + 2]);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_SUB2) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_minus) {
+      stack[base + ins->c] = fast_sub(stack[base + ins->a + 1], stack[base + ins->a + 2]);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_MUL2) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_star) {
+      stack[base + ins->c] = fast_mul(stack[base + ins->a + 1], stack[base + ins->a + 2]);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_CONS2) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_cons) {
+      stack[base + ins->c] = cvm_cons(vm, stack[base + ins->a + 1], stack[base + ins->a + 2]);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_CAR1) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    Value arg = stack[base + ins->a + 1];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_car && arg.tag == T_PAIR) {
+      stack[base + ins->c] = arg.as.pair->car;
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_CDR1) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    Value arg = stack[base + ins->a + 1];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_cdr && arg.tag == T_PAIR) {
+      stack[base + ins->c] = arg.as.pair->cdr;
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_RECACC) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    Value arg = stack[base + ins->a + 1];
+    if (cell->bound && cell->value.tag == T_RECORD_CALLABLE) {
+      RecordCallable *rc = cell->value.as.record_callable;
+      if (rc->kind == RC_ACCESSOR && arg.tag == T_RECORD && arg.as.record->type == rc->type) {
+        stack[base + ins->c] = arg.as.record->fields[rc->field_index];
+        NEXT();
+      }
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  /* Constructor-side counterpart of OP_QCALLGLOBAL_RECACC just above --
+   * builds the SchemeRecord straight from the call's own argument
+   * registers (stack[base + ins->a + 1 ..]), the exact same field-fill
+   * logic call_record_callable's RC_CTOR case already uses, just skipping
+   * dispatch_call to get there. An arity mismatch on an otherwise-still-
+   * valid constructor falls through to the generic path for one call
+   * (which raises the right "expected N argument(s)" error) and
+   * requickens right back to this op on the next, correctly-arity call —
+   * same non-special-cased "re-quicken naturally" behavior RECACC's own
+   * wrong-record-type case has, since the kind check alone still passes. */
+  CASE(OP_QCALLGLOBAL_RECCTOR) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_RECORD_CALLABLE) {
+      RecordCallable *rc = cell->value.as.record_callable;
+      if (rc->kind == RC_CTOR && ins->b == rc->n_ctor_args) {
+        SchemeRecord *r = GC_MALLOC(sizeof(SchemeRecord));
+        r->type = rc->type;
+        r->fields = GC_MALLOC(sizeof(Value) * (size_t)(rc->type->n_fields ? rc->type->n_fields : 1));
+        for (int i = 0; i < rc->type->n_fields; i++) r->fields[i] = v_nil();
+        for (int i = 0; i < rc->n_ctor_args; i++) r->fields[rc->ctor_field_indices[i]] = stack[base + ins->a + 1 + i];
+        stack[base + ins->c] = v_record(r);
+        NEXT();
+      }
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  /* record-test's own (+ acc (point-x p) (point-y p)) hot loop is exactly
+   * why this exists -- a 3-arg call site OP_QCALLGLOBAL_ADD2 can't touch
+   * (see opcodes.h's own doc comment on why this needs to be a distinct
+   * opcode, not a generalized N-ary one). */
+  CASE(OP_QCALLGLOBAL_ADD3) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_plus) {
+      stack[base + ins->c] = fast_add(fast_add(stack[base + ins->a + 1], stack[base + ins->a + 2]), stack[base + ins->a + 3]);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  /* competition/scheme/bench/creme.scm's own hashtable-test calls modulo
+   * once per phase-2 iteration (to pick i%4's case, and again for i%n's
+   * key) -- mirrors bi_modulo's own int fast path exactly (builtins.c):
+   * result takes the DIVISOR's sign, not C `%`'s dividend-sign
+   * truncation, and a zero divisor falls through to the generic path
+   * (which raises bi_modulo's own "division by zero" via the normal
+   * dispatch_call route) rather than being special-cased here. */
+  CASE(OP_QCALLGLOBAL_MOD2) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    Value x = stack[base + ins->a + 1];
+    Value y = stack[base + ins->a + 2];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_modulo &&
+        x.tag == T_INT && y.tag == T_INT && y.as.i != 0) {
+      int64_t b = y.as.i;
+      int64_t r = x.as.i % b;
+      if (r != 0 && ((r < 0) != (b < 0))) r += b;
+      stack[base + ins->c] = v_int(r);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  /* string-append (2-arg)/number->string (1-arg)/hash-table-set!/
+   * hash-table-ref -- see opcodes.h's own comment on why these call the
+   * matched builtin directly rather than needing any argument-type
+   * fast-path/fallback split the way Add2/etc. do: an unquickened call to
+   * the same builtin would hit the exact same cvm_abort on bad input
+   * anyway, which unwinds correctly (via longjmp) regardless of how many
+   * C frames are between it and the nearest guard handler. */
+  CASE(OP_QCALLGLOBAL_STRAPPEND2) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_string_append) {
+      stack[base + ins->c] = bi_string_append(vm, &stack[base + ins->a + 1], 2);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_NUMTOSTR1) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_number_to_string) {
+      stack[base + ins->c] = bi_number_to_string(vm, &stack[base + ins->a + 1], 1);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  CASE(OP_QCALLGLOBAL_HASHSET) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_hash_table_set) {
+      stack[base + ins->c] = bi_hash_table_set(vm, &stack[base + ins->a + 1], 3);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
+    if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
+    dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
+    frame = &vm->frames[vm->depth - 1];
+    base = frame->base;
+    NEXT();
+  }
+  /* Quickens at both hash-table-ref's 2- and 3-arg (explicit default)
+   * forms (see quicken_callglobal_op) -- ins->b (nargs) is whatever it
+   * already was on the original OP_CALLGLOBAL instruction this was
+   * quickened from (CVM_QUICKEN only ever overwrites the op field), so
+   * it's read here exactly the same way the generic, unquickened path
+   * already does. */
+  CASE(OP_QCALLGLOBAL_HASHREF) {
+    GlobalCell *cell = &vm->globals[ins->d];
+    if (cell->bound && cell->value.tag == T_BUILTIN && cell->value.as.builtin == bi_hash_table_ref) {
+      stack[base + ins->c] = bi_hash_table_ref(vm, &stack[base + ins->a + 1], ins->b);
+      NEXT();
+    }
+    CVM_QUICKEN(ins, OP_CALLGLOBAL);
     if (!cell->bound) cvm_abort("unbound variable: %s", cell->name);
     dispatch_call(vm, frame, ins, cell->value, 0, &final_result, target_depth);
     frame = &vm->frames[vm->depth - 1];
@@ -1836,9 +2475,14 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     base = frame->base;
     NEXT();
   CASE(OP_TAILCALLLOCAL)
-    if (dispatch_call(vm, frame, ins, stack[base + ins->d], 1, &final_result, target_depth)) return final_result;
-    frame = &vm->frames[vm->depth - 1];
-    base = frame->base;
+    {
+      Value callee = stack[base + ins->d];
+      if (!try_self_tail_call(vm, frame, ins, callee, stack)) {
+        if (dispatch_call(vm, frame, ins, callee, 1, &final_result, target_depth)) return final_result;
+        frame = &vm->frames[vm->depth - 1];
+        base = frame->base;
+      }
+    }
     NEXT();
   CASE(OP_CALLUPVAL)
     dispatch_call(vm, frame, ins, upvalue_get(frame->closure->upvalues[ins->d]), 0, &final_result, target_depth);
@@ -1846,9 +2490,14 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     base = frame->base;
     NEXT();
   CASE(OP_TAILCALLUPVAL)
-    if (dispatch_call(vm, frame, ins, upvalue_get(frame->closure->upvalues[ins->d]), 1, &final_result, target_depth)) return final_result;
-    frame = &vm->frames[vm->depth - 1];
-    base = frame->base;
+    {
+      Value callee = upvalue_get(frame->closure->upvalues[ins->d]);
+      if (!try_self_tail_call(vm, frame, ins, callee, stack)) {
+        if (dispatch_call(vm, frame, ins, callee, 1, &final_result, target_depth)) return final_result;
+        frame = &vm->frames[vm->depth - 1];
+        base = frame->base;
+      }
+    }
     NEXT();
   CASE(OP_RETURN)
     if (deliver_return(vm, stack[base + ins->a], &final_result, target_depth)) return final_result;
@@ -1871,7 +2520,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_ADDRETURN) {
-    Value res = num_add(stack[base + ins->b], stack[base + ins->c]);
+    Value res = fast_add(stack[base + ins->b], stack[base + ins->c]);
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1879,7 +2528,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_SUBRETURN) {
-    Value res = num_sub(stack[base + ins->b], stack[base + ins->c]);
+    Value res = fast_sub(stack[base + ins->b], stack[base + ins->c]);
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1887,7 +2536,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_MULRETURN) {
-    Value res = num_mul(stack[base + ins->b], stack[base + ins->c]);
+    Value res = fast_mul(stack[base + ins->b], stack[base + ins->c]);
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1895,7 +2544,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_NUMLTRETURN) {
-    Value res = v_bool(num_lt(stack[base + ins->b], stack[base + ins->c]));
+    Value res = v_bool(fast_lt(stack[base + ins->b], stack[base + ins->c]));
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1903,7 +2552,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_NUMLERETURN) {
-    Value res = v_bool(num_le(stack[base + ins->b], stack[base + ins->c]));
+    Value res = v_bool(fast_le(stack[base + ins->b], stack[base + ins->c]));
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1911,7 +2560,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_NUMGTRETURN) {
-    Value res = v_bool(num_gt(stack[base + ins->b], stack[base + ins->c]));
+    Value res = v_bool(fast_gt(stack[base + ins->b], stack[base + ins->c]));
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1919,7 +2568,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_NUMGERETURN) {
-    Value res = v_bool(num_ge(stack[base + ins->b], stack[base + ins->c]));
+    Value res = v_bool(fast_ge(stack[base + ins->b], stack[base + ins->c]));
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1927,7 +2576,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     NEXT();
   }
   CASE(OP_NUMEQRETURN) {
-    Value res = v_bool(num_eq(stack[base + ins->b], stack[base + ins->c]));
+    Value res = v_bool(fast_eq(stack[base + ins->b], stack[base + ins->c]));
     stack[base + ins->a] = res;
     if (deliver_return(vm, res, &final_result, target_depth)) return final_result;
     frame = &vm->frames[vm->depth - 1];
@@ -1987,6 +2636,30 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
    * suspended C computation" instead of "catch a Crystal exception". */
   CASE(OP_PUSHHANDLER) {
     if (vm->n_handlers >= CVM_HANDLERS_CAP) cvm_abort("cvm: guard handler stack full (CVM_HANDLERS_CAP=%d)", CVM_HANDLERS_CAP);
+    /* This CASE body is one shared piece of code re-executed on every
+     * dynamic PushHandler (e.g. once per nested guard) within the SAME C
+     * stack frame (no intervening cvm_apply recursion) -- it's a loop, not
+     * real recursion, so every dynamic install shares the exact same
+     * physical stack slot/register for any local variable declared here,
+     * REGARDLESS of volatile-qualifying it: volatile only stops the
+     * compiler from caching a stale REGISTER copy, it doesn't give each
+     * loop iteration its own independent storage. A later nested guard's
+     * own install simply overwrites whatever an earlier, still-pending
+     * guard's local held, so by the time that earlier guard's own longjmp
+     * resumes, reading that shared local back gives the WRONG (most
+     * recently written) handler's index, not this resume's own. See
+     * vm.h's own pending_handler_idx doc comment for why the fix is to
+     * identify the resuming handler through a heap field instead (set by
+     * cvm_raise_condition immediately before its longjmp, read here
+     * immediately after) -- that's a plain memory read on the far side of
+     * the jump, not a value carried across it, so it isn't subject to
+     * this hazard at all. (Found via `make sanitize`: with two nested
+     * guards where the inner re-raises to the outer, the outer's resumed
+     * condition value came back corrupted -- ASAN/UBSAN's own extra
+     * instrumentation shifted just enough register allocation to turn
+     * this latent bug into a visible failure; it was already silently
+     * relying on luck before, and a naive volatile-local fix turns out
+     * to still be wrong for the same underlying reason.) */
     GuardHandler *h = &vm->handlers[vm->n_handlers];
     h->depth = vm->depth;
     h->unwind_mark = vm->n_unwind;
@@ -1994,6 +2667,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
     h->resume_ip = frame->ip + ins->b;
     vm->n_handlers++;
     if (setjmp(h->buf) != 0) {
+      h = &vm->handlers[vm->pending_handler_idx];
       for (int i = h->depth; i < vm->depth; i++) close_upvalues(&vm->frames[i]);
       while (vm->n_unwind > h->unwind_mark) {
         vm->n_unwind--;
@@ -2020,7 +2694,7 @@ static Value cvm_dispatch(VM *vm, int target_depth) {
      * propagating past every guard when nothing catches it. */
     if (cvm_is_condition(vm, vm->pending_condition)) {
       Value msg = vm->pending_condition.as.record->fields[0];
-      cvm_abort("%.*s", msg.as.str.len, msg.as.str.chars);
+      cvm_abort("%.*s", msg.aux, msg.as.chars);
     }
     cvm_abort("cvm: unhandled exception (re-raised, no outer guard)");
   }
@@ -2066,10 +2740,10 @@ void cvm_run_chunk(VM *vm, Chunk *chunk) {
 Value cvm_run_loaded_chunk(VM *vm, Chunk *chunk) {
   Frame *caller = &vm->frames[vm->depth - 1];
   int new_base = caller->base + caller->chunk->num_registers;
-  if (new_base + chunk->num_registers > CVM_STACK_CAP) {
-    cvm_abort("cvm: register stack exhausted (CVM_STACK_CAP=%d)", CVM_STACK_CAP);
+  if (new_base + chunk->num_registers > vm->stack_cap) {
+    cvm_abort("cvm: register stack exhausted (stack_cap=%d)", vm->stack_cap);
   }
-  if (vm->depth >= CVM_FRAMES_CAP) cvm_abort("cvm: call depth exceeded (CVM_FRAMES_CAP=%d)", CVM_FRAMES_CAP);
+  if (vm->depth >= vm->frames_cap) cvm_abort("cvm: call depth exceeded (frames_cap=%d)", vm->frames_cap);
   int target_depth = vm->depth;
   Frame *nf = &vm->frames[vm->depth];
   nf->chunk = chunk;
@@ -2123,8 +2797,8 @@ Value cvm_apply(VM *vm, Value fn, Value *args, int nargs) {
   Closure *cl = fn.as.closure;
   Frame *caller = &vm->frames[vm->depth - 1];
   int new_base = caller->base + caller->chunk->num_registers;
-  if (new_base + cl->chunk->num_registers > CVM_STACK_CAP) {
-    cvm_abort("cvm: register stack exhausted (CVM_STACK_CAP=%d)", CVM_STACK_CAP);
+  if (new_base + cl->chunk->num_registers > vm->stack_cap) {
+    cvm_abort("cvm: register stack exhausted (stack_cap=%d)", vm->stack_cap);
   }
 
   int fixed = cl->chunk->param_count;
@@ -2139,7 +2813,7 @@ Value cvm_apply(VM *vm, Value fn, Value *args, int nargs) {
     for (int i = 0; i < fixed; i++) vm->stack[new_base + i] = args[i];
   }
 
-  if (vm->depth >= CVM_FRAMES_CAP) cvm_abort("cvm: call depth exceeded (CVM_FRAMES_CAP=%d)", CVM_FRAMES_CAP);
+  if (vm->depth >= vm->frames_cap) cvm_abort("cvm: call depth exceeded (frames_cap=%d)", vm->frames_cap);
   int target_depth = vm->depth;
   Frame *nf = &vm->frames[vm->depth];
   nf->chunk = cl->chunk;

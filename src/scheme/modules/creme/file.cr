@@ -188,7 +188,7 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "file"] do |env|
+    register_library ["creme", "builtin", "file"] do |env|
       register_module(Scheme::Builtins::FileLibrary, env) +
         register_module(Scheme::Builtins::FileExtra, env)
     end

@@ -418,6 +418,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "jose"], Scheme::Builtins::JoseLibrary
+    register_library ["creme", "builtin", "jose"], Scheme::Builtins::JoseLibrary
   end
 end

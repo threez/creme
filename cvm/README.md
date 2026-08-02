@@ -15,7 +15,7 @@ there's no separate cvm-specific bytecode format anymore. `creme --cvm
 step in one command (see `src/main.cr`'s `run_via_cvm`).
 
 **Scope**: cvm started as a narrow experiment scoped to exactly what
-`bench/creme.scm` compiled down to, but has since grown to full 119/119
+`competition/scheme/bench/creme.scm` compiled down to, but has since grown to full 119/119
 opcode parity with the real VM — including `guard`/`parameterize`,
 `define-record-type`, `case-lambda`, multiple values, bytevectors, and
 mutable strings — enough to run `competition/scheme/demo-todo/app.scm`, a
@@ -29,15 +29,20 @@ rationals, via GMP, are arbitrary-precision) — but the right framing today
 is "a second backend implementing the language's control-flow surface
 faithfully," not "a benchmark-only prototype."
 
+**Stability**: see `STABILITY.md` for what's guaranteed to keep working
+across a release (the SCB1 bytecode format's version-checked read
+compatibility, the base builtin set, the CLI contract) versus what's
+still explicitly in flux (internal struct layout, no stable C ABI yet).
+
 ## Building and running
 
 ```sh
 cd cvm && make
-cd .. && ./bin/creme --emit-cvm bench/creme.scm /tmp/creme.cvmc
+cd .. && ./bin/creme --emit-cvm competition/scheme/bench/creme.scm /tmp/creme.cvmc
 ./cvm/cvm /tmp/creme.cvmc
 ```
 
-Output should match a normal `./bin/creme bench/creme.scm` run's numeric
+Output should match a normal `./bin/creme competition/scheme/bench/creme.scm` run's numeric
 results exactly (timings will naturally differ):
 
 ```
@@ -64,16 +69,27 @@ curl -X POST -d "title=Buy milk" http://127.0.0.1:4599/todos
 
 ## REPL
 
-`cvm/repl.scm` bundles the self-hosted, Scheme-written compiler
-(`modules/creme/compiler/{reader,bytecode,compiler}.sld`) and a small
-read-compile-run loop, precompiled into ONE SCB1 image — after that
-one-time build, an interactive session depends on nothing but this one
-running cvm process; no live Crystal `creme` process is involved:
+`cvm/repl.scm` is now a two-line shim (`(import (creme repl)) (run-repl)`)
+over `modules/creme/repl.sld`, the same shared REPL loop the native
+Crystal interpreter and `--self-hosted` mode also delegate to. Run it as
+plain Scheme SOURCE, directly, via `./cvm/cvm`:
 
 ```sh
-./bin/creme --emit-cvm cvm/repl.scm cvm/repl.cvmc   # one-time build
-./cvm/cvm cvm/repl.cvmc                              # interactive REPL
+./cvm/cvm cvm/repl.scm   # interactive (or piped) REPL, no precompile step
 ```
+
+This must NOT be precompiled ahead of time via `--emit-cvm` into a
+standalone `.cvmc` — `(creme repl)` relies on the portable `(scheme
+read)`/`(scheme eval)`/`(interaction-environment)`, and cvm has no native
+C builtins for those. The only place they're backed at all is "Compiler
+mode" below: when `cvm/cvm` is pointed at raw `.scm` source, it loads the
+bundled self-hosted compiler (`cvm/compiler-run.cvmc`) first, and that
+compiler defines `read`/`eval`/`interaction-environment` itself as part of
+its own toolchain setup before compiling-and-running the target script.
+An ahead-of-time `--emit-cvm` build of `repl.scm` skips that bridge
+entirely, so a precompiled `repl.cvmc` crashes the moment a form is
+submitted (`unbound variable: read`) — always invoke `repl.scm` straight
+from source, the same way `spec/creme/*.scm` files already do.
 
 This works because two things were already true before this file existed:
 `cvm_global_intern` interns by name against one persistent `vm->globals`
@@ -159,19 +175,19 @@ needed for the core deliverable.
 
 ## Compiler mode
 
-Building on the REPL: point `cvm` at a plain `.scm` file and it compiles
-and runs it directly — the target script never touches the Crystal
-`creme` binary, only a small bundled "compiler driver" image (built once,
-same as `repl.cvmc`) still needed Crystal to produce:
+This is what the REPL above actually runs on: point `cvm` at a plain
+`.scm` file and it compiles and runs it directly — the target script
+never touches the Crystal `creme` binary, only a small bundled "compiler
+driver" image (built once, still needed Crystal to produce):
 
 ```sh
 ./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc   # one-time build
-./cvm/cvm bench/creme.scm                                            # compiles + runs directly
+./cvm/cvm competition/scheme/bench/creme.scm                                            # compiles + runs directly
 ```
 
 `cvm/main.c` decides which mode to use by peeking a given file's first 4
 bytes: `"SCB1"` means an already-compiled binary (today's behavior,
-completely unchanged — `./cvm/cvm bench/creme.cvmc` still works exactly
+completely unchanged — `./cvm/cvm competition/scheme/bench/creme.cvmc` still works exactly
 as before), anything else means plain Scheme source needing compiler
 mode. This is content-based, not extension-based — a `.scm` file's first
 bytes (whitespace/`(`/`;`) can never coincidentally read as `"SCB1"` — so
@@ -194,12 +210,12 @@ from already-exported toolchain primitives (`read-program`/
 splice in each top-level `(include "path" ...)`'s own parsed forms
 (resolved relative to the *including* file's own directory, so a nested
 include resolves against wherever its own file lives), then compile the
-flattened list. This is exactly what makes `bench/creme.scm` — which
+flattened list. This is exactly what makes `competition/scheme/bench/creme.scm` — which
 itself `(include "workloads.scm")`/`(include "workloads-demo.scm")` —
 work under compiler mode at all.
 
 Getting the self-hosted compiler to actually compile a real, non-trivial
-program like `bench/creme.scm` (as opposed to the REPL's simple one-line
+program like `competition/scheme/bench/creme.scm` (as opposed to the REPL's simple one-line
 inputs) surfaced the rest of the pattern the REPL work had already
 started: a program the *real* Crystal analyzer compiles never needs
 `cadr`/`vector-ref`/`vector-set!`/`string-ref`/`string-set!`/
@@ -271,15 +287,78 @@ passing under `cvm`:
   parallel mechanism: an `UNWIND_DYNAMIC_WIND` action calls its own
   `after` thunk, triggered either by normal return or by a `guard`
   handler (or a captured continuation) draining the stack past it.
-- `with-exception-handler`/`raise-continuable` need no new C at all —
-  both are plain Scheme, defined in `cvm/compiler-run.scm` atop
-  `dynamic-wind`: a mutable handler-stack list, pushed/popped around
-  `with-exception-handler`'s own thunk (via `dynamic-wind`, so an
-  exception unwinding past it still restores the stack correctly), with
-  `raise-continuable` popping the current handler before calling it (so
-  a handler that itself raises sees the next-outer one, not itself) and
-  restoring it before returning the handler's own result — an ordinary,
-  non-escaping return, no continuation involved at all.
+- `with-exception-handler`/`raise-continuable`/`raise` are genuine
+  cvm-native C builtins now (`cvm/builtins.c`), backed by a real
+  VM-wide handler stack (`vm->exc_handlers`, `vm.h`) — they used to be
+  plain Scheme, defined only in `cvm/compiler-run.scm` atop
+  `dynamic-wind` (a mutable handler-stack list), which meant they only
+  ever worked when a script ran through cvm's own "compiler mode"
+  (below); a precompiled `--emit-cvm` program calling
+  `with-exception-handler` hit "unbound variable". `with-exception-
+  handler` pushes `handler` onto `vm->exc_handlers` and registers a
+  dedicated `UNWIND_EXC_HANDLER` unwind action (`vm.h`'s own
+  `UnwindAction`/`UnwindKind`, alongside `UNWIND_PARAMS`/
+  `UNWIND_DYNAMIC_WIND`) that restores `vm->n_exc_handlers` to an
+  absolute remembered mark — not just "pop one", the way a naive
+  `dynamic-wind`-based `after` thunk would, since that breaks if
+  `raise-continuable`'s own temporary pop-call-pushback around the
+  handler is still in flight when a captured continuation or another
+  raised exception escapes past this frame (a `dynamic-wind`-shaped fix
+  would double-pop in that case). `raise-continuable` pops the current
+  handler before calling it (so a handler that itself raises sees the
+  next-outer one, not itself), then pushes it back before returning the
+  handler's own result. Plain (non-continuable) `raise` used to drive
+  ONLY the C-level `guard`/`GuardHandler` longjmp stack, never
+  consulting an installed `with-exception-handler` at all — a genuine
+  R7RS-correctness gap, now fixed alongside this: `raise` tries the
+  current handler first (same pop/call/push-back as `raise-continuable`)
+  and only falls through to the `guard`/top-level unwind if that handler
+  returns normally (which has nowhere for its value to go on a
+  non-continuable raise). `cvm/compiler-run.scm` no longer redefines any
+  of these — doing so would just shadow the new C builtins via its own
+  top-level `define` (cvm's flat global table lets a later `define`
+  overwrite an earlier binding by name), silently reverting compiler-mode
+  scripts to the old, narrower behavior.
+
+**A pure-Scheme library's own `include`/`include-ci`/`cond-expand`
+declarations, and a bare import-set's own export-rename, now work under
+`cvm` too.** `modules/creme/compiler/compiler.sld`'s own
+`ensure-library-loaded!` — the self-hosted compiler's library loader,
+and the ONLY thing actually loading a pure-Scheme library's body under
+`cvm` (native Crystal's own real `import!` does the equivalent work
+directly at runtime, which is why none of this ever showed up as a gap
+under plain `./bin/creme`/`--self-hosted`, despite both running this
+exact same `compiler.sld`) — used to recognize only literal `import`/
+`begin` clauses in a library's own body, silently ignoring `include`/
+`include-ci`/`cond-expand` declarations entirely. `process-library-
+clause!` now handles all four uniformly (a `cond-expand` clause's own
+matched declarations re-dispatch through this SAME function, so nested
+`import`/`begin`/`include`/`cond-expand` inside it all just work, not
+just one declaration kind); `include-ci` also fold-cases the included
+source first (`ascii-foldcase-string` — ASCII-only, and folds the whole
+source blindly rather than skipping string/char literal contents the
+way a real `#!fold-case` reader would, an honest simplification given
+this compiler has no `(scheme char)` `string-foldcase` to reach for
+here). Separately, `import-set-alias-defines`'s own `else` branch (a
+bare, non-only/except/prefix/rename import-set — i.e. plain `(import
+(some-lib))`) used to generate no aliases at all, so a library's own
+`(export (rename internal external))` never actually bound `external`
+as a global under cvm's self-hosted-loader-only path; it now consults
+`library-export-alist` (already correctly parsing this) the same way
+the `prefix`/`rename` cases already did. Still NOT attempted: a
+*top-level* `(import ...)` declaration's own only/except/prefix/rename
+filters genuinely restricting visibility for the whole importing
+program (as opposed to just aliasing an additional name), and a
+library body genuinely seeing only what it explicitly imports — both
+still blocked on cvm's single, whole-program-wide flat global table
+having no notion of "this program's own visible names" distinct from
+"every name any library anywhere has ever defined". (`environment`'s
+*own* only/except/prefix/rename import-sets are a different, narrower
+case — see "environment/eval" below — and now genuinely restrict
+visibility within the fresh environment they build, since that's a
+genuinely separate global table, not the whole program's own.) See
+`spec/creme/r7rs/ch05_program_structure_spec.scm`'s own header comment
+for the one remaining case this affects.
 
 **`define-syntax`'s own runtime visibility** is also fixed: `Op::
 HelperForm`'s kind 3 (`cvm/vm.c`) now binds a real `T_MACRO` value the
@@ -290,6 +369,59 @@ hosted compiler's own `sr-make-transformer`, its real `syntax-rules`
 pattern matcher) — by checking the wrapped form's own head symbol. `cvm`
 still never expands a `syntax-rules` use directly in C; it bridges out
 to Scheme for that, same as it always did for `defmacro`.
+
+**`include`/`include-ci` now also work in ordinary body position** (inside
+a `let`/`lambda`/library `begin` body, not just at a script's own top
+level or a library declaration — see the previous entry for that
+narrower, declaration-only case). `compiler.sld`'s `flatten-begins` (the
+same pass that already spliced a nested `(begin ...)` form's contents in
+place) gained an `include`/`include-ci` case calling a new
+`expand-include-form`, which resolves the included path against
+`current-compiling-file` (a new mutable var, save/restored around
+`compile-program`'s now-optional 2nd argument — the file path being
+compiled, threaded through from both `cvm/compiler-run.scm` and
+`src/main.cr`'s native `--self-hosted` entry points) so nested includes
+resolve relative to wherever their own file lives, exactly mirroring the
+existing top-level/library-declaration include logic. This needed real
+file-reading, so `(creme file)` was added to `compiler.sld`'s own
+`(import ...)` list and `expand-include-form`/the library-declaration
+`include` branch (previous entry) both call `file-read` (portable,
+available under native/self-hosted/cvm alike) instead of the cvm-only
+`read-whole-file`.
+
+**Regression this surfaced, and why it's fixed by keeping `file-read` and
+`read-whole-file` deliberately separate**: `try-read-whole-file` (the
+helper `ensure-library-loaded!` uses to check whether a library name has
+a real `.sld` file on disk, falling back to `record-required-native-
+family!` when it doesn't) originally called `read-whole-file` — genuinely
+working under `cvm` (a real native builtin there), but ALWAYS silently
+failing under native/`--self-hosted` (unbound there, caught by
+`try-read-whole-file`'s own `guard`), which is exactly why native/self-
+hosted never reentrant-recompiles an ordinary library's body via THIS
+compiler — it relies entirely on native Crystal's own real `import!`
+having already defined everything for real (see the previous entry's own
+"only thing actually loading a pure-Scheme library's body under `cvm`"
+aside). Switching `try-read-whole-file` to the newly-portable `file-read`
+made it genuinely succeed under native/self-hosted too, for the first
+time — which sounds like a strict improvement, but instead made
+`ensure-library-loaded!` actually attempt to independently reentrant-
+recompile every library a self-hosted program imports, including
+foundational ones like `(scheme base)` (which does have a real `.sld` on
+disk, `modules/scheme/base.sld`) and libraries with compile-time-executed
+`defmacro` bodies like `(creme sxql)` — surfacing a real, previously-
+unexercised bug where `(creme sxql)`'s `defmacro sxql-select!` (whose
+transformer body calls `sxql-compile-tree` when a use of `sxql-select!`
+is expanded, not when the macro is defined) ended up unbound
+(`differential_examples_spec.cr`'s "22-sxql-report-builder.scm natively
+vs. self-hosted-compiled" case). Fixed by keeping the two call sites
+separate by design: `try-read-whole-file` still uses `read-whole-file`
+(preserving native/self-hosted's original, load-bearing "never reentrant-
+recompile, trust native's own import" behavior), while `expand-include-
+form` and the library-declaration `include` branch use `file-read`
+instead — both are narrow, deliberately-invoked paths (only reached when
+a script/library genuinely uses `include`/`include-ci`), so this doesn't
+reintroduce the reentrant-recompilation problem for ordinary libraries
+that never use `include` at all.
 
 Rationals and complex numbers (`compiler_numeric_tower_spec.scm`, the 7
 complex-number cases in `reader_literals_spec.scm`) now work under `cvm`
@@ -370,15 +502,6 @@ Crystal VM's `ChunkSerializer`/`ChunkDeserializer` round-trip — there is no
 separate cvm-specific format/opcode-numbering to keep in sync anymore. A
 `.cvmc` file from before this change (the old "CVM2" format) won't load;
 re-run `creme --emit-cvm` to regenerate it.
-
-facil.io (vendored — see the mux/sql/string/format sections below) prints a
-single bare `\n` to **stderr** at process exit unconditionally, via its own
-`__attribute__((destructor))` cleanup (`fio_lib_destroy` in `fio.c`) — this
-fires even if nothing in a given program ever touches an HTTP/FIOBJ
-feature, simply because facil.io is linked into every build. It's
-stdout-only output that matters for correctness (verified byte-for-byte
-against the real interpreter); don't mistake this trailing stderr newline
-for a bug when comparing `2>&1`-merged output.
 
 ## Compatibility with `creme` (the Crystal interpreter)
 
@@ -503,18 +626,23 @@ across these files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
-| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`/`(creme math)`/`(creme introspection)` | 180 | predicates, `car`/`cdr`/`set-car!`/`set-cdr!`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `set-environment-variable!` (`(creme env)`'s own mutator, not just R7RS's read-only `get-environment-variable` — needed so a cvm-run process can pass a flag down to a subprocess it spawns via `process-run`, which inherits environ automatically), `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below), `open-input-file`/`open-output-file`/`open-binary-input-file`/`open-binary-output-file`/`call-with-input-file`/`call-with-output-file`/`with-input-from-file`/`with-output-to-file`/`file-exists?` (`(scheme file)`'s R7RS port surface, plus `(creme file)`'s own `file-append`/`file-lines`/`file-size`/`current-directory` — see this section's own note further down on the two `with-*` builtins specifically) |
-| `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via vendored facil.io |
+| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`, all of `(creme math)`/`(creme introspection)`/`(creme time)` | 190+ | predicates, `car`/`cdr`/`set-car!`/`set-cdr!`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `set-environment-variable!` (`(creme env)`'s own mutator, not just R7RS's read-only `get-environment-variable` — needed so a cvm-run process can pass a flag down to a subprocess it spawns via `process-run`, which inherits environ automatically), `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own SCB1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below), `open-input-file`/`open-output-file`/`open-binary-input-file`/`open-binary-output-file`/`call-with-input-file`/`call-with-output-file`/`with-input-from-file`/`with-output-to-file`/`file-exists?` (`(scheme file)`'s R7RS port surface, plus `(creme file)`'s own `file-append`/`file-lines`/`file-size`/`current-directory` — see this section's own note further down on the two `with-*` builtins specifically) |
+| `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via poll(2) + picohttpparser; `mux-listen!`'s "pool" option picks inline dispatch (`#f`, the default) or a growable SO_REUSEPORT worker pool (`#t`/an integer max) with no cross-thread handoff |
 | `sql.c` | `(creme sql)` | 6 | `sql-open`, `sql-execute`, `sql-query`, `sql-scalar` — real SQLite via the C API |
-| `hashtable.c` | `(creme hash-table)` (partial) | 6 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!` — no `hash-table-keys`/`values`/`walk` yet; `hash-table-ref`'s own default arg may be a plain value OR a thunk (only applied if it's actually callable), matching native's own contract |
+| `hashtable.c` | `(creme hash-table)` (full — every name the `.sld` re-exports) | 9 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!`/`keys`/`values`/`->alist` — `hash-table-ref`'s own default arg may be a plain value OR a thunk (only applied if it's actually callable), matching native's own contract |
 | `strings.c` | `(creme string)` + `(creme format)` | 16 | `string-upcase`/`downcase`/`trim`/`split`/`join`/`replace`/`pad`/etc., `format` |
 | `bootstrap.c` | `(creme bootstrap)` (narrow — see "REPL"/"Compiler mode" above) + a slice of `(scheme file)`/`(creme file)` | 8 | `load-chunk-bytes`, `import!`, `expand-if-macro`, `read-whole-file`, `cvm-target-path`, `file-read` (same function as `read-whole-file`, registered under both names), `file-write`, `delete-file` — the rest of `(scheme file)`/`(creme file)` (now a full port) lives in `builtins.c`'s own row above |
 | `regex.c` | `(creme regex)` (very narrow — see "REPL" above) | 2 | `regexp`, `regexp-matches?` |
-| `process.c` | `(creme process)` (narrow — just `process-run`) | 1 | `process-run` — real POSIX fork/pipe/execvp/waitpid, matching native Crystal's exact `(cmd args) -> (stdout stderr exit-code success?)` contract; exists so spec/creme/main_spec.scm (the one entry point for running every spec/creme spec file and reporting one combined total) spawns each spec file as its own genuinely separate OS process the same way whether it's driven natively or reentrantly under `./cvm/cvm spec/creme/main_spec.scm` itself |
-| `digest.c` | `(creme digest)` | 5 | `digest-md5`/`-sha1`/`-sha256` (hex digest strings, via OpenSSL's `EVP_Digest` — reuses the `-lcrypto` link already added for `(creme actor)`'s own HMAC handshake), `base64-encode`/`-decode` (a small hand-rolled codec — OpenSSL's own `EVP_EncodeBlock`/`DecodeBlock` don't raise cleanly on invalid input the way native's own `Base64.decode_string` does) |
+| `process.c` | `(creme process)` (narrow — `process-run` and `sleep-ms!`) | 2 | `process-run` — real POSIX fork/pipe/execvp/waitpid, matching native Crystal's exact `(cmd args) -> (stdout stderr exit-code success?)` contract; exists so spec/creme/main_spec.scm (the one entry point for running every spec/creme spec file and reporting one combined total) spawns each spec file as its own genuinely separate OS process the same way whether it's driven natively or reentrantly under `./cvm/cvm spec/creme/main_spec.scm` itself. `sleep-ms!` — real `nanosleep(2)` on an exact non-negative integer count of milliseconds, matching native's own `sleep-ms!` contract; cvm had no timer primitive of any kind before this, needed by `(creme raft-scheme)`'s election/heartbeat tickers (a cvm actor is a real OS thread, so blocking here only blocks that one actor, same as native's fiber-yielding `sleep!` never blocking the whole process) |
+| `digest.c` | `(creme digest)` | 10 | `digest-md5`/`-sha1`/`-sha256`/`-sha384`/`-sha512` (hex digest strings, via OpenSSL's `EVP_Digest` — reuses the `-lcrypto` link already added for `(creme actor)`'s own HMAC handshake), `hmac-sha256`/`-sha384`/`-sha512` (via OpenSSL's `HMAC()`, the exact one-shot call `actor.c`'s own handshake already uses), `base64-encode`/`-decode` (a small hand-rolled codec — OpenSSL's own `EVP_EncodeBlock`/`DecodeBlock` don't raise cleanly on invalid input the way native's own `Base64.decode_string` does) |
+| `secure_random.c` | `(creme secure-random)` | 3 | `secure-random-bytes`/`-hex`/`-base64` — OpenSSL's `RAND_bytes` (the same OS-entropy CSPRNG `actor.c`'s own handshake nonces already use), deliberately separate from `(creme random)`'s plain splitmix64 PRNG (`builtins.c`); hex/base64 encoding are small hand-rolled encode-only loops, matching `digest.c`'s own per-file self-contained style |
+| `cipher.c` | `(creme cipher)` | 4 | `aes-256-gcm-encrypt`/`-decrypt`/`-random-key`/`-random-nonce` — the full OpenSSL EVP AEAD sequence (`EVP_CIPHER_CTX_ctrl` for GCM IV length/tag get/set) driven directly in C, where it's simply part of `<openssl/evp.h>` (unlike native, which has to reopen Crystal's own `OpenSSL::LibCrypto` binding to reach the one entry point its high-level `OpenSSL::Cipher` wrapper never exposes); deliberately scoped to AES-256-GCM only, matching `(creme rfc8439)`'s own AEAD-first, single-algorithm cut |
+| `pkey.c` | `(creme pkey)` | 11 | `rsa-generate-key`/`ec-generate-key`/`pkey?`/`-private?`/`-type`/`-public-key`/`->pem`/`pem->pkey`/`pkey-sign`/`-verify`/`rsa-encrypt`/`-decrypt` — the full EVP_PKEY/RSA/EC_KEY/PEM C API driven directly, where (unlike native, which has to reopen Crystal's own `OpenSSL::LibCrypto` binding since that stdlib has no `OpenSSL::PKey` class hierarchy at all) it's simply part of `<openssl/evp.h>`/`<openssl/rsa.h>`/`<openssl/ec.h>`/`<openssl/pem.h>`; a `BOX_KIND_PKEY` handle holds the key's own PEM text, never a live native key pointer, reconstructing a transient one per operation |
+| `x509.c` | `(creme x509)` | 11 | `x509-self-signed-certificate`/`-create-csr`/`-sign-csr`/`-cert->pem`/`pem->x509-cert`/`-cert-subject`/`-issuer`/`-public-key`/`-not-before`/`-not-after`/`-verify-chain` — the full X509/X509_REQ/X509_STORE C API, `not-before`/`-after` converted from `ASN1_TIME` to epoch seconds via a self-contained civil-calendar calculation (Howard Hinnant's `days_from_civil`) rather than `timegm(3)`, whose declaration/feature-test-macro requirements vary across glibc/musl/BSD libc; every self-signed cert gets a `basicConstraints CA:TRUE` extension via `X509V3_EXT_nconf_nid`, required for `x509-verify-chain` to accept it as a trust anchor at all |
 | `json.c` | `(creme json)` | 2 | `json-read`/`json-write` — a small hand-rolled recursive-descent JSON parser/writer; matches native's own conventions exactly (array → vector, object → alist of `(string . value)` pairs usable with `assoc`/`cdr`/`car`, an empty object conflates with JSON null) |
+| `yaml.c` | `(creme yaml)` | 2 | `yaml-read`/`yaml-write` — unlike `json.c` above, wraps libyaml directly rather than hand-rolling a parser/emitter (a full YAML 1.1 implementation would be a much bigger lift than JSON's recursive descent); matches native's own conventions (mapping → alist, sequence → vector, an empty mapping conflates with YAML null) and its own libyaml-backed `YAML::Any`/`YAML::Builder` output closely, down to plain-scalar core-schema type resolution (bool words, `0x`/`0o`/octal/underscored ints, `.inf`/`.nan`) — one deliberate narrow divergence: a mapping KEY is always kept as its literal scalar text here, never run through that same typed resolution the way a value is on the native side (see the file's own header comment) |
 | `bigdecimal.c` | `(creme bigdecimal)` | 14 | `bigdecimal-add`/`-sub`/`-mul`/`-div`/`-neg`/`-compare`/`=?`/`<?`/`>?`/`-zero?`, `string->bigdecimal`/`integer->bigdecimal`/`bigdecimal->string`/`bigdecimal?` — a standalone boxed decimal type (like native, never hooked into the numeric tower), backed by an integer mantissa + a decimal scale on top of GMP's `mpz_t` (Java-`BigDecimal`-style, exact by construction — deliberately NOT GMP's own `mpf_t`, which is arbitrary-precision BINARY float, not exact base-10 decimal) |
-| `http.c` | `(creme http)` | 7 | `http-get`/`-head`/`-delete`/`-post`/`-put`/`-patch`/`-request` — a plain HTTP/1.1 CLIENT, raw `getaddrinfo`/`connect`/`read`/`write` (the same pattern `(creme actor)`'s own `dial()` uses); always sends `Connection: close` and drains the response until the peer closes the socket, decoding a chunked `Transfer-Encoding` body as a second pass if the server ever sends one. HTTPS/TLS is a deliberate scope cut — this project's own native spec suite for `(creme http)` never exercises it either, only plain `http://` |
+| `http.c` | `(creme http)` | 7 | `http-get`/`-head`/`-delete`/`-post`/`-put`/`-patch`/`-request` — an HTTP/1.1 CLIENT, raw `getaddrinfo`/`connect`/`read`/`write` (the same pattern `(creme actor)`'s own `dial()` uses); always sends `Connection: close` and drains the response until the peer closes the socket, decoding a chunked `Transfer-Encoding` body as a second pass if the server ever sends one. HTTPS/TLS is real (libssl, linked alongside the libcrypto this project already had for `(creme actor)`'s HMAC handshake and `(creme digest)`) — always full certificate + hostname verification (`SSL_VERIFY_PEER` against the system trust store, plus `SSL_set1_host`; no flag anywhere disables either), no separate opt-in needed, an `https://` URL just works |
 | `csv.c` | `(creme csv)` | 8 | `csv-read`/`-write`/`-read-headers`/`-write-headers` (bulk) and `csv-reader-open`/`-read!`/`-writer-open`/`-row!` (streaming, over a Port) — a self-contained RFC4180-ish parser/writer, not a port of native's own chunked-IO-optimized implementation |
 | `treelist.c` | `(creme treelist)` | — | a full RRB (Relaxed Radix Balanced) tree, matching native's own structure-sharing behavior, not just an array-backed stand-in |
 | `actor.c` | `(creme actor)` | — | real OS-thread actors, multiple `'local` nodes, and real `'tcp`/`'unix` distribution with an HMAC-SHA256 handshake — see the fuller description just below this table, and `actor.c`'s own header comment |
@@ -536,13 +664,12 @@ mis-listed below as unported): `(scheme inexact)`'s entire surface
 `T_CASE_CLOSURE`/`CaseClosure` dispatch already handles it (see
 `spec/creme/vm_spec.scm`'s own case-lambda case); `(scheme repl)`'s
 `interaction-environment` and `(scheme r5rs)`'s `null-environment`/
-`scheme-report-environment` are all trivial stubs defined directly in
-Scheme in `cvm/compiler-run.scm` (returning a placeholder symbol —
-cvm's flat, ahead-of-time-compiled global table has no real per-
-environment isolation to construct one against, and `eval` there
-already ignores its own environment argument for the same reason — see
-that file's own comments). `spec/creme/inexact_spec.scm` and
-`spec/creme/environments_spec.scm` both already cover this.
+`scheme-report-environment`, plus `(scheme eval)`'s `environment`/
+`eval`'s 2-arg form, are now genuinely isolated per environment — see
+"environment/eval" below for the full design (this used to say they
+were all trivial, non-isolating stubs; no longer true). `spec/creme/
+inexact_spec.scm` and `spec/creme/environments_spec.scm` both already
+cover this.
 `(creme random)` was similarly already fully ported straight into
 `builtins.c` (`random-real`/`-integer`/`-seed!`/`-choice`/`-shuffle`, a
 splitmix64 generator — deliberately NOT bit-for-bit compatible with
@@ -550,12 +677,30 @@ Crystal's own PCG-based `Random`, see `spec/creme/random_spec.scm`'s own
 header comment) but had likewise been left off this list.
 
 Every other `(scheme ...)` library (`process-context` beyond
-`get-environment-variable`/`exit`, `time`, `cxr`) and every other
-`(creme ...)` FFI library (`time`, `tui`,
-`rfc8439`, `prof-native`, `prof-vm`, `raft`, `jose`) has **no**
-cvm-native counterpart at all — a script that calls into one won't
-resolve at cvm load/run time. (`(creme process)` is now a partial
-exception — just `process-run`, see `process.c`'s own row above.)
+`get-environment-variable`/`exit`, `cxr`) and every other `(creme ...)`
+FFI library (`tui`, `rfc8439`, `prof-native`, `prof-vm`, `raft`, `jose`)
+has **no** cvm-native counterpart at all — a script that calls into one
+won't resolve at cvm load/run time. (`(creme process)` is now a partial
+exception — `process-run` and `sleep-ms!`, see `process.c`'s own row
+above.) `raft` here means the FFI *binding* over the `threez/raft.cr`
+shard specifically (`(creme raft)`/`(creme raft-machine)`) — that one
+genuinely has no cvm counterpart. `(creme raft-scheme)` is a separate,
+from-scratch, pure-Scheme Raft implementation (actors + SQLite, no FFI)
+that DOES run under cvm — see `modules/creme/raft-scheme/core.scm`'s own
+header comment and `spec/creme/raft_scheme_spec.scm`.
+`(creme time)` is now a FULL port (`builtins.c`): `current-time`/
+`time-difference` already existed (see the header comment right above
+`bi_current_time`); `time-add`/`time-year`/`time-month`/`time-day`/
+`time-hour`/`time-minute`/`time-second`/`time->string`/`string->time`
+are new, all reading/writing a Unix-epoch-seconds float as UTC via
+`gmtime_r`, `strftime`/`strptime` (the format strings this project's own
+spec suite uses — `%Y-%m-%d %H:%M:%S` etc. — are already
+strftime-compatible, so no separate directive-translation layer was
+needed), and a hand-rolled `days_from_civil`/`tm_to_epoch_utc` pair (a
+portable `timegm(3)` stand-in — glibc and FreeBSD/Darwin libc gate the
+real `timegm` behind different, mutually-incompatible feature-test
+macros, and `strptime`'s own `_XOPEN_SOURCE` requirement on glibc rules
+out satisfying both with one `#define`).
 
 `(creme actor)` (`actor.c`) is now a FULL port — real OS-thread actors
 (one pthread + one independent copied-globals VM per `spawn`, not a
@@ -579,10 +724,15 @@ unsupported (no `T_COMPLEX` value tag) but now has real support — see
 `angle` entry in `builtins.c`'s row above (its complete native surface,
 not a subset).
 
-Two more are *partially* covered, each only as far as this project's
-own `spec/creme` test suite needed: `(creme math)` (just `flonum->bits`/
-`bits->flonum`, not the rest of that FFI) and `(creme introspection)`
-(just `gensym`, not `macro?`/the rest). `(scheme file)`/`(creme file)`
+`(creme math)` and `(creme introspection)` are now both FULL ports:
+`(creme math)`'s complete surface (`sin`/`cos`/`tan`/`asin`/`acos`/
+`atan`/`atan2`/`exp`/`log`/`log2`/`log10`/`pow`/`hypot`/`pi`/`e`, plus
+`flonum->bits`/`bits->flonum`) is already in `builtins.c`'s own table
+above; `(creme introspection)`'s `macro?` (recognizes cvm's own
+`T_MACRO` tag) and `record-fields` (generic positional reflection over
+any `define-record-type` instance's `SchemeRecord` — no per-type
+dispatch, same as native) are new, alongside the pre-existing `gensym`/
+`runtime`/`bound-names`/`library-exports`. `(scheme file)`/`(creme file)`
 is now a FULL port, split across `bootstrap.c` (`file-read`/`file-write`/
 `delete-file`) and `builtins.c` (`file-exists?`/`open-input-file`/
 `open-output-file`/`open-binary-input-file`/`open-binary-output-file`/
@@ -591,12 +741,26 @@ is now a FULL port, split across `bootstrap.c` (`file-read`/`file-write`/
 `current-directory`) -- `with-input-from-file`/`with-output-to-file`
 needed a genuinely new piece first: `(current-input-port)`/`(current-
 output-port)` used to be hardcoded, non-redirectable sentinels (every
-port-defaulting builtin read straight through them); they're now a
-mutable per-thread indirection instead (`g_current_input_port`/
-`g_current_output_port`, `builtins.c`), and these two builtins reuse the
-SAME dynamic-wind unwind-stack mechanism `dynamic-wind` itself uses (see
-`bi_with_input_from_file`'s own comment) so the previous port is
-restored even if the redirected thunk escapes via an error. `(scheme
+port-defaulting builtin read straight through them), then (in a later
+pass) a mutable-but-plain per-thread C global indirection; they're now
+genuine `T_PARAMETER` values (`vm->current_output_param`/
+`vm->current_input_param`, one pair per VM instance — see `vm.h`'s own
+VM-struct doc comment and `builtins.c`'s `cvm_init_current_ports`), so
+`parameterize` can genuinely retarget them (this used to abort with
+"parameterize: expected a parameter object"). Every port-defaulting
+builtin still reads through the SAME two names it always did
+(`g_current_output_port`/`g_current_input_port`), now macros expanding
+to `vm->current_output_param->value.as.port`/the input equivalent, so
+no other call site needed to change. `with-input-from-file`/
+`with-output-to-file` reuse the SAME dynamic-wind unwind-stack mechanism
+`dynamic-wind` itself uses (see `bi_with_input_from_file`'s own comment)
+so the previous port is restored even if the redirected thunk escapes
+via an error. An actor spawn (`cvm_new_child_vm`) gives its own VM a
+FRESH pair rather than inheriting the parent's via that function's own
+wholesale `globals` memcpy — sharing one Parameter across actor threads
+would let one actor's `parameterize`/`with-output-to-file` redirect a
+sibling's default port, a genuine cross-thread bug, not just wrong
+scoping. `(scheme
 read)`'s `read`/
 `open-input-string`/`eof-object` and `(scheme eval)`'s `eval` also have
 no NATIVE (C) counterpart in this table at all, but ARE available when
@@ -604,6 +768,38 @@ running under cvm's own "compiler mode" (see below) -- `cvm/compiler-
 run.scm` defines all four itself, in Scheme, reusing the self-hosted
 reader/compiler already loaded there rather than adding a second parser/
 evaluator in C (see that file's own comments on both).
+
+A batch of smaller R7RS-completeness fixes landed together (`builtins.c`
+unless noted): `eqv?`/`equal?` now compare floats by bit pattern, not
+`==`, so `(eqv? 0.0 -0.0)` is correctly `#f` (`vm.c`'s `cvm_eqv`);
+`equal?` now terminates on circular structure (an ancestor-tracking
+`EqualSeen` stack, same idea as `guard`'s own unwind mechanism, just for
+comparison instead of control flow) and has a real byte-compare case
+for bytevectors (previously pointer-identity only, via the `eqv?`
+fallback); `number->string`'s optional radix argument (2–36, exact
+integers only, matching native) is honored instead of silently ignored;
+`error-object-message` returns the bare message instead of
+message-plus-irritants concatenated; `read-error?`/`file-error?` exist
+as honest always-`#f` stubs (cvm has one unified condition shape, not
+native's distinct read-error/file-error record types); `list-set!`/
+`list-copy`/`make-list`/`square`/`make-promise` are new, and `member`/
+`assoc` accept an optional 3rd comparison-predicate argument;
+`vector->list` accepts optional start/end args; `write` now emits
+`|...|`-escaped symbols the same way native does (`needs_pipe_escape?`,
+mirrored from `values.cr`); `write-simple` is `write` under another
+name (its contract — never emit datum labels — is exactly what `write`
+already does), while `write-shared` is a genuine, independent two-pass
+implementation (`write_value_shared`/`share_mark`) that detects
+sharing/cycles via a whole-traversal seen-set and emits real `#n=`/`#n#`
+datum labels — deliberately NOT an alias to `write`, which would
+infinite-loop on a circular argument since `write_value`'s own `T_PAIR`
+case has no cycle guard; `flush-output-port` is a real `fflush(3)` for
+the two buffered-`FILE*`-backed port kinds (stdout, output files) and a
+no-op for the synchronous-buffer `PORT_KIND_OUTPUT_STRING`; `read-string`
+mirrors native's own `IO#read_fully?`-based all-or-nothing contract (all
+`k` characters available or an eof-object — not R7RS's more literal
+"up to k, or as many as available" wording, matched to native instead
+of diverging from it on this edge case).
 
 ### `.sld` pure-Scheme libraries: transparent, not special-cased
 
@@ -712,69 +908,373 @@ live, and close (copy out) when it returns. This is why the native
 profiler mostly can't see per-Scheme-function detail (see "Profiling"
 above) — Scheme-level calls never become real C stack frames.
 
+### Datum labels (`#n=`/`#n#`) in a precompiled `--emit-cvm` program
+
+A quoted literal using R7RS's datum-label syntax (`'#0=(1 2 . #0#)`, a
+genuine cycle, or `'(#0=(a b) #0#)`, non-cyclic sharing) now round-trips
+correctly through `--emit-cvm` + `cvm` — both the compiled-literal
+identity (`eq?`-preserving, not just structurally-equal duplicates) and,
+for a genuine cycle, without hanging. This spans three files:
+
+- **`src/scheme/compile/chunk_serializer.cr`**: `write_datum` used to
+  recurse unconditionally over a literal's own pair/vector structure —
+  a genuinely circular one would never terminate, a real (previously
+  undiscovered) crash/hang bug, not just "unsupported". Now does a
+  cheap first pass (`count_datum_visits`, an ancestor-tracking walk —
+  the same technique `cvm_equal`/`write_value_shared` already use, just
+  ported to Crystal) counting how many times each distinct pair/vector
+  pointer (by `object_id`, genuine reference identity) is reached;
+  anything reached ≥2 times — whether via a real cycle or separate,
+  non-cyclic sharing — gets a new `TAG_LABEL_DEF`/`TAG_LABEL_REF` wire
+  tag pair (13/14) the same way `write-shared`'s own `#n=`/`#n#`
+  notation works: `TAG_LABEL_DEF` precedes that value's own ordinary
+  tag+bytes the FIRST time it's written, `TAG_LABEL_REF` stands alone
+  for every later encounter. An ordinary, unshared literal serializes to
+  byte-identical output as before — these tags are strictly additive.
+- **`cvm/loader.c`**: `read_datum` (renamed to `read_datum_rec` for the
+  recursive path, with a thin `read_datum` wrapper that resets the
+  per-top-level-datum label table — R7RS: "a datum label's scope is
+  only the outermost datum it appears in") now recognizes both new
+  tags. `TAG_PAIR`/`TAG_VECTOR`'s own container is registered under its
+  label BEFORE its car/cdr/items are read — the same placeholder-then-
+  patch order the code already used for building the container itself,
+  so a `TAG_LABEL_REF` appearing inside that same container's own
+  contents (a genuine cycle) correctly resolves to the already-
+  allocated pointer instead of needing a second pass.
+- **Two genuinely separate, incidental bugs found and fixed along the
+  way** (both pre-existing, both independent of datum labels
+  specifically — reachable by any runtime-built cycle too, e.g. via
+  `set-cdr!`/`vector-set!`, not just a literal): native Crystal's own
+  `Cons`/`SchemeVector#write_seq` (`src/scheme/value/values.cr`) had no
+  cycle guard at all and hung forever printing a circular value —
+  triggered unconditionally by `emit_load_literal`'s own profiler-
+  sample tagging (`bytecode_compiler.cr`) for EVERY compiled literal,
+  meaning a circular literal hung at compile time in plain `./bin/creme`
+  too, before ever reaching `--emit-cvm`'s own serializer. Fixed with an
+  ancestor-tracking guard (`Scheme.write_seq_ancestor?`/
+  `mark_write_seq_ancestor`/`unmark_write_seq_ancestor`, module-scoped
+  rather than per-`SchemeBaseValue`-including-class, so a cycle spanning
+  both a pair AND a vector is still caught). Separately,
+  `Scheme.proper_list?` (`src/scheme/helpers.cr`, backing `list?`) also
+  had no cycle guard — R7RS requires `list?` to return `#f` (not hang)
+  on a circular list — fixed with Floyd's tortoise-and-hare. `cvm`'s own
+  `list?` builtin (`cvm/builtins.c`) had the identical bug, fixed the
+  same way.
+
+**cvm's own RUNTIME `read`** (compiler-mode/REPL only, backed by the
+self-hosted `modules/creme/compiler/reader.sld`) USED to be a separate
+gap from the wire-format work above — it couldn't parse `#n=`/`#n#`
+syntax at all, a deliberate, deferred non-goal per that file's own
+header comment. Now fixed there too (`parse-datum-label`, a mutable
+`current-datum-labels` alist reset once per TOP-LEVEL datum — R7RS: "a
+datum label's scope is only the outermost datum it appears in" — by a
+new `read-toplevel-datum` wrapper only `read-program`'s own loop calls,
+never nested/recursive `read-datum` calls, so labels stay visible
+across an entire outermost datum's own nested structure but not across
+separate top-level forms): genuine cycles through PAIRS use the same
+placeholder-then-patch idea as the C loader (a fresh, empty pair bound
+to the label BEFORE recursing into its own contents, `set-car!`/
+`set-cdr!`-patched to match once known); a labeled non-pair datum
+(symbol/number/string/vector/...) is simply bound to its own value
+directly, since none of those can participate in a genuine cycle
+through themselves the way a pair's own car/cdr can — except a vector,
+which specifically means a self-referential VECTOR literal
+(`#0=#(#0#)`) is the one remaining unsupported case (no test in this
+project's own spec suite needs one). Since this reader is shared by
+both `--self-hosted` and `cvm/cvm`, the fix applies to both.
+
+### `environment`/`eval`'s 2-arg form/`null-environment`: real per-environment isolation
+
+`(scheme eval)`'s `environment`/`eval` (2-arg form) and `(scheme r5rs)`'s
+`null-environment` used to be non-isolating stubs — `eval` ignored
+whatever environment specifier it was given entirely, always
+evaluating against the one real global table, since cvm's `VM` struct
+has exactly one flat `globals[]` array. They're now genuinely isolated,
+without touching that flat-table architecture for the *whole running
+program* at all: an "environment" is just a genuinely separate,
+completely independent `VM` (`cvm_new_empty_vm`, `vm.c`) — no call
+stack/frames actually used, just its own `globals[]` — wrapped as an
+opaque `T_BOX(BOX_KIND_ENVIRONMENT)` value so Scheme can hold and pass
+it around. Three new `cvm/bootstrap.c` builtins expose this:
+`make-environment` (a fresh, empty one), `environment-copy-global!`
+(copies a name's current value from the CALLING vm into a target
+environment's own table under a possibly-different name — a quiet
+no-op, not an abort, if the source name isn't bound at all, since a
+library's own export list can legitimately include a *syntax* keyword
+like `and`/`or` that cvm never binds as a global to begin with — those
+are handled by the compiler directly, independent of environment), and
+`load-chunk-bytes-into` (loads+runs compiled bytecode against a GIVEN
+environment's table instead of always the currently-running one — what
+makes `eval`'s 2-arg form actually target the right place).
+`cvm/compiler-run.scm` builds on these:
+
+- `(environment import-set ...)`: a fresh, empty environment populated
+  by copying exactly each import-set's own resolved bindings —
+  `modules/creme/compiler/compiler.sld`'s new
+  `import-set-resolved-bindings` (reusing the already-existing
+  `library-export-alist`) computes the real only/except/prefix/rename
+  resolution, a genuine filter/rename over a library's own export
+  alist — distinct from (and more complete than) `import-set-alias-
+  defines`, which only ever computed the handful of *extra* aliases a
+  top-level `(import ...)` needs beyond what native `import!`/
+  `ensure-libraries-loaded!` already brings in for free.
+- `(null-environment version)`: `make-environment` with nothing
+  imported at all. Correctly "only syntax, no procedures" for free —
+  cvm has no global bindings for special forms in the first place (they
+  compile directly, independent of any environment), so an empty table
+  already IS exactly that.
+- `(scheme-report-environment version)`/`(interaction-environment)`:
+  both wrap the CURRENTLY RUNNING vm directly (`current-environment`,
+  `cvm/bootstrap.c`) rather than building a fresh one — deliberately
+  mirroring native's own equally-deliberate non-isolation for these two
+  specifically (`r5rs.cr`'s own comment: "wraps `@base_env`... not any
+  Scheme-defined additions").
+- `eval`'s 2-arg form: `load-chunk-bytes-into` the given environment
+  instead of `load-chunk-bytes` into the current one. Compiling the
+  form itself is unaffected either way (`compile-program` produces
+  plain bytecode bytes, independent of any VM); only the LOAD step,
+  resolving `GetGlobal`/`DefGlobal` operands, needs to know which table
+  to target.
+
+One easy trap avoided: `cvm_register_required_builtins` (`main.c`)
+always registers the full base+write builtin set the FIRST time it's
+called for a given VM, regardless of what's actually needed — correct
+for the one real top-level VM (which always needs `base`/`write`
+eventually anyway) but exactly wrong for a fresh environment VM, which
+`load-chunk-bytes-into` also runs through: `cvm_new_empty_vm` pre-marks
+its own VM as `base_write_registered` already-done, so an environment
+never silently regains `+`/every other base builtin the instant
+anything is `eval`'d into it.
+
+**Fused opcodes and `except`/`only`, fixed**: fused opcodes (`+`/`-`/`*`/
+`car`/`cdr`/... in CALL position — `Add`/`Sub`/`Cxr`/etc, baked in at
+compile time identically regardless of backend) never consult ANY
+environment's global table at all — only a bare (non-called) reference
+to one of these names does a real lookup. So excluding e.g. `+` from an
+environment used to leave `(eval '+ env)` correctly failing while
+`(eval '(+ 1 2) env)` still silently worked there, since the fused `Add`
+opcode never checked which environment it was running in. Fixed without
+giving up fusion generally: a new `environment-bound?` builtin
+(`cvm/bootstrap.c`, mirrors `environment-copy-global!`'s own bound check)
+lets `eval` (`cvm/compiler-run.scm`) ask, for the specific target
+environment, which of `compiler.sld`'s `fusable-prim-names` it actually
+lacks; `eval` then calls the newly-exported `mark-redefined!` for each
+such name — the SAME mechanism `compiler.sld` already uses to stop
+fusing a primitive a top-level `(define + ...)` has shadowed — for the
+duration of compiling just that one form (`dynamic-wind`-protected, then
+`unmark-redefined!` reverts it), forcing an ordinary `GetGlobal`+`Call`
+that genuinely fails against that environment, same as a bare reference
+already did. Cxr names (`cadr`, etc.) aren't covered — they're a
+pattern-recognized family, not enumerable from a fixed table — but
+`fused-prim-table`'s ~24 named entries (`+`/`-`/`*`/comparisons/`cons`/
+`vector-ref`/`vector-set!`/... ) all are. See `spec/creme/r7rs/
+ch05_program_structure_spec.scm`'s own "except" case, now passing
+unconditionally, and its own header comment.
+
+**A library body genuinely seeing only what it explicitly imports,
+fixed — without a separate VM per library.** cvm's global table is one
+flat, whole-program-wide `globals[]` array with no runtime notion of
+"which library owns this name" at all — every top-level `define`,
+whether from the user's own script or any imported library's `(begin
+...)` body, lands in the exact same namespace. The obvious-looking fix
+— give every library its own VM (cvm already has the machinery,
+`cvm_new_empty_vm`/`make-environment`, built for `environment`/`eval`)
+— was tried in design and **rejected**: cvm bakes every `GetGlobal`/
+`DefGlobal` operand into a raw array index into one *specific* VM's
+table, once, at chunk-load time (`resolve_globals`, `loader.c`). A
+library's own closure (say, `sxql-run` calling sibling helper
+`sxql-yield`, both defined in the same library) is permanently tied to
+whichever VM it was loaded against; if that closure were later
+*exported* and called from a *different* VM's dispatch context (the
+importer's own VM), its internal `GetGlobal` for `sxql-yield` would
+resolve against the **caller's** table, not the one it was actually
+compiled against — silently misresolving. Native Crystal's `Env`
+doesn't have this problem because a closure carries its own defining
+`Env` *by reference* (parent-chained lookup, resolved by name at call
+time); cvm's baked-integer-index model has no equivalent notion of "this
+closure's home globals table," and giving it one would mean threading a
+per-frame "which VM do my global ops resolve against" tag through the
+calling convention itself — a deep, invasive dispatch-loop change, out
+of scope here.
+
+Fixed instead purely at **compile time**, in the self-hosted compiler
+(`modules/creme/compiler/compiler.sld`), keeping cvm's runtime
+completely unchanged (one flat table, ordinary `GetGlobal`/`DefGlobal`,
+no new VM struct, no new C builtins at all): when `ensure-library-
+loaded!` compiles a library's own body, it first computes that
+library's own visible-name set — its own top-level defines (a small
+dedicated recognizer, `top-level-form-names`, covering `define`/
+`define-values`/`define-record-type`/`define-syntax`/`defmacro`; NOT
+the existing `expand-definition-form`/`record-type->define-forms`,
+which desugar `define-record-type` into an internal, vector-based fake-
+record shape for `hoist-internal-defines`' own letrec* folding and
+critically don't generate a binding for the type name itself, unlike a
+REAL top-level `define-record-type`, which binds type/ctor/pred/
+accessors/mutators all as real globals per `vm.c`'s
+`build_record_bindings`) UNION'd with the external names its own
+`import` clauses actually resolve (`import-set-resolved-bindings`,
+already real only/except/prefix/rename resolution, reused unchanged
+from `environment`'s own machinery — this only needs a dependency's
+*declared* export list, not for it to already be loaded, so it runs
+independently of `ensure-libraries-loaded!` actually loading anything).
+`current-library-visible-names`/`current-library-mangle-prefix`
+(mutable, `#f` by default — ordinary top-level/REPL/script compiles are
+completely unaffected) are bound for the duration of compiling that
+library's own clauses (`dynamic-wind`-protected, so a mid-library
+compile error can't leave state clobbered): `compile-var-ref!`'s new
+`global-ref-name` helper emits an ordinary `GetGlobal` for a name in the
+visible set, or a `GetGlobal` against a **mangled name** (`"<library
+path>:<name>"`, guaranteed never genuinely bound) otherwise — so the
+library's own body still compiles and *loads* successfully (matching
+native's own observed behavior: a library loads fine even referencing
+something it can't see), and only *calling* through to the excluded
+name raises "unbound variable", at the R7RS-mandated moment, not a
+moment earlier.
+
+One subtlety that cost real debugging time: `compile-var-ref!` is NOT
+the only place a bare global name gets compiled — `resolve-callee`
+(feeding the fused-callee `CallGlobal`/`TailCallGlobal` opcodes used for
+an ordinary, non-primitive-fused function call in callee position) has
+its own, separate `chunk-add-const!` call and was missed on the first
+pass; a call to an excluded name kept silently working via this second
+path even after `compile-var-ref!` was fixed, until `resolve-callee`
+was routed through the same `global-ref-name` helper. Fused *primitive*
+opcodes (`+`/`-`/`car`/... in call position) needed the exact same
+`mark-redefined!`/`unmark-redefined!` gating `eval`'s own `except`/
+`only` fix uses (above), applied now per-library-compile instead of
+per-eval-call: every `fusable-prim-names` entry not in the library's own
+visible set is temporarily marked "redefined" for the duration of
+compiling that library, so `(+ 1 2)` inside an unauthorized library body
+also correctly falls back to the (now-mangled) `GetGlobal`+`Call` path
+instead of silently fusing.
+
+Deliberately NOT attempted: a library body's own `prefix`/`rename`
+import-set being usable *by its renamed name* inside that same
+library's own body (`import-set-alias-defines`'s aliasing-`define`
+generation is only ever invoked from a top-level `(import ...)`/
+`import!`, not from `process-library-clause!`'s own `import` case — a
+separate, narrower, not-currently-spec-tested gap noticed during this
+investigation); and restricting the **top-level program's own** import
+visibility (as opposed to a library body's) — a much higher-blast-
+radius case (would affect every existing script, not just library
+bodies), left for a future, dedicated pass.
+
+**Importing an unknown library name now raises, too** (previously a
+silent no-op under cvm specifically — README's old "Deliberate cuts"
+wording, "no eval, no dynamically loading a library cvm wasn't built
+with"). `ensure-library-loaded!`'s native-fallback branch (no `.sld`
+file found) now checks whether the name has the `(creme builtin
+<family>)` shape every genuine native pseudo-library uses — every real
+`(scheme ...)`/`(creme ...)` library this project ships has a real
+`.sld` wrapper file, so a name with neither a `.sld` file nor this shape
+is genuinely unknown, raising `"import: unknown library"` instead of
+silently doing nothing. This check only fires when `(global-bound?
+'read-whole-file)` — i.e. genuinely running under cvm, where "no `.sld`"
+reliably means "no such file exists." Under native/`--self-hosted`,
+`read-whole-file` is *always* unbound regardless of whether a real
+`.sld` exists (the whole reason `try-read-whole-file`/`file-read` are
+kept deliberately separate, see the `include`/`file-read` entry above),
+so "no src" there carries no information about whether a name is real —
+without this guard, the check would have wrongly rejected perfectly
+ordinary libraries like `(scheme base)` whenever a spec (e.g.
+`compiler_libraries_spec.scm`'s `should-match-native?` cases) compiles a
+quoted program reentrant under native Crystal itself; native's own real
+`import!` already raises this exact error correctly, by a completely
+different path.
+
 ## Known bugs (genuine defects, not deliberate cuts)
 
-- **NOT a cvm-specific bug, but affects every program cvm runs (cvm
-  always executes self-hosted-compiled bytecode) — found while porting
-  `(creme actor)`, worth recording here regardless:** a body with TWO
-  `define`s and a plain (non-`define`) expression between them can
-  evaluate the second `define`'s initializer BEFORE that intervening
-  expression runs, if the initializer's correctness depends on a side
-  effect that expression has on shared/global mutable state:
+- **FIXED — was NOT a cvm-specific bug, but affected every program cvm
+  runs (cvm always executes self-hosted-compiled bytecode) — found
+  while porting `(creme actor)`:** a body with a `define` following a
+  preceding plain (non-`define`) expression could evaluate that
+  `define`'s own initializer BEFORE the preceding expression ran, if the
+  initializer's correctness depended on a side effect that expression
+  had on shared/global mutable state:
   ```scheme
   (define worker 42)
   (register! worker)        ; sets some global registry
-  (define found (lookup))   ; should see register!'s effect -- doesn't
+  (define found (lookup))   ; should see register!'s effect -- didn't
   ```
-  `found` ends up holding whatever `(lookup)` would have returned
-  BEFORE `register!` ran. Reproduces with no shard/library dependency
-  at all (a bare top-level `set!`/global-variable pair) under `./bin/
-  creme --self-hosted` too, and does NOT reproduce under plain `./bin/
-  creme` (the native Crystal compiler) — meaning this is a bug in the
-  **self-hosted Scheme compiler itself**
-  (`modules/creme/compiler/compiler.sld`'s own body → `letrec*`-
-  equivalent transform), not in cvm's C dispatch loop; it just also
-  affects cvm since cvm always runs self-hosted-compiled bytecode. This
-  body shape is *permitted* here (see the "definition after expression"
-  pending case in the Crystal-side spec suite) and should still
-  evaluate everything in source order regardless — that in-order
-  guarantee is what's being violated, not the permissiveness itself.
-  **Also confirmed with only ONE `define`, not two**: a single
-  `(define worker (spawn ...))` placed right after a preceding
-  side-effecting expression (`(start-node ...)`, which reassigns the
+  `found` used to end up holding whatever `(lookup)` would have
+  returned BEFORE `register!` ran. Reproduced with no shard/library
+  dependency at all (a bare top-level `set!`/global-variable pair)
+  under `./bin/creme --self-hosted` too, and did NOT reproduce under
+  plain `./bin/creme` (the native Crystal compiler) — confirming this
+  was a bug in the **self-hosted Scheme compiler itself**
+  (`modules/creme/compiler/compiler.sld`'s `hoist-internal-defines`),
+  not in cvm's C dispatch loop; it just also affected cvm since cvm
+  always runs self-hosted-compiled bytecode. This body shape is
+  *permitted* here (see the "definition after expression" pending case
+  in the Crystal-side spec suite) — the bug was that it didn't evaluate
+  in source order regardless, not the permissiveness itself. Also
+  affected a body with just ONE such `define` (not requiring two, as
+  originally suspected while investigating via `(creme actor)`): a
+  single `(define worker (spawn ...))` placed right after a preceding
+  side-effecting expression (`(start-node ...)`, reassigning the
   calling actor's own current node) had its initializer's `spawn` run
-  BEFORE `start-node`'s reassignment took effect — the spawned actor
-  silently inherited the WRONG node, and every message sent to it via
-  its registered name vanished with no error (a misrouted message isn't
-  a error, just a `receive!` that blocks forever) — found and worked
-  around the same way while writing `actor_spec.scm`'s Phase 4 (TCP/
-  Unix transport) cases. So the trigger is any body-level `define`
-  following a preceding plain expression whose side effect the
-  `define`'s own initializer depends on — not specifically "two defines
-  with an expression between them". Workaround used throughout
-  `spec/creme/actor_spec.scm`: restructure as a `let*` (whose own
-  sequential-binding evaluation is NOT affected — confirmed by direct
-  testing) instead of a body-level `define` following a preceding
-  expression. Not yet root-caused further or fixed — out of scope for
-  the actor port itself.
+  before `start-node`'s reassignment took effect — the spawned actor
+  silently inherited the wrong node, and every message sent to it via
+  its registered name vanished with no error.
+
+  **Root cause**: `hoist-internal-defines` folded a body's own internal
+  defines into a `letrec*` by bucketing forms into two SEPARATE lists —
+  all `define`s (became `letrec*`'s own bindings, evaluated as a block
+  BEFORE the body) and everything else (became the body, run after) —
+  silently losing the true interleaved source order whenever a body
+  mixed defines and plain expressions. **Fix**: keep `letrec*` only for
+  what it's actually needed for — pre-declaring every defined name
+  (bound to an unspecified placeholder) so a lambda defined earlier in
+  the body can still forward-reference one defined later (ordinary
+  mutual recursion, e.g. `even?`/`odd?`) — and replace each `define`,
+  IN PLACE, in the body's own original order, with an ordinary `set!`
+  to its already-declared name (exactly what a `define` actually does
+  once its name already has a location to assign into). Every non-
+  define form is left untouched, so the full interleaved sequence now
+  evaluates in exactly the order the source wrote it in, while forward-
+  reference visibility for mutual recursion is unaffected. See
+  `spec/creme/r7rs/ch07_formal_syntax_spec.scm`'s own "evaluates a
+  body's own definitions and expressions in source order" case (the
+  real regression test for this — it was previously only worked around,
+  never actually tested, throughout `spec/creme/actor_spec.scm`, whose
+  own workaround comments this fix makes optional but doesn't require
+  reverting).
 
 ## Deliberate cuts (not bugs — see comments at each site)
 
-- **Fixed-capacity register stack and frame array** (`CVM_STACK_CAP`,
-  `CVM_FRAMES_CAP` in `vm.h`), never reallocated during execution — because
-  an *open* upvalue holds a raw `Value *` into the stack, and growing via
-  `realloc` would silently invalidate every such pointer. Generous fixed
-  caps sidestep the whole problem rather than solving it generally.
+- **Fixed-capacity register stack and frame array for a given VM's whole
+  lifetime**, never reallocated once built — because an *open* upvalue
+  holds a raw `Value *` into the stack, and growing via `realloc` would
+  silently invalidate every such pointer. Generous fixed caps sidestep the
+  whole problem rather than solving it generally. The CAP itself is now
+  embedder-configurable, though, not a hardcoded constant baked into the
+  VM struct's own layout: `cvm_alloc_vm(stack_cap, frames_cap)` (`vm.c`)
+  is the one place every VM gets built (the main script's own top-level
+  VM, a spawned actor's child VM, an `environment`/`eval` target), and any
+  of them can be given a tighter or looser limit than
+  `CVM_DEFAULT_STACK_CAP`/`CVM_DEFAULT_FRAMES_CAP` (`vm.h`) — the running
+  `cvm` binary itself exposes this today via the `CVM_STACK_CAP`/
+  `CVM_FRAMES_CAP` environment variables (`main.c`), ahead of a real
+  embedding API that would pass these values in directly.
 - **Global resolution is ahead-of-time and unconditional**: `loader.c`
   rewrites every `GetGlobal`/`DefGlobal`/`CallGlobal`/`TailCallGlobal`
   operand from a const-pool symbol index to a direct index into the VM's
   global table, once, at load time — no per-call version check like the
   Crystal VM's inline cache. Sound only because this is one static, closed
   program with no `eval`/redefinition at runtime.
-- **Fused-op deopt paths are hard aborts, not real fallbacks.** The Crystal
-  VM's `Cxr`/`Abs`/`NumEq`/etc. fall back to the real builtin when their fast
-  path's precondition fails (non-pair `cxr`, non-fixnum `abs`, ...); this VM
-  just aborts with a message instead.
+- **Most fused-op deopt paths are real fallbacks now, not hard aborts.**
+  `Cxr`/`Abs`/`CmpZero` (`zero?`/`positive?`/`negative?`) fall back to the
+  real accessor/builtin when their fast path's precondition fails (non-pair
+  `cxr`, non-fixnum `abs`, non-fixnum comparison), exactly like the Crystal
+  VM's own `unary_prim_deopt` — resolving the shared `d` operand's const-
+  pool reference to either an already-resolved `T_BUILTIN` (native-compiled
+  bytecode) or a bound global looked up by name (self-hosted-compiled
+  bytecode) and calling it. Still-open, narrower gap: the immediate-
+  arithmetic family's fused ops (`AddImm`/`SubImm`/`MulImm`) still hard-
+  abort on a non-fixnum operand instead of deopting to the real `+`/`-`/`*`
+  (which would itself promote to float/rational for that case) — not
+  reachable by anything this project's own spec suite or bench exercises,
+  same footnote the overflow case below carries.
 - **`HelperForm`** (the top-level `(import ...)`) is a runtime no-op —
   imports are already fully resolved by the Crystal compiler at *emit*
   time, and any pure-Scheme library body they need is already flattened
@@ -784,13 +1284,20 @@ above) — Scheme-level calls never become real C stack frames.
   no `eval`, no dynamically loading a library cvm wasn't built with.
 - Macros (`define-syntax`/`syntax-rules`/`defmacro`) are always gone by
   compile time regardless of backend — nothing cvm-specific there, for an
-  ordinary precompiled program. `Op::HelperForm`'s kind==4 (top-level
-  `defmacro`) is the one exception, needed for the "Compiler mode"/REPL
-  scenario above: it binds a real `T_MACRO` runtime value so `expand-if-
-  macro` can recognize a `defmacro` exported from a library compiled
-  straight to bytecode when the self-hosted compiler runs reentrant under
-  cvm — see that section's own description. `define-syntax` stays a pure
-  no-op either way (no runtime pattern-matching support in this VM).
+  ordinary precompiled program. `Op::HelperForm`'s kind==3 (top-level
+  `define-syntax`) and kind==4 (top-level `defmacro`) are both exceptions,
+  needed for the "Compiler mode"/REPL scenario above: each binds a real
+  `T_MACRO` runtime value so `expand-if-macro` can recognize a
+  `define-syntax`/`defmacro` exported from a library compiled straight to
+  bytecode when the self-hosted compiler runs reentrant under cvm — see
+  that section's own description. Neither kind does any runtime
+  pattern-matching itself (this VM has no such machinery in C);
+  `bi_expand_if_macro` (`bootstrap.c`) bridges both kinds out to the
+  already-loaded self-hosted compiler's own `defmacro-expand-form`/
+  `define-syntax-expand-form` (`compiler.sld`), which do the real
+  expansion work — so a `syntax-rules` macro, including one exported
+  across a library boundary, works the same as a `defmacro` here, not as a
+  no-op.
 
 ## Files
 
@@ -804,16 +1311,19 @@ above) — Scheme-level calls never become real C stack frames.
 - `vm.c` — the dispatch loop, call/upvalue machinery, global table,
   guard/parameterize unwind machinery (`cvm_abort`/`cvm_raise_condition`).
 - `builtins.c` — the R7RS-base-ish builtin surface (see table above).
-- `mux.c`/`mux.h` — `(creme mux)`, a real HTTP server via facil.io.
+- `mux.c`/`mux.h` — `(creme mux)`, a real HTTP server via poll(2) + picohttpparser. Dispatch is either inline (one thread, `mux-listen!`'s "pool" option `#f`, the default) or a growable pool of fully independent SO_REUSEPORT worker threads (`#t`/an integer max), each with its own child VM and no cross-thread handoff at all — the pool grows/shrinks with load between a permanent floor and that max.
 - `sql.c`/`sql.h` — `(creme sql)`, real SQLite via the C API.
-- `hashtable.c`/`hashtable.h` — `(creme hash-table)`, via facil.io's `fiobj_hash`.
+- `hashtable.c`/`hashtable.h` — `(creme hash-table)`, via Verstable.
 - `strings.c`/`strings.h` — `(creme string)`/`(creme format)`.
 - `bootstrap.c`/`bootstrap.h` — `load-chunk-bytes`/`import!`/
   `expand-if-macro`, see "REPL" above.
 - `regex.c`/`regex.h` — `regexp`/`regexp-matches?` via PCRE2, see "REPL" above.
-- `process.c`/`process.h` — `(creme process)`'s `process-run`, via POSIX
-  fork/pipe/execvp/waitpid — see "Native builtins and library coverage" above.
-- `repl.scm` — the REPL driver script, precompiled into `repl.cvmc`.
+- `process.c`/`process.h` — `(creme process)`'s `process-run` (POSIX
+  fork/pipe/execvp/waitpid) and `sleep-ms!` (`nanosleep`) — see "Native
+  builtins and library coverage" above.
+- `repl.scm` — the REPL driver script; a thin shim over `(creme repl)`
+  (`modules/creme/repl.sld`), run directly as source (`./cvm/cvm
+  cvm/repl.scm`, see "REPL" above) — never precompiled via `--emit-cvm`.
 - `compiler-run.scm` — the compiler-mode driver script (see "Compiler
   mode" above), precompiled into `compiler-run.cvmc`.
 - `profiler.c`/`profiler.h` — the `--profile` samplers, see "Profiling" above.

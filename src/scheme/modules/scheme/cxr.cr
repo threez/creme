@@ -338,6 +338,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "cxr"], Scheme::Builtins::Cxr
+    register_library ["creme", "builtin", "cxr"], Scheme::Builtins::Cxr
   end
 end

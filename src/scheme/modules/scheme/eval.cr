@@ -37,6 +37,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "eval"], Scheme::Builtins::EvalLibrary
+    register_library ["creme", "builtin", "eval"], Scheme::Builtins::EvalLibrary
   end
 end

@@ -96,6 +96,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "reader"], Scheme::Builtins::ReaderLibrary
+    register_library ["creme", "builtin", "reader"], Scheme::Builtins::ReaderLibrary
   end
 end

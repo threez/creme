@@ -445,18 +445,18 @@ static Value v_mutable_treelist(RRBNode *root) {
 }
 
 static RRBNode *tl_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.as.box.kind != BOX_KIND_TREELIST) cvm_abort("%s: expected a treelist", who);
-  return (RRBNode *)v.as.box.ptr;
+  if (v.tag != T_BOX || v.aux != BOX_KIND_TREELIST) cvm_abort("%s: expected a treelist", who);
+  return (RRBNode *)v.as.ptr;
 }
 
 static MutableTreelistState *mtl_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.as.box.kind != BOX_KIND_MUTABLE_TREELIST) cvm_abort("%s: expected a mutable treelist", who);
-  return (MutableTreelistState *)v.as.box.ptr;
+  if (v.tag != T_BOX || v.aux != BOX_KIND_MUTABLE_TREELIST) cvm_abort("%s: expected a mutable treelist", who);
+  return (MutableTreelistState *)v.as.ptr;
 }
 
 static RRBNode *any_tree_arg(Value v, const char *who) {
-  if (v.tag == T_BOX && v.as.box.kind == BOX_KIND_TREELIST) return (RRBNode *)v.as.box.ptr;
-  if (v.tag == T_BOX && v.as.box.kind == BOX_KIND_MUTABLE_TREELIST) return ((MutableTreelistState *)v.as.box.ptr)->root;
+  if (v.tag == T_BOX && v.aux == BOX_KIND_TREELIST) return (RRBNode *)v.as.ptr;
+  if (v.tag == T_BOX && v.aux == BOX_KIND_MUTABLE_TREELIST) return ((MutableTreelistState *)v.as.ptr)->root;
   cvm_abort("%s: expected a treelist", who);
 }
 
@@ -572,7 +572,7 @@ static Value bi_treelist_to_vector(VM *vm, Value *args, int nargs) {
 static Value bi_treelist_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("treelist?: expected an argument");
-  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_TREELIST);
+  return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_TREELIST);
 }
 
 static Value bi_treelist_empty_p(VM *vm, Value *args, int nargs) {
@@ -866,7 +866,7 @@ static Value bi_mutable_treelist_to_vector(VM *vm, Value *args, int nargs) {
 static Value bi_mutable_treelist_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("mutable-treelist?: expected an argument");
-  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_MUTABLE_TREELIST);
+  return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_MUTABLE_TREELIST);
 }
 
 static Value bi_mutable_treelist_empty_p(VM *vm, Value *args, int nargs) {

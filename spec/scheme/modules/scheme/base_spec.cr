@@ -35,7 +35,7 @@ describe "builtins: arithmetic" do
   end
 
   it "/ inverts a single argument" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(/ 2)").write_string.should eq("1/2")
   end
 
@@ -907,7 +907,7 @@ describe "builtins: I/O" do
   end
 
   it "writes to the real STDOUT by default" do
-    Scheme::Interpreter.new.stdout.should be(STDOUT)
+    Scheme::Interpreter.new(library_search_path: ["./modules"]).stdout.should be(STDOUT)
   end
 
   it "captures display via a custom stdout" do
@@ -1017,14 +1017,14 @@ end
 
 describe "builtins: exit" do
   it "raises SchemeExit instead of terminating the process" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     expect_raises(Scheme::SchemeExit) do
       Scheme.run_source(interp, "(import (scheme process-context)) (exit)")
     end
   end
 
   it "defaults to code 0" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     ex = expect_raises(Scheme::SchemeExit) do
       Scheme.run_source(interp, "(import (scheme process-context)) (exit)")
     end
@@ -1032,7 +1032,7 @@ describe "builtins: exit" do
   end
 
   it "clamps the given code to 0..255" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     ex = expect_raises(Scheme::SchemeExit) do
       Scheme.run_source(interp, "(import (scheme process-context)) (exit 300)")
     end

@@ -11,7 +11,7 @@
 ;; rationale: every export here is expressible in plain R7RS.
 ;;
 ;; [PASS]/[FAIL] and the final summary line are colored green/red when
-;; STDOUT is an actual terminal (stdout-tty?, (creme introspection)) and
+;; STDOUT is an actual terminal (stdout-tty?, (creme term)) and
 ;; NO_COLOR (https://no-color.org) isn't set -- piping/redirecting output
 ;; (CI logs, `| tee`, a file) automatically gets plain, escape-code-free
 ;; text, no flag needed either way.
@@ -101,13 +101,14 @@
 ;; ===========================================================================
 
 (define-library (creme spec)
-  (export describe it
+  (export describe it pending it-unless
           should-equal? should-eqv? should-be-true? should-be-false? should-raise?
-          spec-describe! spec-it! spec-summary! spec-record-external-result! render-spec-tree! spec-data-marker)
-  (import (scheme base) (scheme cxr) (scheme write) (scheme process-context) (creme introspection))
+          spec-describe! spec-it! spec-pending! spec-summary! spec-record-external-result!
+          render-spec-tree! spec-data-marker spec-vm spec-compiler)
+  (import (scheme base) (scheme cxr) (scheme write) (scheme process-context) (creme introspection) (creme term))
   (begin
     ;; ANSI color, only when it'll actually help: STDOUT must be a real
-    ;; terminal (stdout-tty?, (creme introspection) -- native Crystal's
+    ;; terminal (stdout-tty?, (creme term) -- native Crystal's
     ;; STDOUT.tty? and cvm's isatty(STDOUT_FILENO), kept in sync so this
     ;; behaves the same under bin/creme, --self-hosted, and cvm/cvm), and
     ;; NO_COLOR (https://no-color.org) must be unset -- its mere presence,
@@ -189,7 +190,9 @@
     (define spec-depth 0)
     (define spec-total 0)
     (define spec-failed 0)
+    (define spec-pending 0)
     (define spec-failures '()) ; list of (full-name . message), most recent first
+    (define spec-pendings '()) ; list of full-name, most recent first
 
     (define (spec-indent) (make-string (* spec-depth 2) #\space))
 
@@ -251,6 +254,19 @@
         (if (not spec-data-mode?)
             (begin (display (spec-indent)) (display (spec-colorize "32" "[PASS]")) (display " ") (display name) (newline)))))
 
+    ;; Registers a skipped example -- NO thunk/body argument, mirroring
+    ;; this project's own Crystal specs' bare `pending "message"` (no
+    ;; block), which never evaluates anything at all; see this library's
+    ;; `it-unless` for the common case of "run it, unless some condition
+    ;; means it can't/shouldn't apply here" (e.g. a cvm-only limitation).
+    (define (spec-pending! name)
+      (set! spec-total (+ spec-total 1))
+      (set! spec-pending (+ spec-pending 1))
+      (set! spec-pendings (cons (spec-full-name name) spec-pendings))
+      (spec-frame-add! (list 'it name 'pending #f))
+      (if (not spec-data-mode?)
+          (begin (display (spec-indent)) (display (spec-colorize "33" "[PEND]")) (display " ") (display name) (newline))))
+
     ;; Renders a tree exactly as spec-describe!/spec-it! would have
     ;; printed it live (same indentation/color rules, driven by THIS
     ;; process's own spec-use-color?) -- used by (creme spec-runner) to
@@ -265,7 +281,10 @@
            (for-each (lambda (child) (render-spec-node! child (+ depth 1))) (caddr node)))
           ((it)
            (display indent)
-           (display (if (eq? (caddr node) 'pass) (spec-colorize "32" "[PASS]") (spec-colorize "31" "[FAIL]")))
+           (display (case (caddr node)
+                      ((pass) (spec-colorize "32" "[PASS]"))
+                      ((pending) (spec-colorize "33" "[PEND]"))
+                      (else (spec-colorize "31" "[FAIL]"))))
            (display " ") (display (cadr node)) (newline)))))
 
     (define (render-spec-tree! tree)
@@ -282,14 +301,16 @@
     ;; every EXISTING spec file that merely imports (creme spec) for
     ;; describe/it, including every one already passing under cvm, is
     ;; completely unaffected; only (creme spec-runner) needs those.
-    (define (spec-record-external-result! name n failed)
-      (set! spec-total (+ spec-total n))
-      (set! spec-failed (+ spec-failed failed))
-      (if (> failed 0)
-          (set! spec-failures
-            (cons (cons name (string-append (number->string failed) " of " (number->string n)
-                               " examples failed in this externally-run file -- see its own output above"))
-                  spec-failures))))
+    (define (spec-record-external-result! name n failed . rest)
+      (let ((pending (if (pair? rest) (car rest) 0)))
+        (set! spec-total (+ spec-total n))
+        (set! spec-failed (+ spec-failed failed))
+        (set! spec-pending (+ spec-pending pending))
+        (if (> failed 0)
+            (set! spec-failures
+              (cons (cons name (string-append (number->string failed) " of " (number->string n)
+                                 " examples failed in this externally-run file -- see its own output above"))
+                    spec-failures)))))
 
     (define (spec-summary!)
       (if spec-data-mode?
@@ -303,12 +324,22 @@
           ;; above).
           (begin
             (display spec-data-marker) (newline)
-            (write (list spec-total spec-failed (spec-frame-pop!))))
+            (write (list spec-total spec-failed spec-pending (spec-frame-pop!))))
           (begin
             (newline)
             (display (spec-colorize (if (> spec-failed 0) "31" "32")
-                       (string-append (number->string spec-total) " examples, " (number->string spec-failed) " failures")))
+                       (string-append (number->string spec-total) " examples, " (number->string spec-failed) " failures"
+                         (if (> spec-pending 0)
+                             (string-append ", " (number->string spec-pending) " pending")
+                             ""))))
             (newline)
+            (if (> spec-pending 0)
+                (begin
+                  (newline)
+                  (for-each
+                    (lambda (name)
+                      (display "  ") (display (spec-colorize "33" name)) (display " (PENDING)") (newline))
+                    (reverse spec-pendings))))
             (if (> spec-failed 0)
                 (begin
                   (newline)
@@ -319,10 +350,27 @@
                     (reverse spec-failures))))))
       (if (> spec-failed 0) (exit 1) (exit 0)))
 
+    ;; Convenience wrappers over (creme introspection)'s `runtime`, for
+    ;; specs (typically via `it-unless`) that need to branch on which
+    ;; backend/pipeline they're currently running under -- e.g.
+    ;; (it-unless (equal? (spec-vm) "cvm") "..." body ...) to skip a case
+    ;; cvm can't support yet.
+    (define (spec-vm) (cdr (assq 'vm (runtime))))
+    (define (spec-compiler) (cdr (assq 'compiler (runtime))))
+
     (define-syntax describe
       (syntax-rules ()
         ((_ name body ...) (spec-describe! name (lambda () body ...)))))
 
     (define-syntax it
       (syntax-rules ()
-        ((_ name body ...) (spec-it! name (lambda () body ...)))))))
+        ((_ name body ...) (spec-it! name (lambda () body ...)))))
+
+    (define-syntax pending
+      (syntax-rules ()
+        ((_ name) (spec-pending! name))))
+
+    (define-syntax it-unless
+      (syntax-rules ()
+        ((_ condition name body ...)
+         (if condition (spec-pending! name) (spec-it! name (lambda () body ...))))))))

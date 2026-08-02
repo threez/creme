@@ -125,6 +125,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "bigdecimal"], Scheme::Builtins::BigDecimalLibrary
+    register_library ["creme", "builtin", "bigdecimal"], Scheme::Builtins::BigDecimalLibrary
   end
 end

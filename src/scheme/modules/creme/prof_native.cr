@@ -134,6 +134,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "prof-native"], Scheme::Builtins::ProfNative
+    register_library ["creme", "builtin", "prof-native"], Scheme::Builtins::ProfNative
   end
 end

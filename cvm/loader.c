@@ -27,6 +27,22 @@
  * e.g. the self-hosted compiler's own compile-source-to-bytes output).
  * `read_chunk`/`read_datum`/etc. below never care which mode is active --
  * only the primitives here (must_read/read_u8/...) branch on it. */
+/* R7RS datum labels (#n=/#n#) -- one entry per TAG_LABEL_DEF seen so far
+ * in the CURRENT top-level datum (see read_datum's own doc comment for
+ * why the table resets there, not per-Reader-lifetime). `value` is
+ * filled in immediately for TAG_LABEL_DEF on a pair/vector (the
+ * container's own pointer already exists before its contents are read --
+ * see read_datum_rec's TAG_PAIR/TAG_VECTOR cases), so a TAG_LABEL_REF
+ * appearing anywhere inside that SAME container's own contents (a
+ * genuine cycle) already resolves correctly; for any other tag, `value`
+ * is filled in only after the datum is fully read (no cycle is possible
+ * through a non-container value anyway). */
+#define CVM_DATUM_LABELS_CAP 256
+typedef struct {
+  int id;
+  Value value;
+} DatumLabel;
+
 typedef struct {
   FILE *f;                   /* NULL when reading from a buffer instead */
   const unsigned char *buf;  /* NULL when reading from a file instead */
@@ -34,6 +50,10 @@ typedef struct {
   const char *path; /* diagnostic label only -- a fixed string like
                       * "<bytevector>" when reading from a buffer, since
                       * there's no filename in that case. */
+  DatumLabel labels[CVM_DATUM_LABELS_CAP];
+  int n_labels;
+  int datum_depth;  /* current read_datum_rec nesting -- see its own guard */
+  int chunk_depth;  /* current read_chunk nesting (nested protos) -- ditto */
 } Reader;
 
 static void must_read(Reader *r, void *dst, size_t n) {
@@ -74,10 +94,69 @@ static unsigned char read_u8(Reader *r) {
   return v;
 }
 
+/* Mirrors chunk_serializer.cr's own FORMAT_VERSION exactly (same numeric
+ * value) -- bump both in lockstep, plus modules/creme/bytecode.sld's own
+ * writer and chunk_deserializer.cr's own reader, whenever the on-disk
+ * chunk layout changes in a way an older reader couldn't safely parse.
+ * See CHANGELOG.md/cvm/STABILITY.md for the compatibility policy this
+ * exists to support. */
+#define CVM_SCB1_FORMAT_VERSION 1
+
+/* Checks the "SCB1" magic + format-version byte every entry point below
+ * reads first, before anything else -- shared so the three call sites
+ * (cvm_peek_required_families/cvm_load/cvm_load_from_bytes) give
+ * identical, consistent errors for either failure instead of three
+ * hand-duplicated checks drifting apart over time. */
+static void check_magic_and_version(Reader *r) {
+  char magic[4];
+  must_read(r, magic, 4);
+  if (memcmp(magic, "SCB1", 4) != 0) {
+    cvm_abort("cvm: %s is not an SCB1 bytecode file (re-emit with `creme --emit-cvm`?)", r->path);
+  }
+  unsigned char version = read_u8(r);
+  if (version != CVM_SCB1_FORMAT_VERSION) {
+    cvm_abort("cvm: %s was compiled with SCB1 format version %d, this cvm only reads version %d -- re-emit it with a matching `creme --emit-cvm`", r->path, version, CVM_SCB1_FORMAT_VERSION);
+  }
+}
+
+/* Every length/count field in the SCB1 format (instruction/const/proto/
+ * upvalue/qq-template/case-table counts, and every string/vector/blob
+ * length) feeds directly into a GC_MALLOC size and/or a loop bound right
+ * after being read. Read plain via read_i32, a negative value wraps to a
+ * huge size_t once cast for the allocation (`(size_t)-1 + 1` etc.) --
+ * that's an uncontrolled, uncatchable allocation-failure abort rather
+ * than the clean "corrupt bytecode" error every OTHER malformed-input
+ * case here already gives. A merely-huge (but non-negative) claimed
+ * count is the same hazard from the other direction: this loader is the
+ * boundary an embedder crosses with untrusted/unvalidated bytecode (a
+ * compiled-elsewhere .cvmc, or a load-chunk-bytes blob), so it must
+ * reject an implausible count outright instead of attempting whatever
+ * allocation it implies. CVM_LOADER_MAX_COUNT is generous headroom over
+ * any real compiled program's own counts (cvm/compiler-run.cvmc, the
+ * largest real chunk in this repo, needs a tiny fraction of it) while
+ * still well short of "attempt a multi-gigabyte allocation on a corrupt/
+ * hostile 4-byte claim" -- an EARLIER, far larger value here (1 << 26)
+ * still let a single crafted count force a ~512MB allocation (a pointer-
+ * array field: 67,108,864 * sizeof(void*)), confirmed via `make fuzz`
+ * (see fuzz/fuzz_loader.c) finding it as an out-of-memory artifact within
+ * the first few hundred runs. */
+#define CVM_LOADER_MAX_COUNT (1 << 21) /* 2,097,152 */
+
+static int32_t read_count(Reader *r, const char *what) {
+  int32_t v = read_i32(r);
+  if (v < 0 || v > CVM_LOADER_MAX_COUNT) {
+    cvm_abort("cvm: corrupt bytecode in %s: implausible %s count %d", r->path, what, v);
+  }
+  return v;
+}
+
 /* Owning copy — the file buffer isn't kept around, so string/symbol consts
  * need their own storage (leaked, like everything else here — see
  * value.h's header comment). */
 static char *read_bytes(Reader *r, int len) {
+  if (len < 0 || len > CVM_LOADER_MAX_COUNT) {
+    cvm_abort("cvm: corrupt bytecode in %s: implausible byte length %d", r->path, len);
+  }
   char *buf = GC_MALLOC((size_t)len + 1);
   if (len > 0) must_read(r, buf, (size_t)len);
   buf[len] = '\0';
@@ -101,6 +180,38 @@ static Value resolve_builtin_const(VM *vm, const char *name, int len) {
   return v_nil();
 }
 
+static void datum_label_add(Reader *r, int id, Value v) {
+  if (r->n_labels >= CVM_DATUM_LABELS_CAP) {
+    cvm_abort("cvm: too many datum labels in one top-level datum (max %d) in %s", CVM_DATUM_LABELS_CAP, r->path);
+  }
+  r->labels[r->n_labels].id = id;
+  r->labels[r->n_labels].value = v;
+  r->n_labels++;
+}
+
+static int datum_label_find(Reader *r, int id, Value *out) {
+  for (int i = 0; i < r->n_labels; i++) {
+    if (r->labels[i].id == id) {
+      *out = r->labels[i].value;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static Value read_datum_rec(Reader *r, VM *vm);
+
+/* Max recursive-descent depth through read_datum_rec (nested pairs/
+ * vectors) -- generous headroom over any realistic literal data a
+ * program would embed (config tables, quoted lists), while still finite:
+ * this loader's own input is untrusted bytecode (a compiled-elsewhere
+ * .cvmc or a load-chunk-bytes blob), and an unbounded recursive descent
+ * driven directly by attacker-controlled nesting is a C-stack-overflow
+ * DoS (or worse, on a platform without stack-overflow protection) rather
+ * than the clean "corrupt bytecode" rejection every other malformed-
+ * input case here already gives. */
+#define CVM_LOADER_MAX_DATUM_DEPTH 100000
+
 /* General recursive datum reader (mirrors ChunkSerializer's write_datum) —
  * used both for an ordinary chunk const and for a QQ_CONST template node's
  * own literal-fragment payload (e.g. the `(b c)` in `` `(a (b c) ,d) ``).
@@ -113,71 +224,164 @@ static Value resolve_builtin_const(VM *vm, const char *name, int len) {
  * them back into an mpq_t. TAG_BLOB builds a real Bytevector (see
  * value.h). Pairs/vectors/bytevectors built here are GC_MALLOC'd like
  * every other heap value, even though `vm` itself isn't needed for those
- * cases (only TAG_BUILTIN's by-name lookup needs it). */
+ * cases (only TAG_BUILTIN's by-name lookup needs it).
+ *
+ * TAG_LABEL_DEF/TAG_LABEL_REF (datum labels) are peeled off as an
+ * optional PREFIX before the dispatch below, mirroring exactly how
+ * ChunkSerializer's write_datum_rec emits them: TAG_LABEL_REF stands
+ * alone (the whole datum IS just "go look up this earlier label",
+ * already-fully-built by the time any ref can be read, since a ref can
+ * only ever follow its own def in the byte stream) and returns
+ * immediately; TAG_LABEL_DEF precedes an ordinary tag+bytes payload,
+ * with `def_id` threaded down into the TAG_PAIR/TAG_VECTOR cases
+ * specifically so THEIR OWN container pointer (already allocated before
+ * its car/cdr/items are read, same as always) gets registered under
+ * that label BEFORE recursing into contents — the placeholder-then-
+ * patch step that makes a genuine cycle (a TAG_LABEL_REF appearing
+ * inside that same container's own contents) resolve to the right,
+ * already-allocated pointer instead of needing a second pass. Every
+ * other tag registers its own (necessarily acyclic) value only after
+ * it's fully read, same as untagged data always has. */
 static Value read_datum(Reader *r, VM *vm) {
+  r->n_labels = 0; /* R7RS: a datum label's scope is only the outermost datum it appears in */
+  r->datum_depth = 0;
+  return read_datum_rec(r, vm);
+}
+
+static Value read_datum_rec_impl(Reader *r, VM *vm);
+
+/* Depth-checked wrapper around read_datum_rec_impl -- every recursive call
+ * (TAG_COMPLEX/TAG_PAIR/TAG_VECTOR's own car/cdr/item reads) goes through
+ * THIS name, not the impl directly, so the depth counter and its cap are
+ * enforced at every nesting level, not just the outermost. See
+ * CVM_LOADER_MAX_DATUM_DEPTH's own doc comment for why. */
+static Value read_datum_rec(Reader *r, VM *vm) {
+  if (r->datum_depth >= CVM_LOADER_MAX_DATUM_DEPTH) {
+    cvm_abort("cvm: corrupt bytecode in %s: datum nesting too deep (max %d)", r->path, CVM_LOADER_MAX_DATUM_DEPTH);
+  }
+  r->datum_depth++;
+  Value result = read_datum_rec_impl(r, vm);
+  r->datum_depth--;
+  return result;
+}
+
+static Value read_datum_rec_impl(Reader *r, VM *vm) {
   unsigned char tag = read_u8(r);
+  if (tag == TAG_LABEL_REF) {
+    int id = read_i32(r);
+    Value v;
+    if (!datum_label_find(r, id, &v)) cvm_abort("cvm: unknown datum label #%d# in %s", id, r->path);
+    return v;
+  }
+  int def_id = -1;
+  if (tag == TAG_LABEL_DEF) {
+    def_id = read_i32(r);
+    tag = read_u8(r); /* the labeled datum's own real tag follows */
+  }
   switch (tag) {
-  case TAG_INT:
-    return v_int(read_i64(r));
-  case TAG_FLOAT:
-    return v_float(read_f64(r));
+  case TAG_INT: {
+    Value result = v_int(read_i64(r));
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
+  }
+  case TAG_FLOAT: {
+    Value result = v_float(read_f64(r));
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
+  }
   case TAG_RATIONAL: {
     int64_t num = read_i64(r);
     int64_t den = read_i64(r);
+    /* modules/creme/bytecode.sld's own write-datum! only ever emits an
+     * already-reduced rational (T_RATIONAL's own invariant, denominator
+     * never 0), but this loader can't assume the bytes it's reading
+     * still honor that -- a corrupt/hostile den=0 reaches GMP's own
+     * mpq_set_si/mpq_canonicalize, which detects the division by zero
+     * itself and calls ITS OWN exception handler (an unconditional
+     * raise/abort, not cvm_abort's catchable path) -- a real,
+     * reproducible crash found via `make fuzz` (see fuzz/fuzz_loader.c)
+     * within a couple thousand runs. */
+    if (den == 0) {
+      cvm_abort("cvm: corrupt bytecode in %s: rational constant has a zero denominator", r->path);
+    }
     mpq_t q;
     mpq_init(q);
     mpq_set_si(q, (long)num, (unsigned long)den);
     Value result = make_rational_from_mpq(q);
     mpq_clear(q);
+    if (def_id >= 0) datum_label_add(r, def_id, result);
     return result;
   }
   case TAG_COMPLEX: {
-    Value real = read_datum(r, vm);
-    Value imag = read_datum(r, vm);
-    return make_complex(real, imag);
+    Value real = read_datum_rec(r, vm);
+    Value imag = read_datum_rec(r, vm);
+    Value result = make_complex(real, imag);
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
   }
   case TAG_SYM: {
     int len = read_i32(r);
     char *s = read_bytes(r, len);
-    return v_sym(s, len);
+    Value result = v_sym(s, len);
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
   }
   case TAG_STR: {
     int len = read_i32(r);
     char *s = read_bytes(r, len);
-    return v_str(s, len);
+    Value result = v_str(s, len);
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
   }
-  case TAG_BOOL:
-    return v_bool(read_u8(r));
-  case TAG_NIL:
-    return v_nil();
-  case TAG_CHAR:
-    return v_char(read_i64(r));
+  case TAG_BOOL: {
+    Value result = v_bool(read_u8(r));
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
+  }
+  case TAG_NIL: {
+    Value result = v_nil();
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
+  }
+  case TAG_CHAR: {
+    Value result = v_char(read_i64(r));
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
+  }
   case TAG_PAIR: {
     Pair *p = GC_MALLOC(sizeof(Pair));
-    p->car = read_datum(r, vm);
-    p->cdr = read_datum(r, vm);
-    return v_pair(p);
+    Value result = v_pair(p);
+    if (def_id >= 0) datum_label_add(r, def_id, result); /* BEFORE reading contents -- see this function's own doc comment */
+    p->car = read_datum_rec(r, vm);
+    p->cdr = read_datum_rec(r, vm);
+    return result;
   }
   case TAG_VECTOR: {
-    int n = read_i32(r);
+    int n = read_count(r, "vector length");
     Vector *vec = GC_MALLOC(sizeof(Vector));
     vec->len = n;
     vec->items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-    for (int i = 0; i < n; i++) vec->items[i] = read_datum(r, vm);
-    return v_vector(vec);
+    Value result = v_vector(vec);
+    if (def_id >= 0) datum_label_add(r, def_id, result); /* BEFORE reading items -- see this function's own doc comment */
+    for (int i = 0; i < n; i++) vec->items[i] = read_datum_rec(r, vm);
+    return result;
   }
   case TAG_BLOB: {
-    int n = read_i32(r);
+    int n = read_count(r, "bytevector length");
     Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
     bv->len = n;
     bv->bytes = GC_MALLOC((size_t)(n ? n : 1));
     for (int i = 0; i < n; i++) bv->bytes[i] = read_u8(r);
-    return v_bytevector(bv);
+    Value result = v_bytevector(bv);
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
   }
   case TAG_BUILTIN: {
     int len = read_i32(r);
     char *s = read_bytes(r, len);
-    return resolve_builtin_const(vm, s, len);
+    Value result = resolve_builtin_const(vm, s, len);
+    if (def_id >= 0) datum_label_add(r, def_id, result);
+    return result;
   }
   default:
     cvm_abort("cvm: unknown const/datum tag %d in %s", tag, r->path);
@@ -195,13 +399,13 @@ static QQTemplate *read_qq_template(Reader *r, VM *vm) {
   case QQ_SPLICE:
     break;
   case QQ_LIST:
-    t->n_items = read_i32(r);
+    t->n_items = read_count(r, "qq-template item");
     t->items = GC_MALLOC(sizeof(QQTemplate *) * (size_t)(t->n_items ? t->n_items : 1));
     for (int i = 0; i < t->n_items; i++) t->items[i] = read_qq_template(r, vm);
     t->tail = read_qq_template(r, vm);
     break;
   case QQ_VECTOR:
-    t->n_items = read_i32(r);
+    t->n_items = read_count(r, "qq-template item");
     t->items = GC_MALLOC(sizeof(QQTemplate *) * (size_t)(t->n_items ? t->n_items : 1));
     for (int i = 0; i < t->n_items; i++) t->items[i] = read_qq_template(r, vm);
     break;
@@ -217,7 +421,7 @@ static QQTemplate *read_qq_template(Reader *r, VM *vm) {
 static CaseDispatchTable read_case_dispatch_table(Reader *r) {
   CaseDispatchTable t;
   t.default_target = read_i32(r);
-  t.n_entries = read_i32(r);
+  t.n_entries = read_count(r, "case-dispatch entry");
   t.entries = GC_MALLOC(sizeof(CaseDispatchEntry) * (size_t)(t.n_entries ? t.n_entries : 1));
   for (int i = 0; i < t.n_entries; i++) {
     CaseDispatchEntry *e = &t.entries[i];
@@ -244,47 +448,74 @@ static CaseDispatchTable read_case_dispatch_table(Reader *r) {
   return t;
 }
 
+/* Max recursive-descent depth through read_chunk (nested protos, i.e.
+ * lexically nested lambdas) -- generous headroom over any realistic
+ * source nesting depth, for the same untrusted-input reason
+ * CVM_LOADER_MAX_DATUM_DEPTH exists (see its own doc comment). */
+#define CVM_LOADER_MAX_CHUNK_DEPTH 10000
+
+static Chunk *read_chunk_impl(Reader *r, VM *vm);
+
+/* Depth-checked wrapper -- read_chunk_impl's own recursive proto reads go
+ * through THIS name, not the impl directly, enforcing the cap at every
+ * nesting level. Mirrors read_datum_rec's own wrapper/impl split. */
 static Chunk *read_chunk(Reader *r, VM *vm) {
+  if (r->chunk_depth >= CVM_LOADER_MAX_CHUNK_DEPTH) {
+    cvm_abort("cvm: corrupt bytecode in %s: chunk (proto) nesting too deep (max %d)", r->path, CVM_LOADER_MAX_CHUNK_DEPTH);
+  }
+  r->chunk_depth++;
+  Chunk *c = read_chunk_impl(r, vm);
+  r->chunk_depth--;
+  return c;
+}
+
+static Chunk *read_chunk_impl(Reader *r, VM *vm) {
   Chunk *c = GC_MALLOC(sizeof(Chunk));
 
-  c->n_instrs = read_i32(r);
+  c->n_instrs = read_count(r, "instruction");
   c->instrs = GC_MALLOC(sizeof(Instruction) * (size_t)c->n_instrs);
+  /* Cold parallel array -- same index space as instrs, --profile-only (see
+   * vm.h's InsPos doc comment). Populated here as the SCB1 stream is read
+   * (position data is interleaved per-instruction on disk), then never
+   * touched again except by profiler.c's report. */
+  c->positions = GC_MALLOC(sizeof(InsPos) * (size_t)c->n_instrs);
   for (int i = 0; i < c->n_instrs; i++) {
     Instruction *ins = &c->instrs[i];
+    InsPos *pos = &c->positions[i];
     ins->op = read_i32(r);
     ins->a = read_i32(r);
     ins->b = read_i32(r);
     ins->c = read_i32(r);
     ins->d = read_i32(r);
-    ins->has_pos = read_u8(r);
-    if (ins->has_pos) {
+    pos->has_pos = read_u8(r);
+    if (pos->has_pos) {
       int file_len = read_i32(r);
-      ins->file = read_bytes(r, file_len);
-      ins->line = read_i32(r);
-      ins->col = read_i32(r);
+      pos->file = read_bytes(r, file_len);
+      pos->line = read_i32(r);
+      pos->col = read_i32(r);
     } else {
-      ins->file = NULL;
-      ins->line = 0;
-      ins->col = 0;
+      pos->file = NULL;
+      pos->line = 0;
+      pos->col = 0;
     }
     if (ins->op < 0 || ins->op >= OP_COUNT) {
       cvm_abort("cvm: unknown opcode id %d in %s", ins->op, r->path);
     }
   }
 
-  c->n_consts = read_i32(r);
+  c->n_consts = read_count(r, "const");
   c->consts = GC_MALLOC(sizeof(Value) * (size_t)c->n_consts);
   for (int i = 0; i < c->n_consts; i++) {
     c->consts[i] = read_datum(r, vm);
   }
 
-  c->n_protos = read_i32(r);
+  c->n_protos = read_count(r, "proto");
   c->protos = GC_MALLOC(sizeof(Chunk *) * (size_t)c->n_protos);
   for (int i = 0; i < c->n_protos; i++) {
     c->protos[i] = read_chunk(r, vm);
   }
 
-  c->n_upvalues = read_i32(r);
+  c->n_upvalues = read_count(r, "upvalue");
   c->upvalues = GC_MALLOC(sizeof(UpvalDesc) * (size_t)c->n_upvalues);
   for (int i = 0; i < c->n_upvalues; i++) {
     c->upvalues[i].from_parent_local = read_u8(r);
@@ -300,13 +531,13 @@ static Chunk *read_chunk(Reader *r, VM *vm) {
   int name_len = read_i32(r);
   c->name = read_bytes(r, name_len);
 
-  c->n_qq_templates = read_i32(r);
+  c->n_qq_templates = read_count(r, "qq-template");
   c->qq_templates = GC_MALLOC(sizeof(QQTemplate *) * (size_t)(c->n_qq_templates ? c->n_qq_templates : 1));
   for (int i = 0; i < c->n_qq_templates; i++) {
     c->qq_templates[i] = read_qq_template(r, vm);
   }
 
-  c->n_case_tables = read_i32(r);
+  c->n_case_tables = read_count(r, "case-table");
   c->case_tables = GC_MALLOC(sizeof(CaseDispatchTable) * (size_t)(c->n_case_tables ? c->n_case_tables : 1));
   for (int i = 0; i < c->n_case_tables; i++) {
     c->case_tables[i] = read_case_dispatch_table(r);
@@ -316,38 +547,70 @@ static Chunk *read_chunk(Reader *r, VM *vm) {
 }
 
 /* Second pass: resolve every GetGlobal/DefGlobal/SetGlobal/CallGlobal/
- * TailCallGlobal operand from "const-pool index of a symbol" to "index into
- * vm->globals", recursively through every proto. Must run after the WHOLE
+ * TailCallGlobal/ForLoopGuardedInc/ForLoopGuardedDec/TestGlobalIdentity operand
+ * from "const-pool index of a symbol" to "index into vm->globals", recursively
+ * through every proto. Must run after the WHOLE
  * tree is loaded (not interleaved with read_chunk) only in the sense that it
  * needs each chunk's own consts already populated — which they are by the
  * time read_chunk returns, so a single recursive walk right after loading
  * works fine. SetGlobal's operand is patched here even though its own
  * dispatch handler isn't implemented yet (see vm.c's L_UNIMPL) — this pass
  * doesn't care whether an op is implemented, only what shape its operand is. */
-static void resolve_globals(VM *vm, Chunk *c) {
+/* Every *Global, *GlobalIdentity, and ForLoopGuarded* opcode's own name operand
+ * is supposed to be a const-pool INDEX of a T_SYM/T_STR const (see this
+ * function's own doc comment) -- but that operand, like every other
+ * Instruction field, comes straight from the untrusted bytecode file
+ * with no validation of its own (ins->a/b/c/d are plain ints, read
+ * in read_chunk_impl without bounds checking, since in general they're
+ * register indices this loader has no fixed range to check them
+ * against). A corrupt/hostile file pointing one of these specific
+ * operands at an out-of-range index, or at an in-range const that
+ * ISN'T actually a symbol/string (e.g. a TAG_INT const), used to reach
+ * `.as.chars`/`.aux` directly -- reinterpreting an arbitrary Value's
+ * bit pattern as a pointer+length and calling strlen/memcmp on it via
+ * cvm_global_intern. Found via `make fuzz` (see fuzz/fuzz_loader.c) as
+ * a real, reproducible SIGSEGV inside strlen within the first ~1500
+ * runs -- confirmed a genuine type-confusion bug, not a fuzzer/harness
+ * artifact, by hand-crafting a chunk whose GetGlobal operand pointed at
+ * a TAG_INT const. */
+static Value global_name_const(Chunk *c, int idx, const char *path) {
+  if (idx < 0 || idx >= c->n_consts) {
+    cvm_abort("cvm: corrupt bytecode in %s: global-name const index %d out of range (n_consts=%d)", path, idx, c->n_consts);
+  }
+  Value name = c->consts[idx];
+  if (name.tag != T_SYM && name.tag != T_STR) {
+    cvm_abort("cvm: corrupt bytecode in %s: global-name const #%d is not a symbol/string (tag %d)", path, idx, name.tag);
+  }
+  return name;
+}
+
+static void resolve_globals(VM *vm, Chunk *c, const char *path) {
   for (int i = 0; i < c->n_instrs; i++) {
     Instruction *ins = &c->instrs[i];
     switch (ins->op) {
     case OP_GETGLOBAL: {
-      Value name = c->consts[ins->b];
-      ins->b = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
+      Value name = global_name_const(c, ins->b, path);
+      ins->b = cvm_global_intern(vm, name.as.chars, name.aux);
       break;
     }
     case OP_DEFGLOBAL:
     case OP_SETGLOBAL: {
-      Value name = c->consts[ins->a];
-      ins->a = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
+      Value name = global_name_const(c, ins->a, path);
+      ins->a = cvm_global_intern(vm, name.as.chars, name.aux);
       break;
     }
     case OP_CALLGLOBAL:
-    case OP_TAILCALLGLOBAL: {
-      Value name = c->consts[ins->d];
-      ins->d = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
+    case OP_TAILCALLGLOBAL:
+    case OP_FORLOOPGUARDEDINC:
+    case OP_FORLOOPGUARDEDDEC: {
+      Value name = global_name_const(c, ins->d, path);
+      ins->d = cvm_global_intern(vm, name.as.chars, name.aux);
       break;
     }
-    case OP_RETURNGLOBAL: {
-      Value name = c->consts[ins->a];
-      ins->a = cvm_global_intern(vm, name.as.str.chars, name.as.str.len);
+    case OP_RETURNGLOBAL:
+    case OP_TESTGLOBALIDENTITY: {
+      Value name = global_name_const(c, ins->a, path);
+      ins->a = cvm_global_intern(vm, name.as.chars, name.aux);
       break;
     }
     default:
@@ -355,26 +618,71 @@ static void resolve_globals(VM *vm, Chunk *c) {
     }
   }
   for (int i = 0; i < c->n_protos; i++) {
-    resolve_globals(vm, c->protos[i]);
+    resolve_globals(vm, c->protos[i], path);
   }
 }
 
-Chunk *cvm_load(const char *path, VM *vm) {
+/* Reads the "required families" metadata section (count, then that many
+ * length-prefixed name strings) that sits between the magic and the chunk
+ * body -- see chunk_serializer.cr's `serialize`. Always consumes exactly the
+ * bytes this section occupies, regardless of whether the caller wants the
+ * list, so the chunk body that follows is read from the right offset.
+ * When `names_out`/`count_out` are non-NULL, fills them in with a
+ * GC_MALLOC'd array of GC_MALLOC'd, NUL-terminated C strings. */
+static void read_required_families(Reader *r, char ***names_out, int *count_out) {
+  int count = read_count(r, "required-family");
+  char **names = NULL;
+  if (names_out && count > 0) {
+    names = GC_MALLOC(sizeof(char *) * (size_t)count);
+  }
+  for (int i = 0; i < count; i++) {
+    int len = read_i32(r);
+    char *name = read_bytes(r, len);
+    if (names) names[i] = name;
+  }
+  if (names_out) *names_out = names;
+  if (count_out) *count_out = count;
+}
+
+/* Standalone "peek" counterpart to cvm_load: opens `path`, reads just the
+ * magic + required-families metadata section, then closes the file again
+ * without touching the chunk body -- so main.c can learn which builtin
+ * families a compiled file needs and register only those BEFORE calling the
+ * real cvm_load (which needs those globals already registered, since
+ * resolve_globals's cvm_global_intern must see them to resolve GetGlobal/
+ * DefGlobal/etc. operands correctly -- see resolve_globals's own doc
+ * comment above and main.c's registration-before-cvm_load convention).
+ * cvm_load itself re-reads (and discards, if the caller passes NULL/NULL)
+ * this same section when it runs for real right after -- a second, cheap
+ * file open+seek, deliberately kept rather than threading one shared Reader
+ * across two calls, since that would mean exposing Reader's file-handle
+ * lifetime across a call boundary for no real benefit here. */
+void cvm_peek_required_families(const char *path, char ***names_out, int *count_out) {
   Reader r = {0};
   r.path = path;
   r.f = fopen(path, "rb");
   if (!r.f) cvm_abort("cvm: cannot open %s", path);
 
-  char magic[4];
-  must_read(&r, magic, 4);
-  if (memcmp(magic, "SCB1", 4) != 0) {
-    cvm_abort("cvm: %s is not an SCB1 bytecode file (re-emit with `creme --emit-cvm`?)", path);
-  }
+  check_magic_and_version(&r);
+
+  read_required_families(&r, names_out, count_out);
+  fclose(r.f);
+}
+
+Chunk *cvm_load(const char *path, VM *vm, char ***required_families_out, int *required_families_count_out) {
+  Reader r = {0};
+  r.path = path;
+  r.f = fopen(path, "rb");
+  if (!r.f) cvm_abort("cvm: cannot open %s", path);
+
+  check_magic_and_version(&r);
+
+  read_required_families(&r, required_families_out, required_families_count_out);
 
   Chunk *chunk = read_chunk(&r, vm);
   fclose(r.f);
 
-  resolve_globals(vm, chunk);
+  resolve_globals(vm, chunk, path);
   return chunk;
 }
 
@@ -383,19 +691,17 @@ Chunk *cvm_load(const char *path, VM *vm) {
  * builtin (bootstrap.c) to load a bytevector a running program just
  * computed (e.g. the self-hosted compiler's own compile-source-to-bytes
  * output) without ever touching the filesystem. */
-Chunk *cvm_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len) {
+Chunk *cvm_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len, char ***required_families_out, int *required_families_count_out) {
   Reader r = {0};
   r.path = "<bytevector>";
   r.buf = bytes;
   r.buf_len = len;
 
-  char magic[4];
-  must_read(&r, magic, 4);
-  if (memcmp(magic, "SCB1", 4) != 0) {
-    cvm_abort("cvm: load-chunk-bytes: not an SCB1 bytecode blob");
-  }
+  check_magic_and_version(&r);
+
+  read_required_families(&r, required_families_out, required_families_count_out);
 
   Chunk *chunk = read_chunk(&r, vm);
-  resolve_globals(vm, chunk);
+  resolve_globals(vm, chunk, r.path);
   return chunk;
 }

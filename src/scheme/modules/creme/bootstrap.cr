@@ -79,7 +79,7 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "bootstrap"], Scheme::Builtins::BootstrapLibrary
+    register_library ["creme", "builtin", "bootstrap"], Scheme::Builtins::BootstrapLibrary
 
     # Dispatches to expand_defmacro/expand_syntax_rules -- the same
     # expansion logic analyze_cons already uses for a macro use it finds

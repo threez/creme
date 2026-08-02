@@ -1,7 +1,7 @@
 require "../../spec_helper"
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, src)
 end
 
@@ -72,7 +72,7 @@ describe "call/cc" do
   end
 
   it "parameterize's restore fires correctly even after the escape" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(define p (make-parameter 10))")
     Scheme.run_source(interp, "(call/cc (lambda (k) (parameterize ((p 20)) (k 'escaped))))")
     Scheme.run_source(interp, "(p)").write_string.should eq("10")
@@ -96,7 +96,7 @@ describe "call/cc" do
   end
 
   it "the interpreter remains usable after a stale continuation invocation raises" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(define saved-k #f)")
     Scheme.run_source(interp, "(call/cc (lambda (k) (set! saved-k k) 'initial))")
     expect_raises(Scheme::SchemeRuntimeError) do

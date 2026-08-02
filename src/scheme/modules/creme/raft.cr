@@ -419,6 +419,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "raft"], Scheme::Builtins::RaftLibrary
+    register_library ["creme", "builtin", "raft"], Scheme::Builtins::RaftLibrary
   end
 end

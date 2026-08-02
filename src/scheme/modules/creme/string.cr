@@ -129,6 +129,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "string"], Scheme::Builtins::StringLibrary
+    register_library ["creme", "builtin", "string"], Scheme::Builtins::StringLibrary
   end
 end

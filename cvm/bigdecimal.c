@@ -51,8 +51,8 @@ static BigDecimal *bd_new(void) {
 static Value v_bigdecimal(BigDecimal *bd) { return v_box(bd, BOX_KIND_BIGDECIMAL); }
 
 static BigDecimal *bigdecimal_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.as.box.kind != BOX_KIND_BIGDECIMAL) cvm_abort("%s: expected bigdecimal, got a non-bigdecimal value", who);
-  return v.as.box.ptr;
+  if (v.tag != T_BOX || v.aux != BOX_KIND_BIGDECIMAL) cvm_abort("%s: expected bigdecimal, got a non-bigdecimal value", who);
+  return v.as.ptr;
 }
 
 /* Parses a plain decimal literal: [sign] digits ['.' digits]. No
@@ -183,8 +183,8 @@ static Value bi_string_to_bigdecimal(VM *vm, Value *args, int nargs) {
   int len;
   char intbuf[32];
   if (args[0].tag == T_STR) {
-    s = args[0].as.str.chars;
-    len = args[0].as.str.len;
+    s = args[0].as.chars;
+    len = args[0].aux;
   } else if (args[0].tag == T_INT) {
     len = snprintf(intbuf, sizeof(intbuf), "%lld", (long long)args[0].as.i);
     s = intbuf;
@@ -373,7 +373,7 @@ static Value bi_bigdecimal_to_string(VM *vm, Value *args, int nargs) {
 static Value bi_bigdecimal_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) cvm_abort("bigdecimal?: expected an argument");
-  return v_bool(args[0].tag == T_BOX && args[0].as.box.kind == BOX_KIND_BIGDECIMAL);
+  return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_BIGDECIMAL);
 }
 
 void cvm_register_bigdecimal_builtins(VM *vm) {

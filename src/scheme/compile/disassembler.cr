@@ -11,7 +11,8 @@ module Scheme
       Op::Jmp, Op::TestFalse, Op::TestLt, Op::TestLe, Op::TestGt, Op::TestGe, Op::TestEq, Op::TestIsEq,
       Op::TestLtImm, Op::TestLeImm, Op::TestGtImm, Op::TestGeImm, Op::TestEqImm, Op::TestIsEqImm,
       Op::TestLtUp, Op::TestLeUp, Op::TestGtUp, Op::TestGeUp, Op::TestEqUp, Op::TestIsEqUp,
-      Op::PushHandler,
+      Op::PushHandler, Op::ForPrep, Op::ForLoop,
+      Op::ForLoopGuardedInc, Op::ForLoopGuardedDec, Op::TestGlobalIdentity,
     }
 
     # Which operand field (:a/:b/:c/:d) is a const-pool index, per op.
@@ -20,6 +21,7 @@ module Scheme
       Op::DefGlobal => :a, Op::SetGlobal => :a, Op::ReturnGlobal => :a, Op::Throw => :a,
       Op::CaseMatch => :c,
       Op::CallGlobal => :d, Op::TailCallGlobal => :d,
+      Op::ForLoopGuardedInc => :d, Op::ForLoopGuardedDec => :d, Op::TestGlobalIdentity => :a,
     }
 
     def self.disassemble(chunk : Chunk, name : String = chunk.name, io : IO = STDOUT) : Nil

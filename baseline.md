@@ -1,6 +1,6 @@
 # Performance baseline
 
-Benchmark: `bench/workloads.scm` (fib, tail-recursive sum, list build/reverse/length, vector fill/sum, string-append loop), run via `make bench` — which also produces a cross-language comparison table against Racket, Ruby, and a native-Crystal reference floor (see `bench/` and its README-style comments in `bench/bench.scm`).
+Benchmark: `competition/bench/workloads.scm` (fib, tail-recursive sum, list build/reverse/length, vector fill/sum, string-append loop), run via `make bench` — which also produces a cross-language comparison table against Racket, Ruby, and a native-Crystal reference floor (see `competition/` and its README-style comments in `competition/bench.scm`).
 
 ## Environment
 

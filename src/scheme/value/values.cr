@@ -8,6 +8,40 @@ module Scheme
   # carry per-occurrence position).
   record SourcePos, file : String, line : Int32, col : Int32
 
+  # Cycle guard for Cons/SchemeVector's own write_seq (below) -- an
+  # ANCESTOR stack (object_ids of containers currently being written,
+  # pushed on entry to write_seq / popped on exit, via with_write_seq_
+  # ancestor), not a whole-traversal visited set: this only needs to stop
+  # re-descending into a container that's already an ancestor of itself
+  # (a genuine cycle) -- same technique cvm's own cvm_equal/
+  # write_value_shared (cvm/builtins.c) use for the identical problem,
+  # applied there for equal?/write-shared instead of display/write.
+  # Deliberately at MODULE scope (not inside SchemeBaseValue, which is
+  # `include`d by both Cons and SchemeVector -- a class variable declared
+  # in a module gets a SEPARATE copy per including class in Crystal, which
+  # would miss a cycle spanning both types, e.g. a vector containing a
+  # pair that eventually points back to that same vector).
+  #
+  # This is NOT a faithful #n=/#n#-labeled printer the way cvm's own
+  # write-shared is -- it exists purely so plain `write`/`display`
+  # TERMINATE on a circular value (a real, reachable bug: R7RS datum
+  # labels can read one directly, and set-cdr!/vector-set! can build one
+  # at runtime regardless) instead of hanging forever, printing "..."
+  # for the repeated reference rather than re-descending into it.
+  @@write_seq_ancestors = Set(UInt64).new
+
+  def self.write_seq_ancestor?(id : UInt64) : Bool
+    @@write_seq_ancestors.includes?(id)
+  end
+
+  def self.mark_write_seq_ancestor(id : UInt64) : Nil
+    @@write_seq_ancestors << id
+  end
+
+  def self.unmark_write_seq_ancestor(id : UInt64) : Nil
+    @@write_seq_ancestors.delete(id)
+  end
+
   # The shared behavior every Scheme value provides. A module, not a base
   # class, so both `class` and `struct` value types can mix under the
   # `SchemeValue` union alias (see scheme/value/alias.cr) — Crystal forbids a
@@ -194,7 +228,8 @@ module Scheme
 
   NIL = SchemeNil.new
 
-  class SchemeChar
+  # Value-type struct (see SchemeInt) — immutable, value-compared.
+  struct SchemeChar
     include SchemeBaseValue
     getter value : Char
 
@@ -240,26 +275,43 @@ module Scheme
     end
 
     private def write_seq(io : IO, write_mode : Bool) : Nil
+      if Scheme.write_seq_ancestor?(object_id)
+        io << "..."
+        return
+      end
       io << '('
       cur : SchemeValue = self
       first = true
-      while cur.is_a?(Cons)
-        io << ' ' unless first
-        first = false
-        if write_mode
-          cur.car.to_write(io)
-        else
-          cur.car.to_display(io)
+      pushed = [] of UInt64
+      begin
+        while cur.is_a?(Cons)
+          id = cur.object_id
+          if Scheme.write_seq_ancestor?(id)
+            io << (first ? "..." : " ...")
+            cur = NIL
+            break
+          end
+          Scheme.mark_write_seq_ancestor(id)
+          pushed << id
+          io << ' ' unless first
+          first = false
+          if write_mode
+            cur.car.to_write(io)
+          else
+            cur.car.to_display(io)
+          end
+          cur = cur.cdr
         end
-        cur = cur.cdr
-      end
-      unless cur.is_a?(SchemeNil)
-        io << " . "
-        if write_mode
-          cur.to_write(io)
-        else
-          cur.to_display(io)
+        unless cur.is_a?(SchemeNil)
+          io << " . "
+          if write_mode
+            cur.to_write(io)
+          else
+            cur.to_display(io)
+          end
         end
+      ensure
+        pushed.each { |pid| Scheme.unmark_write_seq_ancestor(pid) }
       end
       io << ')'
     end
@@ -424,14 +476,24 @@ module Scheme
     end
 
     private def write_seq(io : IO, write_mode : Bool) : Nil
+      if Scheme.write_seq_ancestor?(object_id)
+        io << "..."
+        return
+      end
       io << "#("
-      @value.each_with_index do |v, i|
-        io << ' ' if i > 0
-        if write_mode
-          v.to_write(io)
-        else
-          v.to_display(io)
+      id = object_id
+      Scheme.mark_write_seq_ancestor(id)
+      begin
+        @value.each_with_index do |v, i|
+          io << ' ' if i > 0
+          if write_mode
+            v.to_write(io)
+          else
+            v.to_display(io)
+          end
         end
+      ensure
+        Scheme.unmark_write_seq_ancestor(id)
       end
       io << ')'
     end

@@ -144,6 +144,7 @@
     sxql-when
     sxql-where
     sxql-yield
+    sxql-zip-kw-row
   )
   (import (scheme base) (scheme write) (scheme cxr) (creme sql))
   (begin
@@ -755,7 +756,11 @@
     ;; Builds one row's (:col . value) alist reusing the pre-interned `keys`
     ;; (the :col symbols) instead of re-deriving them from the column names
     ;; per row -- the values come from `row` positionally (a SQL result set's
-    ;; rows all share the first row's column order).
+    ;; rows all share the first row's column order). Exported (unlike
+    ;; sxql-row->kw-alist's other private helpers) since (creme dao)'s own
+    ;; dao-run-select uses this same intern-keys-once-then-zip shape for
+    ;; its prepared-query path, not just sxql-run below -- see that
+    ;; procedure's own comment.
     (define (sxql-zip-kw-row keys row)
       (if (null? keys)
           '()

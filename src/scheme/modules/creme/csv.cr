@@ -727,6 +727,6 @@ end
 
 module Scheme
   class Interpreter
-    register_library ["creme", "csv"], Scheme::Builtins::CsvLibrary
+    register_library ["creme", "builtin", "csv"], Scheme::Builtins::CsvLibrary
   end
 end

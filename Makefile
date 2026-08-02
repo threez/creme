@@ -16,8 +16,37 @@ fmtcheck:
 lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext/chacha20_neon.h
 	$(CC) -O3 -march=armv8-a+simd -c -o $@ $<
 
-spec: $(NEON_OBJ)
+# (creme ffi)'s small precompiled dlopen/libffi shim (see that file's own
+# header comment for why) -- unlike NEON_OBJ, needed on every platform, so
+# it's an unconditional bin/creme prerequisite below rather than arch-
+# gated. -I/usr/local/include is a no-op where it doesn't exist (BSD's
+# base cc already searches it by default; Linux distros installing
+# libffi-dev under /usr/include don't need it either) and covers this
+# project's own FreeBSD dev environment, where libffi's headers live
+# under /usr/local/include specifically (a ports/pkg convention).
+FFI_SHIM_OBJ = src/scheme/modules/creme/ffi_shim.o
+
+src/scheme/modules/creme/ffi_shim.o: src/scheme/modules/creme/ffi_shim.c
+	$(CC) -O2 -I/usr/local/include -c -o $@ $<
+
+spec: $(NEON_OBJ) $(FFI_SHIM_OBJ)
 	crystal spec -v
+
+# bin/creme itself, the one binary everything else in this project (creme-
+# spec/creme-spec-cvm above, competition/Makefile's own `creme` delegation
+# target) either runs directly or shells out to. Real prerequisites --
+# every .cr source file plus shard.yml/shard.lock/the NEON object above --
+# not a bare existence check, so a rebuild happens exactly when creme's own
+# behavior could have changed, never leaving a stale (or hand-built, wrong-
+# flags) binary silently in place indefinitely (see competition/Makefile's
+# own header comment for the concrete incident that motivated this: the
+# Crystal demo-todo twin's bin/app once sat unrebuilt for days after a
+# manual, non-`--release` build, because nothing ever re-checked HOW it had
+# been built, only whether it existed and was newer than its source).
+CREME_SRCS != find src -name '*.cr' | tr '\n' ' '
+
+bin/creme: $(CREME_SRCS) shard.yml shard.lock $(NEON_OBJ) $(FFI_SHIM_OBJ)
+	shards build --release --no-debug
 
 # Run-only: assumes bin/creme is already built (shards build --release
 # --no-debug). Runs spec/creme/main_spec.scm -- (creme spec)-based tests,
@@ -65,16 +94,26 @@ creme-spec-cvm:
 	./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc
 	./bin/creme spec/creme/main_spec.scm --cvm
 
-# Run-only: assumes bin/creme is already built (shards build --release
-# --no-debug) and, for the native-Crystal comparison column, bin/bench_cr is
-# already built too (crystal build --release bench/bench.cr -o bin/bench_cr).
-# Same for the cvm column: cvm/cvm built (make -C cvm) -- bench.scm itself
-# regenerates cvm/compiler-run.cvmc (the precompiled self-hosted-compiler
-# image cvm's compiler mode needs) every run, so no separate emit step here.
-# Ruby/Racket/Guile/Node/cvm columns fall back to "n/a" if those aren't built
-# or installed.
+# Every artifact competition/bench.scm's two suites need (bin/creme and
+# cvm/cvm themselves, the self-hosted-compiler image, both suites' native-
+# code comparison floors, and every todo-app twin) is now a real,
+# prerequisite-tracked target owned by competition/Makefile -- see its own
+# header comment for why (a hand-built, wrong-flags binary used to be able
+# to sit unrebuilt indefinitely; a target's only path to existing now is
+# through that Makefile's own recipe). competition/Makefile itself is
+# written in the same portable make subset as this file (works under
+# either plain `make` or `gmake` here) -- it only reaches for `gmake`
+# explicitly, internally, for the one delegation (cvm/Makefile) that
+# actually needs GNU-only syntax; see its own header comment.
+#
+# Runs BOTH the CPU-workload "bench" suite and the HTTP-benchmarked
+# "todo-app" suite, bench first -- pass --only bench / --only todo-app
+# yourself (`./bin/creme competition/bench.scm --only ...`) to narrow to
+# just one (competition/Makefile's own `build` still prepares everything
+# either one could need either way).
 bench:
-	./bin/creme bench/bench.scm
+	$(MAKE) -C competition build
+	./bin/creme competition/bench.scm
 
 lib/ameba/bin/ameba:
 	shards install

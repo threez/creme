@@ -1,12 +1,12 @@
 require "../../../spec_helper"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme prof-vm)) #{src}").write_string
 end
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme prof-vm)) #{src}")
 end
 
@@ -67,7 +67,7 @@ describe "prof-vm module" do
   end
 
   it "propagates a raised error and still leaves sampling in a clean state" do
-    interp = Scheme::Interpreter.new
+    interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
     Scheme.run_source(interp, "(import (creme prof-vm))")
 
     expect_raises(Scheme::SchemeRuntimeError, /boom/) do
@@ -89,7 +89,7 @@ describe "prof-vm module" do
   # share the parent's still-active sampler (see Interpreter::SampleSink)
   # so the parent's own report reflects work done on the child too.
   it "a child interpreter spawned while sampling is active contributes samples to the parent's report" do
-    parent = Scheme::Interpreter.new
+    parent = Scheme::Interpreter.new(library_search_path: ["./modules"])
     parent.start_scheme_sampling(1)
     child = Scheme::Interpreter.new(inherit_from: parent)
     Scheme::BytecodeCompiler.run_program(
@@ -104,7 +104,7 @@ describe "prof-vm module" do
   end
 
   it "a child interpreter spawned while the parent is NOT sampling stays uninstrumented" do
-    parent = Scheme::Interpreter.new
+    parent = Scheme::Interpreter.new(library_search_path: ["./modules"])
     child = Scheme::Interpreter.new(inherit_from: parent)
     Scheme::BytecodeCompiler.run_program(
       child,

@@ -2,12 +2,12 @@ require "../../../spec_helper"
 require "http/server"
 
 private def w(src : String) : String
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme http)) #{src}").write_string
 end
 
 private def run(src : String) : Scheme::SchemeValue
-  interp = Scheme::Interpreter.new
+  interp = Scheme::Interpreter.new(library_search_path: ["./modules"])
   Scheme.run_source(interp, "(import (creme http)) #{src}")
 end
 

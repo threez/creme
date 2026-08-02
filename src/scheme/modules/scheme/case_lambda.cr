@@ -8,7 +8,7 @@
 
 module Scheme
   class Interpreter
-    register_library ["scheme", "case-lambda"] do |env|
+    register_library ["creme", "builtin", "case-lambda"] do |env|
       names = %w[case-lambda]
       names.each { |name| env.define(name, @base_env.get(name)) }
       names
