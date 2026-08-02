@@ -1,7 +1,7 @@
 ; Build everything both suites below need with `make -C competition build`
 ; (or `gmake`, on a system whose default `make` isn't already GNU make --
 ; see competition/Makefile's own header comment) before running this --
-; it owns bin/creme, cvm/cvm + its self-hosted-compiler image, both
+; it owns bin/creme, icecreme/icecreme + its self-hosted-compiler image, both
 ; suites' native-code comparison floors, and every todo-app twin as real,
 ; prerequisite-tracked targets, replacing what used to be a mix of ad hoc
 ; shell freshness checks scattered through the todo-app suite below (see
@@ -49,16 +49,16 @@
 ;          just as coarse, so it optionally builds against
 ;          competition/lua/bench/monotonic.so too — see monotonic.c's own
 ;          header comment for the one-time build command)
-;        - cvm/cvm, the standalone C11 prototype VM in cvm/ (see
-;          cvm/README.md — a narrow experiment scoped to exactly
+;        - icecreme/icecreme, the standalone C11 prototype VM in icecreme/ (see
+;          icecreme/README.md — a narrow experiment scoped to exactly
 ;          competition/scheme/bench/creme.scm, not a general Scheme
 ;          runtime), compiling and running competition/scheme/bench/
 ;          creme.scm itself through its own self-hosted (creme compiler
 ;          compiler) -- a genuinely independent compile of the same
 ;          source, not the bytecode creme's own column runs (build once:
-;          make -C cvm; this script regenerates cvm/compiler-run.cvmc, the
-;          precompiled self-hosted-compiler image cvm's compiler mode
-;          depends on, on every run -- see ensure-cvm-compiler-image!
+;          make -C icecreme; this script regenerates icecreme/compiler-run.ice, the
+;          precompiled self-hosted-compiler image icecreme's compiler mode
+;          depends on, on every run -- see ensure-icecreme-compiler-image!
 ;          below, cheap enough (~0.15s) not to bother with a staleness
 ;          check spanning every .sld the compiler bundles)
 ;
@@ -66,7 +66,7 @@
 ;      (competition/scheme/demo-todo/app.scm) against its Sinatra+ERB+
 ;      Sequel+SQLite, Kemal+Granite+ECR, Racket web-server, Go Fiber+GORM+
 ;      html-template, Node Express+Drizzle+Eta, and C facil.io+mustache+
-;      SQLite3 twins using wrk -- plus cvm, compiling and running that SAME
+;      SQLite3 twins using wrk -- plus icecreme, compiling and running that SAME
 ;      app.scm source directly through its own self-hosted (creme compiler
 ;      compiler) instead of a hand-ported twin -- including its (creme dao)
 ;      dependency's define-dao, a defmacro exported from a pure-Scheme,
@@ -75,10 +75,10 @@
 ;      recursively load and compile a file-based library's own body the
 ;      first time it's imported and register any defmacro/define-syntax it
 ;      exports into the same macro-table a textually-local one would use --
-;      needed since cvm's own `import!`/`expand-if-macro` builtins are
-;      permanent stubs (cvm's global table is unconditionally flat, with no
+;      needed since icecreme's own `import!`/`expand-if-macro` builtins are
+;      permanent stubs (icecreme's global table is unconditionally flat, with no
 ;      runtime Macro/SchemeSyntaxRules representation at all -- see
-;      cvm/bootstrap.c's own header comment).
+;      icecreme/bootstrap.c's own header comment).
 ;
 ; Run with no flags to run both suites, bench first (much faster, and the
 ; order this file's own sections appear in below) then todo-app. Narrow to
@@ -124,7 +124,7 @@
              (flag "go-port" "--go-port" "Go server port" 'integer 4574)
              (flag "node-port" "--node-port" "Node server port" 'integer 4575)
              (flag "c-port" "--c-port" "C server port" 'integer 4576)
-             (flag "cvm-port" "--cvm-port" "cvm (C11 prototype VM) server port" 'integer 4577)
+             (flag "icecreme-port" "--icecreme-port" "icecreme (C11 prototype VM) server port" 'integer 4577)
              (flag "duration" "--duration" "wrk run duration" 'string "8s")
              (flag "threads" "--threads" "wrk thread count" 'integer 4)
              (flag "conns" "--conns" "wrk connection count" 'integer 32)
@@ -253,16 +253,16 @@
          (lua-output (process-run-safe lua-cmd (list "competition/lua/bench/bench.lua")))
          (luajit-output (process-run-safe "luajit" (list "competition/lua/bench/bench.lua"))))
 
-    ; Regenerates cvm/compiler-run.cvmc (the precompiled self-hosted-compiler
-    ; image cvm's own compiler mode depends on to run a plain .scm file
-    ; directly, see cvm/compiler-run.scm) unconditionally every run rather
+    ; Regenerates icecreme/compiler-run.ice (the precompiled self-hosted-compiler
+    ; image icecreme's own compiler mode depends on to run a plain .scm file
+    ; directly, see icecreme/compiler-run.scm) unconditionally every run rather
     ; than tracking a staleness check across every .sld it bundles
     ; (reader.sld, bytecode.sld, compiler.sld, ...) -- ~0.15s, cheap enough
     ; not to bother. Best-effort like every other variant here: if bin/creme
-    ; or cvm/cvm aren't built yet, this (and then cvm-output below) just
+    ; or icecreme/icecreme aren't built yet, this (and then icecreme-output below) just
     ; falls back to n/a.
-    (process-run-safe "bin/creme" (list "--emit-cvm" "cvm/compiler-run.scm" "cvm/compiler-run.cvmc"))
-    (let ((cvm-output (process-run-safe "cvm/cvm" (list "competition/scheme/bench/creme.scm"))))
+    (process-run-safe "bin/creme" (list "--emit-icecreme" "icecreme/compiler-run.scm" "icecreme/compiler-run.ice"))
+    (let ((icecreme-output (process-run-safe "icecreme/icecreme" (list "competition/scheme/bench/creme.scm"))))
 
       ; ---- parse "<label> = <result>  (<elapsed>s)" / "total = <elapsed>s" ---
 
@@ -291,7 +291,7 @@
       (define lua-times (parse-elapsed-alist lua-output))
       (define luajit-times (parse-elapsed-alist luajit-output))
       (define creme-times (parse-elapsed-alist creme-output))
-      (define cvm-times (parse-elapsed-alist cvm-output))
+      (define icecreme-times (parse-elapsed-alist icecreme-output))
 
       ; ---- build the two tables ---------------------------------------------
       ;
@@ -319,7 +319,7 @@
         (list (cons "crystal" crystal-times) (cons "go" go-times) (cons "racket" racket-times)
               (cons "ruby" ruby-times) (cons "guile" guile-times) (cons "node" node-times)
               (cons "lua55" lua-times) (cons "luajit" luajit-times)
-              (cons "creme" creme-times) (cons "cvm" cvm-times)))
+              (cons "creme" creme-times) (cons "icecreme" icecreme-times)))
 
       (define (times-of variant) (lookup variant variant-times))
       (define (total-of variant) (lookup "total" (times-of variant)))
@@ -433,7 +433,7 @@
 (define go-port (number->string (cli-get opts "go-port")))
 (define node-port (number->string (cli-get opts "node-port")))
 (define c-port (number->string (cli-get opts "c-port")))
-(define cvm-port (number->string (cli-get opts "cvm-port")))
+(define icecreme-port (number->string (cli-get opts "icecreme-port")))
 (define duration (cli-get opts "duration"))
 (define threads (cli-get opts "threads"))
 (define profile? (cli-flag? opts "profile"))
@@ -618,7 +618,7 @@
 ;; a wrk req/s number, silently comparing garbage. Run once here, before any
 ;; wrk load-testing starts, rather than per-app-under-test below, since it's
 ;; the one Scheme source file (app.scm) every entry in this suite either
-;; runs directly (scheme.cr, cvm) or was hand-ported from (every other
+;; runs directly (scheme.cr, icecreme) or was hand-ported from (every other
 ;; language's twin) -- a behavior bug in app.scm's own logic would already
 ;; be a bug in the comparison itself, worth catching before spending any
 ;; time on throughput numbers at all.
@@ -749,25 +749,25 @@
   (cleanup!)
   (sleep! 1)
 
-  ;; ---- cvm / standalone C11 prototype VM, running app.scm itself -------------
+  ;; ---- icecreme / standalone C11 prototype VM, running app.scm itself -------------
   ;;
   ;; Not a hand-ported twin like every other entry above -- this compiles and
   ;; runs the exact same competition/scheme/demo-todo/app.scm source (and its
   ;; full (creme surf)/(creme dao)/(creme html)/... library stack) through
-  ;; cvm/ (../cvm/), a from-scratch C11 VM built for exactly this: see
-  ;; cvm/README.md.
+  ;; icecreme/ (../icecreme/), a from-scratch C11 VM built for exactly this: see
+  ;; icecreme/README.md.
 
-  (step! (string-append "cvm / creme (C11 prototype VM) -- starting on port " cvm-port))
-  ;; Run-only: assumes competition/Makefile already built cvm/cvm and
-  ;; regenerated cvm/compiler-run.cvmc (the precompiled self-hosted-
-  ;; compiler image cvm's compiler mode needs -- see cvm/compiler-run.
+  (step! (string-append "icecreme / creme (C11 prototype VM) -- starting on port " icecreme-port))
+  ;; Run-only: assumes competition/Makefile already built icecreme/icecreme and
+  ;; regenerated icecreme/compiler-run.ice (the precompiled self-hosted-
+  ;; compiler image icecreme's compiler mode needs -- see icecreme/compiler-run.
   ;; scm's own header comment) -- see the Crystal section's own comment
   ;; above for why this no longer builds/checks either itself.
-  (track! (process-spawn "./cvm/cvm" (list "competition/scheme/demo-todo/app.scm")
-                         'env (list (cons "PORT" cvm-port))
-                         'stdout "/tmp/bench-cvm.log" 'stderr "/tmp/bench-cvm.log"))
-  (wait-for-port! cvm-port)
-  (bench-app! "cvm / creme (C11 prototype VM)" cvm-port)
+  (track! (process-spawn "./icecreme/icecreme" (list "competition/scheme/demo-todo/app.scm")
+                         'env (list (cons "PORT" icecreme-port))
+                         'stdout "/tmp/bench-icecreme.log" 'stderr "/tmp/bench-icecreme.log"))
+  (wait-for-port! icecreme-port)
+  (bench-app! "icecreme / creme (C11 prototype VM)" icecreme-port)
   (cleanup!)
 
   (print-results-table!)

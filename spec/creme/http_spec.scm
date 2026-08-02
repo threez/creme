@@ -3,9 +3,9 @@
 ;; (spec/scheme/modules/creme/http_spec.cr) -- see modules/creme/spec.sld's
 ;; own header comment for the framework this uses.
 ;;
-;; (creme http) used to be entirely absent from cvm. Crystal's own
+;; (creme http) used to be entirely absent from icecreme. Crystal's own
 ;; `require "http/client"` is standard library, not an external shard --
-;; backed here (cvm/http.c) by a small hand-rolled HTTP/1.1 client (raw
+;; backed here (icecreme/http.c) by a small hand-rolled HTTP/1.1 client (raw
 ;; getaddrinfo/connect/read/write, the same pattern (creme actor)'s own
 ;; dial() already uses): builds a request, sends "Connection: close",
 ;; and drains the response by reading until the peer closes the socket
@@ -13,7 +13,7 @@
 ;; whatever bytes were read, if the server ever sends one) rather than
 ;; tracking Content-Length precisely while receiving.
 ;;
-;; HTTPS/TLS is now real (cvm/http.c's own header comment) -- this file's
+;; HTTPS/TLS is now real (icecreme/http.c's own header comment) -- this file's
 ;; two https:// cases near the end are the only ones needing actual
 ;; external network access, everything else here is local-only via the
 ;; spawned mux server below. Native's own spec suite (spec/scheme/modules/
@@ -24,7 +24,7 @@
 ;; needs a REAL server to test the client against -- same reasoning as
 ;; actor_spec.scm's own header comment (inherently about real I/O, not a
 ;; deterministic dual-compiler comparison). Native's own http_spec.cr
-;; spins up a real HTTP::Server on its own Fiber; cvm has no such
+;; spins up a real HTTP::Server on its own Fiber; icecreme has no such
 ;; concurrency primitive for (creme mux)'s own mux-listen! (it blocks
 ;; the calling thread inside facil.io's own reactor loop forever, by
 ;; design -- see mux.c's own comment), so this spins up the SAME real
@@ -32,12 +32,12 @@
 ;; FIXED port, not mux-listen!'s own ephemeral-port return value, since
 ;; mux-listen! never returns that value back to the caller at all).
 ;; try-connect below retries the very first request in a bounded loop
-;; (no sleep builtin exists in cvm to wait out the small
+;; (no sleep builtin exists in icecreme to wait out the small
 ;; spawn-a-thread-then-bind-a-socket startup race otherwise) -- once
 ;; that first request succeeds, the server is definitely up for every
 ;; case that follows.
 ;;
-;; Unlike every other file in this directory, this one is cvm-ONLY --
+;; Unlike every other file in this directory, this one is icecreme-ONLY --
 ;; native's differently-shaped mux-listen!/actor Fiber concurrency
 ;; doesn't stand up the same "server on one thread, client on another,
 ;; same script" pattern this file relies on (see main_spec.scm's own
@@ -46,7 +46,7 @@
 ;; passing Crystal spec, spec/scheme/modules/creme/http_spec.cr).
 ;;
 ;; Run with:
-;;   ./cvm/cvm spec/creme/http_spec.scm
+;;   ./icecreme/icecreme spec/creme/http_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (creme mux) (creme http) (creme actor) (creme spec))
@@ -127,13 +127,13 @@
   (it "raises on a malformed url"
     (should-raise? (lambda () (http-get "not a url"))))
 
-  ;; HTTPS: real TLS now (cvm/http.c's Conn/connect_tls), always with full
+  ;; HTTPS: real TLS now (icecreme/http.c's Conn/connect_tls), always with full
   ;; certificate + hostname verification (SSL_VERIFY_PEER against the
   ;; system trust store, plus SSL_set1_host -- see http.c's own header
   ;; comment; there's no flag anywhere to turn either off). Unlike every
   ;; other case in this file, these two genuinely need REAL external
   ;; network access -- there's no local TLS server here to test against
-  ;; (cvm's own mux.c is a plain-HTTP server only, no TLS listener), so
+  ;; (icecreme's own mux.c is a plain-HTTP server only, no TLS listener), so
   ;; this mirrors examples/27-http-json-fetch.scm's own pre-existing
   ;; live-network dependency (postman-echo.com) rather than introducing a
   ;; new kind of exception: example.com and badssl.com's wrong-host

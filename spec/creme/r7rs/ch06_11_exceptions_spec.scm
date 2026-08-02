@@ -7,21 +7,21 @@
 ;; interpreter indirection needed the way the original Crystal spec's
 ;; run(src)/w(src) helpers required).
 ;;
-;; This file used to document four cvm-only gaps here, each gated behind
+;; This file used to document four icecreme-only gaps here, each gated behind
 ;; `it-unless`: plain `raise` not consulting an installed with-exception-
 ;; handler at all (it used to drive ONLY the C-level guard/GuardHandler
 ;; longjmp stack); error-object-message returning irritants concatenated
 ;; in; read-error?/file-error? being unbound. All four are now fixed --
-;; with-exception-handler/raise/raise-continuable are genuine cvm-native
-;; builtins (cvm/builtins.c, backed by a real VM-wide handler stack, see
-;; cvm/vm.h's own UNWIND_EXC_HANDLER doc comment), not just a Scheme-
-;; level shim that only worked under cvm's own "compiler mode" -- so
+;; with-exception-handler/raise/raise-continuable are genuine icecreme-native
+;; builtins (icecreme/builtins.c, backed by a real VM-wide handler stack, see
+;; icecreme/vm.h's own UNWIND_EXC_HANDLER doc comment), not just a Scheme-
+;; level shim that only worked under icecreme's own "compiler mode" -- so
 ;; every case in this file runs unconditionally now.
 ;;
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_11_exceptions_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_11_exceptions_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_11_exceptions_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_11_exceptions_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (creme spec))

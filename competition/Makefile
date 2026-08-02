@@ -1,7 +1,7 @@
 # ===========================================================================
 # Builds every artifact competition/bench.scm's two suites (bench, todo-app
 # -- see that file's own header comment) need before either can run: bin/
-# creme itself, cvm/cvm and its self-hosted-compiler image, both suites'
+# creme itself, icecreme/icecreme and its self-hosted-compiler image, both suites'
 # native-code comparison floors, and every todo-app twin.
 #
 # Real, prerequisite-tracked targets everywhere in this file (source files,
@@ -29,7 +29,7 @@
 # fix, and reads identically to GNU make either way. Run this file with
 # either `make -C competition build` or `gmake -C competition build`.
 #
-# The one exception: cvm/Makefile itself (delegated to below) DOES use
+# The one exception: icecreme/Makefile itself (delegated to below) DOES use
 # GNU-only `$(shell ...)` internally (its own pkg-config-driven CFLAGS),
 # so that one delegation hardcodes `gmake` rather than $(MAKE) -- see its
 # own recipe comment. Everything else in this file has no such
@@ -48,9 +48,9 @@
 
 ROOT := ..
 
-.PHONY: all build clean creme cvm bench-binaries todo-app-binaries c/demo-todo/bin/app
+.PHONY: all build clean creme icecreme bench-binaries todo-app-binaries c/demo-todo/bin/app
 
-build: creme cvm bench-binaries todo-app-binaries
+build: creme icecreme bench-binaries todo-app-binaries
 
 all: build
 
@@ -66,21 +66,21 @@ all: build
 creme:
 	$(MAKE) -C $(ROOT) bin/creme
 
-# Delegates to cvm/Makefile -- which already has real per-.c/.h
+# Delegates to icecreme/Makefile -- which already has real per-.c/.h
 # prerequisite tracking (see its own %.o pattern rule) -- called
 # unconditionally, same reasoning as `creme` above. Hardcoded `gmake`, not
-# $(MAKE): cvm/Makefile itself uses GNU-only $(shell ...) (pkg-config-
+# $(MAKE): icecreme/Makefile itself uses GNU-only $(shell ...) (pkg-config-
 # driven CFLAGS/LDLIBS), which BSD make silently mis-parses into broken,
 # empty flags rather than refusing to run -- so this one delegation always
 # needs the real GNU make binary, regardless of which make is running
 # THIS file.
-cvm:
-	gmake -C $(ROOT)/cvm
+icecreme:
+	gmake -C $(ROOT)/icecreme
 
-# cvm's own self-hosted-compiler image (cvm/compiler-run.cvmc), needed by
-# every cvm/cvm invocation that compiles a plain .scm file directly (cvm's
-# "compiler mode" -- see cvm/compiler-run.scm's own header comment).
-# Depends on bin/creme (native --emit-cvm builds it) plus every .sld file
+# icecreme's own self-hosted-compiler image (icecreme/compiler-run.ice), needed by
+# every icecreme/icecreme invocation that compiles a plain .scm file directly (icecreme's
+# "compiler mode" -- see icecreme/compiler-run.scm's own header comment).
+# Depends on bin/creme (native --emit-icecreme builds it) plus every .sld file
 # the self-hosted compiler itself bundles (reader.sld/compiler.sld and
 # everything (creme compiler compiler) transitively imports, all under
 # modules/creme/, recursively -- a plain recursive find covers both the
@@ -89,8 +89,8 @@ cvm:
 # source changes, not just when compiler-run.scm's short driver body does.
 COMPILER_SLDS != find $(ROOT)/modules/creme -name '*.sld' | tr '\n' ' '
 
-$(ROOT)/cvm/compiler-run.cvmc: creme $(ROOT)/cvm/compiler-run.scm $(COMPILER_SLDS)
-	cd $(ROOT) && ./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc
+$(ROOT)/icecreme/compiler-run.ice: creme $(ROOT)/icecreme/compiler-run.scm $(COMPILER_SLDS)
+	cd $(ROOT) && ./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice
 
 # ---- bench suite: native-code comparison floors -----------------------------
 
@@ -116,9 +116,9 @@ bench-binaries: $(ROOT)/bin/bench_cr $(ROOT)/bin/bench_go lua/bench/monotonic.so
 
 # ---- todo-app suite: every twin ---------------------------------------------
 
-# scheme.cr / bin/creme and cvm / creme (C11 prototype VM) run
+# scheme.cr / bin/creme and icecreme / creme (C11 prototype VM) run
 # scheme/demo-todo/app.scm directly -- no separate build artifact of their
-# own beyond `creme`/`cvm`/compiler-run.cvmc above.
+# own beyond `creme`/`icecreme`/compiler-run.ice above.
 
 CRYSTAL_TODO_SRCS != find crystal/demo-todo/src -name '*.cr' | tr '\n' ' '
 
@@ -134,11 +134,11 @@ node/demo-todo/node_modules: node/demo-todo/package.json node/demo-todo/package-
 
 # Delegates to c/demo-todo/Makefile, which already vendors+builds facil.io
 # and tracks bin/app against main.c with real prerequisites, and (unlike
-# cvm/Makefile) has no GNU-only construct of its own -- plain $(MAKE) is
+# icecreme/Makefile) has no GNU-only construct of its own -- plain $(MAKE) is
 # fine here. Named explicitly since that Makefile's own FIRST (so default)
 # target is the vendored facil.io clone, not bin/app (see its own target
 # order). Declared .PHONY (see the list up top) and called unconditionally,
-# same as `creme`/`cvm` above -- a real prerequisite list here would only
+# same as `creme`/`icecreme` above -- a real prerequisite list here would only
 # duplicate c/demo-todo/Makefile's own, and worse, once the file exists a
 # target declared with NO prerequisites is never reconsidered at all,
 # silently skipping this delegation forever after the first build.
@@ -149,7 +149,7 @@ c/demo-todo/bin/app:
 # here -- both run their app.rb/app.rkt source directly (bundler/raco
 # resolve dependencies at run time, same as scheme.cr's own bin/creme +
 # app.scm), so there's nothing for this Makefile to build for either.
-todo-app-binaries: creme cvm $(ROOT)/cvm/compiler-run.cvmc \
+todo-app-binaries: creme icecreme $(ROOT)/icecreme/compiler-run.ice \
                     crystal/demo-todo/bin/app go/demo-todo/bin/app \
                     node/demo-todo/node_modules c/demo-todo/bin/app
 

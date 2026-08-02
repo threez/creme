@@ -62,11 +62,11 @@
 ;;                                      hash-table-keys)
 ;;   (pstore-root? store key)        -> #t iff key is currently set
 ;;
-;; Native `bin/creme` only -- `cvm/cvm`'s `read` builtin requires an
+;; Native `bin/creme` only -- `icecreme/icecreme`'s `read` builtin requires an
 ;; explicit port argument (it has no current-input-port default the way
 ;; native creme's `read` does), so pstore-open's `(read)` call inside
 ;; with-input-from-file doesn't work unmodified there; not addressed
-;; here since fixing it is a cvm builtin-arity change, out of this
+;; here since fixing it is an icecreme builtin-arity change, out of this
 ;; library's own scope.
 ;;
 ;; Limitations (same honesty as (creme tempfile)'s own stated scope):

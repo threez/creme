@@ -17,8 +17,8 @@
 ;; Run with:
 ;;   ./bin/creme spec/creme/bootstrap_spec.scm                    (all 5 pass)
 ;;   ./bin/creme --self-hosted spec/creme/bootstrap_spec.scm       (4 of 5)
-;;   ./cvm/cvm spec/creme/bootstrap_spec.scm                       (4 of 5)
-;; Both --self-hosted and cvm/cvm fail only "import! copies a library's
+;;   ./icecreme/icecreme spec/creme/bootstrap_spec.scm                       (4 of 5)
+;; Both --self-hosted and icecreme/icecreme fail only "import! copies a library's
 ;; bindings into the global env" (see its own comment -- a harmless
 ;; environment artifact, not a bug: each of these two bootstraps already
 ;; transitively imports (creme regex) for its own compiler's use, so
@@ -26,7 +26,7 @@
 ;; test's own initial "is it genuinely unbound?" check meaningless there).
 ;;
 ;; "import! applies only/except/prefix import-set filters" now passes
-;; under both -- cvm's own import! (cvm/bootstrap.c, bi_import_bang)
+;; under both -- icecreme's own import! (icecreme/bootstrap.c, bi_import_bang)
 ;; bridges a bare runtime call out to compiler.sld's own alias-generation
 ;; logic (import!-apply-aliases!, built on the existing alias-defines-
 ;; for-specs), same pattern as expand-if-macro's own bridging below. This
@@ -42,7 +42,7 @@
 ;;      run ensure-libraries-loaded! first (see that function's own
 ;;      comment).
 ;;   2. THIS specific test targets `(creme regex)`, a NATIVE (Crystal/
-;;      cvm-builtin) library with no .sld file on disk -- and import-
+;;      icecreme-builtin) library with no .sld file on disk -- and import-
 ;;      set-alias-defines's own prefix/rename branches need a library's
 ;;      export alist to know what name(s) to alias (library-export-
 ;;      alist, compiler.sld), which used to only ever read a real .sld
@@ -50,10 +50,10 @@
 ;;      Crystal already tracks every registered library's own exports
 ;;      internally regardless of whether it's file- or Crystal-based
 ;;      (SchemeLibrary#exports, eval/library.cr), now exposed to Scheme
-;;      via (creme introspection); cvm has its own, much narrower
-;;      library-exports (cvm/bootstrap.c) -- a small hardcoded table
+;;      via (creme introspection); icecreme has its own, much narrower
+;;      library-exports (icecreme/bootstrap.c) -- a small hardcoded table
 ;;      covering just the native libraries this project's own spec suite
-;;      actually needs aliased this way (today: (creme regex)), since cvm
+;;      actually needs aliased this way (today: (creme regex)), since icecreme
 ;;      has no per-library grouping of its own flat global table to draw
 ;;      such a list from automatically.
 ;; ===========================================================================
@@ -63,9 +63,9 @@
 ;; import! brings them in dynamically at runtime; a static top-level
 ;; import of (creme regex) would make that check meaningless. The FIRST
 ;; case's own initial check fails regardless under BOTH --self-hosted
-;; and cvm/cvm: each has its own bootstrap toolchain (SELF_HOSTED_
-;; TOOLCHAIN_IMPORT in src/main.cr for --self-hosted; cvm/compiler-run.
-;; scm's own top-level import clause for cvm) that already transitively
+;; and icecreme/icecreme: each has its own bootstrap toolchain (SELF_HOSTED_
+;; TOOLCHAIN_IMPORT in src/main.cr for --self-hosted; icecreme/compiler-run.
+;; scm's own top-level import clause for icecreme) that already transitively
 ;; imports (creme regex) for the compiler's own use, so regexp-matches?
 ;; is bound before this script even starts -- an environment difference
 ;; between how each of these bootstraps itself, not a compiler bug.
@@ -102,15 +102,15 @@
 ;; runtime global binding, or it would leak past its own lexical scope
 ;; the same way compile-scoped-body!'s own earlier fix was needed for.
 ;;
-;; Under cvm/cvm specifically, this ALSO now works for both defmacro AND
-;; define-syntax: cvm's OWN VM (cvm/vm.c's Op::HelperForm) binds a real
+;; Under icecreme/icecreme specifically, this ALSO now works for both defmacro AND
+;; define-syntax: icecreme's OWN VM (icecreme/vm.c's Op::HelperForm) binds a real
 ;; T_MACRO value for kind 3 (define-syntax) the same way it already did
-;; for kind 4 (defmacro), and bi_expand_if_macro (cvm/bootstrap.c) picks
+;; for kind 4 (defmacro), and bi_expand_if_macro (icecreme/bootstrap.c) picks
 ;; the right bridge (defmacro-expand-form vs. the new define-syntax-
 ;; expand-form, compiler.sld -- built on the self-hosted compiler's own
 ;; sr-make-transformer, its real syntax-rules pattern matcher, already
 ;; loaded for exactly this purpose) by checking the wrapped form's own
-;; head symbol. cvm's C VM still never expands a syntax-rules use
+;; head symbol. icecreme's C VM still never expands a syntax-rules use
 ;; DIRECTLY (no pattern-matching machinery in C) -- it bridges out to
 ;; Scheme for that, same as it always did for defmacro.
 (defmacro my-list2 args (cons 'list args))

@@ -7,10 +7,10 @@
 ;;
 ;; interaction-environment/scheme-report-environment/null-environment and
 ;; eval's optional 2nd (environment specifier) argument USED to be a
-;; deliberate cvm gap -- cvm/compiler-run.scm's own versions of these were
-;; non-isolating stubs, since cvm has exactly ONE flat global table. Now
+;; deliberate icecreme gap -- icecreme/compiler-run.scm's own versions of these were
+;; non-isolating stubs, since icecreme has exactly ONE flat global table. Now
 ;; fixed for real (a genuinely separate child VM per environment -- see
-;; cvm/README.md's own "environment/eval" section and cvm/vm.c's
+;; icecreme/README.md's own "environment/eval" section and icecreme/vm.c's
 ;; cvm_new_empty_vm), so every isolation-dependent case this file used to
 ;; exclude now has FULL, unweakened coverage in
 ;; spec/creme/r7rs/ch06_12_environments_eval_spec.scm instead (including
@@ -22,7 +22,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/environments_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/environments_spec.scm
-;;   ./cvm/cvm spec/creme/environments_spec.scm
+;;   ./icecreme/icecreme spec/creme/environments_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

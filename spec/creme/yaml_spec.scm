@@ -6,7 +6,7 @@
 ;;
 ;; (creme yaml) used to be entirely absent from both backends. Native's
 ;; own (creme yaml) (src/creme/modules/creme/yaml.cr) leans on Crystal's
-;; stdlib `YAML`; cvm's (cvm/yaml.c) wraps libyaml directly -- both end up
+;; stdlib `YAML`; icecreme's (icecreme/yaml.c) wraps libyaml directly -- both end up
 ;; backed by the same underlying C library either way (see yaml.c's own
 ;; header comment for the full design and its one deliberate, narrow
 ;; native divergence around non-string-typed mapping keys).
@@ -14,7 +14,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/yaml_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/yaml_spec.scm
-;;   ./cvm/cvm spec/creme/yaml_spec.scm
+;;   ./icecreme/icecreme spec/creme/yaml_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

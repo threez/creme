@@ -10,23 +10,23 @@
 ;; Runs under all three backends:
 ;;   ./bin/creme spec/creme/main_spec.scm                 (native bin/creme; spawns bin/creme per file)
 ;;   ./bin/creme spec/creme/main_spec.scm --self-hosted    (native VM, self-hosted compiler; spawns bin/creme --self-hosted per file)
-;;   ./bin/creme spec/creme/main_spec.scm --cvm            (spawns ./cvm/cvm per file)
-;;   ./cvm/cvm spec/creme/main_spec.scm                    (cvm itself; ALSO spawns ./cvm/cvm per file)
-;; The last two land on the same runner -- cvm's own process-run (cvm/
+;;   ./bin/creme spec/creme/main_spec.scm --icecreme            (spawns ./icecreme/icecreme per file)
+;;   ./icecreme/icecreme spec/creme/main_spec.scm                    (icecreme itself; ALSO spawns ./icecreme/icecreme per file)
+;; The last two land on the same runner -- icecreme's own process-run (icecreme/
 ;; process.c, POSIX fork/pipe/execvp/waitpid, matching src/creme/
 ;; modules/creme/process.cr's contract exactly) means it makes no
 ;; difference whether THIS file is itself being driven natively or
-;; reentrantly under cvm: either way, each spec file still gets spawned
-;; as its own genuinely separate OS process. cvm-under-cvm is detected
-;; via cvm-target-path (cvm/bootstrap.c) being bound -- a marker that
-;; only ever exists in a cvm compiler-mode process, checked via a guard+
+;; reentrantly under icecreme: either way, each spec file still gets spawned
+;; as its own genuinely separate OS process. icecreme-under-icecreme is detected
+;; via icecreme-target-path (icecreme/bootstrap.c) being bound -- a marker that
+;; only ever exists in an icecreme compiler-mode process, checked via a guard+
 ;; eval probe (never calling it, just asking whether it's bound) so this
 ;; doesn't have to touch (command-line) at all when running that way
-;; (cvm has no argv-passing mechanism into compiler mode beyond the
+;; (icecreme has no argv-passing mechanism into compiler mode beyond the
 ;; target path, so there'd be nothing to parse there anyway).
 ;;
-;; (cvm/compiler-run.cvmc must already be built fresh before either cvm
-;; path -- see the Makefile's own creme-spec-cvm target.)
+;; (icecreme/compiler-run.ice must already be built fresh before either icecreme
+;; path -- see the Makefile's own creme-spec-icecreme target.)
 ;;
 ;; NOT itself named to match spec/creme/*_spec.scm's own usual naming --
 ;; deliberately doesn't end in "_spec.scm" the way every file it RUNS
@@ -56,7 +56,7 @@
     "spec/creme/cipher_spec.scm"
     "spec/creme/csv_spec.scm"
     "spec/creme/digest_spec.scm"
-    "spec/creme/examples_cvm_spec.scm"
+    "spec/creme/examples_icecreme_spec.scm"
     "spec/creme/file_extra_spec.scm"
     "spec/creme/file_ports_spec.scm"
     "spec/creme/general_loop_fusion_spec.scm"
@@ -109,27 +109,27 @@
     "spec/creme/r7rs/appendix_b_feature_identifiers_spec.scm"))
 
 ;; (creme reader)'s lex-tokens/tokens->forms (reader_native_spec.scm's own
-;; subject) are native-Crystal-only, with no cvm C equivalent at all -- see
-;; that file's own header comment. Skipped only when the runner targets cvm.
+;; subject) are native-Crystal-only, with no icecreme C equivalent at all -- see
+;; that file's own header comment. Skipped only when the runner targets icecreme.
 ;;
 ;; The spec/creme/r7rs/*.scm ports (and bootstrap_spec.scm) each carry
 ;; their own PER-CASE `pending` via `it-unless`/`(spec-vm)`/`(spec-
 ;; compiler)` (see modules/creme/spec.sld and (creme introspection)'s
-;; `runtime` builtin) for every genuine, individually-verified cvm/self-
+;; `runtime` builtin) for every genuine, individually-verified icecreme/self-
 ;; hosted gap those ports surfaced -- so none of those files need a
 ;; whole-file exclusion entry here anymore; a file that used to be listed
 ;; below now just reports some cases as `[PEND]` instead of `[FAIL]`
 ;; under the backend(s) where the gap applies, while still running (and
 ;; asserting) everything else for real. See each such file's own header
 ;; comment for exactly which cases are conditionally pending and why.
-(define cvm-excluded '("spec/creme/reader_native_spec.scm"))
+(define icecreme-excluded '("spec/creme/reader_native_spec.scm"))
 
 (define self-hosted-excluded '())
 
 ;; The inverse case: http_spec.scm's own live-server cases spawn a real
 ;; (creme mux) HTTP server on a (creme actor) thread and hit it with
 ;; (creme http)'s client, within the SAME script -- this only works
-;; under cvm, whose mux-listen! blocks a spawned actor's own OS thread
+;; under icecreme, whose mux-listen! blocks a spawned actor's own OS thread
 ;; forever (see that file's own header comment), letting the main
 ;; thread's requests run concurrently. Native's mux-listen! has
 ;; different (Fiber-based) concurrency semantics that don't line up the
@@ -138,21 +138,21 @@
 ;; (spec/scheme/modules/creme/http_spec.cr, a real HTTP::Server on its
 ;; own Fiber) verifying the identical request/response contract, so
 ;; nothing is left untested by skipping this file under native/self-
-;; hosted. Skipped only when the runner does NOT target cvm.
+;; hosted. Skipped only when the runner does NOT target icecreme.
 (define native-excluded '("spec/creme/http_spec.scm"))
 
 (define runner
-  (if (bound? 'cvm-target-path)
-      '("./cvm/cvm")
+  (if (bound? 'icecreme-target-path)
+      '("./icecreme/icecreme")
       (let ((args (cdr (command-line))))
         (cond
-          ((member "--cvm" args) '("./cvm/cvm"))
+          ((member "--icecreme" args) '("./icecreme/icecreme"))
           ((member "--self-hosted" args) '("./bin/creme" "--self-hosted"))
           (else '("./bin/creme"))))))
 
 (define exclude
   (cond
-    ((equal? runner '("./cvm/cvm")) cvm-excluded)
+    ((equal? runner '("./icecreme/icecreme")) icecreme-excluded)
     ((equal? runner '("./bin/creme" "--self-hosted")) (append native-excluded self-hosted-excluded))
     (else native-excluded)))
 

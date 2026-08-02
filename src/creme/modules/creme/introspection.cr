@@ -44,10 +44,10 @@ module Creme::Builtins::Introspection
   end
 
   # The runtime this script is currently executing under -- an alist:
-  #   ((vm . "crystal"|"cvm") (compiler . "native"|"self-hosted")
+  #   ((vm . "crystal"|"icecreme") (compiler . "native"|"self-hosted")
   #    (version . "0.1.0") (os . <uname -s>) (arch . <uname -m>))
-  # `vm` is always "crystal" here (cvm's own copy, cvm/builtins.c's
-  # bi_runtime, always answers "cvm" instead -- there's no other engine
+  # `vm` is always "crystal" here (icecreme's own copy, icecreme/builtins.c's
+  # bi_runtime, always answers "icecreme" instead -- there's no other engine
   # this Crystal-side implementation could possibly be running under).
   # `compiler` distinguishes native Crystal's own tree-walking evaluator
   # from `creme --self-hosted` (both run inside this SAME Interpreter/
@@ -55,7 +55,7 @@ module Creme::Builtins::Introspection
   # interp.global right before running the user's script -- see that
   # method's own comment. `version` is a hardcoded literal (0.1.0) --
   # this project has no other canonical version yet; keep this in sync
-  # BY HAND with cvm/builtins.c's bi_runtime's own copy of the same
+  # BY HAND with icecreme/builtins.c's bi_runtime's own copy of the same
   # literal. `os`/`arch` shell out to the real `uname` binary rather than
   # add a LibC binding, so they read exactly what running `uname -s`/
   # `uname -m` yourself would show.
@@ -67,7 +67,7 @@ module Creme::Builtins::Introspection
     Creme.a_to_list([
       Cons.new(SchemeSym.of("vm"), SchemeStr.new("crystal")).as(SchemeValue),
       Cons.new(SchemeSym.of("compiler"), SchemeStr.new(compiler)).as(SchemeValue),
-      Cons.new(SchemeSym.of("version"), SchemeStr.new("0.1.0")).as(SchemeValue), # keep in sync with cvm/builtins.c's bi_runtime
+      Cons.new(SchemeSym.of("version"), SchemeStr.new("0.1.0")).as(SchemeValue), # keep in sync with icecreme/builtins.c's bi_runtime
       Cons.new(SchemeSym.of("os"), SchemeStr.new(os)).as(SchemeValue),
       Cons.new(SchemeSym.of("arch"), SchemeStr.new(arch)).as(SchemeValue),
     ])

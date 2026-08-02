@@ -399,7 +399,7 @@
     ;; shadows an earlier one with no need to remove it.
     ;;
     ;; Genuine cycles (`#0=(1 2 . #0#)`) need the same placeholder-then-
-    ;; patch trick the native Crystal reader/cvm's own loader.c use: the
+    ;; patch trick the native Crystal reader/icecreme's own loader.c use: the
     ;; def half allocates an empty (mutable) placeholder PAIR and binds
     ;; the label to THAT before recursing into the labeled datum's own
     ;; contents, so a `#0#` reached while still parsing those contents

@@ -13,14 +13,14 @@
 ;; (creme bytecode) is a pure-Scheme, file-based library (modules/creme/
 ;; bytecode.sld) -- no native-only surface here, so unlike prim_call_spec.
 ;; scm (which exercises a NATIVE-only compiler optimization) this passes
-;; identically under all three backends, including cvm/cvm (whose own
+;; identically under all three backends, including icecreme/icecreme (whose own
 ;; self-hosted loader reads this library's source the same way it already
 ;; does for (creme compiler compiler) etc.).
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/bytecode_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/bytecode_spec.scm
-;;   ./cvm/cvm spec/creme/bytecode_spec.scm
+;;   ./icecreme/icecreme spec/creme/bytecode_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context)

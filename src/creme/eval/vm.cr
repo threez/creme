@@ -1707,7 +1707,7 @@ module Creme
     # ORIGINAL Builtin object every top-level env's own "+"/"-"/etc. binding
     # is a copy of at import time. Comparing a call site's CURRENT resolved
     # value against this cached reference by IDENTITY (`same?`, never `==`
-    # or a name lookup) is this VM's counterpart to cvm/vm.c's own
+    # or a name lookup) is this VM's counterpart to icecreme/vm.c's own
     # bi_plus/bi_minus/... C function pointer comparisons in
     # quicken_callglobal_op — "was this call site's target ever redefined".
     private def plus_builtin : Builtin
@@ -2044,7 +2044,7 @@ module Creme
     # Op::CallGlobal / Op::TailCallGlobal — the callee is a global, resolved
     # from this instruction's own inline cache (same fast path + redefinition
     # safety as GetGlobal), NOT read from register `a`. A non-tail call site
-    # (`tail: false` only — mirrors cvm/vm.c's own OP_CALLGLOBAL-only scope,
+    # (`tail: false` only — mirrors icecreme/vm.c's own OP_CALLGLOBAL-only scope,
     # never OP_TAILCALLGLOBAL) whose resolved callee is one of the handful
     # of quickenable builtins gets rewritten in place (Chunk#requicken!) to
     # the matching QCallGlobal* op before this call even completes, so every

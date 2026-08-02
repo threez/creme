@@ -322,7 +322,7 @@ module Creme::Builtins::ProcessExtra
   # (sleep-ms! milliseconds) -> same fiber-yielding sleep! above, but
   # takes an exact integer count of milliseconds instead of a real number
   # of seconds. Exists so portable Scheme code (written to run unchanged
-  # under both this interpreter and cvm/'s own sleep-ms!, which only has
+  # under both this interpreter and icecreme/'s own sleep-ms!, which only has
   # an integer-milliseconds C API) never needs two timer call sites --
   # see (creme raft-scheme)'s election/heartbeat tickers, the first
   # caller of this.

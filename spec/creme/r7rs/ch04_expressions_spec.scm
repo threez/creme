@@ -33,38 +33,38 @@
 ;;   current-compiling-file's own directory -- a mutable variable set
 ;;   (with save/restore for reentrant compiles) by compile-program's new
 ;;   optional 2nd argument, threaded through from src/main.cr's
-;;   run_self_hosted and cvm/compiler-run.scm alike. So both cases now
+;;   run_self_hosted and icecreme/compiler-run.scm alike. So both cases now
 ;;   run unconditionally under all three backends.
-;; - Three `cvm/builtins.c` gaps this file's direct R7RS coverage used to
+;; - Three `icecreme/builtins.c` gaps this file's direct R7RS coverage used to
 ;;   surface here (each was split into its own `it-unless (equal?
-;;   (spec-vm) "cvm") ...` case, neither a macro/compiler-architecture
+;;   (spec-vm) "icecreme") ...` case, neither a macro/compiler-architecture
 ;;   limitation like the ones above, just a narrower native-C builtin
 ;;   that hadn't been filled in yet) are now all fixed, so those cases
 ;;   run unconditionally:
 ;;   - `equal?` on two distinct-but-content-equal bytevectors used to
-;;     return `#f` under `./cvm/cvm` -- fixed (cvm_equal now has a real
+;;     return `#f` under `./icecreme/icecreme` -- fixed (cvm_equal now has a real
 ;;     T_BYTEVECTOR byte-compare case).
 ;;   - `number->string`'s optional radix argument used to be silently
-;;     ignored under `./cvm/cvm` (always base 10) -- fixed, which is what
+;;     ignored under `./icecreme/icecreme` (always base 10) -- fixed, which is what
 ;;     actually made the §4.2.6 parameterize case below pass (parameterize
 ;;     itself was never the bug).
 ;;   - `(scheme lazy)`'s `make-promise` used to be unbound under
-;;     `./cvm/cvm` -- fixed.
+;;     `./icecreme/icecreme` -- fixed.
 ;; - The "(... ...)" ellipsis-escape idiom (letting a macro's own
 ;;   generated output contain a literal `...` inside ANOTHER generated
 ;;   syntax-rules macro): the self-hosted compiler's syntax-rules only
 ;;   supports single-level ellipsis (compiler.sld's own header comment on
 ;;   sr-match/sr-expand) with no escape-form support, so this case is left
 ;;   as a comment (not a runnable `it`) rather than a case guaranteed to
-;;   fail under `--self-hosted`/`cvm/cvm` -- mirrors the original file's
+;;   fail under `--self-hosted`/`icecreme/icecreme` -- mirrors the original file's
 ;;   own `pending` for the letrec-syntax hygiene stress test just below it.
 ;;
 ;; Run with (every case passes or is genuinely pending under all three --
-;; native has 0 pending; --self-hosted/cvm/cvm show `[PEND]` for the
+;; native has 0 pending; --self-hosted/icecreme/icecreme show `[PEND]` for the
 ;; specific cases documented above):
 ;;   ./bin/creme spec/creme/r7rs/ch04_expressions_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch04_expressions_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch04_expressions_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch04_expressions_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme eval) (scheme lazy) (scheme inexact) (scheme case-lambda) (creme spec))
@@ -338,7 +338,7 @@
   ;; for the letrec-syntax hygiene case just below): "the (... template)
   ;; ellipsis-escape idiom lets a macro's own output contain a literal ...
   ;; inside a generated syntax-rules macro" fails under both
-  ;; `./bin/creme --self-hosted` and `./cvm/cvm` ("no matching syntax-rules
+  ;; `./bin/creme --self-hosted` and `./icecreme/icecreme` ("no matching syntax-rules
   ;; clause") -- the self-hosted compiler's syntax-rules implementation
   ;; only supports single-level ellipsis (see compiler.sld's own header
   ;; comment on sr-match/sr-expand) with no `(... ...)` escape-form support

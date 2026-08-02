@@ -10,7 +10,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_01_equivalence_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_01_equivalence_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_01_equivalence_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_01_equivalence_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (creme spec))

@@ -1,26 +1,26 @@
 ;; ===========================================================================
-;; Correctness coverage for cvm's OP_QCALLGLOBAL_RECACC (cvm/vm.c) -- the
+;; Correctness coverage for icecreme's OP_QCALLGLOBAL_RECACC (icecreme/vm.c) -- the
 ;; same call-site quickening trick prim_call_spec.scm's "deopt on
 ;; redefinition" cases already cover for +/-/*/vector-ref/etc., applied to
 ;; define-record-type field accessors instead. A top-level accessor call
 ;; like (point-x p) always compiles to a plain OP_CALLGLOBAL against a
-;; T_RECORD_CALLABLE (see cvm/vm.c's build_record_bindings) -- never a
-;; fused op of its own -- so cvm rewrites that call site to
+;; T_RECORD_CALLABLE (see icecreme/vm.c's build_record_bindings) -- never a
+;; fused op of its own -- so icecreme rewrites that call site to
 ;; OP_QCALLGLOBAL_RECACC in place the first time it runs, and must deopt
 ;; back to OP_CALLGLOBAL the instant the accessor's global is redefined or
 ;; called on the wrong record type.
 ;;
 ;; should-match-native? is still the right tool here even though this is a
-;; cvm-only runtime behavior (see prim_call_spec.scm's own header comment
+;; icecreme-only runtime behavior (see prim_call_spec.scm's own header comment
 ;; on the same point): it asserts the COMPUTED VALUE matches native, not
 ;; which opcode path produced it, so this doubles as a genuine native/
-;; self-hosted/cvm consistency check regardless of backend, while only
-;; actually exercising the quickened path when run under cvm.
+;; self-hosted/icecreme consistency check regardless of backend, while only
+;; actually exercising the quickened path when run under icecreme.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/record_accessor_quicken_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/record_accessor_quicken_spec.scm
-;;   ./cvm/cvm spec/creme/record_accessor_quicken_spec.scm
+;;   ./icecreme/icecreme spec/creme/record_accessor_quicken_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme cxr) (scheme write) (scheme process-context) (scheme eval)
@@ -28,7 +28,7 @@
         (creme compiler reader) (creme compiler compiler) (creme spec) (creme compiler spec-helper))
 
 (describe "record accessor call-site quickening (OP_QCALLGLOBAL_RECACC)"
-  (it "computes correctly across many repeated calls (forces cvm's runtime quicken to engage)"
+  (it "computes correctly across many repeated calls (forces icecreme's runtime quicken to engage)"
     (should-match-native?
       '((define-record-type point (make-point x y) point? (x point-x) (y point-y))
         (define p (make-point 3 4))

@@ -1,11 +1,11 @@
 ;; ===========================================================================
 ;; Proves the `(creme raft)` cond-expand DISPATCH ITSELF resolves correctly
-;; under real cvm -- as opposed to spec/creme/raft_scheme_spec.scm (prior
+;; under real icecreme -- as opposed to spec/creme/raft_scheme_spec.scm (prior
 ;; phase), which proves the pure-Scheme ENGINE works by including
 ;; raft-scheme/core.scm directly, bypassing (creme raft)/cond-expand
 ;; entirely. This file instead imports `(creme raft)`/`(creme raft-machine)`
 ;; the ORDINARY way, same as any native script (and the same way
-;; examples/37-raft-kv-store.scm does) -- if cvm's self-hosted compiler
+;; examples/37-raft-kv-store.scm does) -- if icecreme's self-hosted compiler
 ;; didn't correctly resolve modules/creme/raft.sld as a real file-based
 ;; library (reading it, evaluating its own cond-expand, and transitively
 ;; registering whatever native families its `else` branch needs -- actor/
@@ -18,7 +18,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/raft_dispatch_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/raft_dispatch_spec.scm
-;;   ./cvm/cvm spec/creme/raft_dispatch_spec.scm
+;;   ./icecreme/icecreme spec/creme/raft_dispatch_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme read) (scheme cxr)

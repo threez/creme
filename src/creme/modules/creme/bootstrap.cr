@@ -4,15 +4,15 @@
 #
 # `load-chunk-bytes` is the missing piece a Scheme-written bytecode compiler
 # needs to actually run something it compiled: it turns a bytevector holding
-# the "SCB1" format (ChunkSerializer/ChunkDeserializer, compile/chunk_*.cr)
+# the "ICE1" format (ChunkSerializer/ChunkDeserializer, compile/chunk_*.cr)
 # into a real Chunk and runs it as a top-level program in the CALLING env —
 # same semantics as BytecodeCompiler.run_program running one already-
 # analyzed form, just skipping analyze/compile entirely since the bytes
 # already ARE compiled bytecode. This is deliberately the Crystal-VM-hosted
 # half of the bootstrap plan: it lets a self-hosted compiler be verified by
 # diffing its output against Crystal's own native pipeline before any of
-# this is pointed at cvm (which has its own, much narrower, opcode/value
-# support — see cvm/README.md).
+# this is pointed at icecreme (which has its own, much narrower, opcode/value
+# support — see icecreme/README.md).
 module Creme::Builtins::BootstrapLibrary
   extend self
   include Creme::BuiltinHelpers

@@ -95,30 +95,30 @@ module Creme
     # reachable).
     property library_search_path : Array(String)
 
-    # Set (and reset to nil right after) only by CVMEmitter.emit
-    # (cvm_emitter.cr), around its own per-library second analyze pass over
+    # Set (and reset to nil right after) only by IcecremeEmitter.emit
+    # (icecreme_emitter.cr), around its own per-library second analyze pass over
     # a library's body forms — maps that ONE library's own internal
-    # (non-exported) top-level names to a qualified form, so cvm's flat,
+    # (non-exported) top-level names to a qualified form, so icecreme's flat,
     # name-interned global table (no per-library namespacing at all — see
-    # cvm/vm.c's cvm_global_intern) can't have two libraries' same-named
+    # icecreme/vm.c's cvm_global_intern) can't have two libraries' same-named
     # private helpers silently clobber each other's slot. Consulted by
-    # Analyzer's cvm_global_name helper. nil (the default, and the state
+    # Analyzer's icecreme_global_name helper. nil (the default, and the state
     # for every real interpreter session/REPL) makes analysis behave
     # exactly as it always has — this property only ever matters during
     # that one emitter-internal analyze pass.
-    property cvm_rename : Hash(String, String)? = nil
+    property icecreme_rename : Hash(String, String)? = nil
 
-    # Set (and reset to false right after) only by CVMEmitter.emit, for the
-    # whole duration of a --emit-cvm compile. cond_expand_matches?'s `library`
+    # Set (and reset to false right after) only by IcecremeEmitter.emit, for the
+    # whole duration of a --emit-icecreme compile. cond_expand_matches?'s `library`
     # case consults this to answer "(library (creme builtin X))" as false
     # whenever X is a 3-segment (creme builtin ...) FFI family name, even
     # though the NATIVE bin/creme process doing this compile always has that
-    # family registered for itself -- cvm, the actual target runtime the
+    # family registered for itself -- icecreme, the actual target runtime the
     # emitted chunk will execute on, never does. Without this, a library's
     # own `(cond-expand ((library (creme builtin X)) ...) (else ...))` (e.g.
     # modules/creme/raft.sld) would wrongly pick the FFI branch based on the
     # COMPILING process's own capabilities rather than the TARGET's.
-    property emitting_for_cvm : Bool = false
+    property emitting_for_icecreme : Bool = false
 
     # Real R7RS parameter objects backing current-output-port/
     # current-input-port/current-error-port, so `(parameterize
@@ -1048,7 +1048,7 @@ module Creme
           # useful side effect of actually registering it on success, same
           # as a real import would.
           libname = SchemeLibrary.parse_library_name(args[0])
-          return false if emitting_for_cvm && libname.size == 3 && libname[0] == "creme" && libname[1] == "builtin"
+          return false if emitting_for_icecreme && libname.size == 3 && libname[0] == "creme" && libname[1] == "builtin"
           @libraries.has_key?(libname) || !!(resolve_library(libname) rescue nil)
         else
           raise SchemeRuntimeError.new("cond-expand: unknown requirement '#{head.name}'")

@@ -21,14 +21,14 @@ XML, ERB) have since been closed as pure-R7RS `(creme ...)` modules — see
 `CHANGELOG.md`'s "New `(creme ...)` stdlib modules closing Ruby-stdlib gaps"
 entry. They've moved down into §1. Three of them (`(creme uri)`, `(creme
 pstore)`, `(creme escm)`) are native `bin/creme` only for now — each leans on
-a builtin that behaves differently or is unavailable under `cvm/cvm` today
+a builtin that behaves differently or is unavailable under `icecreme/icecreme` today
 (regex trailing-group reporting, `read`'s port-optional default, and
 `(scheme eval)`'s `environment`, respectively); see each library's own
 header comment.
 
 **Update 2:** two more gaps have since closed: `YAML` (`(creme yaml)`,
 backed by libyaml on both backends — Crystal's own bundled `YAML` stdlib
-module natively, `cvm/cvm` linking libyaml directly) and `IPAddr`
+module natively, `icecreme/icecreme` linking libyaml directly) and `IPAddr`
 (`(creme ipaddr)`, pure R7RS, no new builtins on either backend — see
 that library's own header comment for why it stores an address as a list
 of per-group integers rather than one combined integer). Both have moved
@@ -42,8 +42,8 @@ alongside newly-added `digest-sha384`/`-sha512`), `OpenSSL::Cipher`
 CBC/ECB), and `SecureRandom` (`(creme secure-random)`, a CSPRNG kept
 apart from `(creme random)`'s plain PRNG the same way Ruby keeps the two
 modules separate). All three are implemented identically on both native
-`bin/creme` and `cvm/cvm` (`cvm/digest.c`'s `HMAC()` addition,
-`cvm/secure_random.c`, `cvm/cipher.c` — all reusing the libcrypto/libssl
+`bin/creme` and `icecreme/icecreme` (`icecreme/digest.c`'s `HMAC()` addition,
+`icecreme/secure_random.c`, `icecreme/cipher.c` — all reusing the libcrypto/libssl
 link already in place, no new dependency on either backend). Remaining
 real gaps: RMD160 (`(creme digest)`), and general symmetric-cipher modes
 beyond GCM (raw CBC/ECB, deliberately not offered).
@@ -63,7 +63,7 @@ LibCrypto` binding (`(creme pkey)` also reuses the vendored `jose.cr`
 shard's own `LibCryptoJose` FFI declarations directly, already proven
 correct by that shard's own JWK/JWS code, rather than re-declaring them).
 Both modules are implemented identically on native `bin/creme` and
-`cvm/cvm` (`cvm/pkey.c`/`cvm/x509.c`, where the full API is simply part
+`icecreme/icecreme` (`icecreme/pkey.c`/`icecreme/x509.c`, where the full API is simply part
 of OpenSSL's own C headers — no FFI reopening needed there at all).
 Deliberate cuts: RSA encryption is OAEP-only (no legacy PKCS1v1.5
 encryption padding); no DSA; Ed25519 remains JOSE-only (`(creme jose)`'s
@@ -79,7 +79,7 @@ own OKP key type), not exposed through `(creme pkey)`; X.509 has no CRL
 | `Digest::MD5`/`SHA1`/`SHA256`/`SHA384`/`SHA512` | `(creme digest)` | Ruby's `Digest` family also has RMD160; that's the only remaining gap now that SHA384/512 have closed. |
 | `Base64` | `(creme digest)`'s `base64-encode`/`base64-decode` | Folded into digest rather than its own library. |
 | `OpenSSL::HMAC` | `(creme digest)`'s `hmac-sha256`/`-sha384`/`-sha512` | Hex digest strings, folded into the same `(creme digest)` module rather than a separate one, matching how `Base64` above already folds in too. |
-| `OpenSSL::Cipher` | `(creme cipher)` | Scoped to AES-256-GCM only (authenticated encryption) — no raw CBC/ECB/etc.; Ruby's `OpenSSL::Cipher` accepts any cipher name string OpenSSL itself supports. A genuine dual-implementation module on both backends, not a pure-Scheme one: native drives OpenSSL's raw EVP AEAD API directly (its own `OpenSSL::Cipher` wrapper has no GCM/AEAD support at all in this Crystal version), `cvm` drives the same EVP API directly in C. |
+| `OpenSSL::Cipher` | `(creme cipher)` | Scoped to AES-256-GCM only (authenticated encryption) — no raw CBC/ECB/etc.; Ruby's `OpenSSL::Cipher` accepts any cipher name string OpenSSL itself supports. A genuine dual-implementation module on both backends, not a pure-Scheme one: native drives OpenSSL's raw EVP AEAD API directly (its own `OpenSSL::Cipher` wrapper has no GCM/AEAD support at all in this Crystal version), `icecreme` drives the same EVP API directly in C. |
 | `SecureRandom` | `(creme secure-random)` | Kept as its own module, distinct from `(creme random)`'s plain PRNG, the same way Ruby keeps `SecureRandom` apart from `Random`; `secure-random-bytes`/`-hex`/`-base64` match `SecureRandom.random_bytes`/`.hex`/`.base64` closely. |
 | `OpenSSL::PKey::RSA`/`EC` | `(creme pkey)` | Key generation, PEM import/export, `pkey-sign`/`-verify` (one shared name for both algorithms, like Ruby's shared `PKey#sign`/`#verify`), `rsa-encrypt`/`-decrypt` (RSA-OAEP-SHA256 only — no legacy PKCS1v1.5 encryption padding). No DSA; Ed25519 stays JOSE-only (`(creme jose)`'s own OKP key type), not exposed here. |
 | `OpenSSL::X509` | `(creme x509)` | Self-signed certificates, CSRs, CA-signing, chain verification (`x509-verify-chain`, an `X509_STORE`-backed check that raises with OpenSSL's own failure reason on a broken/untrusted chain). No CRL (certificate revocation list) support. |
@@ -115,7 +115,7 @@ own OKP key type), not exposed through `(creme pkey)`; X.509 has no CRL
 | `Matrix`/`Vector` (bundled gem) | `(creme matrix)` | Dense-matrix linear algebra: add/sub/scale/multiply/transpose/trace/determinant (recursive cofactor expansion, so `O(n!)` — fine for small matrices). |
 | `REXML`/`Nokogiri`-adjacent XML | `(creme xml)` | A minimal well-formed-XML reader/writer, parsing into exactly `(creme html)`'s own node shape; no DTD/namespace/CDATA support. |
 | `ERB`/template engines | `(creme escm)` | `<% %>`/`<%= %>` over literal text, compiled once via `escm-compile` and rendered per locals-alist via `(scheme eval)` — native `bin/creme` only for now. |
-| `YAML` (Psych) | `(creme yaml)` | Both backends backed by libyaml either way (native via Crystal's own bundled `YAML` stdlib module, `cvm/cvm` linking libyaml directly) — a genuine dual-implementation module, unlike the 14 pure-Scheme ones above; `yaml-read`/`yaml-write` follow the same alist/vector convention as `(creme json)`. |
+| `YAML` (Psych) | `(creme yaml)` | Both backends backed by libyaml either way (native via Crystal's own bundled `YAML` stdlib module, `icecreme/icecreme` linking libyaml directly) — a genuine dual-implementation module, unlike the 14 pure-Scheme ones above; `yaml-read`/`yaml-write` follow the same alist/vector convention as `(creme json)`. |
 | `IPAddr` | `(creme ipaddr)` | Pure R7RS, no new builtins on either backend — CIDR masks are always MSB-contiguous, so network math is plain `quotient`/`expt` on per-group integers rather than needing bitwise ops (creme has none); stores an address as a list of per-group integers instead of one combined integer, since this interpreter's plain integers don't auto-promote to a bignum past ~2^62, too narrow for a full 128-bit IPv6 address. |
 
 ## 2. Ruby stdlib has it, creme doesn't
@@ -136,7 +136,7 @@ own OKP key type), not exposed through `(creme pkey)`; X.509 has no CRL
 |---|---|---|
 | `(creme raft)`/`(creme raft-scheme)`/`(creme raft-machine)` | Full Raft consensus (leader election, log replication, snapshotting, membership changes), two independent implementations (FFI-backed and pure-Scheme) | None in stdlib; would mean reaching for a gem like `raft-rb` (unmaintained) or rolling your own |
 | `(creme actor)`/`(creme actor-supervisor)` | Message-passing actors with OTP-style supervised restart-on-crash | None — Ruby's concurrency stdlib (`Thread`/`Fiber`/`Ractor`) is shared-memory/message-queue at a much lower level; nothing OTP-shaped ships by default |
-| `(creme bytecode)` | Assembler + serializer (SCB1 format) for this project's own register-VM bytecode | N/A — Ruby doesn't expose its own YARV bytecode format for scripts to assemble |
+| `(creme bytecode)` | Assembler + serializer (ICE1 format) for this project's own register-VM bytecode | N/A — Ruby doesn't expose its own YARV bytecode format for scripts to assemble |
 | `(creme ir)` | Generic S-expression code-generation building blocks (used by the self-hosted compiler) | No direct analog — closest is metaprogramming via `Kernel#eval`/`instance_eval`, a different mechanism entirely |
 | `(creme lr)` | SLR(1) parser-table generator exposed as a library, including conflict inspection (`debug-states`) | `Racc` is a *code generator* (compiles a `.y` grammar to a `.rb` file offline); `(creme lr)` is a runtime library callable directly from a script |
 | `(creme peg)` | PEG-style parser combinators | Not in stdlib; closest gems are `parslet`/`treetop`, both third-party |
@@ -182,7 +182,7 @@ own OKP key type), not exposed through `(creme pkey)`; X.509 has no CRL
   plain PRNG), and `OpenSSL::PKey::RSA`/`EC` + `OpenSSL::X509`
   (`(creme pkey)`/`(creme x509)`: key generation/sign/verify/encryption,
   certificates/CSRs/chain verification) — all five implemented identically
-  on both native `bin/creme` and `cvm/cvm`, unlike `(creme rfc8439)`/
+  on both native `bin/creme` and `icecreme/icecreme`, unlike `(creme rfc8439)`/
   `(creme jose)` below, which remain native-only.
 - **Ruby-only (§2):** now just `Resolv` (DNS resolution, needs a real socket)
   plus things that are structural to Ruby-the-OO-language and have no

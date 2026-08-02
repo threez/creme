@@ -3,13 +3,13 @@
 ;; Runs the router on a background (creme actor) thread with a FIXED port,
 ;; then retry-connects the first request in a bounded loop -- the same
 ;; shape spec/creme/http_spec.scm already uses (see its own header
-;; comment): cvm's mux-listen! blocks its calling thread inside facil.io's
+;; comment): icecreme's mux-listen! blocks its calling thread inside facil.io's
 ;; own reactor loop forever, by design, and never returns the port it
 ;; bound to back to its caller, so a script that calls mux-listen! then
 ;; immediately issues requests against its own server in the SAME
 ;; top-level thread (as this example used to) can't work there. Native's
 ;; own Fiber-based mux-listen! tolerates this shape fine too, so one
-;; script now runs unchanged on both `./bin/creme` and `./cvm/cvm`.
+;; script now runs unchanged on both `./bin/creme` and `./icecreme/icecreme`.
 
 (define router-port 18924)
 (define (url path) (string-append "http://127.0.0.1:" (number->string router-port) path))

@@ -21,7 +21,7 @@
 ;; bench.scm's own --*-port defaults, so this can run standalone or
 ;; alongside a bench run without clashing. Works the same under any
 ;; backend that can run this spec file itself (native, --self-hosted, or
-;; ./cvm/cvm) since process-spawn always shells out to a real
+;; ./icecreme/icecreme) since process-spawn always shells out to a real
 ;; ./bin/creme child regardless.
 ;;
 ;; Run with:

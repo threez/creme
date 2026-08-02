@@ -24,10 +24,10 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/reader_literals_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/reader_literals_spec.scm
-;;   ./cvm/cvm spec/creme/reader_literals_spec.scm
+;;   ./icecreme/icecreme spec/creme/reader_literals_spec.scm
 ;; The 7 complex-number cases in "numbers" (1+2i, 1-2i, -4i, +i, -i, 3+i,
-;; 1.5+2.5i) used to fail under `cvm/cvm` specifically (cvm had no
-;; complex-number support at all) -- fixed by cvm/value.h's T_COMPLEX (see
+;; 1.5+2.5i) used to fail under `icecreme/icecreme` specifically (icecreme had no
+;; complex-number support at all) -- fixed by icecreme/value.h's T_COMPLEX (see
 ;; compiler_numeric_tower_spec.scm's own header comment for the matching
 ;; fix on the rational side and at the compiler level).
 ;; ===========================================================================

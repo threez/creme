@@ -34,21 +34,21 @@
 ;; A separate library from (creme spec) itself specifically so (creme
 ;; spec)'s own dependency footprint doesn't grow: (creme env)/(creme
 ;; process) are both native-Crystal-only from Crystal's point of view
-;; (though cvm now backs both process-run and set-environment-variable!
-;; too -- see cvm/process.c and cvm/builtins.c), and (creme spec) is
+;; (though icecreme now backs both process-run and set-environment-variable!
+;; too -- see icecreme/process.c and icecreme/builtins.c), and (creme spec) is
 ;; imported by EVERY spec/creme/*.scm file, including every one already
-;; passing under cvm's self-hosted loader today. Only spec/creme/
+;; passing under icecreme's self-hosted loader today. Only spec/creme/
 ;; main_spec.scm needs this library at all.
 ;;
-;; (creme process)'s process-run works under all three backends: cvm's
-;; own cvm/process.c backs it with plain POSIX fork/pipe/execvp/waitpid,
-;; matching native Crystal's exact contract -- so `./cvm/cvm spec/creme/
-;; main_spec.scm` spawns real `./cvm/cvm <file>` subprocesses the same
-;; way `./bin/creme spec/creme/main_spec.scm --cvm` does, no different
+;; (creme process)'s process-run works under all three backends: icecreme's
+;; own icecreme/process.c backs it with plain POSIX fork/pipe/execvp/waitpid,
+;; matching native Crystal's exact contract -- so `./icecreme/icecreme spec/creme/
+;; main_spec.scm` spawns real `./icecreme/icecreme <file>` subprocesses the same
+;; way `./bin/creme spec/creme/main_spec.scm --icecreme` does, no different
 ;; code path needed here for that case. Likewise set-environment-
 ;; variable! -- a subprocess inherits its parent's environ automatically
 ;; (execvp/Process.run don't touch it), so setting the flag once here
-;; works whether THIS process is itself native or cvm.
+;; works whether THIS process is itself native or icecreme.
 ;; ===========================================================================
 
 (define-library (creme spec-runner)

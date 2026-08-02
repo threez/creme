@@ -1,7 +1,7 @@
 ;; (creme raft): transparent frontend -- (creme builtin raft) (the real
 ;; threez/raft.cr FFI binding) when it exists, else the pure-Scheme
 ;; actor+SQLite engine in raft-scheme/ (no FFI at all, so it also runs
-;; under cvm, which has no raft.cr code compiled in).
+;; under icecreme, which has no raft.cr code compiled in).
 ;;
 ;; The `(library (creme builtin raft))` check is a reliable, already-
 ;; existing discriminator between the two runtimes, needing no new feature
@@ -11,12 +11,12 @@
 ;; file involved at all, always present whenever raft.cr's FFI code is
 ;; compiled into the binary) -- so it's ALWAYS true under any `bin/creme`
 ;; build, including `--self-hosted` mode (still native Crystal underneath).
-;; Under cvm, that same 3-segment library name fails BOTH of cvm's own
+;; Under icecreme, that same 3-segment library name fails BOTH of icecreme's own
 ;; resolution paths (no modules/creme/builtin/raft.sld file exists on disk,
-;; and cvm/bootstrap.c's hardcoded fallback table structurally only handles
+;; and icecreme/bootstrap.c's hardcoded fallback table structurally only handles
 ;; 2-segment "(creme X)" names) -- feature-satisfied?'s `library` case
 ;; gracefully returns #f, never an abort, so the `else` branch below is
-;; exactly the cvm case.
+;; exactly the icecreme case.
 ;;
 ;; (creme raft-machine) (raft-cluster, raft-commands, sexp<->bytevector,
 ;; noop-snapshot/-restore -- pure R7RS, generic over whatever (creme raft)

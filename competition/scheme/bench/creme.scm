@@ -8,8 +8,8 @@
 ; hashtable-test: mixed read/write/growth traffic against creme's own
 ; REAL (creme hash-table) -- see workloads.scm's own note on why this
 ; workload is defined per-runtime instead of shared there. Both native
-; bin/creme and cvm (cvm/hashtable.c) implement this same API, so this is
-; a genuine creme-vs-cvm hash-table comparison too, not just scaffolding
+; bin/creme and icecreme (icecreme/hashtable.c) implement this same API, so this is
+; a genuine creme-vs-icecreme hash-table comparison too, not just scaffolding
 ; around a benchmark.
 ;
 ; String keys ("k" ++ i), not raw integers, everywhere this workload is

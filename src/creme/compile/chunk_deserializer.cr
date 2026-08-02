@@ -1,5 +1,5 @@
 # ===========================================================================
-# ChunkDeserializer: the inverse of ChunkSerializer's "SCB1" format.
+# ChunkDeserializer: the inverse of ChunkSerializer's "ICE1" format.
 # ===========================================================================
 #
 # This is the piece the self-hosting bootstrap plan actually needs long-
@@ -28,7 +28,7 @@ module Creme
       raise FormatError.new("chunk_deserializer: bad magic #{magic.inspect}, expected #{ChunkSerializer::MAGIC.inspect}") unless magic == ChunkSerializer::MAGIC
       version = read_byte!(io)
       unless version == ChunkSerializer::FORMAT_VERSION
-        raise FormatError.new("chunk_deserializer: format version #{version} (expected #{ChunkSerializer::FORMAT_VERSION}) -- re-emit this chunk with the current creme/cvm")
+        raise FormatError.new("chunk_deserializer: format version #{version} (expected #{ChunkSerializer::FORMAT_VERSION}) -- re-emit this chunk with the current creme/icecreme")
       end
       read_required_families(io) # not yet consumed by any caller; just skip past it
       read_chunk(io, env)

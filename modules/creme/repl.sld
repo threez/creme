@@ -1,7 +1,7 @@
 ;; ===========================================================================
 ;; (creme repl): a single, shared REPL loop -- native Crystal, --self-hosted,
-;; and cvm/cvm all import and run the SAME (run-repl) instead of each having
-;; their own (src/main.cr's `repl`, cvm/repl.scm) -- built entirely out of
+;; and icecreme/icecreme all import and run the SAME (run-repl) instead of each having
+;; their own (src/main.cr's `repl`, icecreme/repl.scm) -- built entirely out of
 ;; the already-built, already-cross-runtime-verified building blocks:
 ;; (creme scheme-lexer)/(creme highlight) for tokenizing/coloring/paren-
 ;; balance, (creme term) for raw-mode key-at-a-time input and relative

@@ -23,8 +23,8 @@ module Creme
   module CremeFfiShim
     # Must match ffi_shim.c's own creme_ffi_type_for_kind switch AND
     # ffi.cr's Kind-parsing exactly — three independent copies of the same
-    # small enum (the other two: ffi_shim.c here, cvm/creme_ffi.c on the
-    # cvm side) rather than a shared header, since Crystal/C/cvm's C each
+    # small enum (the other two: ffi_shim.c here, icecreme/creme_ffi.c on the
+    # icecreme side) rather than a shared header, since Crystal/C/icecreme's C each
     # need their own literal copy regardless.
     KIND_VOID    = 0
     KIND_INT32   = 1

@@ -1,6 +1,6 @@
 ;; ===========================================================================
 ;; (creme compiler compiler): a self-hosted, one-pass Scheme->bytecode
-;; compiler, targeting (creme bytecode)'s Chunk assembler/SCB1 serializer
+;; compiler, targeting (creme bytecode)'s Chunk assembler/ICE1 serializer
 ;; so its output can be run via (creme bootstrap)'s `load-chunk-bytes` on
 ;; the real Crystal VM -- the verification loop this whole bootstrap
 ;; effort is built around (see
@@ -13,7 +13,7 @@
 ;; resolution) and one compile-*! per special form -- while (creme
 ;; bytecode) owns everything about actually BUILDING/EMITTING/
 ;; serializing a Chunk (op-name lookup, jump patching, the const/proto/
-;; upvalue pools, SCB1 bytes). Every chunk-*!/op-ordinal call below comes
+;; upvalue pools, ICE1 bytes). Every chunk-*!/op-ordinal call below comes
 ;; from that library; this file never touches instruction/const-pool
 ;; internals directly. (creme compiler reader) supplies read-program,
 ;; used by compile-source-to-bytes.
@@ -528,7 +528,7 @@
     ;; session's own macro-table (needed so a LATER top-level form in the
     ;; same compile-program call can still use the macro), leaving no
     ;; runtime-visible binding at all -- so expand-if-macro (used by
-    ;; cvm's bootstrap bridge, or any later, separate program/eval call)
+    ;; icecreme's bootstrap bridge, or any later, separate program/eval call)
     ;; could never detect a self-hosted-compiled top-level macro, unlike
     ;; a natively-compiled one. An INTERNAL (non-top-level) define-syntax
     ;; does NOT get this -- matching native's own at_toplevel check
@@ -579,11 +579,11 @@
     ;; interpreter either, for exactly this reason).
     ;;
     ;; Shared by compile-defmacro!'s own registered transformer below (for
-    ;; a LOCAL, same-compile-session macro use) and cvm's bootstrap.c
+    ;; a LOCAL, same-compile-session macro use) and icecreme's bootstrap.c
     ;; (bi_expand_if_macro, via cvm_apply, looking this up by name in
     ;; vm->globals) for a defmacro EXPORTED from a library compiled
     ;; straight to bytecode -- e.g. sxql-select! from (creme sxql),
-    ;; Crystal-native-precompiled into a cvm image -- whose runtime value,
+    ;; Crystal-native-precompiled into an icecreme image -- whose runtime value,
     ;; once Op::HelperForm's kind==4 case binds it (vm.c), is a T_MACRO
     ;; wrapping this exact (defmacro name (params...) body...) form. Both
     ;; call sites need the SAME "bind params positionally to the call's
@@ -621,8 +621,8 @@
 
     ;; defmacro-expand-form's own sibling for a TOP-LEVEL define-syntax
     ;; exported to bytecode -- same reason/same two call sites (a LOCAL,
-    ;; same-compile-session use via macro-table, and cvm's bootstrap.c
-    ;; bi_expand_if_macro for one reentrant-compiled under cvm), just
+    ;; same-compile-session use via macro-table, and icecreme's bootstrap.c
+    ;; bi_expand_if_macro for one reentrant-compiled under icecreme), just
     ;; syntax-rules' own real pattern-matching semantics (sr-make-
     ;; transformer, already used by compile-define-syntax! below to
     ;; register a LOCAL macro-table entry) instead of defmacro's
@@ -813,11 +813,11 @@
     ;; the named file's own top-level forms in place, same as a nested
     ;; `begin`'s own contents) -- this is what gives `include` genuine
     ;; R7RS body-position support (usable inside a `let`/`lambda` body,
-    ;; not just at a file's own top level, which cvm/compiler-run.scm's
+    ;; not just at a file's own top level, which icecreme/compiler-run.scm's
     ;; separate expand-includes already handled): flatten-begins runs
     ;; for every scope-introducing body (compile-scoped-body!'s own
     ;; hoist-internal-defines call), unlike compile-program's direct
-    ;; compile-body! call for the outermost program (which cvm/
+    ;; compile-body! call for the outermost program (which icecreme/
     ;; compiler-run.scm's own pre-pass already covers). See
     ;; current-compiling-file/expand-include-form (below dirname/
     ;; path-join/ascii-foldcase-string's own definitions further down
@@ -854,7 +854,7 @@
     ;; compiler had before this pair of variables existed. See compile-
     ;; var-ref!'s own use of these, and ensure-library-loaded!'s save/
     ;; restore around processing one library's clauses, for the full
-    ;; mechanism (cvm/README.md's own "environment/eval" section has the
+    ;; mechanism (icecreme/README.md's own "environment/eval" section has the
     ;; complete design rationale for why this is a compile-time-only
     ;; masking trick rather than genuine runtime isolation).
     (define current-library-visible-names #f)
@@ -964,7 +964,7 @@
     ;; silently REORDERED a body that interleaves defines and plain
     ;; expressions: a `define` appearing textually AFTER some expression
     ;; had its own initializer moved to evaluate BEFORE that expression
-    ;; instead. Confirmed as a genuine, reproducible bug (cvm/README.md's
+    ;; instead. Confirmed as a genuine, reproducible bug (icecreme/README.md's
     ;; own "Known bugs" section, found while porting (creme actor)):
     ;;   (define worker 42)
     ;;   (register! worker)        ; a plain expression
@@ -1233,8 +1233,8 @@
     ;; needs a CaseDispatchTable structure this chunk format has no
     ;; constructor for yet (chunk-add-case-dispatch-table!/case-dispatch-
     ;; tables, which would need wiring through (creme bytecode)'s own
-    ;; chunk record AND chunk_serializer.cr/chunk_deserializer.cr/cvm's
-    ;; SCB1 (de)serialization, not just this compiler) -- a real,
+    ;; chunk record AND chunk_serializer.cr/chunk_deserializer.cr/icecreme's
+    ;; ICE1 (de)serialization, not just this compiler) -- a real,
     ;; deliberately out-of-scope-for-now gap. Behavior is identical either
     ;; way: CaseDispatch is a pure O(1)-vs-O(n) perf optimization over
     ;; CaseMatch (see hashable_case?'s own gating), and this compiler's
@@ -1309,9 +1309,9 @@
     ;; (bytecode_compiler.cr's compile_quasiquote): its own doc comment
     ;; says its QQTemplate tree is "never serialized into the const pool
     ;; since only VM#build_qq's Crystal code ever reads it" -- i.e. it's a
-    ;; same-process-only optimization with NO SCB1 wire representation at
+    ;; same-process-only optimization with NO ICE1 wire representation at
     ;; all. A chunk built by THIS compiler exists specifically to be
-    ;; serialized and reloaded standalone (load-chunk-bytes/cvm), so
+    ;; serialized and reloaded standalone (load-chunk-bytes/icecreme), so
     ;; emitting Op::Quasiquote here wouldn't just need extra format work
     ;; (unlike Op::CaseDispatch's missing-but-addable table) -- it would
     ;; produce chunks that never round-trip correctly at all, a real
@@ -1902,7 +1902,7 @@
     ;; The inverse of mark-redefined! -- removes every occurrence of name
     ;; (mark-redefined! doesn't dedupe, so more than one may be present).
     ;; Exported (alongside mark-redefined! and fusable-prim-names below)
-    ;; so `eval` (cvm/compiler-run.scm) can temporarily disable fusion for
+    ;; so `eval` (icecreme/compiler-run.scm) can temporarily disable fusion for
     ;; exactly the fusable names a target `environment` excludes via its
     ;; own only/except import-set, for the duration of one compile, then
     ;; restore afterward -- see that function's own doc comment for why
@@ -2893,24 +2893,24 @@
     ;; ---------------------------------------------------------------------
     ;; Self-hosted library loader -- needed because `import!` (creme
     ;; bootstrap) is a real, full R7RS loader ONLY under the real Crystal
-    ;; interpreter; under cvm it's a permanent no-op (cvm's global table is
-    ;; unconditionally flat and everything Crystal/cvm-native is already
+    ;; interpreter; under icecreme it's a permanent no-op (icecreme's global table is
+    ;; unconditionally flat and everything Crystal/icecreme-native is already
     ;; baked into it, per that builtin's own doc comment -- but a PURE-
     ;; SCHEME file-based library like (creme dao)/(creme sxql)/(creme
-    ;; html)/etc, never compiled into cvm's own image, genuinely has
-    ;; nothing defined for it at all under cvm without this). Implemented
+    ;; html)/etc, never compiled into icecreme's own image, genuinely has
+    ;; nothing defined for it at all under icecreme without this). Implemented
     ;; entirely with primitives this compiler already has (read-whole-
     ;; file, read-program, compile-program, chunk->bytes, load-chunk-
     ;; bytes) rather than any new builtin -- works identically under
     ;; either backend (redundant-but-harmless under Crystal, where
-    ;; import! already did the real work; load-bearing under cvm, where it
+    ;; import! already did the real work; load-bearing under icecreme, where it
     ;; does the only real work). Mirrors import.cr's own recursive
     ;; resolve_library/build_library shape (verified against that file
     ;; this session), deliberately narrowed to what a flat-global-
-    ;; namespace runtime like cvm needs:
+    ;; namespace runtime like icecreme needs:
     ;; - only/except don't restrict VISIBILITY -- every top-level binding
     ;;   a library defines (exported or not) still lands in the same flat
-    ;;   global table, exactly matching cvm's own already-accepted "no
+    ;;   global table, exactly matching icecreme's own already-accepted "no
     ;;   per-import scoping" design; only/except are accepted as a no-op
     ;;   beyond that (confirmed safe for this project's own pure-Scheme
     ;;   libraries -- checked every one app.scm transitively depends on).
@@ -2919,16 +2919,16 @@
     ;;   alias for the library's own internal binding (resolved against
     ;;   its (export ...) clause, via library-export-alist), so code that
     ;;   uses the name the importer actually asked for isn't left with an
-    ;;   unbound-variable error under cvm -- the ORIGINAL unprefixed/
+    ;;   unbound-variable error under icecreme -- the ORIGINAL unprefixed/
     ;;   un-renamed name also stays visible, for the same flat-namespace
     ;;   reason only/except can't hide anything either.
     ;; - cond-expand/include/include-ci inside a .sld file are NOT
     ;;   supported (none of this project's own pure-Scheme libraries use
     ;;   them in a way this loader would ever see -- checked this session).
-    ;; - A library with no .sld file on disk (an ordinary Crystal/cvm-
+    ;; - A library with no .sld file on disk (an ordinary Crystal/icecreme-
     ;;   native library, e.g. (creme sql)/(scheme base)) is silently
     ;;   treated as already available -- exactly import!'s own existing
-    ;;   assumption for a cvm-native name.
+    ;;   assumption for an icecreme-native name.
     ;; ---------------------------------------------------------------------
 
     ;; Process-wide (like macro-table): library names (each a list like
@@ -2947,21 +2947,21 @@
     ;; nothing (the file doesn't exist until an EARLIER form actually
     ;; RUNS), and marking it loaded anyway made the LATER, correctly-
     ;; timed runtime attempt skip loading it for real. Harmless under
-    ;; native Crystal (whose own real import! -- unlike cvm's permanent
+    ;; native Crystal (whose own real import! -- unlike icecreme's permanent
     ;; no-op -- already does the genuine work independently, making this
-    ;; tracking redundant there), but a real, silent failure under cvm,
+    ;; tracking redundant there), but a real, silent failure under icecreme,
     ;; where this self-hosted loader is the ONLY mechanism -- confirmed
     ;; by tracing spec/creme/compiler_libraries_spec.scm's own "imports a
-    ;; library file written by an earlier form" case failing under `cvm`
+    ;; library file written by an earlier form" case failing under `icecreme`
     ;; only, never under `--self-hosted`.
     ;;
     ;; mark-self-hosted-library-loaded! is EXPORTED (unlike the other two
-    ;; names here) specifically so cvm/compiler-run.scm can pre-seed this
+    ;; names here) specifically so icecreme/compiler-run.scm can pre-seed this
     ;; state for every file-based library IT ITSELF already bundles
-    ;; natively (via --emit-cvm, which never touches this tracking at
+    ;; natively (via --emit-icecreme, which never touches this tracking at
     ;; all -- it's Crystal's own import machinery, not this self-hosted
     ;; loader). Without that, a target script reentrant-compiled under
-    ;; cvm that ALSO imports e.g. (creme compiler compiler)/(creme
+    ;; icecreme that ALSO imports e.g. (creme compiler compiler)/(creme
     ;; bytecode) -- exactly what every spec/creme/*.scm file does via
     ;; (creme compiler spec-helper) -- would have ensure-library-loaded!
     ;; re-read and re-run those libraries' own source a second time,
@@ -2978,8 +2978,8 @@
     (define (mark-self-hosted-library-loaded! name)
       (set! self-hosted-loaded-libraries (cons name self-hosted-loaded-libraries)))
 
-    ;; Mirrors cvm_emitter.cr's own required_families computation (the
-    ;; native --emit-cvm path), just reimplemented here for THIS compiler's
+    ;; Mirrors icecreme_emitter.cr's own required_families computation (the
+    ;; native --emit-icecreme path), just reimplemented here for THIS compiler's
     ;; own self-hosted programs: every library name of the exact shape
     ;; (creme builtin <family>) ever reached by ensure-library-loaded!
     ;; below (which only gets here for a library with no .sld file on
@@ -2988,10 +2988,10 @@
     ;; transitively depends on, and is recorded here (deduped) so
     ;; compile-source-to-bytes/compiler-run.scm can pass a REAL required-
     ;; families list into chunk->bytes instead of an empty/hardcoded one --
-    ;; letting cvm's own import-gated native builtin registration (main.c)
+    ;; letting icecreme's own import-gated native builtin registration (main.c)
     ;; work correctly even for a program compiled entirely by THIS
-    ;; self-hosted compiler (cvm's "compiler mode"), not just one compiled
-    ;; natively via --emit-cvm.
+    ;; self-hosted compiler (icecreme's "compiler mode"), not just one compiled
+    ;; natively via --emit-icecreme.
     (define required-native-families '())
     (define (record-required-native-family! name)
       (if (and (= (length name) 3) (eq? (car name) 'creme) (eq? (cadr name) 'builtin))
@@ -3016,7 +3016,7 @@
     ;; the names the library ACTUALLY declares exported, not just
     ;; whatever it happens to `define` internally.
     ;;
-    ;; For a library with no .sld file on disk (ordinary Crystal/cvm-
+    ;; For a library with no .sld file on disk (ordinary Crystal/icecreme-
     ;; native), falls back to library-exports ((creme introspection)) --
     ;; native Crystal already tracks every registered library's own
     ;; exports internally (SchemeLibrary#exports) regardless of whether
@@ -3025,8 +3025,8 @@
     ;; imported/registered by the time this runs (an as-yet-unimported
     ;; native library has no exports to report any more than an
     ;; unimported file-based one would -- same restriction, just a
-    ;; different reason). cvm has its own, much narrower library-exports
-    ;; (cvm/bootstrap.c) -- a small hardcoded table, since cvm has no
+    ;; different reason). icecreme has its own, much narrower library-exports
+    ;; (icecreme/bootstrap.c) -- a small hardcoded table, since icecreme has no
     ;; per-library grouping of its own flat global table the way native
     ;; Crystal's SchemeLibrary does; see that file's own comment for
     ;; which libraries it actually covers.
@@ -3054,7 +3054,7 @@
     ;; needs beyond what a plain top-level `(import ...)` already brings
     ;; in via native import!/ensure-libraries-loaded!), this is a
     ;; complete, from-scratch resolution used by `environment`
-    ;; (cvm/compiler-run.scm) to populate a genuinely fresh, otherwise-
+    ;; (icecreme/compiler-run.scm) to populate a genuinely fresh, otherwise-
     ;; empty environment -- there is no ambient "already imported"
     ;; baseline to lean on there, so only/except need REAL filtering
     ;; here (not the no-op passthrough import-set-alias-defines's own
@@ -3095,7 +3095,7 @@
     ;; Crystal can see directly, whether native or file-based, since its
     ;; apply_import_set (library.cr) is a full, correct implementation;
     ;; only a pure-Scheme library loaded SOLELY through this file's own
-    ;; self-hosted loader (the cvm case, where import! is a no-op) needs
+    ;; self-hosted loader (the icecreme case, where import! is a no-op) needs
     ;; import-set-alias-defines to actually generate anything.
     (define (global-bound? name)
       (guard (e (#t #f)) (eval name) #t))
@@ -3117,7 +3117,7 @@
     ;; loaded!, etc) runs with root_env = THIS LIBRARY's own private env
     ;; (Crystal's real library system is NOT the flat global namespace
     ;; the self-hosted loader below provides; that flatness is this
-    ;; loader's OWN design for cvm, not how Crystal loads (creme compiler
+    ;; loader's OWN design for icecreme, not how Crystal loads (creme compiler
     ;; compiler) itself) -- so any global this file's own procedures call
     ;; must be in ITS OWN import clause, not just the caller's.
     (define (import-set-alias-defines spec)
@@ -3163,7 +3163,7 @@
         ;; (rename internal-add public-add))`), and nothing consumed
         ;; library-export-alist's already-correct (external . internal)
         ;; parsing of that for a bare import at all before this -- so
-        ;; `public-add` was never actually bound as a global under cvm's
+        ;; `public-add` was never actually bound as a global under icecreme's
         ;; self-hosted-loader-only path (native Crystal's own real
         ;; import! already handles this correctly, via global-bound?'s
         ;; same "already handled natively" skip below, which is why this
@@ -3190,7 +3190,7 @@
             (string-append acc ".sld")
             (loop (cdr parts) (string-append acc "/" (symbol->string (car parts)))))))
 
-    ;; dirname/path-join -- mirrors cvm/compiler-run.scm's own pair
+    ;; dirname/path-join -- mirrors icecreme/compiler-run.scm's own pair
     ;; exactly (that file's own copy resolves the TARGET SCRIPT's own
     ;; top-level `include` forms; this one resolves an `include`/
     ;; `include-ci` declaration nested inside a separately-loaded
@@ -3229,9 +3229,9 @@
     ;; cvm_abort/an uncaught SchemeRuntimeError with no active guard here
     ;; would kill the entire run, not just fail this one lookup) when the
     ;; file can't be read -- the signal that `name` is an ordinary
-    ;; Crystal/cvm-native library instead, with nothing further to do.
-    ;; Deliberately uses read-whole-file (a cvm-only native builtin), NOT
-    ;; the genuinely-portable file-read from (creme file) -- under cvm this
+    ;; Crystal/icecreme-native library instead, with nothing further to do.
+    ;; Deliberately uses read-whole-file (an icecreme-only native builtin), NOT
+    ;; the genuinely-portable file-read from (creme file) -- under icecreme this
     ;; really reads the file, so ensure-library-loaded! actually reentrant-
     ;; compiles a library's own .sld source there (as it always has); under
     ;; native/--self-hosted, read-whole-file is unbound, so the guard below
@@ -3341,7 +3341,7 @@
     ;; hoist-internal-defines' own letrec* folding, and critically don't
     ;; generate a binding for the type name itself -- top-level define-
     ;; record-type genuinely binds ALL of type-name/ctor/pred/accessors/
-    ;; mutators as real globals, per cvm/vm.c's build_record_bindings
+    ;; mutators as real globals, per icecreme/vm.c's build_record_bindings
     ;; "bindings, in the same order: type, ctor, pred, then per field").
     ;; define-syntax/defmacro names are included defensively too (a
     ;; top-level define-syntax genuinely binds a real T_MACRO global,
@@ -3420,13 +3420,13 @@
     ;; are what such a wrapper itself imports, see record-required-
     ;; native-family!'s own matching shape check above). Deliberately NOT
     ;; using library-export-alist's native fallback to decide "is this
-    ;; real" here -- cvm's own library-exports builtin (cvm/bootstrap.c)
+    ;; real" here -- icecreme's own library-exports builtin (icecreme/bootstrap.c)
     ;; is a small, hand-maintained table covering only the one native
     ;; library a spec actually needs only/except/prefix/rename against
     ;; ((creme regex) today), NOT a general "does this native family
     ;; exist" oracle -- treating its #f as "unknown" would wrongly reject
     ;; almost every real (creme builtin <family>) name.
-    ;; Only meaningful under cvm, where read-whole-file (try-read-whole-
+    ;; Only meaningful under icecreme, where read-whole-file (try-read-whole-
     ;; file's own probe) is a genuine builtin -- there, "no src" reliably
     ;; means "no .sld file exists on disk for this name" (global-bound?
     ;; 'read-whole-file is how we tell we're actually running there).
@@ -3503,13 +3503,13 @@
     ;; happened against the SAME env that check consults (interp.global
     ;; -- see (creme bootstrap)'s expand-if-macro). ALSO runs the
     ;; self-hosted loader above, for the same reason -- load-bearing
-    ;; under cvm (see this section's own header comment), redundant but
+    ;; under icecreme (see this section's own header comment), redundant but
     ;; harmless under Crystal (import! already did the real work there).
     ;; Both emitted runtime calls are still there too, so a separately
     ;; reloaded chunk still works standalone without needing to be
     ;; recompiled in the same process that originally compiled it --
     ;; PROVIDED that process still has this same compiler's own
-    ;; ensure-libraries-loaded! defined as a global (true for cvm's own
+    ;; ensure-libraries-loaded! defined as a global (true for icecreme's own
     ;; compiler-mode/REPL images, which always bundle this whole file).
     ;; import-set-alias-defines for every spec in one (import ...) form,
     ;; in order -- manual recursion (not map), matching this section's own
@@ -3526,14 +3526,14 @@
     ;; Runtime counterpart of alias-defines-for-specs above, for `import!`
     ;; called as a BARE PROCEDURE (e.g. `(import! '((prefix (creme regex)
     ;; rx:)))` directly in a test, not through the `(import ...)` special
-    ;; form compile-import! below handles) -- cvm/bootstrap.c's bi_import_
+    ;; form compile-import! below handles) -- icecreme/bootstrap.c's bi_import_
     ;; bang bridges here (same pattern as expand-if-macro bridging to
-    ;; defmacro-expand-form/define-syntax-expand-form) since cvm's own
+    ;; defmacro-expand-form/define-syntax-expand-form) since icecreme's own
     ;; import! has no compiler context of its own to emit bytecode from.
     ;; Reuses alias-defines-for-specs' pure computation of the `(define
     ;; new old)` forms needed, then genuinely executes each one via `eval`
     ;; (this library's own top-level (import (scheme eval)) makes that
-    ;; resolve; under cvm, whatever global `eval` compiler-run.scm itself
+    ;; resolve; under icecreme, whatever global `eval` compiler-run.scm itself
     ;; defines) -- safe to do here specifically because bi_import_bang is
     ;; ONLY ever reached for a bare runtime call, never for the special-
     ;; form path below (compile-import! never emits a call to THIS
@@ -3569,12 +3569,12 @@
     ;; ensure-libraries-loaded! now runs BEFORE import! (both here and in
     ;; the emitted runtime sequence below) -- ordering that USED to not
     ;; matter (native Crystal's own import! is fully independent of this
-    ;; self-hosted loader), but does now that cvm's own import! (bi_
-    ;; import_bang, cvm/bootstrap.c) bridges to import!-apply-aliases!
+    ;; self-hosted loader), but does now that icecreme's own import! (bi_
+    ;; import_bang, icecreme/bootstrap.c) bridges to import!-apply-aliases!
     ;; above: a pure-Scheme library's exports (e.g. (creme extra)'s
     ;; `filter`, aliased via a prefix import-set) must already be real
     ;; globals -- which only ensure-libraries-loaded! (not import!, a
-    ;; permanent no-op at cvm's OWN runtime level) establishes -- before
+    ;; permanent no-op at icecreme's OWN runtime level) establishes -- before
     ;; the alias-generation bridge tries to resolve them. Getting this
     ;; backwards previously broke compiler_libraries_spec.scm's prefix-
     ;; import case ("unbound variable: any") when this bridge was first
@@ -3746,7 +3746,7 @@
         ch))
 
     ;; Public entry point: compiles every top-level form in `source` (via
-    ;; (creme compiler reader)'s read-program) into SCB1 bytes -- a
+    ;; (creme compiler reader)'s read-program) into ICE1 bytes -- a
     ;; bytevector ready for (creme bootstrap)'s load-chunk-bytes. Optional
     ;; 2nd argument: see compile-program's own doc comment.
     (define (compile-source-to-bytes source . file)

@@ -24,7 +24,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/compiler_global_counted_loop_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/compiler_global_counted_loop_spec.scm
-;;   ./cvm/cvm spec/creme/compiler_global_counted_loop_spec.scm
+;;   ./icecreme/icecreme spec/creme/compiler_global_counted_loop_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)

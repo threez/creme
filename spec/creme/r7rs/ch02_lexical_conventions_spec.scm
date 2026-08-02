@@ -23,8 +23,8 @@
 ;; 'unknown # syntax')" -- nothing to assert against here either, same
 ;; reason the original left it a no-op pending.
 ;;
-;; §2.4 Datum labels (#n=/#n#) USED to be a genuine cvm reader gap --
-;; cvm's own `read` is backed by the self-hosted reader
+;; §2.4 Datum labels (#n=/#n#) USED to be a genuine icecreme reader gap --
+;; icecreme's own `read` is backed by the self-hosted reader
 ;; (modules/creme/compiler/reader.sld), which used to raise "unknown #
 ;; syntax #0" on `#0=...`/`#0#` at all (a documented, deliberate scope
 ;; cut in that file's own header comment). Now supported there
@@ -33,15 +33,15 @@
 ;; value directly (can't participate in a cycle anyway); only a
 ;; self-referential VECTOR specifically remains unsupported (no test
 ;; here or elsewhere needs one) -- so every case runs unconditionally
-;; now. Separately, cvm's OWN --emit-cvm + cvm/cvm precompiled pipeline
+;; now. Separately, icecreme's OWN --emit-icecreme + icecreme/icecreme precompiled pipeline
 ;; (a different code path from this file's `read`-based cases, native
-;; Crystal's reader/serializer + cvm/loader.c) has its own, independent
-;; #n=/#n# support -- see cvm/README.md's own "Datum labels" section.
+;; Crystal's reader/serializer + icecreme/loader.c) has its own, independent
+;; #n=/#n# support -- see icecreme/README.md's own "Datum labels" section.
 ;;
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch02_lexical_conventions_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch02_lexical_conventions_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch02_lexical_conventions_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch02_lexical_conventions_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme read) (creme spec))

@@ -2,7 +2,7 @@
 ;; (creme scheme-lexer): a real Scheme-source tokenizer, in pure R7RS -- the
 ;; shared foundation for a syntax-highlighting REPL that must behave
 ;; IDENTICALLY across all three runtimes (native Crystal interpreter,
-;; --self-hosted, and cvm/cvm). File-based, same rationale as (creme
+;; --self-hosted, and icecreme/icecreme). File-based, same rationale as (creme
 ;; scanner)'s own header comment: every export here is expressible in plain
 ;; R7RS, so it belongs alongside the other file-based creme.* libraries
 ;; rather than as native code duplicated per-runtime.
@@ -87,13 +87,13 @@
 ;; if either changes.
 ;;
 ;; NAMES are deliberately prefixed (lex-*) rather than reused verbatim,
-;; unlike the values/logic above: cvm's self-hosted library loader (see
+;; unlike the values/logic above: icecreme's self-hosted library loader (see
 ;; (creme compiler compiler)'s own ensure-library-loaded!) compiles every
 ;; library's top-level bindings -- exported or not -- into ONE flat global
-;; table (cvm's own accepted "no per-import scoping" design; see that
+;; table (icecreme's own accepted "no per-import scoping" design; see that
 ;; file's own comments). Reusing reader.sld's own internal names unprefixed
 ;; here used to mean importing (creme scheme-lexer) anywhere alongside
-;; (scheme eval)/(scheme read) under cvm would silently clobber reader.sld's
+;; (scheme eval)/(scheme read) under icecreme would silently clobber reader.sld's
 ;; OWN same-named globals with this library's own (differently-behaved --
 ;; e.g. this file's own delimiter-char? doesn't treat whitespace as a
 ;; delimiter, unlike reader.sld's) definitions the moment this library's
@@ -101,7 +101,7 @@
 ;; process (observed as a bogus "unbound variable: <mashed-together tokens>"
 ;; from `read` no longer treating spaces as token boundaries). Confirmed
 ;; empirically as the exact cause of that failure before this rename; see
-;; cvm/compiler-run.scm's own `read`/`eval` bridge doc comments for the
+;; icecreme/compiler-run.scm's own `read`/`eval` bridge doc comments for the
 ;; general reentrant-compilation background this bug lives in.
 ;; ===========================================================================
 

@@ -1,4 +1,4 @@
-.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-cvm bench version tag
+.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-icecreme bench version tag
 
 UNAME_M != uname -m
 NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
@@ -33,7 +33,7 @@ spec: $(NEON_OBJ) $(FFI_SHIM_OBJ)
 	crystal spec -v
 
 # bin/creme itself, the one binary everything else in this project (creme-
-# spec/creme-spec-cvm above, competition/Makefile's own `creme` delegation
+# spec/creme-spec-icecreme above, competition/Makefile's own `creme` delegation
 # target) either runs directly or shells out to. Real prerequisites --
 # every .cr source file plus shard.yml/shard.lock/the NEON object above --
 # not a bare existence check, so a rebuild happens exactly when creme's own
@@ -59,26 +59,26 @@ bin/creme: $(CREME_SRCS) shard.yml shard.lock $(NEON_OBJ) $(FFI_SHIM_OBJ)
 creme-spec:
 	./bin/creme spec/creme/main_spec.scm
 
-# Run-only: assumes bin/creme and cvm/cvm are already built (`make -C
-# cvm`). Rebuilds cvm/compiler-run.cvmc fresh (the precompiled self-
-# hosted-compiler image cvm's own "compiler mode" needs -- see cvm/
+# Run-only: assumes bin/creme and icecreme/icecreme are already built (`make -C
+# icecreme`). Rebuilds icecreme/compiler-run.ice fresh (the precompiled self-
+# hosted-compiler image icecreme's own "compiler mode" needs -- see icecreme/
 # compiler-run.scm's own header comment) since a stale one would silently
 # run against old compiler/builtin behavior, then runs spec/creme/
-# main_spec.scm --cvm, which spawns `./cvm/cvm <file>` (cvm reentrant-
+# main_spec.scm --icecreme, which spawns `./icecreme/icecreme <file>` (icecreme reentrant-
 # compiling+running each file with the SELF-HOSTED compiler, entirely
-# inside cvm, no native Crystal process involved at run time -- NOT `./
-# bin/creme --cvm`, an unrelated native-compile-then-run-on-cvm path) for
+# inside icecreme, no native Crystal process involved at run time -- NOT `./
+# bin/creme --icecreme`, an unrelated native-compile-then-run-on-icecreme path) for
 # every spec/creme/*_spec.scm file except reader_native_spec.scm (see
 # that file's own header comment: (creme reader)'s lex-tokens/tokens->
-# forms are native-Crystal-only, no cvm equivalent at all), and reports
+# forms are native-Crystal-only, no icecreme equivalent at all), and reports
 # ONE combined total the same way creme-spec does.
 #
 # Every file now passes in full, including compiler_numeric_tower_spec.
-# scm (cvm/value.h's T_RATIONAL, GMP-backed, and T_COMPLEX -- see cvm/
+# scm (icecreme/value.h's T_RATIONAL, GMP-backed, and T_COMPLEX -- see icecreme/
 # README.md's "numeric tower" note for exactly what this does and
 # doesn't cover), reader_literals_spec.scm's own 7 complex-number cases,
 # and bootstrap_spec.scm's "import! applies only/except/prefix import-
-# set filters" case (cvm/bootstrap.c's import! bridge, plus a small
+# set filters" case (icecreme/bootstrap.c's import! bridge, plus a small
 # hardcoded library-exports table so it can alias a NATIVE library's
 # exports too, not just a pure-Scheme one -- see that file's own
 # comment), EXCEPT bootstrap_spec.scm's one remaining, harmless
@@ -90,12 +90,12 @@ creme-spec:
 # exit here isn't automatically a problem; check which specific case
 # failed against the affected file's own documented list before assuming
 # something broke.
-creme-spec-cvm:
-	./bin/creme --emit-cvm cvm/compiler-run.scm cvm/compiler-run.cvmc
-	./bin/creme spec/creme/main_spec.scm --cvm
+creme-spec-icecreme:
+	./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice
+	./bin/creme spec/creme/main_spec.scm --icecreme
 
 # Every artifact competition/bench.scm's two suites need (bin/creme and
-# cvm/cvm themselves, the self-hosted-compiler image, both suites' native-
+# icecreme/icecreme themselves, the self-hosted-compiler image, both suites' native-
 # code comparison floors, and every todo-app twin) is now a real,
 # prerequisite-tracked target owned by competition/Makefile -- see its own
 # header comment for why (a hand-built, wrong-flags binary used to be able
@@ -103,7 +103,7 @@ creme-spec-cvm:
 # through that Makefile's own recipe). competition/Makefile itself is
 # written in the same portable make subset as this file (works under
 # either plain `make` or `gmake` here) -- it only reaches for `gmake`
-# explicitly, internally, for the one delegation (cvm/Makefile) that
+# explicitly, internally, for the one delegation (icecreme/Makefile) that
 # actually needs GNU-only syntax; see its own header comment.
 #
 # Runs BOTH the CPU-workload "bench" suite and the HTTP-benchmarked

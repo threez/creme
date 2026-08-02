@@ -6,23 +6,23 @@
 ;; should-match-native? approach.
 ;;
 ;; open-input-file/open-output-file/call-with-input-file/
-;; call-with-output-file/file-exists? used to be a deliberate cvm gap --
+;; call-with-output-file/file-exists? used to be a deliberate icecreme gap --
 ;; only string ports existed there (see ports_spec.scm) until PORT_KIND_
 ;; INPUT_FILE/PORT_KIND_OUTPUT_FILE were added on top of that same
-;; kind-tagged Port (cvm/builtins.c's own "file ports" section).
+;; kind-tagged Port (icecreme/builtins.c's own "file ports" section).
 ;;
 ;; Uses a fixed /tmp path rather than a freshly-generated temp directory
 ;; (unlike ch06_13_input_output_spec.cr's own Dir.mkdir_p/FileUtils.rm_rf) --
 ;; kept deliberately simple for a spec/creme file, since nothing here runs
 ;; concurrently with itself. Still no delete-file cleanup here (delete-file
-;; itself IS in cvm's scope now, see bootstrap.c) -- simply not needed:
+;; itself IS in icecreme's scope now, see bootstrap.c) -- simply not needed:
 ;; every probe path below is unique enough per-run and small enough to
 ;; just leave behind in /tmp, matching this file's own existing style.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/file_ports_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/file_ports_spec.scm
-;;   ./cvm/cvm spec/creme/file_ports_spec.scm
+;;   ./icecreme/icecreme spec/creme/file_ports_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

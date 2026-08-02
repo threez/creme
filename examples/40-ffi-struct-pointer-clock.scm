@@ -5,7 +5,7 @@
 ;; individual field, given a pointer to the struct and that field's real
 ;; byte offset in the target C ABI, and (creme foreign)'s
 ;; define-foreign-struct turns a byte-offset table into ordinary-looking
-;; accessor/mutator procedures. See cvm/creme_ffi.c's and
+;; accessor/mutator procedures. See icecreme/creme_ffi.c's and
 ;; src/creme/modules/creme/ffi.cr's own header comments for the exact
 ;; scope (still no automatic layout/alignment computation -- offsets must
 ;; come from the real ABI), and modules/creme/foreign.sld's header

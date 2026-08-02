@@ -20,7 +20,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/syntax_rules_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/syntax_rules_spec.scm
-;;   ./cvm/cvm spec/creme/syntax_rules_spec.scm
+;;   ./icecreme/icecreme spec/creme/syntax_rules_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

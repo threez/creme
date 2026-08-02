@@ -558,8 +558,8 @@ module Creme::Builtins::ActorLibrary
   # used to build "tcp://ping-server@127.0.0.1:<port>" by hand); the result
   # is exactly what remote-ref expects. `id` may be a registered name
   # (symbol/string, e.g. 'ping-server) OR an actor-ref directly (its own
-  # .id is used) — the latter accepted for symmetry with cvm's own
-  # node-address (cvm/actor.c), which supports both forms.
+  # .id is used) — the latter accepted for symmetry with icecreme's own
+  # node-address (icecreme/actor.c), which supports both forms.
   @[Creme::SchemeFn("node-address", min: 2, max: 2)]
   def node_address(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     system = node_arg(args[0], "node-address")

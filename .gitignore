@@ -8,22 +8,22 @@ crystal-run-*.tm.core
 /competition/bench/prof.html
 /competition/lua/bench/monotonic.so
 
-/cvm/cvm
-/cvm/cvm-sanitize
-/cvm/fuzz-loader
-/cvm/cvm.dSYM/
-/cvm/*.o
-/cvm/vendor/
-/cvm/repl.cvmc
-/cvm/compiler-run.cvmc
-/cvm/fuzz/corpus/
-/cvm/crash-*
-/cvm/oom-*
-/cvm/timeout-*
+/icecreme/icecreme
+/icecreme/icecreme-sanitize
+/icecreme/fuzz-loader
+/icecreme/icecreme.dSYM/
+/icecreme/*.o
+/icecreme/vendor/
+/icecreme/repl.ice
+/icecreme/compiler-run.ice
+/icecreme/fuzz/corpus/
+/icecreme/crash-*
+/icecreme/oom-*
+/icecreme/timeout-*
 
 # (creme ffi)'s small precompiled dlopen/libffi shim (see ffi_shim.c's own
 # header comment) -- built by the root Makefile's ffi_shim.o rule, same
-# convention as /cvm/*.o above.
+# convention as /icecreme/*.o above.
 /src/creme/modules/creme/ffi_shim.o
 
 # Libraries don't need dependency lock

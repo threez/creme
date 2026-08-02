@@ -4,9 +4,9 @@
 ;; uses, and compiler_spec.scm's own header comment for the general
 ;; should-match-native? approach.
 ;;
-;; (creme treelist) used to be entirely absent from cvm. Implemented as a
+;; (creme treelist) used to be entirely absent from icecreme. Implemented as a
 ;; direct, line-for-line port of native's own RRB (Relaxed Radix
-;; Balanced) tree engine (cvm/treelist.c) -- every internal branch node
+;; Balanced) tree engine (icecreme/treelist.c) -- every internal branch node
 ;; carries a cumulative size table, giving real O(log n) ref/set/add/
 ;; insert/delete/take/drop/concat, not just a plain array standing in
 ;; for the same API. See that file's own header comment for the port's
@@ -26,7 +26,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/treelist_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/treelist_spec.scm
-;;   ./cvm/cvm spec/creme/treelist_spec.scm
+;;   ./icecreme/icecreme spec/creme/treelist_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

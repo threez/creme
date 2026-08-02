@@ -17,7 +17,7 @@
 ;; cond-expand's `(library (name ...))` requirement form USED to be a
 ;; genuine divergence between backends: the self-hosted compiler
 ;; (modules/creme/compiler/compiler.sld, used by both `--self-hosted` and
-;; `cvm/cvm`) used to treat EVERY `(library ...)` requirement as
+;; `icecreme/icecreme`) used to treat EVERY `(library ...)` requirement as
 ;; unconditionally unsatisfied, unlike native Crystal's own cond-expand
 ;; (src/creme/eval/interpreter.cr), which really does consult the
 ;; interpreter's own library registry. Fixed: `feature-satisfied?`'s own
@@ -30,17 +30,17 @@
 ;;
 ;; `(features)` itself (the procedure, distinct from cond-expand's own
 ;; compile-time feature-identifier check above) USED to be entirely
-;; unbound under cvm specifically (`--self-hosted` never showed this,
+;; unbound under icecreme specifically (`--self-hosted` never showed this,
 ;; since it still runs inside the ordinary Crystal process, so an
 ;; ordinary procedure call like this one still resolved to Crystal's own
 ;; native builtin regardless of the self-hosted compiler's own, separate
-;; cond-expand-time check) -- fixed (cvm/builtins.c's own `bi_features`,
+;; cond-expand-time check) -- fixed (icecreme/builtins.c's own `bi_features`,
 ;; matching native's exact `(r7rs creme creme.cr)` list).
 ;;
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/appendix_b_feature_identifiers_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/appendix_b_feature_identifiers_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/appendix_b_feature_identifiers_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/appendix_b_feature_identifiers_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (creme spec))

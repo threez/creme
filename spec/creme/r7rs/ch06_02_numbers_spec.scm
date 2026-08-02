@@ -22,8 +22,8 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_02_numbers_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_02_numbers_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_02_numbers_spec.scm
-;; (cvm/cvm has no `environment`/`eval` procedures at all -- see cvm/
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_02_numbers_spec.scm
+;; (icecreme/icecreme has no `environment`/`eval` procedures at all -- see icecreme/
 ;; README.md's own "Native builtins"/REPL sections -- so the two
 ;; should-raise? cases below that use environment/eval still PASS there,
 ;; just for a different underlying reason: `environment` itself being

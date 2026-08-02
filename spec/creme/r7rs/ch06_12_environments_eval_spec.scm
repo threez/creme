@@ -11,7 +11,7 @@
 ;; See also spec/creme/environments_spec.scm, an existing narrower port of
 ;; this same Crystal file that used to deliberately exclude every
 ;; isolation-dependent case (see its own header comment) because of a
-;; genuine cvm gap: `environment` was entirely unbound under cvm/cvm, and
+;; genuine icecreme gap: `environment` was entirely unbound under icecreme/icecreme, and
 ;; `interaction-environment`/`scheme-report-environment`/`null-
 ;; environment` were non-isolating stubs (`eval` ignored its own
 ;; environment argument entirely, evaluating everything against the one
@@ -19,14 +19,14 @@
 ;;
 ;; All of that is now fixed: `environment`/`null-environment` are backed
 ;; by a genuinely separate child VM per environment
-;; (cvm_new_empty_vm/BOX_KIND_ENVIRONMENT, cvm/vm.c and cvm/vm.h's own
+;; (cvm_new_empty_vm/BOX_KIND_ENVIRONMENT, icecreme/vm.c and icecreme/vm.h's own
 ;; doc comments) with its own independent global table, populated (for
 ;; `environment`) by copying exactly the requested import-set's own
 ;; resolved bindings (modules/creme/compiler/compiler.sld's new
 ;; import-set-resolved-bindings, reusing library-export-alist) out of the
 ;; calling environment; `eval`'s 2-arg form loads and runs the compiled
 ;; form against THAT target environment's own table
-;; (load-chunk-bytes-into, cvm/bootstrap.c) instead of always the current
+;; (load-chunk-bytes-into, icecreme/bootstrap.c) instead of always the current
 ;; one. `scheme-report-environment`/`interaction-environment` mirror
 ;; native's own deliberate non-isolation for those two specifically
 ;; (wrapping the CURRENT running VM directly, not a fresh one -- see
@@ -36,7 +36,7 @@
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_12_environments_eval_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_12_environments_eval_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_12_environments_eval_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_12_environments_eval_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme eval) (scheme r5rs) (scheme repl) (creme spec))

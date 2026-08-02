@@ -6,15 +6,15 @@
 ;; directly (no string-embedding-and-sub-eval needed, since this file
 ;; already runs in a real Scheme runtime).
 ;;
-;; `vector->list`'s optional start argument USED to be a genuine cvm gap
-;; (cvm's own bi_vector_to_list, cvm/builtins.c, used to always convert
+;; `vector->list`'s optional start argument USED to be a genuine icecreme gap
+;; (icecreme's own bi_vector_to_list, icecreme/builtins.c, used to always convert
 ;; the WHOLE vector, silently ignoring any start/end arguments) -- fixed,
 ;; so every case below runs unconditionally now.
 ;;
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_08_vectors_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_08_vectors_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_08_vectors_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_08_vectors_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (creme spec))

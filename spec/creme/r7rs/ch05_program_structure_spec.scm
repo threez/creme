@@ -33,8 +33,8 @@
 ;; coming after, and delete-file cleanup at the very end. An INLINE
 ;; (define-library ...) form directly in this script's own body (rather
 ;; than a real file resolved via library_search_path) works fine under
-;; plain `./bin/creme`, but not under `./bin/creme --self-hosted`/`./cvm/
-;; cvm` -- both run the self-hosted compiler's own library loader
+;; plain `./bin/creme`, but not under `./bin/creme --self-hosted`/`./icecreme/
+;; icecreme` -- both run the self-hosted compiler's own library loader
 ;; (ensure-libraries-loaded!, compiler.sld), which only ever resolves a
 ;; library by searching for an actual file, never by noticing an
 ;; already-evaluated inline define-library earlier in the same program;
@@ -44,26 +44,26 @@
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch05_program_structure_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch05_program_structure_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch05_program_structure_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch05_program_structure_spec.scm
 ;;
 ;; §5.2's "only"/"except"/"prefix"/"rename" and §5.6's "a library body
-;; sees only what it explicitly imports" cases USED to be cvm-only gaps
-;; (`environment` was entirely unbound under cvm/cvm, and cvm's global
+;; sees only what it explicitly imports" cases USED to be icecreme-only gaps
+;; (`environment` was entirely unbound under icecreme/icecreme, and icecreme's global
 ;; table has no runtime notion of "which library owns this name" at
 ;; all) but are now fixed -- see the "a library body sees only what it
-;; explicitly imports" case's own comment below, and cvm/README.md's
+;; explicitly imports" case's own comment below, and icecreme/README.md's
 ;; "environment/eval" section, for the full design (a purely compile-
-;; time fix in the self-hosted compiler, not a runtime one -- cvm's flat
+;; time fix in the self-hosted compiler, not a runtime one -- icecreme's flat
 ;; global table itself is unchanged). "except" needed the same
 ;; fused-op-gating mechanism twice: once for `eval`'s own target
 ;; environment, once for a library body's own visibility.
 ;;
 ;; §5.6's export-rename, include/include-ci-in-a-library-body, and
 ;; cond-expand-as-a-library-declaration cases USED to be four more such
-;; cvm-only gaps here, each traced to modules/creme/compiler/compiler.sld's
+;; icecreme-only gaps here, each traced to modules/creme/compiler/compiler.sld's
 ;; own `ensure-library-loaded!` (the self-hosted compiler's own library
 ;; loader, the ONLY mechanism actually loading a pure-Scheme library
-;; under cvm -- native Crystal's own real `import!` does the equivalent
+;; under icecreme -- native Crystal's own real `import!` does the equivalent
 ;; work directly, which is why `--self-hosted` never showed these even
 ;; before the fix, despite running the very same compiler.sld): it only
 ;; ever recognized literal `import`/`begin` clauses in a library's own
@@ -97,17 +97,17 @@
   (it "(only import-set identifier ...) imports just the listed identifiers"
     (should-equal? (eval '(+ 1 2) (environment '(only (scheme base) +))) 3))
 
-  ;; Used to FAIL under `./cvm/cvm` only: `+` in CALL position (unlike a
+  ;; Used to FAIL under `./icecreme/icecreme` only: `+` in CALL position (unlike a
   ;; bare reference to it) compiles to a fused Add opcode, baked in at
   ;; compile time independent of any environment -- so excluding `+`
   ;; from an environment couldn't stop `(+ 1 2)` from working there.
-  ;; Fixed: `eval` (cvm/compiler-run.scm) now checks, via the new
+  ;; Fixed: `eval` (icecreme/compiler-run.scm) now checks, via the new
   ;; `environment-bound?` builtin, which fusable primitive names the
   ;; target environment actually lacks, and temporarily tells the
   ;; compiler's own fusion gate (compiler.sld's `mark-redefined!`/
   ;; `unmark-redefined!`) to treat those as redefined for the duration of
   ;; compiling just this form -- forcing an ordinary GetGlobal+Call,
-  ;; which genuinely fails against that environment. See cvm/README.md's
+  ;; which genuinely fails against that environment. See icecreme/README.md's
   ;; own "environment/eval" section for the full explanation.
   (it "(except import-set identifier ...) imports everything except the listed identifiers"
     (should-raise? (lambda () (eval '(+ 1 2) (environment '(except (scheme base) +))))))
@@ -226,22 +226,22 @@
   (it "export supports (rename internal external) to expose a binding under a different external name"
     (should-equal? (public-add 2 3) 5))
 
-  ;; USED to fail under `./cvm/cvm` only -- cvm's global table is one
+  ;; USED to fail under `./icecreme/icecreme` only -- icecreme's global table is one
   ;; flat, whole-program-wide table with no runtime notion of "which
   ;; library owns this name" at all, so a naive fix would need a
-  ;; genuinely separate VM per library (rejected -- cvm bakes GetGlobal/
+  ;; genuinely separate VM per library (rejected -- icecreme bakes GetGlobal/
   ;; DefGlobal operands into raw indices into ONE specific VM's table at
   ;; load time, so an exported closure calling a sibling helper defined
   ;; in the same library would misresolve if called from a different
   ;; VM's dispatch context). Fixed instead purely at compile time, in
   ;; the self-hosted compiler (modules/creme/compiler/compiler.sld),
-  ;; keeping cvm's runtime completely unchanged: a library body's own
+  ;; keeping icecreme's runtime completely unchanged: a library body's own
   ;; free-variable references that fall outside its own top-level
   ;; defines + resolved imports compile to a GetGlobal against a
   ;; mangled, guaranteed-never-bound name instead of the real one, so
   ;; the library still loads fine (matching native's own observed
   ;; behavior) and only actually CALLING through to the excluded name
-  ;; raises "unbound variable" -- see cvm/README.md's own "environment/
+  ;; raises "unbound variable" -- see icecreme/README.md's own "environment/
   ;; eval" section for the full design.
   (it "a library body sees only what it explicitly imports, not the importer's own bindings"
     (should-raise? (lambda () (broken))))

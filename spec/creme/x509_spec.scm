@@ -8,8 +8,8 @@
 ;; Crystal's own OpenSSL::LibCrypto binding to add every X509/ASN1
 ;; declaration it needs (src/creme/modules/creme/x509.cr, since neither
 ;; Crystal's stdlib nor the vendored jose.cr shard bind a certificate-
-;; building/chain-verification surface), cvm drives the same X509/
-;; X509_REQ/X509_STORE API directly in C (cvm/x509.c, where it's simply
+;; building/chain-verification surface), icecreme drives the same X509/
+;; X509_REQ/X509_STORE API directly in C (icecreme/x509.c, where it's simply
 ;; part of <openssl/x509.h>/<openssl/x509v3.h>) -- both already linked
 ;; via -lcrypto.
 ;;
@@ -20,7 +20,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/x509_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/x509_spec.scm
-;;   ./cvm/cvm spec/creme/x509_spec.scm
+;;   ./icecreme/icecreme spec/creme/x509_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)

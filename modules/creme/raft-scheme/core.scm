@@ -5,15 +5,15 @@
 ;; purpose: it is spliced into two different hosts.
 ;;   - modules/creme/raft-scheme.sld pulls it in via (include "raft-scheme/
 ;;     core.scm") inside a real define-library, for native creme.
-;;   - cvm (the standalone C VM) has no runtime library/import machinery at
+;;   - icecreme (the standalone C VM) has no runtime library/import machinery at
 ;;     all -- a plain top-level (import ...) line in a SCRIPT only tells its
 ;;     bundled self-hosted compiler which native builtin "families" to
 ;;     register (spawn/send!/receive!/... for (creme actor), sql-open/
 ;;     -execute/-query/-scalar for (creme sql), sleep-ms! for (creme
 ;;     process)); it has no separate-file library resolution beyond that.
-;;     A cvm-facing script therefore starts with its own (import ...) line
+;;     An icecreme-facing script therefore starts with its own (import ...) line
 ;;     naming those families, then (include "modules/creme/raft-scheme/
-;;     core.scm") -- cvm's compiler supports a bare top-level (include ...)
+;;     core.scm") -- icecreme's compiler supports a bare top-level (include ...)
 ;;     the same way native's define-library does, splicing this file's
 ;;     forms in textually. Either way, this file only ever calls primitives
 ;;     confirmed present as flat globals on BOTH runtimes: R7RS base, plus
@@ -23,12 +23,12 @@
 ;;
 ;; Why this exists at all: src/creme/modules/creme/raft.cr ((creme raft)) is
 ;; a Scheme *binding* over an external Crystal shard (threez/raft.cr) that
-;; cvm has no native counterpart for at all -- see that file's own header
+;; icecreme has no native counterpart for at all -- see that file's own header
 ;; comment. (creme raft-scheme) is a separate, independent implementation:
 ;; real Raft, driven entirely by actor mailboxes instead of Crystal fibers/
 ;; channels, log/metadata/snapshots persisted in SQLite instead of a
 ;; bespoke binary file format -- so the SAME Scheme source runs identically
-;; under native creme and under cvm. (creme raft)/(creme raft-machine) are
+;; under native creme and under icecreme. (creme raft)/(creme raft-machine) are
 ;; untouched; this is purely additive.
 ;;
 ;; ---- Design ---------------------------------------------------------------
@@ -36,7 +36,7 @@
 ;; One actor per node (spawn), running raft-node-loop -- a plain tail-
 ;; recursive (receive!) dispatch loop, closing over a private, mutable
 ;; hash-table "state" that only THAT actor's thread ever touches. This
-;; matters specifically under cvm: cvm actors are real OS threads, each
+;; matters specifically under icecreme: icecreme actors are real OS threads, each
 ;; with its own independently-copied VM/heap (spawn deep-copies whatever
 ;; the thunk closes over, then the two sides share NOTHING afterward) --
 ;; so unlike native's cooperative-fiber actors, there is no shared-memory
@@ -91,7 +91,7 @@
 ;; produces for ordinary command data); metadata(current_term, voted_for)
 ;; and snapshots(last_included_index, last_included_term, data), each a
 ;; single upserted row. parse-datum exists because (scheme read)'s `read`
-;; has no cvm-native counterpart outside its own "compiler mode" (see cvm/
+;; has no icecreme-native counterpart outside its own "compiler mode" (see icecreme/
 ;; README.md) -- `write` alone is not enough to round-trip.
 ;;
 ;; ---- Scope cuts (deliberate, matching the "full feature parity" minus
@@ -139,7 +139,7 @@
   (> (* 2 votes-count) total))
 
 ;; A local, portable `filter` -- not a base-library builtin on both
-;; runtimes (native has none at all outside (creme extra); cvm's is a
+;; runtimes (native has none at all outside (creme extra); icecreme's is a
 ;; native builtin, but relying on the environment to supply it either
 ;; way would make this file's portability depend on which runtime it's
 ;; running under, exactly what this file is trying to avoid everywhere

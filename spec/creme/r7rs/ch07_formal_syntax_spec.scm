@@ -18,7 +18,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch07_formal_syntax_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch07_formal_syntax_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch07_formal_syntax_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch07_formal_syntax_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme read) (creme spec))
@@ -55,7 +55,7 @@
   ;; body, run after), silently losing the true interleaved order --
   ;; `found`'s own initializer ran BEFORE `register!`, not after it, even
   ;; though `found`'s own `define` appears textually after `register!` in
-  ;; the source. Confirmed this affected cvm and --self-hosted only (both
+  ;; the source. Confirmed this affected icecreme and --self-hosted only (both
   ;; run this same self-hosted compiler); plain native tree-walking
   ;; already evaluated bodies in the correct order. Fixed by keeping
   ;; letrec* only for forward-reference visibility (every defined name

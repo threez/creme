@@ -9,7 +9,7 @@
 ;; get-output-bytevector/read-u8/peek-u8/u8-ready?/write-u8/
 ;; read-bytevector[!]/write-bytevector/binary-port?/textual-port?/
 ;; input-port-open?/output-port-open?/call-with-port used to be a
-;; deliberate cvm gap -- only bytevector?/bytevector/make-bytevector/
+;; deliberate icecreme gap -- only bytevector?/bytevector/make-bytevector/
 ;; bytevector-length/bytevector-u8-ref/bytevector-u8-set!/char-ready?
 ;; existed there. Now built on the same kind-tagged Port introduced for
 ;; string ports (see value.h's own comment on Port's `binary` field).
@@ -17,7 +17,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/bytevectors_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/bytevectors_spec.scm
-;;   ./cvm/cvm spec/creme/bytevectors_spec.scm
+;;   ./icecreme/icecreme spec/creme/bytevectors_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

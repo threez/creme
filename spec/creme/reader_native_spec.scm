@@ -11,23 +11,23 @@
 ;; Scheme, rewriting the token list before handing it back to the
 ;; ordinary Reader).
 ;;
-;; NOT runnable under cvm/cvm, structurally, not as a bug to fix: `(creme
+;; NOT runnable under icecreme/icecreme, structurally, not as a bug to fix: `(creme
 ;; reader)`'s lex-tokens/tokens->forms are native-Crystal-only (src/creme/
-;; modules/creme/reader.cr) -- no pure-Scheme .sld fallback and no cvm C
+;; modules/creme/reader.cr) -- no pure-Scheme .sld fallback and no icecreme C
 ;; equivalent at all (unlike (creme bytecode)/(creme compiler compiler),
-;; which cvm's self-hosted loader can read straight off disk). Under
-;; cvm/cvm, `lex-tokens` would simply be an unbound variable, aborting the
+;; which icecreme's self-hosted loader can read straight off disk). Under
+;; icecreme/icecreme, `lex-tokens` would simply be an unbound variable, aborting the
 ;; whole compile the same way compiler_numeric_tower_spec.scm used to
 ;; before rational/complex support existed -- except there's no realistic
 ;; fix here, since this is exposing native Crystal's own lexer/reader
-;; internals, not a Scheme-expressible algorithm cvm could reimplement.
-;; Excluded from the Makefile's creme-spec-cvm target's own sweep for
+;; internals, not a Scheme-expressible algorithm icecreme could reimplement.
+;; Excluded from the Makefile's creme-spec-icecreme target's own sweep for
 ;; exactly this reason (see that target's own comment).
 ;;
 ;; Run with:
 ;;   ./bin/creme spec/creme/reader_native_spec.scm               (all 4 pass)
 ;;   ./bin/creme --self-hosted spec/creme/reader_native_spec.scm  (all 4 pass)
-;; (not ./cvm/cvm -- see this file's own header comment above for why.)
+;; (not ./icecreme/icecreme -- see this file's own header comment above for why.)
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme read) (scheme process-context)

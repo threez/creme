@@ -12,12 +12,12 @@
 ;; sequence produces which kind) -- that's spec/scheme/modules/creme/
 ;; term_spec.cr's job, against the native Crystal build specifically, since
 ;; word-nav's raw-terminal reading is duplicated by hand between term.cr and
-;; cvm/term.c (see that file's own header comment) rather than shared code.
+;; icecreme/term.c (see that file's own header comment) rather than shared code.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/repl_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/repl_spec.scm
-;;   ./cvm/cvm spec/creme/repl_spec.scm
+;;   ./icecreme/icecreme spec/creme/repl_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (creme repl) (creme spec))

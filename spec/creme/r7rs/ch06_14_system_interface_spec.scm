@@ -15,12 +15,12 @@
 ;; `File.write(..., "(define (triple x) (* x 3))")`.
 ;;
 ;; `load`/`command-line`/`get-environment-variables` USED to each be a
-;; genuine cvm gap here, every one gated behind
-;; `it-unless (equal? (spec-vm) "cvm")`. All three are now fixed --
-;; `load` is a real cvm/compiler-run.scm-defined procedure now (the same
+;; genuine icecreme gap here, every one gated behind
+;; `it-unless (equal? (spec-vm) "icecreme")`. All three are now fixed --
+;; `load` is a real icecreme/compiler-run.scm-defined procedure now (the same
 ;; compile-mode-only pattern `eval`/`read`/`open-input-string` already
 ;; used, see that file's own comment), and `(scheme process-context)` is
-;; a full port (cvm/builtins.c's cvm_register_process_context_builtins
+;; a full port (icecreme/builtins.c's cvm_register_process_context_builtins
 ;; used to register only `exit`) -- so every case in this file runs
 ;; unconditionally now.
 ;;
@@ -32,7 +32,7 @@
 ;; INSIDE Scheme, `exit` is deliberately NOT guard-catchable in any of
 ;; the three backends (see src/creme/errors.cr's own comment on
 ;; SchemeExit -- "Deliberately not a SchemeError... `guard` must not be
-;; able to intercept" -- and cvm/builtins.c's own bi_exit, which calls
+;; able to intercept" -- and icecreme/builtins.c's own bi_exit, which calls
 ;; the raw C exit() directly): actually invoking `(exit)` here would just
 ;; terminate this whole spec file's own process mid-run, taking every
 ;; later `it`/spec-summary! down with it. Skipped entirely rather than
@@ -43,7 +43,7 @@
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_14_system_interface_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_14_system_interface_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_14_system_interface_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_14_system_interface_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme load) (scheme file) (scheme process-context) (scheme time) (creme spec))

@@ -6,7 +6,7 @@ FIO_LIB := $(FIO)/lib/facil
 # always live on the compiler's default search path (e.g. /usr/local on
 # this project's own FreeBSD dev box) -- falls back to the old bare
 # -lsqlite3 if pkg-config doesn't know about it, same "degrade, don't
-# fail outright" convention cvm/Makefile's own pkg-config lookups use.
+# fail outright" convention icecreme/Makefile's own pkg-config lookups use.
 SQLITE3_CFLAGS != pkg-config --cflags sqlite3 2>/dev/null
 SQLITE3_LIBS != pkg-config --libs sqlite3 2>/dev/null || echo -lsqlite3
 

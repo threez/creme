@@ -6,16 +6,16 @@
 ;;
 ;; char-alphabetic?/char-numeric?/char-whitespace?/char-upper-case?/
 ;; char-lower-case?/char-foldcase/digit-value/char-ci=?<>/string-ci=?<>/
-;; string-foldcase used to be a deliberate cvm gap (only char-upcase/
+;; string-foldcase used to be a deliberate icecreme gap (only char-upcase/
 ;; char-downcase/string-upcase/string-downcase existed there) -- now
-;; implemented in cvm/builtins.c (ASCII-only, matching those existing
-;; ones' own documented scope) and cvm/strings.c (string-foldcase, same
+;; implemented in icecreme/builtins.c (ASCII-only, matching those existing
+;; ones' own documented scope) and icecreme/strings.c (string-foldcase, same
 ;; function as string-downcase).
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/char_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/char_spec.scm
-;;   ./cvm/cvm spec/creme/char_spec.scm
+;;   ./icecreme/icecreme spec/creme/char_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

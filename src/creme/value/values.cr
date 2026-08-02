@@ -13,8 +13,8 @@ module Creme
   # pushed on entry to write_seq / popped on exit, via with_write_seq_
   # ancestor), not a whole-traversal visited set: this only needs to stop
   # re-descending into a container that's already an ancestor of itself
-  # (a genuine cycle) -- same technique cvm's own cvm_equal/
-  # write_value_shared (cvm/builtins.c) use for the identical problem,
+  # (a genuine cycle) -- same technique icecreme's own cvm_equal/
+  # write_value_shared (icecreme/builtins.c) use for the identical problem,
   # applied there for equal?/write-shared instead of display/write.
   # Deliberately at MODULE scope (not inside SchemeBaseValue, which is
   # `include`d by both Cons and SchemeVector -- a class variable declared
@@ -22,7 +22,7 @@ module Creme
   # would miss a cycle spanning both types, e.g. a vector containing a
   # pair that eventually points back to that same vector).
   #
-  # This is NOT a faithful #n=/#n#-labeled printer the way cvm's own
+  # This is NOT a faithful #n=/#n#-labeled printer the way icecreme's own
   # write-shared is -- it exists purely so plain `write`/`display`
   # TERMINATE on a circular value (a real, reachable bug: R7RS datum
   # labels can read one directly, and set-cdr!/vector-set! can build one

@@ -29,7 +29,7 @@ end
 # let/do that self-tail-recurses WITHOUT a numeric counter (e.g. walking a
 # list via `(cdr ...)`) still lowers to plain mutable registers instead of
 # allocating a fresh Closure every time its enclosing function runs, the
-# same way a counted loop already does — see doc/optimization-cvm.md and
+# same way a counted loop already does — see doc/optimization-icecreme.md and
 # the investigation that motivated this (hashtable-test's own `scan`,
 # competition/bench/workloads.scm, closes over its own `k` and got a fresh
 # Closure on every single lookup call before this).
@@ -37,10 +37,10 @@ end
 # NOTE: this is a NATIVE-compiler-only optimization so far — it has not
 # been ported to the self-hosted compiler (modules/creme/compiler/
 # compiler.sld) the way the counted-loop work eventually was (see that
-# work's own doc/optimization-general.md account) — so cvm and
+# work's own doc/optimization-general.md account) — so icecreme and
 # --self-hosted still allocate a real closure for these shapes today.
 # should-match-native?-style cross-backend value comparisons (creme-spec-
-# cvm) still pass regardless, since this only changes WHICH bytecode path
+# icecreme) still pass regardless, since this only changes WHICH bytecode path
 # computes a value, never the value itself.
 describe "general (non-counted) loop closure elimination" do
   it "still computes correctly for the exact motivating shape (a cond-based assoc scan, closing over its own key)" do

@@ -133,7 +133,7 @@
             (else (dao-filter pred (cdr lst)))))
 
     ;; dao-ref is a hot path (every field read on every row, on every
-    ;; request) -- profiled (cvm --profile) as this project's single
+    ;; request) -- profiled (icecreme --profile) as this project's single
     ;; biggest shared cost between the HTML and JSON demo-todo routes
     ;; (competition/scheme/demo-todo/app.scm), split between dao-ref
     ;; itself and dao-ref-keyword's own runtime string->symbol/string-
@@ -271,7 +271,7 @@
 
     ;; This prepared-query path is (with dao-ref, above) the OTHER half of
     ;; this project's single biggest shared cost between the HTML and JSON
-    ;; demo-todo routes (cvm --profile) -- it used to run every row
+    ;; demo-todo routes (icecreme --profile) -- it used to run every row
     ;; through sxql-row->kw-alist, re-deriving (string->symbol/string-
     ;; append, plus a fresh per-row closure for map's own lambda) the SAME
     ;; :col keyword symbols from scratch for every single row, even though

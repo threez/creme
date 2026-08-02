@@ -1,32 +1,32 @@
 # ===========================================================================
-# ChunkSerializer: dumps a compiled Chunk to the "SCB1" binary format that
+# ChunkSerializer: dumps a compiled Chunk to the "ICE1" binary format that
 # ChunkDeserializer reads back.
 # ===========================================================================
 #
 # This exists for the self-hosting bootstrap effort, and is also the format
-# the standalone C11 prototype VM in cvm/ reads directly (see cvm/README.md)
-# — cvm/loader.c parses this exact wire format, so there is exactly one
+# the standalone C11 prototype VM in icecreme/ reads directly (see icecreme/README.md)
+# — icecreme/loader.c parses this exact wire format, so there is exactly one
 # on-disk bytecode format across the whole project now, serializing Op's
 # own enum ordinal directly and covering every opcode/value type Chunk can
 # ever hold.
 #
-# `CVMEmitter` (cvm_emitter.cr) is one writer of this format, for `creme
-# --emit-cvm`/cvm/. The self-hosted, Scheme-written bytecode compiler
+# `IcecremeEmitter` (icecreme_emitter.cr) is one writer of this format, for `creme
+# --emit-icecreme`/icecreme/. The self-hosted, Scheme-written bytecode compiler
 # (modules/creme/compiler/compiler.sld, via modules/creme/bytecode.sld) is
 # another — it builds the byte buffer directly with ordinary vector/
 # bytevector operations, needing no Crystal-side serializer at all.
 module Creme
   module ChunkSerializer
-    MAGIC = "SCB1"
+    MAGIC = "ICE1"
     # A single format-version byte, written immediately after MAGIC.
     # Bump this (in lockstep with modules/creme/bytecode.sld's own
-    # writer, and cvm/loader.c's/chunk_deserializer.cr's own readers)
+    # writer, and icecreme/loader.c's/chunk_deserializer.cr's own readers)
     # whenever the on-disk chunk layout itself changes in a way an
     # older reader couldn't safely parse -- so a stale precompiled
-    # .cvmc (or a load-chunk-bytes blob built by a different creme/cvm
+    # .ice (or a load-chunk-bytes blob built by a different creme/icecreme
     # release) fails with a clean, actionable "re-emit this" error
     # instead of a reader silently misinterpreting bytes it wasn't
-    # written for. See CHANGELOG.md/cvm/STABILITY.md for the
+    # written for. See CHANGELOG.md/icecreme/STABILITY.md for the
     # compatibility policy this exists to support.
     FORMAT_VERSION = 1_u8
 
@@ -81,7 +81,7 @@ module Creme
     # Source positions carry a filename resolved internally as an absolute
     # path (needed for correct `include`/relative-library resolution
     # regardless of the process's own working directory — see
-    # Interpreter#push_load_dir/src/main.cr's emit_cvm), but that's a
+    # Interpreter#push_load_dir/src/main.cr's emit_icecreme), but that's a
     # correctness concern for FINDING files, not a reason to bake the
     # builder's own local filesystem layout into a persisted bytecode
     # artifact — position info is diagnostic-only (only ever read back by
@@ -207,7 +207,7 @@ module Creme
     # while walking `v`. Re-entering a pointer already in `counts` --
     # whether because it's a genuine cycle still mid-traversal, or a
     # separate later reference to already-fully-walked shared
-    # substructure -- stops further descent there (same reasoning cvm's
+    # substructure -- stops further descent there (same reasoning icecreme's
     # own cvm_equal/write_value_shared use for the identical problem):
     # this is what makes the pass terminate on a circular datum instead
     # of recursing forever. Every scalar tag (ints, symbols, strings, …)
@@ -237,7 +237,7 @@ module Creme
     # TAG_LABEL_DEF the first time and a bare TAG_LABEL_REF (no
     # re-serialized contents at all) every time after -- see
     # TAG_LABEL_DEF/TAG_LABEL_REF's own doc comment above for the wire
-    # shape, and cvm/loader.c's read_datum for the matching reader side.
+    # shape, and icecreme/loader.c's read_datum for the matching reader side.
     private def self.write_datum(io : IO, v : SchemeValue) : Nil
       counts = {} of UInt64 => Int32
       count_datum_visits(v, counts)

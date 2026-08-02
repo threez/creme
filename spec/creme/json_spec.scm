@@ -4,21 +4,21 @@
 ;; uses, and compiler_spec.scm's own header comment for the general
 ;; should-match-native? approach.
 ;;
-;; (creme json) used to be entirely absent from cvm. Crystal's own
+;; (creme json) used to be entirely absent from icecreme. Crystal's own
 ;; `require "json"` is standard library, not an external shard (see
-;; shard.yml) -- backed here (cvm/json.c) by a small hand-rolled
-;; recursive-descent JSON parser/writer, since cvm has no JSON support to
+;; shard.yml) -- backed here (icecreme/json.c) by a small hand-rolled
+;; recursive-descent JSON parser/writer, since icecreme has no JSON support to
 ;; reuse from anywhere else. Matches native's own conventions exactly: a
 ;; JSON array decodes to a vector, an object decodes to an alist of
 ;; (string . value) pairs usable with assoc/cdr/car, and an empty object
 ;; conflates with JSON null (both decode to '() -- an accepted native
-;; tradeoff, not a cvm-specific cut: an alist built from zero pairs IS
+;; tradeoff, not an icecreme-specific cut: an alist built from zero pairs IS
 ;; '(), not a special case).
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/json_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/json_spec.scm
-;;   ./cvm/cvm spec/creme/json_spec.scm
+;;   ./icecreme/icecreme spec/creme/json_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

@@ -10,8 +10,8 @@ private def w(src : String) : String
 end
 
 # Covers VM#exec_call_global's own call-site quickening (Op::QCallGlobal*,
-# opcode.cr) -- this VM's counterpart to cvm/vm.c's OP_QCALLGLOBAL_* work
-# (see doc/optimization-cvm.md's "Call-site quickening" section), ported
+# opcode.cr) -- this VM's counterpart to icecreme/vm.c's OP_QCALLGLOBAL_* work
+# (see doc/optimization-icecreme.md's "Call-site quickening" section), ported
 # here since that mechanism never existed in the REAL production
 # interpreter before: a still-generic Op::CallGlobal site whose resolved
 # callee turns out to be one of +/-/*/cons/car/cdr gets rewritten in place
@@ -20,7 +20,7 @@ end
 #
 # Every case here forces the call site to actually BE an Op::CallGlobal
 # first (never Op::TailCallGlobal, which this mechanism deliberately never
-# touches, same as cvm's own scope -- every call below is used as a
+# touches, same as icecreme's own scope -- every call below is used as a
 # non-tail ARGUMENT, mirroring a self-recursive loop's own `(- n 1)` step,
 # not the tail expression itself). The trickier part is defeating the
 # native compiler's own static Op::Add/Sub/Mul/Cons/Cxr fusion correctly:

@@ -4,7 +4,7 @@
 ;; comment for the framework this uses, and compiler_spec.scm's own
 ;; header comment for the general should-match-native? approach.
 ;;
-;; sqrt/nan?/infinite?/finite? used to be a deliberate cvm gap (entirely
+;; sqrt/nan?/infinite?/finite? used to be a deliberate icecreme gap (entirely
 ;; absent). sqrt has an exact perfect-square fast path ((sqrt 4) is exact
 ;; 2, not inexact 2.0) and returns a complex value for a negative real
 ;; input, mirroring native's own (scheme inexact) sqrt exactly.
@@ -12,7 +12,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/inexact_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/inexact_spec.scm
-;;   ./cvm/cvm spec/creme/inexact_spec.scm
+;;   ./icecreme/icecreme spec/creme/inexact_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

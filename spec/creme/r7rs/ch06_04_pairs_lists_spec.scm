@@ -14,19 +14,19 @@
 ;; Every procedure exercised here (pair?, cons, car/cdr, set-car!/
 ;; set-cdr!, caar/cadr/cdar/cddr, null?, list?, list, length, append,
 ;; reverse, list-tail, list-ref, memq/memv, assq/assv) is an ordinary
-;; (scheme base) export with a real cvm/builtins.c native builtin, so
+;; (scheme base) export with a real icecreme/builtins.c native builtin, so
 ;; every case passes identically under all three backends. This USED to
-;; document a handful of genuine, undocumented cvm gaps here
+;; document a handful of genuine, undocumented icecreme gaps here
 ;; (list-set!/list-copy/make-list entirely unbound; member/assoc's own C
 ;; implementations silently ignoring an optional 3rd comparison-predicate
-;; argument, each gated behind `it-unless (equal? (spec-vm) "cvm")`) --
+;; argument, each gated behind `it-unless (equal? (spec-vm) "icecreme")`) --
 ;; all fixed now, so every case below runs unconditionally.
 ;;
 ;; Run with:
 ;;   ./bin/creme spec/creme/r7rs/ch06_04_pairs_lists_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_04_pairs_lists_spec.scm
 ;;     -- both: all cases pass, 0 pending.
-;;   ./cvm/cvm spec/creme/r7rs/ch06_04_pairs_lists_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_04_pairs_lists_spec.scm
 ;;     -- 0 failures; the five cases above show [PEND]; everything else
 ;;        passes.
 ;; ===========================================================================

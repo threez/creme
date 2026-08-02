@@ -1,13 +1,13 @@
 ;; ===========================================================================
 ;; A (creme spec)-based port of the core cases in spec/scheme/modules/creme/
 ;; raft_scheme_spec.cr, run directly against modules/creme/raft-scheme/
-;; core.scm -- proving (creme raft-scheme) genuinely works under cvm, not
+;; core.scm -- proving (creme raft-scheme) genuinely works under icecreme, not
 ;; just under native creme. (creme raft) itself now dispatches to this same
-;; engine under cvm too (modules/creme/raft.sld's cond-expand, see
+;; engine under icecreme too (modules/creme/raft.sld's cond-expand, see
 ;; examples/37-raft-kv-store.scm), so this file's own direct raft-scheme-*
-;; coverage is complementary, not the only cvm-side raft coverage anymore.
+;; coverage is complementary, not the only icecreme-side raft coverage anymore.
 ;;
-;; Uses (include ...) rather than `(import (creme raft-scheme))` -- cvm has
+;; Uses (include ...) rather than `(import (creme raft-scheme))` -- icecreme has
 ;; no library/import machinery to resolve a separate .sld file. See
 ;; modules/creme/raft-scheme/core.scm's own header comment for the full
 ;; design.
@@ -15,7 +15,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/raft_scheme_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/raft_scheme_spec.scm
-;;   ./cvm/cvm spec/creme/raft_scheme_spec.scm
+;;   ./icecreme/icecreme spec/creme/raft_scheme_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme cxr) (scheme char)

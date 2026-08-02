@@ -4,11 +4,11 @@
 ;; for the framework this uses.
 ;;
 ;; current-second/current-jiffy/jiffies-per-second used to be a deliberate
-;; cvm gap (only (creme time)'s current-time/time-difference existed
-;; natively there -- see cvm/builtins.c's own bi_current_time). Unlike
+;; icecreme gap (only (creme time)'s current-time/time-difference existed
+;; natively there -- see icecreme/builtins.c's own bi_current_time). Unlike
 ;; every other file in this directory, this one does NOT use
 ;; should-match-native?: current-jiffy measures elapsed time since each
-;; process's own start (cvm's own clock_gettime(CLOCK_MONOTONIC) call vs.
+;; process's own start (icecreme's own clock_gettime(CLOCK_MONOTONIC) call vs.
 ;; native's Time.instant - interp.start_instant), so its absolute value
 ;; can never match across two independently-started processes -- the
 ;; native Crystal spec this is ported from (spec/scheme/modules/
@@ -18,7 +18,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/time_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/time_spec.scm
-;;   ./cvm/cvm spec/creme/time_spec.scm
+;;   ./icecreme/icecreme spec/creme/time_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme time) (creme spec))

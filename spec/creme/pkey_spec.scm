@@ -7,8 +7,8 @@
 ;; (creme pkey) is a genuine dual-implementation module -- native reuses
 ;; the vendored jose.cr shard's own reopened LibCryptoJose FFI bindings
 ;; (src/creme/modules/creme/pkey.cr, since Crystal's stdlib has no
-;; OpenSSL::PKey class hierarchy at all), cvm drives the same EVP_PKEY/
-;; RSA/EC_KEY/PEM API directly in C (cvm/pkey.c, where it's simply part
+;; OpenSSL::PKey class hierarchy at all), icecreme drives the same EVP_PKEY/
+;; RSA/EC_KEY/PEM API directly in C (icecreme/pkey.c, where it's simply part
 ;; of <openssl/evp.h>/<openssl/rsa.h>/<openssl/ec.h>/<openssl/pem.h>) --
 ;; both already linked via -lcrypto. RSA-OAEP-SHA256 is the only
 ;; encryption mode offered (no legacy PKCS1v1.5 encryption padding, the
@@ -22,7 +22,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/pkey_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/pkey_spec.scm
-;;   ./cvm/cvm spec/creme/pkey_spec.scm
+;;   ./icecreme/icecreme spec/creme/pkey_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)

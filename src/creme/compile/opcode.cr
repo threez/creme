@@ -392,7 +392,7 @@ module Creme
     # general `d`-as-step, freeing `d` up for the operand below) — so this lowering only
     # ever fires when the recognized step is exactly +-1; anything else falls back to the
     # ordinary unfused TailCallGlobal path. `d` is a const-pool index (Crystal) / a
-    # pre-resolved global slot index (cvm — see loader.c's resolve_globals) naming the
+    # pre-resolved global slot index (icecreme — see loader.c's resolve_globals) naming the
     # recursed-to function's own global binding, the same convention CallGlobal's own `d`
     # already uses. Every iteration: counter += step; test in-range vs limit as usual;
     # ALSO re-fetch the named global's current value and compare it (reference identity)
@@ -414,7 +414,7 @@ module Creme
     # way this call would have worked without the optimization at all).
     TestGlobalIdentity
     # Runtime-only, from here down: NEVER emitted by BytecodeCompiler, and
-    # (unlike every op above) not part of the on-disk SCB1 format at all —
+    # (unlike every op above) not part of the on-disk ICE1 format at all —
     # nothing outside this same running VM ever needs to interpret one of
     # these ordinals, so appending them after every real op is safe
     # regardless of ordinal value. Op::CallGlobal's own arm (VM#exec_call_global)
@@ -422,8 +422,8 @@ module Creme
     # mirroring Chunk#patch_jump_to_here's existing "build a new Instruction,
     # overwrite the array slot" technique) the first time that site's callee
     # turns out to be one of a handful of well-known (scheme base) builtins
-    # with a matching argument count: the SAME call-site quickening cvm/vm.c
-    # already does (cvm/opcodes.h's own OP_QCALLGLOBAL_* — this is that
+    # with a matching argument count: the SAME call-site quickening icecreme/vm.c
+    # already does (icecreme/opcodes.h's own OP_QCALLGLOBAL_* — this is that
     # mechanism's native-VM counterpart, since this VM never got one before).
     # Each re-checks the call site's CURRENT global value against the exact
     # builtin identity it quickened for, every time it runs, and deopts back
@@ -449,7 +449,7 @@ module Creme
     QCallGlobalSubN
     QCallGlobalMulN
     # define-record-type field accessor call-site quickening (mirrors
-    # cvm/opcodes.h's own OP_QCALLGLOBAL_RECACC) -- a 1-arg call site whose
+    # icecreme/opcodes.h's own OP_QCALLGLOBAL_RECACC) -- a 1-arg call site whose
     # global resolves to a RecordAccessor (record.cr) skips straight from
     # this op to the type-guarded direct field read, bypassing BOTH
     # exec_call_global's own dispatch (already a bit redundant here, since
@@ -499,7 +499,7 @@ module Creme
     # string) shapes quicken; string-append's 0/1/3+-arg forms and
     # number->string's 2-arg (explicit radix) form always fall through to
     # the ordinary Op::CallGlobal path, same as Add2 not touching a 3-arg
-    # `+` call site (see OP_QCALLGLOBAL_ADD3's cvm counterpart for that
+    # `+` call site (see OP_QCALLGLOBAL_ADD3's icecreme counterpart for that
     # exact shape).
     QCallGlobalStrAppend2
     QCallGlobalNumToStr1

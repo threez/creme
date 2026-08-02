@@ -6,16 +6,16 @@
 ;; should-match-native? approach.
 ;;
 ;; open-input-string/read-char/peek-char/read-line/eof-object[?]/port?/
-;; input-port?/output-port? used to be a deliberate cvm gap -- cvm's
+;; input-port?/output-port? used to be a deliberate icecreme gap -- icecreme's
 ;; Port was output-string-only, with no input-port variant at all (see
-;; cvm/value.h's own header comment on the `kind`-tagged Port struct,
+;; icecreme/value.h's own header comment on the `kind`-tagged Port struct,
 ;; added alongside this file). File ports (open-input-file etc.) are a
 ;; separate, later phase -- not covered here.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/ports_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/ports_spec.scm
-;;   ./cvm/cvm spec/creme/ports_spec.scm
+;;   ./icecreme/icecreme spec/creme/ports_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

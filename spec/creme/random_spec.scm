@@ -4,14 +4,14 @@
 ;; uses.
 ;;
 ;; random-real/random-integer/random-seed!/random-choice/random-shuffle
-;; used to be a deliberate cvm gap (entirely absent). cvm's own PRNG
-;; (a splitmix64 generator, cvm/builtins.c) is deliberately NOT bit-for-
+;; used to be a deliberate icecreme gap (entirely absent). icecreme's own PRNG
+;; (a splitmix64 generator, icecreme/builtins.c) is deliberately NOT bit-for-
 ;; bit compatible with Crystal's own Random (PCG-based) -- nothing
-;; observes cvm's sequence against a real Crystal process, so that's not
+;; observes icecreme's sequence against a real Crystal process, so that's not
 ;; a goal. Unlike this directory's other spec files, this one does NOT
 ;; use should-match-native? at all: every case runs directly against
 ;; whichever single backend is executing this file (native/self-hosted/
-;; cvm) and asserts range/membership/determinism properties instead of
+;; icecreme) and asserts range/membership/determinism properties instead of
 ;; an exact expected value -- appropriate for a genuinely random source.
 ;; random-seed!'s determinism case seeds and draws TWICE within that one
 ;; running interpreter, not by comparing across two different compilers.
@@ -19,7 +19,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/random_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/random_spec.scm
-;;   ./cvm/cvm spec/creme/random_spec.scm
+;;   ./icecreme/icecreme spec/creme/random_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (creme random) (creme spec))

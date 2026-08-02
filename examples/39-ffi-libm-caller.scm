@@ -9,7 +9,7 @@
 ;; Same underlying eight primitives, same MVP type-marshalling scope, on
 ;; both backends this project ships: native `bin/creme`
 ;; (modules/creme/ffi.sld -> src/creme/modules/creme/ffi.cr) and
-;; `cvm/cvm` (cvm/creme_ffi.c) -- see either file's own header comment for
+;; `icecreme/icecreme` (icecreme/creme_ffi.c) -- see either file's own header comment for
 ;; the full non-goals list (no whole-struct-by-value marshalling, no
 ;; Scheme-closure-as-C-callback), and modules/creme/foreign.sld's own
 ;; header comment for exactly what define-foreign-function expands to.

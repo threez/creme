@@ -5,9 +5,9 @@
 ;; extend this file with the 'local same-process transport and real
 ;; TCP/Unix distribution.
 ;;
-;; (creme actor) used to be entirely absent from cvm -- porting it
-;; required building real concurrency into cvm for the first time (see
-;; cvm/actor.c's own header comment): one real OS thread + one
+;; (creme actor) used to be entirely absent from icecreme -- porting it
+;; required building real concurrency into icecreme for the first time (see
+;; icecreme/actor.c's own header comment): one real OS thread + one
 ;; independent VM per spawned actor (not a cooperative green-thread
 ;; scheduler), a bounded (64-slot) mutex+condvar mailbox per actor
 ;; matching native's own Channel(64) exactly, and a per-actor
@@ -25,7 +25,7 @@
 ;; comparable feature.
 ;;
 ;; actor-ref-id's exact STRING FORMAT is deliberately NOT asserted on --
-;; cvm uses its own simple sequential-counter id scheme, not native's
+;; icecreme uses its own simple sequential-counter id scheme, not native's
 ;; "actor-N" naming (see actor.c's own comment) -- only that two refs to
 ;; the SAME actor produce the SAME id (self-consistency), never a
 ;; specific expected string.
@@ -33,7 +33,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/actor_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/actor_spec.scm
-;;   ./cvm/cvm spec/creme/actor_spec.scm
+;;   ./icecreme/icecreme spec/creme/actor_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme cxr) (scheme write) (creme actor) (creme spec))
@@ -41,7 +41,7 @@
 ;; Used by the Phase 4 "record round-trips over a real tcp: socket" case
 ;; below -- a message decoded off the wire is only reconstructed as a
 ;; record if the RECEIVING actor's own VM has a global bound to this
-;; exact type name (see cvm/actor.c's read_list, which mirrors native's
+;; exact type name (see icecreme/actor.c's read_list, which mirrors native's
 ;; own from_wire_plain type-by-name lookup); defining it once here, at
 ;; top level, means every actor spawned in this file (including ones
 ;; that started their own 'tcp node) sees the same type.
@@ -68,7 +68,7 @@
   ;; NOTE: deliberately uses let* (not two top-level defines with
   ;; register! in between) -- a define whose initializer depends on an
   ;; EARLIER expression's side effect on shared/global state, with
-  ;; another define in between, hits a genuine pre-existing cvm compiler
+  ;; another define in between, hits a genuine pre-existing icecreme compiler
   ;; bug (confirmed unrelated to actor.c: reproduces with plain set!/
   ;; define, no actors involved at all) where the later define's
   ;; initializer gets evaluated before the intervening expression runs.
@@ -112,7 +112,7 @@
     (should-be-false? (down? "not a down record")))
 
   ;; --- Phase 3: 'local transport (multiple ActorSystems, same process) ---
-  ;; cvm's own actor-ref is always a direct, process-wide-valid pointer
+  ;; icecreme's own actor-ref is always a direct, process-wide-valid pointer
   ;; (see actor.c's own comment on why), so unlike native's ActorRefData
   ;; a ref never needs rewriting ("localize_refs") when a message carrying
   ;; it crosses an ActorSystem/node boundary -- these cases confirm that
@@ -260,7 +260,7 @@
 
   (it "'unix transport: send!/receive! round-trip a value across a real unix domain socket"
     (define main-ref (self))
-    (define sock-path "/tmp/cvm-actor-spec.sock")
+    (define sock-path "/tmp/icecreme-actor-spec.sock")
     (spawn (lambda ()
              (let* ((node (start-node 'unix sock-path "spec-unix-cookie"))
                     (worker (spawn (lambda ()

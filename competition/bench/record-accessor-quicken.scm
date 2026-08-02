@@ -1,21 +1,21 @@
-; Standalone microbenchmark for cvm's OP_QCALLGLOBAL_RECACC (cvm/vm.c) --
+; Standalone microbenchmark for icecreme's OP_QCALLGLOBAL_RECACC (icecreme/vm.c) --
 ; measures the effect of quickening a define-record-type field accessor's
-; call site, the same way doc/optimization-cvm.md's own "Call-site
+; call site, the same way doc/optimization-icecreme.md's own "Call-site
 ; quickening for primitive calls" section measured the +/-/*/cons/car/cdr
 ; work. NOT wired into competition/bench.scm's cross-language suite: this
-; is a cvm-only runtime behavior (no other backend here has an equivalent
+; is an icecreme-only runtime behavior (no other backend here has an equivalent
 ; to compare against), not a cross-language comparison, same reasoning as
 ; why that original microbenchmark was never folded into workloads.scm
 ; either.
 ;
-; Run standalone, before and after cvm/vm.c's quickening change, comparing
-; the printed elapsed time (rebuild cvm/cvm between runs -- the .cvmc this
-; produces doesn't change, only how cvm executes it does):
-;   ./bin/creme --emit-cvm competition/bench/record-accessor-quicken.scm /tmp/recacc.cvmc
-;   ./cvm/cvm /tmp/recacc.cvmc
+; Run standalone, before and after icecreme/vm.c's quickening change, comparing
+; the printed elapsed time (rebuild icecreme/icecreme between runs -- the .ice this
+; produces doesn't change, only how icecreme executes it does):
+;   ./bin/creme --emit-icecreme competition/bench/record-accessor-quicken.scm /tmp/recacc.ice
+;   ./icecreme/icecreme /tmp/recacc.ice
 ;
 ; Also runs directly under creme itself (no quickening there -- this is a
-; cvm-only mechanism -- so this number is just a reference point, not
+; icecreme-only mechanism -- so this number is just a reference point, not
 ; expected to move):
 ;   ./bin/creme competition/bench/record-accessor-quicken.scm
 

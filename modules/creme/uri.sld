@@ -51,12 +51,12 @@
 ;;                          is "http://a/b/g", (uri-join base "/g") is
 ;;                          "http://a/g"
 ;;
-;; Native `bin/creme` only -- `cvm/cvm`'s regexp-search drops a trailing
+;; Native `bin/creme` only -- `icecreme/icecreme`'s regexp-search drops a trailing
 ;; unmatched optional group entirely instead of reporting it as #f (e.g.
 ;; a pattern ending in "(b)?" against input lacking that group returns
-;; one shorter a list on cvm than on native creme), which desyncs
+;; one shorter a list on icecreme than on native creme), which desyncs
 ;; uri-parse's fixed group-index reads; not addressed here since fixing
-;; it is a cvm regex-engine change, out of this library's own scope.
+;; it is an icecreme regex-engine change, out of this library's own scope.
 ;;
 ;; Limitations: no IPv6 literal host handling (a "[::1]"-shaped host
 ;; isn't specially recognized -- the generic authority split still

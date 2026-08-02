@@ -8,14 +8,14 @@
 ;; and-sub-eval needed since this file already runs in a real Scheme
 ;; runtime).
 ;;
-;; This file used to document five genuine cvm gaps: current-output-port
+;; This file used to document five genuine icecreme gaps: current-output-port
 ;; being a plain mutable per-thread C global rather than a real
 ;; make-parameter-backed parameter object (so `parameterize` couldn't
 ;; target it -- "parameterize: expected a parameter object"), plus
 ;; write-shared/write-simple/read-string/flush-output-port each having no
 ;; cvm_register_builtin entry at all. All five are now fixed:
 ;; current-output-port/current-input-port are genuine T_PARAMETER values
-;; (cvm/builtins.c's cvm_init_current_ports, cvm/vm.h's own VM-struct doc
+;; (icecreme/builtins.c's cvm_init_current_ports, icecreme/vm.h's own VM-struct doc
 ;; comment), and write-shared genuinely tracks shared/circular structure
 ;; and emits real #n=/#n# datum labels (`write_value_shared`), not just
 ;; an alias to `write`. Every case in this file runs unconditionally now.
@@ -27,7 +27,7 @@
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_13_input_output_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_13_input_output_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_13_input_output_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_13_input_output_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme read) (scheme file) (creme spec))

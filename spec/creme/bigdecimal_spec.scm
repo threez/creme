@@ -5,9 +5,9 @@
 ;; uses, and compiler_spec.scm's own header comment for the general
 ;; should-match-native? approach.
 ;;
-;; (creme bigdecimal) used to be entirely absent from cvm. Crystal's own
+;; (creme bigdecimal) used to be entirely absent from icecreme. Crystal's own
 ;; `require "big"` (BigDecimal) is standard library, not an external
-;; shard (see shard.yml) -- backed here (cvm/bigdecimal.c) by a small
+;; shard (see shard.yml) -- backed here (icecreme/bigdecimal.c) by a small
 ;; hand-rolled decimal type on top of GMP's arbitrary-precision mpz_t
 ;; (already linked, used for T_RATIONAL): an integer mantissa plus a
 ;; decimal scale, Java-BigDecimal-style, exact by construction --
@@ -23,7 +23,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/bigdecimal_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/bigdecimal_spec.scm
-;;   ./cvm/cvm spec/creme/bigdecimal_spec.scm
+;;   ./icecreme/icecreme spec/creme/bigdecimal_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

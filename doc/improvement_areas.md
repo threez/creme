@@ -1,8 +1,8 @@
-# Improvement areas — JIT-adjacent techniques for cvm/creme
+# Improvement areas — JIT-adjacent techniques for icecreme/creme
 
 Notes from surveying a bytecode-VM JIT writeup
-(https://yoichiozaki.github.io/en/blog/bytecode-vm) against cvm's actual
-architecture (`cvm/vm.c`: computed-goto dispatch, Boehm conservative GC,
+(https://yoichiozaki.github.io/en/blog/bytecode-vm) against icecreme's actual
+architecture (`icecreme/vm.c`: computed-goto dispatch, Boehm conservative GC,
 ahead-of-time self-hosted compiler in `modules/creme/compiler/`). Not all
 of that article's techniques are a good fit here — this doc separates
 what's worth pursuing from what isn't, roughly in priority order.
@@ -14,7 +14,7 @@ what's worth pursuing from what isn't, roughly in priority order.
 ### 1. ~~Inline caching for global lookups~~ — correction: already a non-issue
 
 **This entry was wrong and is kept only as a correction note.** It
-assumed cvm resolves a global-variable reference the way, say, a
+assumed icecreme resolves a global-variable reference the way, say, a
 Python module dict or a JS global object does — a real lookup on every
 access. It doesn't: `loader.c`'s `resolve_globals` interns every
 `GetGlobal`/`SetGlobal`/`DefGlobal`/`CallGlobal` reference to a fixed
@@ -34,8 +34,8 @@ quickened.)
 
 ### 2. Call-site quickening for primitive calls — **implemented**
 
-The genuine analog of "inline caching" for cvm turned out to be at
-`OP_CALLGLOBAL` call sites, not at global-slot storage itself. cvm's
+The genuine analog of "inline caching" for icecreme turned out to be at
+`OP_CALLGLOBAL` call sites, not at global-slot storage itself. icecreme's
 self-hosted bootstrap compiler (`modules/creme/compiler/compiler.sld`)
 *does* fuse `+`/`-`/`*`/`car`/`cdr`/`cons`/etc. into dedicated opcodes
 at compile time when it can prove the call site is safe to fuse — but
@@ -53,20 +53,20 @@ in code that never touches the redefinition at runtime.
 Implemented as runtime call-site quickening: the first time a still-
 generic `OP_CALLGLOBAL` site's target resolves to one of these
 builtins with a matching argument count, the instruction is rewritten
-in place to a new `OP_QCALLGLOBAL_*` opcode (`cvm/opcodes.h`, appended
+in place to a new `OP_QCALLGLOBAL_*` opcode (`icecreme/opcodes.h`, appended
 after `OP_COUNT` — runtime-only, never serialized) that re-checks the
 global's *current* value against the exact expected builtin pointer on
 every execution and permanently deopts back to plain `OP_CALLGLOBAL`
 the instant that check fails (a genuine redefinition). See
-`doc/optimization-cvm.md`'s "Call-site quickening" section for the
+`doc/optimization-icecreme.md`'s "Call-site quickening" section for the
 implementation and measured effect.
 
-cvm already had a *compile-time-only* version of this general idea in
+icecreme already had a *compile-time-only* version of this general idea in
 two other places — the integer fast-path wrappers inlined into
-arithmetic/comparison opcodes (`doc/optimization-cvm.md`, Section 3)
+arithmetic/comparison opcodes (`doc/optimization-icecreme.md`, Section 3)
 and the counted-loop fusion opcodes (OP_FORLOOP*,
 OP_FORLOOPGUARDEDINC/DEC, `doc/optimization-general.md`) — this is the
-first place cvm makes that kind of specialization decision at runtime
+first place icecreme makes that kind of specialization decision at runtime
 instead of purely ahead of time.
 
 ### 3. Call-site quickening for record accessors — **implemented**
@@ -78,13 +78,13 @@ shape of problem as item 2's builtins, just with a `RecordCallable`
 function pointer — `(point-x p)` always compiles to a plain
 `OP_CALLGLOBAL`, never a fused op, since accessors aren't part of the
 compiler's static fusion list at all. `quicken_callglobal_op`
-(`cvm/vm.c`) now recognizes this case too, rewriting such a call site
+(`icecreme/vm.c`) now recognizes this case too, rewriting such a call site
 to a new `OP_QCALLGLOBAL_RECACC` opcode that re-checks the global's
 current value (tag, `RC_ACCESSOR` kind, and the accessor's own
 `RecordType*` by pointer identity) and the argument's own record type
 on every execution, reading the field directly on a match and
 deopting back to plain `OP_CALLGLOBAL` otherwise — same pattern as
-item 2, same file. See `doc/optimization-cvm.md`'s "Call-site
+item 2, same file. See `doc/optimization-icecreme.md`'s "Call-site
 quickening for record accessors" section for the implementation and
 measured effect (~22% faster on a hot accessor loop), and
 `spec/creme/record_accessor_quicken_spec.scm` for the correctness
@@ -101,7 +101,7 @@ patched with operands, glued together for a hot code path. No SSA IR,
 no real register allocator, no method-JIT-grade optimizer — closer in
 engineering cost to quickening than to a full JIT.
 
-cvm's use of the **Boehm conservative GC** is a real advantage here:
+icecreme's use of the **Boehm conservative GC** is a real advantage here:
 the collector already scans the C stack (and would scan a JIT code
 buffer's stack frames) conservatively, so JIT'd/quickened code doesn't
 need precise stack maps or explicit safepoint polling the way a
@@ -119,7 +119,7 @@ native code backend, on-stack replacement, and deoptimization frame
 reconstruction (LuaJIT-style tracing, or TurboFan/HotSpot C2-style
 method compilation) is a multi-week-to-multi-month undertaking on its
 own. For this project specifically, the gains such a tier would target
-— hot numeric loops — substantially overlap with what cvm's *ahead-of-
+— hot numeric loops — substantially overlap with what icecreme's *ahead-of-
 time* compiler already captures via static counted-loop fusion and
 inlined arithmetic fast paths. The marginal benefit over items 1–4
 above doesn't currently look worth the engineering and maintenance
@@ -148,11 +148,11 @@ attach them. Revisit only alongside item 4, not before.
 1. ~~Inline caching for globals~~ — dropped, see item 1's correction note
    above (nothing to cache; global access was already O(1)).
 2. Call-site quickening for primitive calls — **done**, see
-   `doc/optimization-cvm.md`'s "Call-site quickening for primitive
+   `doc/optimization-icecreme.md`'s "Call-site quickening for primitive
    calls" section for the measured effect.
 3. Call-site quickening for record accessors — **done**, the same
    technique applied to `define-record-type` field accessors; see
-   `doc/optimization-cvm.md`'s "Call-site quickening for record
+   `doc/optimization-icecreme.md`'s "Call-site quickening for record
    accessors" section for the measured effect.
 4. Copy-and-patch native codegen — only if quickening turns out
    insufficient somewhere and real native code generation is

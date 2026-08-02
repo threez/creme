@@ -338,12 +338,12 @@ describe "bootstrap-compiler module" do
   # +running its (begin ...) body (which registers define-dao into
   # macro-table via compile-defmacro!, the same as a textually-local one),
   # then successfully expanding+compiling a real define-dao use. This is
-  # the exact pattern that made cvm's own compiler mode abort with "unbound
-  # variable: todo" before this support existed (cvm's expand-if-macro is a
-  # permanent stub, and cvm's import! is a permanent no-op -- neither
+  # the exact pattern that made icecreme's own compiler mode abort with "unbound
+  # variable: todo" before this support existed (icecreme's expand-if-macro is a
+  # permanent stub, and icecreme's import! is a permanent no-op -- neither
   # applies here since this test runs the bootstrap compiler under the
   # real Crystal interpreter, but the SAME self-hosted code path is what
-  # makes it also work correctly under cvm).
+  # makes it also work correctly under icecreme).
   it "loads a defmacro-exporting pure-Scheme library (creme dao) via the self-hosted loader" do
     src = <<-SCM
     (import (scheme base) (creme sql) (creme dao))

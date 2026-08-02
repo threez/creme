@@ -4,8 +4,8 @@
 ;; uses, and compiler_spec.scm's own header comment for the general
 ;; should-match-native? approach.
 ;;
-;; (creme csv) used to be entirely absent from cvm. Implemented as a
-;; small, self-contained RFC4180-ish parser/writer (cvm/csv.c) rather
+;; (creme csv) used to be entirely absent from icecreme. Implemented as a
+;; small, self-contained RFC4180-ish parser/writer (icecreme/csv.c) rather
 ;; than a port of native's own chunked-IO-optimized Creme::Csv (see that
 ;; file's own header comment on why the two designs differ) -- both bulk
 ;; (csv-read/csv-write/csv-read-headers/csv-write-headers) and streaming
@@ -17,7 +17,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/csv_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/csv_spec.scm
-;;   ./cvm/cvm spec/creme/csv_spec.scm
+;;   ./icecreme/icecreme spec/creme/csv_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

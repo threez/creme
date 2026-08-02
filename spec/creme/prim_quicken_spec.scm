@@ -1,5 +1,5 @@
 ;; ===========================================================================
-;; Correctness coverage for cvm's OP_QCALLGLOBAL_ADD3/MOD2 (cvm/vm.c) --
+;; Correctness coverage for icecreme's OP_QCALLGLOBAL_ADD3/MOD2 (icecreme/vm.c) --
 ;; two more call-site quickening cases in the same family as
 ;; OP_QCALLGLOBAL_ADD2/etc. and OP_QCALLGLOBAL_RECACC (see
 ;; record_accessor_quicken_spec.scm's own header comment for the general
@@ -8,23 +8,23 @@
 ;; A 3-argument call to `+` (e.g. `(+ acc x y)`, found live in
 ;; competition/bench/workloads.scm's own record-test) never gets the
 ;; native/self-hosted compiler's own static 2-operand arithmetic fusion
-;; (see doc/optimization-cvm.md Section 3) -- it always compiles to a
+;; (see doc/optimization-icecreme.md Section 3) -- it always compiles to a
 ;; plain OP_CALLGLOBAL regardless of redefinition tracking, exactly the
 ;; same "only quickening ever reaches this call site" situation the 2-arg
 ;; opcodes already handle. `modulo` isn't in the compiler's static fusion
 ;; list at any arity, so it always compiles to OP_CALLGLOBAL too.
 ;;
 ;; should-match-native? is still the right tool here even though this is
-;; a cvm-only runtime behavior (see prim_call_spec.scm's own header
+;; an icecreme-only runtime behavior (see prim_call_spec.scm's own header
 ;; comment on the same point): it asserts the COMPUTED VALUE matches
 ;; native, not which opcode path produced it, so it doubles as a genuine
-;; native/self-hosted/cvm consistency check regardless of backend, while
-;; only actually exercising the quickened path when run under cvm.
+;; native/self-hosted/icecreme consistency check regardless of backend, while
+;; only actually exercising the quickened path when run under icecreme.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/prim_quicken_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/prim_quicken_spec.scm
-;;   ./cvm/cvm spec/creme/prim_quicken_spec.scm
+;;   ./icecreme/icecreme spec/creme/prim_quicken_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)
@@ -32,7 +32,7 @@
         (creme compiler reader) (creme compiler compiler) (creme spec) (creme compiler spec-helper))
 
 (describe "3-arg + call-site quickening (OP_QCALLGLOBAL_ADD3)"
-  (it "computes correctly across many repeated calls (forces cvm's runtime quicken to engage)"
+  (it "computes correctly across many repeated calls (forces icecreme's runtime quicken to engage)"
     (should-match-native?
       '((define (sum3-loop n acc) (if (= n 0) acc (sum3-loop (- n 1) (+ acc n (* n 2)))))
         (sum3-loop 50 0)))))

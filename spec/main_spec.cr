@@ -199,17 +199,17 @@ describe "main.cr (CLI)" do
     end
   end
 
-  it "--disassemble prints the bytecode of an already-compiled --emit-cvm file, including nested closures" do
+  it "--disassemble prints the bytecode of an already-compiled --emit-icecreme file, including nested closures" do
     src_file = File.tempfile("main_spec_disasm", ".scm") do |io|
       io.print(%((import (scheme base) (scheme write)) (define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (display (fact 5))))
     end
-    cvmc_file = File.tempname("main_spec_disasm", ".cvmc")
+    ice_file = File.tempname("main_spec_disasm", ".ice")
     begin
-      _, emit_err, emit_status = run_cli(["--emit-cvm", src_file.path, cvmc_file])
+      _, emit_err, emit_status = run_cli(["--emit-icecreme", src_file.path, ice_file])
       emit_status.success?.should be_true
       emit_err.should eq("")
 
-      out, err, status = run_cli(["--disassemble", cvmc_file])
+      out, err, status = run_cli(["--disassemble", ice_file])
       status.success?.should be_true
       err.should eq("")
       out.should contain("DefGlobal")
@@ -218,24 +218,24 @@ describe "main.cr (CLI)" do
       out.should contain("TestEqImm")
     ensure
       File.delete(src_file.path)
-      File.delete(cvmc_file) if File.exists?(cvmc_file)
+      File.delete(ice_file) if File.exists?(ice_file)
     end
   end
 
   it "--disassemble requires a file argument" do
     _, err, status = run_cli(["--disassemble"])
     status.success?.should be_false
-    err.should contain("Usage: creme --disassemble <file.cvmc>")
+    err.should contain("Usage: creme --disassemble <file.ice>")
   end
 
   it "--disassemble exits non-zero and prints an error when the file doesn't exist" do
-    _, err, status = run_cli(["--disassemble", "/nonexistent/path/does-not-exist.cvmc"])
+    _, err, status = run_cli(["--disassemble", "/nonexistent/path/does-not-exist.ice"])
     status.success?.should be_false
     err.should contain("no such file")
   end
 
-  it "--disassemble exits non-zero and prints an error for a non-SCB1 file" do
-    file = File.tempfile("main_spec_disasm_bad", ".cvmc") do |io|
+  it "--disassemble exits non-zero and prints an error for a non-ICE1 file" do
+    file = File.tempfile("main_spec_disasm_bad", ".ice") do |io|
       io.print("not a real chunk")
     end
     begin
@@ -247,35 +247,35 @@ describe "main.cr (CLI)" do
     end
   end
 
-  # cvm/cvm (the standalone C11 prototype VM) is a separate, optionally-built
-  # binary -- same "best effort" treatment bench/bench.scm and run_via_cvm
+  # icecreme/icecreme (the standalone C11 prototype VM) is a separate, optionally-built
+  # binary -- same "best effort" treatment bench/bench.scm and run_via_icecreme
   # (src/main.cr) already give it, since a fresh checkout on a machine
   # without a working C toolchain/GC dev package for it shouldn't fail the
-  # whole Crystal spec suite. `make -C cvm` here only actually rebuilds
-  # anything the first time cvm/cvm doesn't exist yet or its sources
+  # whole Crystal spec suite. `make -C icecreme` here only actually rebuilds
+  # anything the first time icecreme/icecreme doesn't exist yet or its sources
   # changed; a no-op run (the common case in CI, where it's already built)
   # is instant.
-  describe "--cvm (standalone C11 prototype VM)" do
-    cvm_bin = "cvm/cvm"
-    Process.run("make", ["-C", "cvm"], output: Process::Redirect::Close, error: Process::Redirect::Close)
-    cvm_available = File.exists?(cvm_bin)
+  describe "--icecreme (standalone C11 prototype VM)" do
+    icecreme_bin = "icecreme/icecreme"
+    Process.run("make", ["-C", "icecreme"], output: Process::Redirect::Close, error: Process::Redirect::Close)
+    icecreme_available = File.exists?(icecreme_bin)
 
-    unless cvm_available
-      puts "  (cvm/cvm could not be built in this environment -- skipping cvm-specific regression tests)"
+    unless icecreme_available
+      puts "  (icecreme/icecreme could not be built in this environment -- skipping icecreme-specific regression tests)"
     end
 
-    if cvm_available
-      # Regression test for a real bug: cvm/hashtable.c's hash-table-ref
+    if icecreme_available
+      # Regression test for a real bug: icecreme/hashtable.c's hash-table-ref
       # unconditionally cvm_apply'd its third argument as a thunk, but this
       # project's own hash-table-ref contract (src/creme/modules/creme/
       # hash_table.cr) allows a plain, non-procedure default too -- (creme
       # dao)'s dao-ref-keyword relies on exactly that (a plain #f default),
       # so any DAO-based script (e.g. competition/scheme/demo-todo/app.scm)
-      # crashed under cvm with "attempt to apply a non-procedure value" the
-      # moment it read back a bool column. See cvm/hashtable.c's
+      # crashed under icecreme with "attempt to apply a non-procedure value" the
+      # moment it read back a bool column. See icecreme/hashtable.c's
       # bi_hash_table_ref for the fix.
       it "hash-table-ref accepts a plain (non-procedure) default, not just a thunk" do
-        file = File.tempfile("main_spec_cvm_hashtable", ".scm") do |io|
+        file = File.tempfile("main_spec_icecreme_hashtable", ".scm") do |io|
           io.print(<<-SCHEME)
             (import (scheme base) (scheme write) (creme hash-table))
             (define h (make-hash-table))
@@ -289,11 +289,11 @@ describe "main.cr (CLI)" do
             SCHEME
         end
         begin
-          out, err, status = run_cli(["--cvm", file.path])
+          out, err, status = run_cli(["--icecreme", file.path])
           status.success?.should be_true
           out.should eq("#f\n42\ncomputed\n")
-          # A plain --cvm run always writes one stray "\n" to stderr
-          # regardless of the script (a pre-existing cvm quirk, unrelated
+          # A plain --icecreme run always writes one stray "\n" to stderr
+          # regardless of the script (a pre-existing icecreme quirk, unrelated
           # to this test) -- so only check no actual error text appears.
           err.strip.should eq("")
         ensure
@@ -301,13 +301,13 @@ describe "main.cr (CLI)" do
         end
       end
 
-      # Regression test: cvm/builtins.c was missing several R7RS vector
+      # Regression test: icecreme/builtins.c was missing several R7RS vector
       # procedures ((creme html)/(creme css), among others, call these) --
       # vector-map, vector-for-each, vector-copy, vector-copy!,
       # vector-fill!, vector-append. Calling any of them aborted with
       # "unbound variable" before this fix.
       it "has the previously-missing R7RS vector procedures (vector-map/-for-each/-copy/-copy!/-fill!/-append)" do
-        file = File.tempfile("main_spec_cvm_vectors", ".scm") do |io|
+        file = File.tempfile("main_spec_icecreme_vectors", ".scm") do |io|
           io.print(<<-SCHEME)
             (import (scheme base) (scheme write))
             (define v (vector 1 2 3))
@@ -329,7 +329,7 @@ describe "main.cr (CLI)" do
             SCHEME
         end
         begin
-          out, err, status = run_cli(["--cvm", file.path])
+          out, err, status = run_cli(["--icecreme", file.path])
           status.success?.should be_true
           out.should eq("123\n#(2 4 6)\n#(2 3)\n#(9 9)\n#(1 2 3 9 9)\n#(9 9 3)\n")
           err.strip.should eq("")
@@ -338,23 +338,23 @@ describe "main.cr (CLI)" do
         end
       end
 
-      # Regression test for the flagship case cvm/bootstrap.c's
+      # Regression test for the flagship case icecreme/bootstrap.c's
       # bi_expand_if_macro exists for: a syntax-rules macro EXPORTED from a
       # .sld library, used by an importing script, compiled entirely ahead
-      # of time via --emit-cvm (not cvm's own compiler-mode/REPL bridge,
+      # of time via --emit-icecreme (not icecreme's own compiler-mode/REPL bridge,
       # which spec/scheme/modules/creme/bootstrap_spec.cr already covers).
-      # --emit-cvm's own emitter (cvm_emitter.cr) re-analyzes each imported
-      # library's body a second time purely for cvm's benefit
-      # (Interpreter#library_body_forms_for_cvm) -- this confirms a
+      # --emit-icecreme's own emitter (icecreme_emitter.cr) re-analyzes each imported
+      # library's body a second time purely for icecreme's benefit
+      # (Interpreter#library_body_forms_for_icecreme) -- this confirms a
       # library-defined macro survives that second pass and is fully
       # expanded away before the resulting chunk ever runs, matching plain
       # Crystal-native execution's own macro-then-compile order.
       it "expands a syntax-rules macro exported from an imported .sld library" do
-        lib_dir = File.join("modules", "main_spec_cvm_macro_lib")
+        lib_dir = File.join("modules", "main_spec_icecreme_macro_lib")
         Dir.mkdir_p(lib_dir)
         lib_file = File.join(lib_dir, "greet.sld")
         File.write(lib_file, <<-SCHEME)
-          (define-library (main_spec_cvm_macro_lib greet)
+          (define-library (main_spec_icecreme_macro_lib greet)
             (export my-if)
             (import (scheme base))
             (begin
@@ -363,9 +363,9 @@ describe "main.cr (CLI)" do
                   ((_ c t e) (cond (c t) (else e)))))))
           SCHEME
 
-        file = File.tempfile("main_spec_cvm_macro", ".scm") do |io|
+        file = File.tempfile("main_spec_icecreme_macro", ".scm") do |io|
           io.print(<<-SCHEME)
-            (import (scheme base) (scheme write) (main_spec_cvm_macro_lib greet))
+            (import (scheme base) (scheme write) (main_spec_icecreme_macro_lib greet))
             (display (my-if #t 'yes 'no))
             (newline)
             (display (my-if #f 'yes 'no))
@@ -373,7 +373,7 @@ describe "main.cr (CLI)" do
             SCHEME
         end
         begin
-          out, err, status = run_cli(["--cvm", file.path])
+          out, err, status = run_cli(["--icecreme", file.path])
           status.success?.should be_true
           out.should eq("yes\nno\n")
           err.strip.should eq("")
@@ -384,22 +384,22 @@ describe "main.cr (CLI)" do
         end
       end
 
-      # Regression test: collect_library_body_forms_for_cvm (import.cr) used
+      # Regression test: collect_library_body_forms_for_icecreme (import.cr) used
       # to raise on `include`/`include-ci` inside a define-library, so any
-      # library using either couldn't be compiled via --emit-cvm at all.
+      # library using either couldn't be compiled via --emit-icecreme at all.
       # Covers a nested relative include too (helper.scm itself includes
       # nested/deep.scm) to exercise the @load_dirs push this fix also
-      # needed in library_body_forms_for_cvm -- without it, the nested
+      # needed in library_body_forms_for_icecreme -- without it, the nested
       # include would resolve against the wrong directory.
       it "inlines include/include-ci declarations inside an imported .sld library" do
-        lib_dir = File.join("modules", "main_spec_cvm_include_lib")
+        lib_dir = File.join("modules", "main_spec_icecreme_include_lib")
         nested_dir = File.join(lib_dir, "nested")
         Dir.mkdir_p(nested_dir)
         lib_file = File.join(lib_dir, "lib.sld")
         helper_file = File.join(lib_dir, "helper.scm")
         deep_file = File.join(nested_dir, "deep.scm")
         File.write(lib_file, <<-SCHEME)
-          (define-library (main_spec_cvm_include_lib lib)
+          (define-library (main_spec_icecreme_include_lib lib)
             (export greet loud-greet)
             (import (scheme base))
             (include "helper.scm"))
@@ -412,15 +412,15 @@ describe "main.cr (CLI)" do
           (define (loud-greet name) (string-append (greet name) "!"))
           SCHEME
 
-        file = File.tempfile("main_spec_cvm_include", ".scm") do |io|
+        file = File.tempfile("main_spec_icecreme_include", ".scm") do |io|
           io.print(<<-SCHEME)
-            (import (scheme base) (scheme write) (main_spec_cvm_include_lib lib))
+            (import (scheme base) (scheme write) (main_spec_icecreme_include_lib lib))
             (display (loud-greet "world"))
             (newline)
             SCHEME
         end
         begin
-          out, err, status = run_cli(["--cvm", file.path])
+          out, err, status = run_cli(["--icecreme", file.path])
           status.success?.should be_true
           out.should eq("hi world!\n")
           err.strip.should eq("")
@@ -434,23 +434,23 @@ describe "main.cr (CLI)" do
         end
       end
 
-      # Regression test: cvm's global table is one flat, name-interned array
-      # with no per-library namespacing (cvm/vm.c's cvm_global_intern) --
-      # before cvm_emitter.cr qualified a library's own internal
+      # Regression test: icecreme's global table is one flat, name-interned array
+      # with no per-library namespacing (icecreme/vm.c's cvm_global_intern) --
+      # before icecreme_emitter.cr qualified a library's own internal
       # (non-exported) top-level names, two libraries each defining a
       # private helper of the same name would silently clobber each
-      # other's global slot under --emit-cvm (last DefGlobal wins), even
-      # though the exact same program runs correctly under native (non-cvm)
+      # other's global slot under --emit-icecreme (last DefGlobal wins), even
+      # though the exact same program runs correctly under native (non-icecreme)
       # execution, where each library keeps a genuinely separate Env.
-      it "keeps two libraries' same-named internal (non-exported) helpers from colliding under --emit-cvm" do
-        lib_a_dir = File.join("modules", "main_spec_cvm_collide_a")
-        lib_b_dir = File.join("modules", "main_spec_cvm_collide_b")
+      it "keeps two libraries' same-named internal (non-exported) helpers from colliding under --emit-icecreme" do
+        lib_a_dir = File.join("modules", "main_spec_icecreme_collide_a")
+        lib_b_dir = File.join("modules", "main_spec_icecreme_collide_b")
         Dir.mkdir_p(lib_a_dir)
         Dir.mkdir_p(lib_b_dir)
         lib_a_file = File.join(lib_a_dir, "lib.sld")
         lib_b_file = File.join(lib_b_dir, "lib.sld")
         File.write(lib_a_file, <<-SCHEME)
-          (define-library (main_spec_cvm_collide_a lib)
+          (define-library (main_spec_icecreme_collide_a lib)
             (export entry-a)
             (import (scheme base))
             (begin
@@ -458,7 +458,7 @@ describe "main.cr (CLI)" do
               (define (entry-a n) (helper n))))
           SCHEME
         File.write(lib_b_file, <<-SCHEME)
-          (define-library (main_spec_cvm_collide_b lib)
+          (define-library (main_spec_icecreme_collide_b lib)
             (export entry-b)
             (import (scheme base))
             (begin
@@ -466,9 +466,9 @@ describe "main.cr (CLI)" do
               (define (entry-b n) (helper n))))
           SCHEME
 
-        file = File.tempfile("main_spec_cvm_collide", ".scm") do |io|
+        file = File.tempfile("main_spec_icecreme_collide", ".scm") do |io|
           io.print(<<-SCHEME)
-            (import (scheme base) (scheme write) (main_spec_cvm_collide_a lib) (main_spec_cvm_collide_b lib))
+            (import (scheme base) (scheme write) (main_spec_icecreme_collide_a lib) (main_spec_icecreme_collide_b lib))
             (display (entry-a 1))
             (newline)
             (display (entry-b 1))
@@ -476,7 +476,7 @@ describe "main.cr (CLI)" do
             SCHEME
         end
         begin
-          out, err, status = run_cli(["--cvm", file.path])
+          out, err, status = run_cli(["--icecreme", file.path])
           status.success?.should be_true
           out.should eq("101\n1000\n")
           err.strip.should eq("")
@@ -490,7 +490,7 @@ describe "main.cr (CLI)" do
       end
 
       # (creme ffi)'s generic dlopen/libffi bridge (src/creme/modules/
-      # creme/ffi.cr, cvm/creme_ffi.c) -- calls libm's real `sqrt` and
+      # creme/ffi.cr, icecreme/creme_ffi.c) -- calls libm's real `sqrt` and
       # libc's real `abs`/`strlen`/`malloc`/`free` by name at runtime,
       # covering every MVP marshalled type (double, int32, string, and a
       # round-tripped pointer) on both backends identically, plus
@@ -570,10 +570,10 @@ describe "main.cr (CLI)" do
           out.should eq("4.0\n42\n11\n#t\n#f\n4\n8\n42\n2.5\n#t\n777\n")
           err.strip.should eq("")
 
-          cvm_out, cvm_err, cvm_status = run_cli(["--cvm", file.path])
-          cvm_status.success?.should be_true
-          cvm_out.should eq("4.0\n42\n11\n#t\n#f\n4\n8\n42\n2.5\n#t\n777\n")
-          cvm_err.strip.should eq("")
+          icecreme_out, icecreme_err, icecreme_status = run_cli(["--icecreme", file.path])
+          icecreme_status.success?.should be_true
+          icecreme_out.should eq("4.0\n42\n11\n#t\n#f\n4\n8\n42\n2.5\n#t\n777\n")
+          icecreme_err.strip.should eq("")
         ensure
           File.delete(file.path)
         end

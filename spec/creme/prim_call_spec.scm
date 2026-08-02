@@ -13,7 +13,7 @@
 ;; should-match-native?, even though this is a NATIVE-only optimization:
 ;; should-match-native? asserts the COMPUTED VALUE is correct, not which
 ;; internal bytecode path produced it, so it doubles as a genuine cross-
-;; compiler (native/self-hosted/cvm) consistency check regardless of
+;; compiler (native/self-hosted/icecreme) consistency check regardless of
 ;; whether the self-hosted compiler implements the same Imm/Up/fusion op
 ;; families internally.
 ;;
@@ -47,7 +47,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/prim_call_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/prim_call_spec.scm
-;;   ./cvm/cvm spec/creme/prim_call_spec.scm
+;;   ./icecreme/icecreme spec/creme/prim_call_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

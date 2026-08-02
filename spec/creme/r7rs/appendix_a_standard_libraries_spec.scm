@@ -20,14 +20,14 @@
 ;; header comment. That internal reshuffle is invisible from user code, so
 ;; every (import (scheme ...)) form below is unaffected by it.
 ;;
-;; (scheme load)'s `load` has no equivalent anywhere in cvm (neither a
-;; native C builtin in cvm/builtins.c nor a Scheme-level shim in cvm/
+;; (scheme load)'s `load` has no equivalent anywhere in icecreme (neither a
+;; native C builtin in icecreme/builtins.c nor a Scheme-level shim in icecreme/
 ;; compiler-run.scm, unlike eval/interaction-environment/scheme-report-
 ;; environment/null-environment, which compiler-run.scm defines as
 ;; reduced-but-real stubs -- see that file's own comments) -- a genuine,
-;; undocumented-but-real cvm gap, so "(scheme load) provides the load
-;; procedure" below is gated behind `it-unless (equal? (spec-vm) "cvm")`
-;; and shows as [PEND] only under ./cvm/cvm.
+;; undocumented-but-real icecreme gap, so "(scheme load) provides the load
+;; procedure" below is gated behind `it-unless (equal? (spec-vm) "icecreme")`
+;; and shows as [PEND] only under ./icecreme/icecreme.
 ;;
 ;; `load` (src/creme/modules/scheme/load.cr) joins a relative path
 ;; against the RUNNING SCRIPT's own directory (the last entry of
@@ -45,32 +45,32 @@
 ;; than the Crystal original's freshly Dir.mkdir_p'd temp directory.
 ;;
 ;; "importing an unknown library name ... raises the same clear error"
-;; USED to be a genuine cvm gap too (README's old "Deliberate cuts"
-;; wording: "no eval, no dynamically loading a library cvm wasn't built
+;; USED to be a genuine icecreme gap too (README's old "Deliberate cuts"
+;; wording: "no eval, no dynamically loading a library icecreme wasn't built
 ;; with" -- so importing a nonexistent library was a silent no-op there
 ;; instead of an error) -- now fixed: `ensure-library-loaded!`
 ;; (modules/creme/compiler/compiler.sld) raises when a name has no .sld
 ;; file AND doesn't match the `(creme builtin <family>)` shape every
 ;; genuine native pseudo-library uses, but ONLY when genuinely running
-;; under cvm (`global-bound? 'read-whole-file`) -- under native/
+;; under icecreme (`global-bound? 'read-whole-file`) -- under native/
 ;; --self-hosted, `read-whole-file` is always unbound regardless of
 ;; whether a real .sld exists, so this check would otherwise
 ;; misidentify perfectly ordinary libraries as "unknown" there; native's
 ;; own real import already raises this error correctly by a completely
 ;; different path. "(scheme process-context) exports command-line/..."
 ;; USED to be a second such gap (README used to say "process-context
-;; beyond get-environment-variable/exit" had no cvm-native counterpart
+;; beyond get-environment-variable/exit" had no icecreme-native counterpart
 ;; at all) but `(scheme process-context)` is now a full port -- see
-;; cvm/README.md's own builtins table -- so that case runs
+;; icecreme/README.md's own builtins table -- so that case runs
 ;; unconditionally now.
 ;;
 ;; Run with (all cases pass under bin/creme and --self-hosted, 0 pending;
-;; under ./cvm/cvm, "(scheme load) provides the load procedure" and
+;; under ./icecreme/icecreme, "(scheme load) provides the load procedure" and
 ;; "importing an unknown library name..." show as [PEND], per the
 ;; genuine gap described above):
 ;;   ./bin/creme spec/creme/r7rs/appendix_a_standard_libraries_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/appendix_a_standard_libraries_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/appendix_a_standard_libraries_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/appendix_a_standard_libraries_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme case-lambda) (scheme char)

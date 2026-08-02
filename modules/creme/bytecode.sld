@@ -1,5 +1,5 @@
 ;; ===========================================================================
-;; (creme bytecode): a Chunk assembler + SCB1 serializer for this project's
+;; (creme bytecode): a Chunk assembler + ICE1 serializer for this project's
 ;; own register-VM bytecode format.
 ;;
 ;; File-based, no FFI of its own (same rationale as (creme peg)'s own
@@ -14,7 +14,7 @@
 ;; bootstrap/compiler.scm's <fcomp> for that), a complete table of every
 ;; opcode this VM defines (src/creme/compile/opcode.cr's Op enum,
 ;; ordinal-for-ordinal) so any of them can be emitted by name, and the
-;; SCB1 byte format (src/creme/compile/chunk_serializer.cr /
+;; ICE1 byte format (src/creme/compile/chunk_serializer.cr /
 ;; chunk_deserializer.cr) a chunk gets turned into so it can be run via
 ;; (creme bootstrap)'s load-chunk-bytes on the real Crystal VM.
 ;;
@@ -35,17 +35,17 @@
 ;;   (chunk-add-upval! ch name from-parent-local index) -> its index
 ;;   (chunk-find-upval-index ch name)  -> an existing upvalue's index, or #f
 ;;   (op-ordinal name)                 -> the opcode's raw enum ordinal
-;;   (chunk->bytes ch)                 -> a bytevector: "SCB1" magic +
+;;   (chunk->bytes ch)                 -> a bytevector: "ICE1" magic +
 ;;                                         an empty required-families
 ;;                                         section + the chunk, ready for
 ;;                                         (creme bootstrap)'s
 ;;                                         load-chunk-bytes
 ;;
 ;; FRAGILE DEPENDENCY: the op-ordinals table below must exactly match
-;; src/creme/compile/opcode.cr's Op enum declaration order -- SCB1
+;; src/creme/compile/opcode.cr's Op enum declaration order -- ICE1
 ;; serializes the raw ordinal directly (same as ChunkSerializer does on
 ;; the Crystal side), so there's no separate translation table to keep
-;; opcode.cr free to reorder against, unlike CVMSerializer's OP_IDS/cvm/
+;; opcode.cr free to reorder against, unlike CVMSerializer's OP_IDS/icecreme/
 ;; opcodes.h pair. If that enum ever gets reordered, this table must be
 ;; updated by hand.
 ;; ===========================================================================
@@ -196,7 +196,7 @@
           (error "creme bytecode: unknown opcode -- op-ordinal-table out of date?" name)))
 
     ;; -----------------------------------------------------------------
-    ;; SCB1 serialization -- see chunk_serializer.cr's own header comment
+    ;; ICE1 serialization -- see chunk_serializer.cr's own header comment
     ;; for the format this mirrors. write-datum! supports every constant
     ;; shape the real Crystal-side ChunkSerializer/ChunkDeserializer do,
     ;; including general (finite/inf/nan) floats via (creme math)'s
@@ -279,7 +279,7 @@
          (let loop ((i 0))
            (if (< i (bytevector-length v))
                (begin (sink-push-byte! sink (bytevector-u8-ref v i)) (loop (+ i 1))))))
-        (else (error "creme bytecode: unsupported constant/datum type for SCB1 serialization" v))))
+        (else (error "creme bytecode: unsupported constant/datum type for ICE1 serialization" v))))
 
     (define (write-chunk! sink ch)
       (let ((instrs (reverse (chunk-instrs ch))))
@@ -315,7 +315,7 @@
     ;; strings -- native (creme builtin <name>) family names the caller
     ;; already knows the chunk transitively depends on (e.g. compiler.sld's
     ;; own required-native-families-list) -- written into the
-    ;; required-families section right after the SCB1 magic, so cvm's
+    ;; required-families section right after the ICE1 magic, so icecreme's
     ;; main.c can decide which cvm_register_*_builtins functions to call
     ;; before running this chunk (see that file's own header comment on
     ;; import-gated native builtin registration). Most callers (bytecode_
@@ -325,7 +325,7 @@
     (define (chunk->bytes ch . opts)
       (let ((required-families (if (pair? opts) (car opts) '()))
             (sink (make-sink)))
-        (sink-push-bytes! sink (map char->integer (string->list "SCB1")))
+        (sink-push-bytes! sink (map char->integer (string->list "ICE1")))
         ;; Format-version byte, right after the magic -- mirrors
         ;; chunk_serializer.cr's own FORMAT_VERSION exactly (same
         ;; numeric value, bumped in lockstep whenever either writer's

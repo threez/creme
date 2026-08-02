@@ -57,15 +57,15 @@
 ;;                                 top-level forms, not a define-library
 ;;                                 wrapper.
 ;;
-;; Under cvm/cvm specifically (see cvm/compiler-run.scm), `eval`/`native-
+;; Under icecreme/icecreme specifically (see icecreme/compiler-run.scm), `eval`/`native-
 ;; eval`/`native-eval-forms` are NOT an independent-reference comparison
-;; the way they are under plain `./bin/creme`/`--self-hosted` -- cvm has
+;; the way they are under plain `./bin/creme`/`--self-hosted` -- icecreme has
 ;; no second evaluator at all, so its own top-level `eval` (compiler-run.
 ;; scm) is necessarily "compile+run via the SAME self-hosted compiler,
 ;; just one form at a time instead of compile-program's whole-list-at-
-;; once". should-match-native? under cvm still catches real divergences
+;; once". should-match-native? under icecreme still catches real divergences
 ;; between those two entry points, just with a weaker guarantee than
-;; elsewhere -- see cvm/compiler-run.scm's own header comment on `eval`.
+;; elsewhere -- see icecreme/compiler-run.scm's own header comment on `eval`.
 ;;
 ;; should-match-native?/bootstrap-eval both run against THIS ONE PROCESS's
 ;; single shared global table (load-chunk-bytes always loads into the

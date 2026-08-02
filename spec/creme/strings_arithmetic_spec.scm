@@ -7,14 +7,14 @@
 ;;
 ;; string<?/>/<=?/>=?, symbol=?, boolean=?, string-map, string-copy!,
 ;; string-fill!, string->vector, vector->string used to be a deliberate
-;; cvm gap in base/strings.cr. truncate-quotient/-remainder,
+;; icecreme gap in base/strings.cr. truncate-quotient/-remainder,
 ;; floor-quotient/-remainder, truncate//floor/, gcd, lcm, expt,
 ;; exact-integer-sqrt used to be the same in base/arithmetic.cr.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/strings_arithmetic_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/strings_arithmetic_spec.scm
-;;   ./cvm/cvm spec/creme/strings_arithmetic_spec.scm
+;;   ./icecreme/icecreme spec/creme/strings_arithmetic_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import
@@ -88,7 +88,7 @@
     (should-match-native? '((call-with-values (lambda () (exact-integer-sqrt 17)) list)))
     (should-match-native? '((call-with-values (lambda () (exact-integer-sqrt 16)) list))))
 
-  ;; set-car!/set-cdr! used to be entirely absent from cvm (an unbound
+  ;; set-car!/set-cdr! used to be entirely absent from icecreme (an unbound
   ;; variable) -- a genuine, unrelated gap noticed while porting (creme
   ;; json), fixed alongside this case.
   (it "set-car!/set-cdr! mutate the pair's fields in place"

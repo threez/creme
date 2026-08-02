@@ -80,20 +80,20 @@
 ;; are used, which "visible because this library exports it and the spec
 ;; file imports this library" satisfies for free.
 ;;
-;; `describe`/`it` also work fine reentrant under `cvm/cvm` (cvm's own
+;; `describe`/`it` also work fine reentrant under `icecreme/icecreme` (icecreme's own
 ;; standalone C11 VM, running the self-hosted compiler directly -- see
-;; cvm/compiler-run.scm): a spec file's own `(import (creme spec))`
+;; icecreme/compiler-run.scm): a spec file's own `(import (creme spec))`
 ;; triggers the self-hosted compiler's own library loader (ensure-
 ;; libraries-loaded!, compiler.sld) to read+reentrant-compile THIS
 ;; library's source, registering describe/it into that SAME compile
 ;; session's own macro-table -- entirely a Scheme-level, compile-time
-;; mechanism, independent of cvm's separate (and narrower) expand-if-
-;; macro Crystal-bridge (cvm/bootstrap.c, which only recognizes a
+;; mechanism, independent of icecreme's separate (and narrower) expand-if-
+;; macro Crystal-bridge (icecreme/bootstrap.c, which only recognizes a
 ;; `defmacro`-defined macro exported from an ALREADY-compiled bytecode
 ;; library, e.g. sxql-select! precompiled into an image -- a different,
 ;; narrower scenario this project's own spec files don't hit). So run
-;; with `./cvm/cvm some_spec.scm` directly (not `./bin/creme --cvm
-;; some_spec.scm`, which is unrelated -- native-compile-then-run-on-cvm,
+;; with `./icecreme/icecreme some_spec.scm` directly (not `./bin/creme --icecreme
+;; some_spec.scm`, which is unrelated -- native-compile-then-run-on-icecreme,
 ;; never touching the self-hosted compiler at all).
 ;;
 ;; Not auto-imported anywhere -- every script that wants any of this must
@@ -109,8 +109,8 @@
   (begin
     ;; ANSI color, only when it'll actually help: STDOUT must be a real
     ;; terminal (stdout-tty?, (creme term) -- native Crystal's
-    ;; STDOUT.tty? and cvm's isatty(STDOUT_FILENO), kept in sync so this
-    ;; behaves the same under bin/creme, --self-hosted, and cvm/cvm), and
+    ;; STDOUT.tty? and icecreme's isatty(STDOUT_FILENO), kept in sync so this
+    ;; behaves the same under bin/creme, --self-hosted, and icecreme/icecreme), and
     ;; NO_COLOR (https://no-color.org) must be unset -- its mere presence,
     ;; any value, opts out, same convention as most other CLI tools. Not
     ;; re-checked per describe!/it! call: computed once at library-load
@@ -258,7 +258,7 @@
     ;; this project's own Crystal specs' bare `pending "message"` (no
     ;; block), which never evaluates anything at all; see this library's
     ;; `it-unless` for the common case of "run it, unless some condition
-    ;; means it can't/shouldn't apply here" (e.g. a cvm-only limitation).
+    ;; means it can't/shouldn't apply here" (e.g. an icecreme-only limitation).
     (define (spec-pending! name)
       (set! spec-total (+ spec-total 1))
       (set! spec-pending (+ spec-pending 1))
@@ -299,7 +299,7 @@
     ;; whole condition/thunk -- this library itself takes on no new
     ;; dependency (no (creme process)/(creme string) import here) so
     ;; every EXISTING spec file that merely imports (creme spec) for
-    ;; describe/it, including every one already passing under cvm, is
+    ;; describe/it, including every one already passing under icecreme, is
     ;; completely unaffected; only (creme spec-runner) needs those.
     (define (spec-record-external-result! name n failed . rest)
       (let ((pending (if (pair? rest) (car rest) 0)))
@@ -353,8 +353,8 @@
     ;; Convenience wrappers over (creme introspection)'s `runtime`, for
     ;; specs (typically via `it-unless`) that need to branch on which
     ;; backend/pipeline they're currently running under -- e.g.
-    ;; (it-unless (equal? (spec-vm) "cvm") "..." body ...) to skip a case
-    ;; cvm can't support yet.
+    ;; (it-unless (equal? (spec-vm) "icecreme") "..." body ...) to skip a case
+    ;; icecreme can't support yet.
     (define (spec-vm) (cdr (assq 'vm (runtime))))
     (define (spec-compiler) (cdr (assq 'compiler (runtime))))
 

@@ -6,10 +6,10 @@
 # runtime, instead of needing a hand-written native module (like every
 # other file in this directory) per library. Backed by ffi_shim.cr/.o (see
 # that file's own header comment for why a small precompiled C shim exists
-# at all). Mirrors cvm/creme_ffi.c's own Scheme-facing surface exactly —
+# at all). Mirrors icecreme/creme_ffi.c's own Scheme-facing surface exactly —
 # same procedure names, same MVP type-marshalling scope — so a script using
-# (creme ffi) behaves identically under native `bin/creme` and `--emit-cvm`/
-# cvm/cvm:
+# (creme ffi) behaves identically under native `bin/creme` and `--emit-icecreme`/
+# icecreme/icecreme:
 #
 #   (define lib (ffi-open "libm.so.6"))
 #   (define fn (ffi-function lib "sqrt" 'double '(double)))
@@ -28,7 +28,7 @@
 # call). NOT supported, by design: passing/returning a whole struct BY
 # VALUE as a single ffi-call argument/return value (there's no type
 # symbol for "struct"), and passing a Scheme closure as a C callback (a
-# function pointer INTO Scheme) — see cvm/creme_ffi.c's own header
+# function pointer INTO Scheme) — see icecreme/creme_ffi.c's own header
 # comment for the same two documented non-goals. ffi-pointer-ref/
 # ffi-pointer-set! DO let a script read/write an individual struct FIELD,
 # given a pointer to the struct and that field's byte offset — but this
@@ -77,7 +77,7 @@ module Creme::Builtins::FfiLibrary
   # One prepared ffi-function: a libffi call handle (ffi_shim.cr's opaque
   # `Void*`), the dlopen handle it was resolved against (kept alive here
   # only so it isn't GC'd early — dlclose is still the caller's own
-  # responsibility via ffi-close, matching cvm's identical lifetime
+  # responsibility via ffi-close, matching icecreme's identical lifetime
   # contract), and the per-argument/return type kinds ffi-call needs to
   # marshal Scheme values in and out.
   private class PreparedFn

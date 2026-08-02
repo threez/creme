@@ -5,7 +5,7 @@
 ;; own header comment for the general should-match-native? approach.
 ;;
 ;; hash-table-keys/hash-table-values/hash-table->alist used to be a
-;; deliberate cvm gap (cvm/hashtable.c's CvmHashTable only stored values,
+;; deliberate icecreme gap (icecreme/hashtable.c's CvmHashTable only stored values,
 ;; never the original keys, so there was nothing to recover them from) --
 ;; now implemented (see hashtable.c's own header comment on the `keys`
 ;; array + fiobj_each1-based enumeration), so ported here the same
@@ -15,7 +15,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/hashtable_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/hashtable_spec.scm
-;;   ./cvm/cvm spec/creme/hashtable_spec.scm
+;;   ./icecreme/icecreme spec/creme/hashtable_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

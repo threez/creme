@@ -13,7 +13,7 @@
 ;; returned (`(define k #f) (+ 1 (call/cc (lambda (c) (set! k c) 1)))`
 ;; then later `(k 2)`), which would need full R7RS multi-shot/re-entrant
 ;; continuations to resume and yield 3. This project's call/cc is
-;; ESCAPE-ONLY everywhere (native VM AND cvm/cvm -- see cvm/README.md's
+;; ESCAPE-ONLY everywhere (native VM AND icecreme/icecreme -- see icecreme/README.md's
 ;; "call/cc"/"dynamic-wind" section and value.h's own `Continuation` doc
 ;; comment): a continuation invoked outside the dynamic extent of its own
 ;; call/cc raises instead of resuming, so this case cannot be ported
@@ -29,7 +29,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_10_control_features_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_10_control_features_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_10_control_features_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_10_control_features_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme inexact) (creme spec))

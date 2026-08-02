@@ -8,7 +8,7 @@ require "../../../spec_helper"
 # raft.sld's cond-expand `else` branch uses, bypassing cond-expand entirely
 # so this spec is independent of which branch native's own build happens to
 # pick. See modules/creme/raft.sld's own header comment for why cond-expand
-# reliably picks the OTHER branch under cvm instead.
+# reliably picks the OTHER branch under icecreme instead.
 private PRELUDE = <<-SCHEME
   (import (scheme base) (scheme write) (scheme read) (scheme cxr) (scheme char)
           (creme actor) (creme sql) (creme process) (creme hash-table) (creme random))

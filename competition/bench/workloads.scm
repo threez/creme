@@ -12,8 +12,8 @@
 ;     this shared file (see the note below on why), unlike every other
 ;     workload here
 ;   - record fill + sum (mutable define-record-type field access -- the
-;     read side is exactly what cvm's OP_QCALLGLOBAL_RECACC call-site
-;     quickening targets, see doc/optimization-cvm.md's "Call-site
+;     read side is exactly what icecreme's OP_QCALLGLOBAL_RECACC call-site
+;     quickening targets, see doc/optimization-icecreme.md's "Call-site
 ;     quickening for record accessors" section)
 ;   - string building via a string output port (growable-buffer writes)
 ;   - tak: the Gabriel Takeuchi benchmark, triply-nested non-tail recursion
@@ -82,8 +82,8 @@
 ; compiler (observed under Crystal --release) could prove never escapes and
 ; fully constant-fold/hoist away, collapsing what should be a real per-call
 ; accessor benchmark into a near-zero-cost no-op. The read side here is
-; exactly the shape cvm's OP_QCALLGLOBAL_RECACC call-site quickening
-; targets (see doc/optimization-cvm.md's "Call-site quickening for record
+; exactly the shape icecreme's OP_QCALLGLOBAL_RECACC call-site quickening
+; targets (see doc/optimization-icecreme.md's "Call-site quickening for record
 ; accessors" section).
 (define-record-type bench-point
   (make-bench-point x y) bench-point?

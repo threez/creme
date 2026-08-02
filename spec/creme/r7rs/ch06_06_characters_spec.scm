@@ -11,7 +11,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_06_characters_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_06_characters_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_06_characters_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_06_characters_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme char) (creme spec))

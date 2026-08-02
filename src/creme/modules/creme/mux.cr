@@ -57,7 +57,7 @@
 # alists above, rather than a positional host argument — this backend
 # only reads "host" out of it (defaulting to "127.0.0.1" if absent or the
 # argument is omitted entirely) and otherwise ignores any key it doesn't
-# recognize, e.g. cvm's own cvm-only "pool" (cvm/mux.c's own header
+# recognize, e.g. icecreme's own icecreme-only "pool" (icecreme/mux.c's own header
 # comment) — Crystal uses Fiber concurrency here, not a worker-VM pool,
 # so there's nothing to configure on this backend for that key.
 # ===========================================================================

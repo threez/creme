@@ -7,11 +7,11 @@
 ;;
 ;; open-binary-input-file/open-binary-output-file, with-input-from-file/
 ;; with-output-to-file, file-append, file-lines, file-size, and
-;; current-directory used to be a deliberate cvm gap -- (creme file) was
+;; current-directory used to be a deliberate icecreme gap -- (creme file) was
 ;; only a narrow partial port (file-read/file-write/delete-file, in
 ;; bootstrap.c) plus R7RS's own open-input-file/open-output-file/
 ;; call-with-*-file/file-exists? (builtins.c). with-input-from-file/
-;; with-output-to-file needed a genuinely new piece: cvm's (current-
+;; with-output-to-file needed a genuinely new piece: icecreme's (current-
 ;; input-port)/(current-output-port) used to be hardcoded, non-
 ;; redirectable sentinels (display/write/write-char/newline/read-line/
 ;; read-char/peek-char all read straight through them) -- they're now a
@@ -27,7 +27,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/file_extra_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/file_extra_spec.scm
-;;   ./cvm/cvm spec/creme/file_extra_spec.scm
+;;   ./icecreme/icecreme spec/creme/file_extra_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

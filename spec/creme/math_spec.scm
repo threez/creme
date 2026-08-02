@@ -5,14 +5,14 @@
 ;; should-match-native? approach.
 ;;
 ;; sin/cos/tan/asin/acos/atan/log/exp/log2/log10/atan2/pow/hypot/pi/e used
-;; to be a deliberate cvm gap (only flonum->bits/bits->flonum existed
-;; there) -- now thin libm wrappers in cvm/builtins.c (cvm already links
+;; to be a deliberate icecreme gap (only flonum->bits/bits->flonum existed
+;; there) -- now thin libm wrappers in icecreme/builtins.c (icecreme already links
 ;; libm for the numeric tower's own use).
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/math_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/math_spec.scm
-;;   ./cvm/cvm spec/creme/math_spec.scm
+;;   ./icecreme/icecreme spec/creme/math_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

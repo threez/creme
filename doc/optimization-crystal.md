@@ -12,7 +12,7 @@ the rest of this project's performance work:
   both the native compiler and the self-hosted Scheme-to-bytecode compiler,
   and portable library-level optimizations that benefit every backend
   equally.
-- `doc/optimization-cvm.md` — `cvm`, the standalone C11 VM and its own
+- `doc/optimization-icecreme.md` — `icecreme`, the standalone C11 VM and its own
   compiler, which has a genuinely different implementation and its own
   distinct set of hot paths.
 
@@ -549,7 +549,7 @@ implemented or prototyped and then dropped on measurement.
 - **Batching call-argument register reservation in the self-hosted compiler.**
   The same batched-reservation change described in Section 10 for the native
   compiler was attempted in the self-hosted compiler too, and reverted after
-  surfacing a genuine, not-yet-root-caused regression under `cvm` (the general
+  surfacing a genuine, not-yet-root-caused regression under `icecreme` (the general
   call-argument-compilation path silently failing to compile a call's arguments
   correctly in one narrow reentrant-compile scenario). Left unchanged pending
   further investigation — see `doc/optimization-general.md`.
@@ -558,7 +558,7 @@ implemented or prototyped and then dropped on measurement.
   Tested alongside Section 11's GC-heap-sizing work, same 9-workload
   `competition/scheme/bench/creme.scm` suite, median of 11 runs: **+17.3%
   slower** (0.342s → 0.401s vs. the libgc default). Same root cause as
-  `cvm`'s identical result (`doc/deadend-cvm.md`): incremental mode's write
+  `icecreme`'s identical result (`doc/deadend-icecreme.md`): incremental mode's write
   barrier trades throughput for pause *latency*, which this batch-throughput
   benchmark never measures. Per-workload, the regression again concentrates
   on the most allocation/mutation-heavy workloads (`record-test` 0.087s →
@@ -569,7 +569,7 @@ implemented or prototyped and then dropped on measurement.
 
 ## 11. A larger default initial GC heap
 
-Same experiment as `cvm/main.c`'s (see `doc/optimization-cvm.md`'s own
+Same experiment as `icecreme/main.c`'s (see `doc/optimization-icecreme.md`'s own
 Section 8) — Crystal links the identical Boehm/bdwgc collector, read via the
 stdlib's `crystal/gc/boehm.cr`, so the same lever applies: libgc grows its
 heap in increments as the program allocates past what it currently holds,
@@ -590,7 +590,7 @@ runtimes per rep):
 | `GC_INITIAL_HEAP_SIZE=256M` | 0.265s | **−22.6%** |
 | `GC_INITIAL_HEAP_SIZE=1G` | 0.266s | −22.2% (no further win past 256M) |
 
-Per-workload, same signature as `cvm`: `hashtable-test` 0.155s → 0.110s,
+Per-workload, same signature as `icecreme`: `hashtable-test` 0.155s → 0.110s,
 `record-test` 0.087s → 0.063s, `build-list` 0.026s → 0.019s, while
 non-allocating workloads (`tak`, `fib`, `vector-sum-test`) barely move.
 
@@ -601,7 +601,7 @@ statement, but only when `GC_INITIAL_HEAP_SIZE` isn't already set in the
 environment — an explicit env var still wins, this is a default, not an
 override. By the time `main` runs, Crystal's own runtime prelude has already
 called `GC.init` (honoring that same env var if set), so this mirrors
-exactly where `cvm/main.c` places its own equivalent call, right after
+exactly where `icecreme/main.c` places its own equivalent call, right after
 `GC_INIT()`. Same as there, `GC_expand_hp` only grows libgc's
 address-space reservation, not memory committed up front, so this costs
 nothing for a long-running `bin/creme` server process either.

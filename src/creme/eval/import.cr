@@ -321,8 +321,8 @@ module Creme
     # library with no .sld file of its own, e.g. mux/sql/string/format) and
     # returns just the flat list of body forms its declarations expand to,
     # WITHOUT executing or registering anything. Used only by
-    # CVMEmitter.emit (src/creme/compile/cvm_emitter.cr): the C VM
-    # prototype in cvm/ has no way to run arbitrary library source the way
+    # IcecremeEmitter.emit (src/creme/compile/icecreme_emitter.cr): the C VM
+    # prototype in icecreme/ has no way to run arbitrary library source the way
     # the ordinary import path does (see this file's own header comment on
     # each library getting its own Env populated by evaluating its
     # begin/include bodies against it) — it can only execute bytecode, so a
@@ -331,7 +331,7 @@ module Creme
     # `import` path, which discards the form list once done). Mirrors
     # process_library_declarations's own declaration walk but collects
     # instead of compiling+running.
-    def library_body_forms_for_cvm(name : Array(String)) : Array(SchemeValue)?
+    def library_body_forms_for_icecreme(name : Array(String)) : Array(SchemeValue)?
       relative = File.join(name) + ".sld"
       path = @library_search_path.each do |dir|
         candidate = File.join(dir, relative)
@@ -351,20 +351,20 @@ module Creme
       # relative to the CURRENT top of @load_dirs (read_include_file's own
       # contract) — the real `import` path (load_library_file) pushes the
       # library's own directory before walking declarations for exactly this
-      # reason, but this second, cvm-only pass reuses the same file without
+      # reason, but this second, icecreme-only pass reuses the same file without
       # going through load_library_file at all, so it needs the identical
       # push/pop here or a relative include would resolve against whatever
       # directory happened to be on top instead (e.g. the top-level script's
       # own directory).
       @load_dirs << File.dirname(resolved)
       begin
-        collect_library_body_forms_for_cvm(parts[1..], relative)
+        collect_library_body_forms_for_icecreme(parts[1..], relative)
       ensure
         @load_dirs.pop
       end
     end
 
-    private def collect_library_body_forms_for_cvm(declarations : Array(SchemeValue), relative : String) : Array(SchemeValue)
+    private def collect_library_body_forms_for_icecreme(declarations : Array(SchemeValue), relative : String) : Array(SchemeValue)
       body = [] of SchemeValue
       declarations.each do |decl|
         next unless decl.is_a?(Cons)
@@ -373,15 +373,15 @@ module Creme
         args = Creme.list_to_a(decl.cdr)
         case tag.name
         when "begin"
-          body.concat(inline_nested_includes_for_cvm(args))
+          body.concat(inline_nested_includes_for_icecreme(args))
         when "include", "include-ci"
           fold_case = tag.name == "include-ci"
           args.each do |filename_form|
             raise SchemeRuntimeError.new("define-library: #{tag.name} expects string filenames") unless filename_form.is_a?(SchemeStr)
-            read_include_file(filename_form.value, fold_case) { |forms| body.concat(inline_nested_includes_for_cvm(forms)) }
+            read_include_file(filename_form.value, fold_case) { |forms| body.concat(inline_nested_includes_for_icecreme(forms)) }
           end
         when "cond-expand"
-          body.concat(collect_library_body_forms_for_cvm(matched_cond_expand_declarations(args), relative))
+          body.concat(collect_library_body_forms_for_icecreme(matched_cond_expand_declarations(args), relative))
         else
           # export/import contribute no body forms of their own.
         end
@@ -393,25 +393,25 @@ module Creme
     # expression-level `(include ...)`/`(include-ci ...)` form (R7RS
     # §4.1.7's own definition-context "include" — same grammar as the
     # define-library declaration above, just appearing inline in an
-    # ordinary body). The real (non-cvm) path leaves this for the Analyzer
+    # ordinary body). The real (non-icecreme) path leaves this for the Analyzer
     # to expand lazily via analyze_include/eval_include, which works there
     # because analysis happens immediately, in file order, while
     # @load_dirs still reflects each include's own nesting at the exact
-    # moment it's analyzed. This cvm-only collection pass instead gathers
-    # every form upfront for CVMEmitter to analyze in a SECOND, much later
-    # pass (cvm_emitter.cr) against a totally different @load_dirs
+    # moment it's analyzed. This icecreme-only collection pass instead gathers
+    # every form upfront for IcecremeEmitter to analyze in a SECOND, much later
+    # pass (icecreme_emitter.cr) against a totally different @load_dirs
     # context by then — so a nested include must be expanded eagerly here,
     # recursively, while @load_dirs (via read_include_file's own push/pop)
     # still correctly reflects the nesting, rather than left as a raw form
     # for that later pass to resolve against the wrong directory.
-    private def inline_nested_includes_for_cvm(forms : Array(SchemeValue)) : Array(SchemeValue)
+    private def inline_nested_includes_for_icecreme(forms : Array(SchemeValue)) : Array(SchemeValue)
       result = [] of SchemeValue
       forms.each do |form|
         if form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && (head.name == "include" || head.name == "include-ci")
           fold_case = head.name == "include-ci"
           Creme.list_to_a(form.cdr).each do |filename_form|
             raise SchemeRuntimeError.new("include: expects string filenames") unless filename_form.is_a?(SchemeStr)
-            read_include_file(filename_form.value, fold_case) { |nested| result.concat(inline_nested_includes_for_cvm(nested)) }
+            read_include_file(filename_form.value, fold_case) { |nested| result.concat(inline_nested_includes_for_icecreme(nested)) }
           end
         else
           result << form

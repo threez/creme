@@ -2,7 +2,7 @@ require "./creme"
 
 # Reopens the stdlib's own `lib LibGC` (crystal/gc/boehm.cr) just to add the
 # two bdwgc functions it doesn't already bind, needed for the default-heap-
-# size tuning below -- see cvm/main.c's own equivalent GC_INIT()-adjacent
+# size tuning below -- see icecreme/main.c's own equivalent GC_INIT()-adjacent
 # comment (same rationale, same libgc, same measured effect) for why.
 lib LibGC
   fun expand_hp = GC_expand_hp(bytes : LibC::SizeT) : LibC::Int
@@ -27,7 +27,7 @@ def format_error(ex : Creme::SchemeError) : String
 end
 
 # # The interactive REPL is now the same shared (creme repl) library
-# # (modules/creme/repl.sld) that cvm/repl.scm and --self-hosted mode also
+# # (modules/creme/repl.sld) that icecreme/repl.scm and --self-hosted mode also
 # # delegate to, instead of Crystal-native hand-rolled line-reading/
 # # buffering/error-formatting -- one implementation for line-editing,
 # # live syntax highlighting, and paren-matching across all three runtimes.
@@ -71,16 +71,16 @@ def usage : Nil
                                  behavior of requiring the script's own
                                  (import ...), e.g. to see exactly what an
                                  unfused/not-yet-imported form compiles to
-    creme --disassemble <file.cvmc>
-                                 Disassemble an ALREADY-COMPILED SCB1 file
-                                 (e.g. one written by --emit-cvm, or
+    creme --disassemble <file.ice>
+                                 Disassemble an ALREADY-COMPILED ICE1 file
+                                 (e.g. one written by --emit-icecreme, or
                                  compiled by the self-hosted (creme
                                  compiler compiler)'s own compile-source-
                                  to-bytes) — unlike -S/--dump-bytecode
                                  above, does not recompile from source; it
                                  reads the file's own raw bytes through the
                                  exact same deserializer load-chunk-bytes
-                                 and cvm both use, so what it prints is
+                                 and icecreme both use, so what it prints is
                                  exactly what would actually run
     creme --profile table <file.scm> [args...]
                                  Run a script exactly as `creme <file.scm>
@@ -98,27 +98,27 @@ def usage : Nil
                                  format (a future format, e.g. "html", could
                                  be added as another value here without
                                  changing this flag's shape)
-    creme --emit-cvm <file.scm> <out.cvmc>
+    creme --emit-icecreme <file.scm> <out.ice>
                                  Compile a script and serialize its bytecode
-                                 to <out.cvmc> for the standalone C11
-                                 prototype VM in cvm/ (see cvm/README.md) —
+                                 to <out.ice> for the standalone C11
+                                 prototype VM in icecreme/ (see icecreme/README.md) —
                                  a narrow experiment, not a general target;
                                  currently only bench/creme.scm is verified
                                  to work with it.
-    creme --cvm <file.scm>
-                                 Shorthand for --emit-cvm to a throwaway
-                                 file followed by `cvm/cvm <that file>` —
+    creme --icecreme <file.scm>
+                                 Shorthand for --emit-icecreme to a throwaway
+                                 file followed by `icecreme/icecreme <that file>` —
                                  compiles <file.scm> and runs it under the
                                  standalone C prototype VM in one step,
-                                 cleaning up the intermediate .cvmc file
+                                 cleaning up the intermediate .ice file
                                  afterward. Must be run from the repo root
-                                 with cvm/cvm already built (`make -C cvm`),
+                                 with icecreme/icecreme already built (`make -C icecreme`),
                                  matching bench/bench.scm's own convention
                                  for locating it.
-    creme --profile --cvm <file.scm>
-                                 Same as --cvm above, but runs
-                                 `cvm/cvm --profile <that file>` (see
-                                 cvm/README.md's "Profiling" section)
+    creme --profile --icecreme <file.scm>
+                                 Same as --icecreme above, but runs
+                                 `icecreme/icecreme --profile <that file>` (see
+                                 icecreme/README.md's "Profiling" section)
                                  instead of a plain run.
     creme --self-hosted <file.scm>
                                  Run <file.scm> exactly like plain `creme
@@ -177,12 +177,12 @@ def dump_bytecode(path : String, strict : Bool = false) : Nil
   end
 end
 
-# Disassembles an ALREADY-COMPILED SCB1 file (e.g. one written by
-# `--emit-cvm`, or by the self-hosted (creme compiler compiler)'s own
+# Disassembles an ALREADY-COMPILED ICE1 file (e.g. one written by
+# `--emit-icecreme`, or by the self-hosted (creme compiler compiler)'s own
 # compile-source-to-bytes/chunk->bytes) — unlike dump_bytecode above,
 # which always compiles SOURCE fresh, this reads raw bytes straight off
 # disk via the exact same ChunkDeserializer both `load-chunk-bytes` and
-# cvm's own loader.c round-trip through, so what it prints is exactly
+# icecreme's own loader.c round-trip through, so what it prints is exactly
 # what would actually run, not a fresh recompile that might legitimately
 # differ (e.g. a different fusable-primitive set already imported at the
 # time the file was originally compiled).
@@ -204,7 +204,7 @@ KITCHEN_SINK_IMPORT = %((import (scheme base) (scheme write) (scheme cxr) (schem
                                  (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
                                  (creme compiler reader) (creme compiler compiler)))
 
-def disassemble_scb1(path : String) : Nil
+def disassemble_ice1(path : String) : Nil
   bytes = File.read(path).to_slice
   interp = Creme::Interpreter.new(library_search_path: ["./modules"])
   Creme.run_source(interp, KITCHEN_SINK_IMPORT)
@@ -212,11 +212,11 @@ def disassemble_scb1(path : String) : Nil
   Creme::Disassembler.disassemble(chunk, File.basename(path))
 end
 
-# Handles `creme --disassemble <file.cvmc>` — split out of `main` purely to
+# Handles `creme --disassemble <file.ice>` — split out of `main` purely to
 # keep that method's own top-level dispatch simple.
 def handle_disassemble(args : Array(String)) : Nil
   unless path = args[1]?
-    STDERR.puts "Usage: creme --disassemble <file.cvmc>"
+    STDERR.puts "Usage: creme --disassemble <file.ice>"
     exit 1
   end
   unless File.exists?(path)
@@ -224,7 +224,7 @@ def handle_disassemble(args : Array(String)) : Nil
     exit 1
   end
   begin
-    disassemble_scb1(path)
+    disassemble_ice1(path)
   rescue ex : Creme::ChunkDeserializer::FormatError
     STDERR.puts "creme: #{path}: #{ex.message}"
     exit 1
@@ -239,39 +239,39 @@ end
 
 # Compiles `path` (same auto-import-base convention as dump_bytecode above,
 # so builtins fuse the same way a real run would) into a single Chunk and
-# serializes it to `out_path` via CVMEmitter/ChunkSerializer (the same
-# "SCB1" format the real Crystal VM already round-trips through) — for
-# `creme --emit-cvm`, feeding the standalone C11 prototype VM in cvm/ (see
-# cvm/README.md for current opcode/value-model coverage). Pushes path's own
+# serializes it to `out_path` via IcecremeEmitter/ChunkSerializer (the same
+# "ICE1" format the real Crystal VM already round-trips through) — for
+# `creme --emit-icecreme`, feeding the standalone C11 prototype VM in icecreme/ (see
+# icecreme/README.md for current opcode/value-model coverage). Pushes path's own
 # directory first, same as Creme.run_file — bench/creme.scm's own
 # `(include "workloads.scm")` resolves relative to wherever the script
 # lives, not the process's CWD, so this must match run_file's convention
 # rather than dump_bytecode's (which doesn't push one at all) for `creme
-# --emit-cvm bench/creme.scm ...` to work when invoked from the repo root.
-def emit_cvm(path : String, out_path : String) : Nil
+# --emit-icecreme bench/creme.scm ...` to work when invoked from the repo root.
+def emit_icecreme(path : String, out_path : String) : Nil
   interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: true)
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
     src = File.read(path)
     forms = Creme.forms_for(interp, src, path)
-    bytes = Creme::CVMEmitter.emit(interp, forms, interp.global)
+    bytes = Creme::IcecremeEmitter.emit(interp, forms, interp.global)
     File.write(out_path, bytes)
   ensure
     interp.pop_load_dir
   end
 end
 
-# Handles `creme --emit-cvm <file.scm> <out.cvmc>` — split out of `main`
+# Handles `creme --emit-icecreme <file.scm> <out.ice>` — split out of `main`
 # purely to keep that method's own top-level dispatch simple.
-def handle_emit_cvm(args : Array(String)) : Nil
+def handle_emit_icecreme(args : Array(String)) : Nil
   unless args[1]? && args[2]?
-    STDERR.puts "Usage: creme --emit-cvm <file.scm> <out.cvmc>"
+    STDERR.puts "Usage: creme --emit-icecreme <file.scm> <out.ice>"
     exit 1
   end
   begin
     path = args[1]
     out_path = args[2]
-    emit_cvm(path, out_path)
+    emit_icecreme(path, out_path)
   rescue ex : Creme::SchemeError
     STDERR.puts format_error(ex)
     exit 1
@@ -281,24 +281,24 @@ def handle_emit_cvm(args : Array(String)) : Nil
   end
 end
 
-# Shared by `creme --cvm <file.scm>` and `creme --profile --cvm <file.scm>`:
-# emits <file.scm> to a throwaway .cvmc file, runs it via cvm/cvm (with
-# `cvm_args` — e.g. ["--profile"], or [] for a plain run — passed ahead of
+# Shared by `creme --icecreme <file.scm>` and `creme --profile --icecreme <file.scm>`:
+# emits <file.scm> to a throwaway .ice file, runs it via icecreme/icecreme (with
+# `icecreme_args` — e.g. ["--profile"], or [] for a plain run — passed ahead of
 # the compiled file's own path), then cleans up the intermediate file.
-# Assumes the repo-root-relative "cvm/cvm" path, same convention
+# Assumes the repo-root-relative "icecreme/icecreme" path, same convention
 # bench/bench.scm's own run-variant calls rely on for locating it.
-def run_via_cvm(path : String, cvm_args : Array(String)) : Nil
-  cvm_bin = "cvm/cvm"
-  unless File.exists?(cvm_bin)
-    STDERR.puts "creme: #{cvm_bin} not found — build it first (`make -C cvm`)"
+def run_via_icecreme(path : String, icecreme_args : Array(String)) : Nil
+  icecreme_bin = "icecreme/icecreme"
+  unless File.exists?(icecreme_bin)
+    STDERR.puts "creme: #{icecreme_bin} not found — build it first (`make -C icecreme`)"
     exit 1
   end
 
-  tmp_path = File.tempname("creme-cvm", ".cvmc")
+  tmp_path = File.tempname("creme-icecreme", ".ice")
   exit_code = 1
   begin
-    emit_cvm(path, tmp_path)
-    status = Process.run(cvm_bin, cvm_args + [tmp_path],
+    emit_icecreme(path, tmp_path)
+    status = Process.run(icecreme_bin, icecreme_args + [tmp_path],
       output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
     exit_code = status.exit_code
   rescue ex : Creme::SchemeError
@@ -311,27 +311,27 @@ def run_via_cvm(path : String, cvm_args : Array(String)) : Nil
   exit(exit_code)
 end
 
-# Handles `creme --cvm <file.scm>` — combines --emit-cvm (to a throwaway
-# file) with a plain `cvm/cvm <that file>` run, so running a script under the
+# Handles `creme --icecreme <file.scm>` — combines --emit-icecreme (to a throwaway
+# file) with a plain `icecreme/icecreme <that file>` run, so running a script under the
 # C prototype VM doesn't need its own separate compile-then-run step. Split
 # out of `main` purely to keep that method's own top-level dispatch simple.
-def handle_cvm(args : Array(String)) : Nil
+def handle_icecreme(args : Array(String)) : Nil
   unless path = args[1]?
-    STDERR.puts "Usage: creme --cvm <file.scm>"
+    STDERR.puts "Usage: creme --icecreme <file.scm>"
     exit 1
   end
-  run_via_cvm(path, [] of String)
+  run_via_icecreme(path, [] of String)
 end
 
-# Handles `creme --profile --cvm <file.scm>` — same as --cvm above, but runs
-# cvm/cvm with --profile (see cvm/README.md's "Profiling" section). Split out
+# Handles `creme --profile --icecreme <file.scm>` — same as --icecreme above, but runs
+# icecreme/icecreme with --profile (see icecreme/README.md's "Profiling" section). Split out
 # of `main` purely to keep that method's own top-level dispatch simple.
-def handle_profile_cvm(args : Array(String)) : Nil
+def handle_profile_icecreme(args : Array(String)) : Nil
   unless path = args[2]?
-    STDERR.puts "Usage: creme --profile --cvm <file.scm>"
+    STDERR.puts "Usage: creme --profile --icecreme <file.scm>"
     exit 1
   end
-  run_via_cvm(path, ["--profile"])
+  run_via_icecreme(path, ["--profile"])
 end
 
 # Handles `creme -S | --dump-bytecode [--strict] <file.scm>` — split out of
@@ -465,7 +465,7 @@ SELF_HOSTED_TOOLCHAIN_IMPORT = %((import (scheme lazy) (scheme eval) (scheme cxr
 # file-based library SELF_HOSTED_TOOLCHAIN_IMPORT above already loaded
 # NATIVELY (this whole toolchain import runs through Crystal's own real
 # import machinery, which the self-hosted compiler's own loader has no
-# way to know about) -- mirrors cvm/compiler-run.scm's own identical
+# way to know about) -- mirrors icecreme/compiler-run.scm's own identical
 # pre-seeding, needed for the identical reason (that file's own header
 # comment): once compiler.sld's own file-reading (file-read, via (creme
 # file)) genuinely works under self-hosted too (previously silently
@@ -580,7 +580,7 @@ end
 def main : Nil
   # Crystal's own runtime already ran GC.init (and honored an explicit
   # GC_INITIAL_HEAP_SIZE env var, if set) before this method was ever
-  # called -- so, same as cvm/main.c, only step in with our own default
+  # called -- so, same as icecreme/main.c, only step in with our own default
   # when the caller didn't set one. Benchmarked (doc/optimization-crystal.md's
   # own GC env-var section) across the same 9 competition/bench.scm
   # workloads, median of 11 runs each: unset (libgc's own default) 0.342s
@@ -630,15 +630,15 @@ def main : Nil
     handle_dump_bytecode(args)
   when "--disassemble"
     handle_disassemble(args)
-  when "--emit-cvm"
-    handle_emit_cvm(args)
-  when "--cvm"
-    handle_cvm(args)
+  when "--emit-icecreme"
+    handle_emit_icecreme(args)
+  when "--icecreme"
+    handle_icecreme(args)
   when "--self-hosted"
     handle_self_hosted(args)
   when "--profile"
-    if args[1]? == "--cvm"
-      handle_profile_cvm(args)
+    if args[1]? == "--icecreme"
+      handle_profile_icecreme(args)
     else
       handle_profile(args)
     end

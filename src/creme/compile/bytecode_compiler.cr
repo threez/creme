@@ -66,7 +66,7 @@ module Creme
     # into one of these directly: the runtime only closes (snapshots) an
     # open upvalue right before a TailCall's own dispatch overwrites the
     # frame (close_upvalues, called from dispatch_call in both vm.cr and
-    # cvm/vm.c) — writing the new value earlier, via an ordinary preceding
+    # icecreme/vm.c) — writing the new value earlier, via an ordinary preceding
     # instruction, corrupts the still-open upvalue before that protection
     # ever runs. Deliberately whole-function, not scope-local: a register
     # number gets reused by a later, unrelated scope once the capturing
@@ -2769,7 +2769,7 @@ module Creme
              end
         # A TAIL call always reuses the CURRENT frame's own base as its new
         # frame's base (dispatch_call/exec_call*'s `new_base = tail ?
-        # caller_base : ...`, mirrored in cvm/vm.c) — so if every argument is
+        # caller_base : ...`, mirrored in icecreme/vm.c) — so if every argument is
         # a leaf_node? (no nested calls/closures — see leaf_node?'s own use
         # for prim-call operand fusion above), compile them directly into
         # registers 0..n-1 instead of a floating anchor+1.. run: anchor=-1

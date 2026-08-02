@@ -5,8 +5,8 @@
 ;; should-match-native? approach.
 ;;
 ;; (creme secure-random) is a genuine dual-implementation module (not a
-;; pure-Scheme .sld) -- native leans on Crystal's Random::Secure, cvm on
-;; OpenSSL's RAND_bytes (cvm/secure_random.c), the same CSPRNG (creme
+;; pure-Scheme .sld) -- native leans on Crystal's Random::Secure, icecreme on
+;; OpenSSL's RAND_bytes (icecreme/secure_random.c), the same CSPRNG (creme
 ;; actor)'s own TCP/Unix handshake nonces and (creme rfc8439)'s random-
 ;; key/-nonce already use. should-match-native? here checks lengths/
 ;; shapes, never exact byte content -- these procedures are non-
@@ -15,7 +15,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/secure_random_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/secure_random_spec.scm
-;;   ./cvm/cvm spec/creme/secure_random_spec.scm
+;;   ./icecreme/icecreme spec/creme/secure_random_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)

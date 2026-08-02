@@ -12,10 +12,10 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/compiler_libraries_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/compiler_libraries_spec.scm
-;;   ./cvm/cvm spec/creme/compiler_libraries_spec.scm
-;; (cvm's Op::HelperForm now binds a runtime value for kind 3/define-
+;;   ./icecreme/icecreme spec/creme/compiler_libraries_spec.scm
+;; (icecreme's Op::HelperForm now binds a runtime value for kind 3/define-
 ;; syntax too, not just kind 4/defmacro -- see modules/creme/compiler/
-;; compiler.sld's own define-syntax-expand-form and cvm/vm.c's Op::
+;; compiler.sld's own define-syntax-expand-form and icecreme/vm.c's Op::
 ;; HelperForm comment -- so "honors a prefix import-set filter against a
 ;; pure-Scheme library" (which aliases (creme extra)'s own `times`, a
 ;; top-level define-syntax) now passes there too.)
@@ -35,7 +35,7 @@
 ;; +running its (begin ...) body (which registers define-dao into
 ;; macro-table via compile-defmacro!, the same as a textually-local one),
 ;; then successfully expanding+compiling a real define-dao use. This is
-;; the exact pattern that made cvm's own compiler mode abort with "unbound
+;; the exact pattern that made icecreme's own compiler mode abort with "unbound
 ;; variable: todo" before this support existed.
 (describe "pure-Scheme file-based libraries"
   (it "loads a defmacro-exporting library (creme dao) via the self-hosted loader"

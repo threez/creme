@@ -1,9 +1,9 @@
 # The performance journey — shared across both backends
 
 This project has two independent implementations of the same bytecode
-format: the native Crystal compiler/VM (`src/creme/`) and `cvm`, a
+format: the native Crystal compiler/VM (`src/creme/`) and `icecreme`, a
 standalone C11 VM with its own self-hosted Scheme-to-bytecode compiler
-(`modules/creme/compiler/compiler.sld`, `cvm/`). This document covers
+(`modules/creme/compiler/compiler.sld`, `icecreme/`). This document covers
 optimization work that is genuinely cross-cutting — a technique designed,
 or later ported, to apply to both compilers and/or both VM backends — and
 portable library-level optimizations that benefit every backend equally
@@ -11,7 +11,7 @@ because they're plain Scheme.
 
 Two sibling documents cover backend-specific work:
 - `doc/optimization-crystal.md` — the native Crystal VM/interpreter only.
-- `doc/optimization-cvm.md` — the standalone C11 VM and its own compiler
+- `doc/optimization-icecreme.md` — the standalone C11 VM and its own compiler
   only.
 
 ---
@@ -25,22 +25,22 @@ imported — every program paid the setup cost of every native family that
 exists, whether or not it ever used one.
 
 Both runtimes now gate registration on what's actually imported:
-- **cvm**: `builtins.c`'s single monolithic registration function was
+- **icecreme**: `builtins.c`'s single monolithic registration function was
   split into one function per library family. The compiled bytecode
-  format (SCB1) gained a "required families" metadata section, and
-  `cvm/main.c` only calls the registration functions for families a given
+  format (ICE1) gained a "required families" metadata section, and
+  `icecreme/main.c` only calls the registration functions for families a given
   program's compiled chunk actually needs. The self-hosted compiler
   tracks and emits the same metadata when it compiles a program on the
-  fly, so a raw `.scm` file run directly through `cvm/cvm` benefits too,
-  not just an ahead-of-time `.cvmc`.
+  fly, so a raw `.scm` file run directly through `icecreme/icecreme` benefits too,
+  not just an ahead-of-time `.ice`.
 - **Crystal**: native libraries are now lazily constructed on first
   import instead of eagerly at interpreter startup, except `(scheme
   base)`/`(scheme write)`, which stay eager since nearly every program
-  imports them anyway. The `--emit-cvm` chunk emitter collects the
+  imports them anyway. The `--emit-icecreme` chunk emitter collects the
   transitive set of builtin families a program's compiled bytecode
   actually reaches and serializes that same required-families metadata
-  into the `.cvmc`, so a native-compiled-then-cvm-run program carries the
-  same information cvm's own compiler produces directly.
+  into the `.ice`, so a native-compiled-then-icecreme-run program carries the
+  same information icecreme's own compiler produces directly.
 
 Startup cost now scales with what a program imports, not with how many
 native builtin families this project happens to ship.
@@ -71,11 +71,11 @@ the existing closure-based path unchanged, so this is a strict subset of
 loop shapes that gets the fast path, not a best-effort heuristic. All
 counted-loop sites in the standard micro-benchmark suite compile to
 `ForPrep`/`ForLoop` instead of a nested closure; total benchmark time
-dropped noticeably for both the native Crystal VM and cvm.
+dropped noticeably for both the native Crystal VM and icecreme.
 
 This landed first in the native compiler and both VM backends together
 (the new opcodes needed real implementations in both `src/creme/eval/
-vm.cr` and `cvm/vm.c` to be usable at all, regardless of which compiler
+vm.cr` and `icecreme/vm.c` to be usable at all, regardless of which compiler
 emits them). The self-hosted compiler is a genuinely separate
 implementation — it compiles from raw s-expressions, with no typed AST
 the way the native compiler's `Node` hierarchy provides — so porting the
@@ -139,7 +139,7 @@ since without it the new recognizer could never find a match to fuse in
 the self-hosted compiler.
 
 Measured on a large tail-recursive accumulation: roughly **2.3× faster**
-under the native VM and **3× faster** under cvm. Verified against the
+under the native VM and **3× faster** under icecreme. Verified against the
 disabled-optimization baseline specifically for the mid-loop-redefinition
 case, confirming the deopt path produces identical results to the
 unfused baseline when a self-recursive function redefines itself (or is
@@ -151,7 +151,7 @@ unfused baseline when a self-recursive function redefines itself (or is
 
 These aren't compiler or VM changes — they're changes to plain,
 portable `.sld` Scheme library code (plus, in one case, a thin native
-driver layer). They benefit both the native interpreter and cvm equally,
+driver layer). They benefit both the native interpreter and icecreme equally,
 since the same library source runs unmodified under either.
 
 - **Rendering a DAO's static queries once instead of per call.** A DAO's

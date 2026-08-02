@@ -10,8 +10,8 @@
 ;;
 ;; The last case here (write's own |...| vertical-bar escaping for a
 ;; symbol name containing a space) used to expose a genuine,
-;; undocumented cvm gap -- cvm/builtins.c's write_value had no T_SYM
-;; case of its own, so `write` of a symbol under cvm never bar-escaped a
+;; undocumented icecreme gap -- icecreme/builtins.c's write_value had no T_SYM
+;; case of its own, so `write` of a symbol under icecreme never bar-escaped a
 ;; name needing it. Fixed (write_value's new T_SYM case, backed by
 ;; write_symbol_literal/symbol_needs_pipe_escape), so this case runs
 ;; unconditionally now.
@@ -19,7 +19,7 @@
 ;; Run with (all cases pass, 0 pending, under all three):
 ;;   ./bin/creme spec/creme/r7rs/ch06_05_symbols_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/r7rs/ch06_05_symbols_spec.scm
-;;   ./cvm/cvm spec/creme/r7rs/ch06_05_symbols_spec.scm
+;;   ./icecreme/icecreme spec/creme/r7rs/ch06_05_symbols_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme read) (creme spec))

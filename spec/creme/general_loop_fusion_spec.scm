@@ -10,7 +10,7 @@
 ;; the counter/step/limit requirements entirely.
 ;;
 ;; Unlike that native-only Crystal spec, THIS optimization was ported to
-;; the self-hosted compiler specifically because cvm (which always
+;; the self-hosted compiler specifically because icecreme (which always
 ;; compiles via the self-hosted path, never the native one) got none of
 ;; last session's native-only closure elimination -- hashtable-test's own
 ;; `scan` (competition/bench/workloads.scm) is exactly the cond-bodied
@@ -25,7 +25,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/general_loop_fusion_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/general_loop_fusion_spec.scm
-;;   ./cvm/cvm spec/creme/general_loop_fusion_spec.scm
+;;   ./icecreme/icecreme spec/creme/general_loop_fusion_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)

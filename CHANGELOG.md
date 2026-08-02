@@ -15,6 +15,36 @@ both reaching their current shape) — not itemized individually here;
 
 ## [Unreleased]
 
+### Breaking: standalone C VM (`cvm`) renamed to `icecreme` ("Ice Creme")
+
+- Continuing the project's dessert-themed branding (the Crystal implementation
+  is "Crystal Creme"), the standalone C11 VM backend is renamed from `cvm` to
+  **`icecreme`** ("Ice Creme") throughout: the directory (`cvm/` →
+  `icecreme/`), its built binary (`cvm/cvm` → `icecreme/icecreme`, sanitizer
+  build `cvm-sanitize` → `icecreme-sanitize`), and the CLI flags on `bin/creme`
+  that drive it (`--emit-cvm` → `--emit-icecreme`, `--cvm` → `--icecreme`).
+- The compiled-bytecode file extension changes `.cvmc` → `.ice`, and its
+  on-disk magic header changes `SCB1` → `ICE1` (a build artifact regenerated
+  by `make`, not persisted user data, so no old-format compatibility is
+  needed).
+- The two documented, publicly-read environment variables rename to match:
+  `CVM_STACK_CAP`/`CVM_FRAMES_CAP` → `ICECREME_STACK_CAP`/`ICECREME_FRAMES_CAP`
+  (the internal-only default-value macros stay named
+  `CVM_DEFAULT_STACK_CAP`/`CVM_DEFAULT_FRAMES_CAP`, since those were never a
+  public interface).
+- The runtime-visible backend name changes too: `(runtime)`'s `vm` field is
+  now `"icecreme"` instead of `"cvm"` (tested via `(spec-vm)` in the spec
+  suite's cvm-only skip logic).
+- Files renamed to match: `doc/optimization-cvm.md` →
+  `doc/optimization-icecreme.md`, `doc/deadend-cvm.md` →
+  `doc/deadend-icecreme.md`, `spec/creme/examples_cvm_spec.scm` →
+  `spec/creme/examples_icecreme_spec.scm`, `src/creme/compile/cvm_emitter.cr`
+  → `src/creme/compile/icecreme_emitter.cr` (`CVMEmitter` → `IcecremeEmitter`).
+- Not renamed, deliberately: the internal C implementation's own
+  `cvm_*`/`CVM_*` function and macro naming convention (e.g. `cvm_alloc_vm`,
+  `cvm_cons`, `CVM_COMPILER_DRIVER_PATH`) — a purely internal detail with no
+  user-facing surface, left alone to avoid an enormous, low-value diff.
+
 ### Breaking: `Scheme` Crystal namespace renamed to `Creme`, shard renamed `scheme` → `creme`
 
 - The Crystal-side module namespace (`Scheme::Interpreter`, `Scheme.run_source`,

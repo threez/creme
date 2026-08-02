@@ -4,17 +4,17 @@
 ;; uses, and compiler_spec.scm's own header comment for the general
 ;; should-match-native? approach.
 ;;
-;; (creme digest) used to be entirely absent from cvm. Crystal's own
+;; (creme digest) used to be entirely absent from icecreme. Crystal's own
 ;; `require "digest/md5"`/`sha1`/`sha256`/`sha512`/`openssl/digest`/
 ;; `openssl/hmac`/`base64` are all Crystal STANDARD LIBRARY, not external
-;; shards (see shard.yml) -- backed here (cvm/digest.c) by OpenSSL's
+;; shards (see shard.yml) -- backed here (icecreme/digest.c) by OpenSSL's
 ;; EVP_Digest/HMAC (already linked via -lcrypto, from (creme actor)'s own
 ;; HMAC-SHA256 handshake) plus a small hand-rolled base64 codec.
 ;;
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/digest_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/digest_spec.scm
-;;   ./cvm/cvm spec/creme/digest_spec.scm
+;;   ./icecreme/icecreme spec/creme/digest_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

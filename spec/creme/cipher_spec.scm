@@ -8,8 +8,8 @@
 ;; drives OpenSSL's raw EVP AEAD API by reopening Crystal's own
 ;; OpenSSL::LibCrypto binding (src/creme/modules/creme/cipher.cr, see
 ;; its own header comment for why: Crystal's high-level OpenSSL::Cipher
-;; wrapper has no GCM/AEAD support at all in this Crystal version), cvm
-;; drives the same EVP AEAD API directly in C (cvm/cipher.c) -- both
+;; wrapper has no GCM/AEAD support at all in this Crystal version), icecreme
+;; drives the same EVP AEAD API directly in C (icecreme/cipher.c) -- both
 ;; already linked via -lcrypto. Scoped to AES-256-GCM only (no raw
 ;; CBC/ECB), the same AEAD-first cut (creme rfc8439) already made for
 ;; ChaCha20-Poly1305.
@@ -17,7 +17,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/cipher_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/cipher_spec.scm
-;;   ./cvm/cvm spec/creme/cipher_spec.scm
+;;   ./icecreme/icecreme spec/creme/cipher_spec.scm
 ;; ===========================================================================
 
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)

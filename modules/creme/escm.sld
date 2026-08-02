@@ -69,11 +69,11 @@
 ;;                                     a one-shot render that doesn't
 ;;                                     need the compiled value again
 ;;
-;; Native `bin/creme` only -- `cvm/cvm`'s `(scheme eval)` `environment`
+;; Native `bin/creme` only -- `icecreme/icecreme`'s `(scheme eval)` `environment`
 ;; procedure isn't fully wired for plain script execution (it errors
 ;; with "unbound variable: import-set-resolved-bindings", a self-hosted-
-;; compiler-only helper per cvm/README.md), so escm-render doesn't work
-;; unmodified there; not addressed here since fixing it is a cvm/(scheme
+;; compiler-only helper per icecreme/README.md), so escm-render doesn't work
+;; unmodified there; not addressed here since fixing it is an icecreme/(scheme
 ;; eval) change, out of this library's own scope.
 ;;
 ;; Limitations: no `<%-`/`-%>` whitespace-trimming directives; no

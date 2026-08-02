@@ -6,7 +6,7 @@
 ;; comment for the general should-match-native? approach.
 ;;
 ;; regexp?/regexp-search/regexp-extract/regexp-replace/regexp-replace-all/
-;; regexp-split used to be a deliberate cvm gap -- cvm/regex.c only had
+;; regexp-split used to be a deliberate icecreme gap -- icecreme/regex.c only had
 ;; regexp/regexp-matches? (just enough for reader.sld's own numeric-token
 ;; classification). Now built on a shared regex_match_once helper there.
 ;; regexp-replace/regexp-replace-all substitute their replacement string
@@ -18,7 +18,7 @@
 ;; Run with (all cases pass under all three):
 ;;   ./bin/creme spec/creme/regex_spec.scm
 ;;   ./bin/creme --self-hosted spec/creme/regex_spec.scm
-;;   ./cvm/cvm spec/creme/regex_spec.scm
+;;   ./icecreme/icecreme spec/creme/regex_spec.scm
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

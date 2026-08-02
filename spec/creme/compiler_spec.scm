@@ -31,8 +31,8 @@
 ;; Run with (all 117 cases pass under all three):
 ;;   ./bin/creme spec/creme/compiler_spec.scm            (native Crystal VM)
 ;;   ./bin/creme --self-hosted spec/creme/compiler_spec.scm
-;;   ./cvm/cvm spec/creme/compiler_spec.scm               (standalone C11 VM)
-;; (cvm previously had no call/cc/dynamic-wind at all; see spec/creme/
+;;   ./icecreme/icecreme spec/creme/compiler_spec.scm               (standalone C11 VM)
+;; (icecreme previously had no call/cc/dynamic-wind at all; see spec/creme/
 ;; vm_spec.scm's own header comment for where those were added.)
 ;; ===========================================================================
 
@@ -181,9 +181,9 @@
 
   ;; Rationals/complex numbers are covered by spec/creme/
   ;; compiler_numeric_tower_spec.scm (kept in its own file even now that
-  ;; cvm supports both, per that file's own header comment -- a future,
+  ;; icecreme supports both, per that file's own header comment -- a future,
   ;; still-unsupported literal would have the same whole-file-aborts-
-  ;; under-cvm failure mode, since compile-program compiles a whole
+  ;; under-icecreme failure mode, since compile-program compiles a whole
   ;; script as one upfront chunk).
   (describe "numeric and bytevector literals"
     (it "flonums and division"
