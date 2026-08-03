@@ -20,6 +20,7 @@
 
 #include <gc.h>
 
+#include "embed.h"
 #include "profiler.h"
 #include "vm.h"
 
@@ -53,8 +54,7 @@ static void port_buf_grow(Port *p, int extra) {
 
 static Value bi_make_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-vector: expected a length");
-  int64_t n = args[0].as.i;
+  int64_t n = creme_arg_int(args, nargs, 0, "make-vector");
   Value fill = nargs >= 2 ? args[1] : v_bool(0);
   Vector *vec = GC_MALLOC(sizeof(Vector));
   vec->len = (int)n;
@@ -65,8 +65,7 @@ static Value bi_make_vector(VM *vm, Value *args, int nargs) {
 
 static Value bi_make_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-bytevector: expected a length");
-  int64_t n = args[0].as.i;
+  int64_t n = creme_arg_int(args, nargs, 0, "make-bytevector");
   int64_t fill = nargs >= 2 && args[1].tag == T_INT ? args[1].as.i : 0;
   if (fill < 0 || fill > 255) creme_abort("make-bytevector: fill value out of byte range");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
@@ -168,9 +167,7 @@ static Value bi_utf8_to_string(VM *vm, Value *args, int nargs) {
   int first, last;
   byte_range_args(args, nargs, 1, bv->len, &first, &last);
   int len = last - first;
-  char *copy = GC_MALLOC((size_t)(len ? len : 1));
-  memcpy(copy, bv->bytes + first, (size_t)len);
-  return v_str(copy, len);
+  return creme_bytes_value((const char *)bv->bytes + first, len);
 }
 
 static Value bi_string_to_utf8(VM *vm, Value *args, int nargs) {
@@ -454,8 +451,8 @@ static Value bi_expt(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_exact_integer_sqrt(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_INT || args[0].as.i < 0) creme_abort("exact-integer-sqrt: expected a non-negative integer");
-  int64_t n = args[0].as.i;
+  int64_t n = creme_arg_int(args, nargs, 0, "exact-integer-sqrt");
+  if (n < 0) creme_abort("exact-integer-sqrt: expected a non-negative integer");
   int64_t root = (int64_t)sqrt((double)n);
   while (root > 0 && root * root > n) root--;
   while ((root + 1) * (root + 1) <= n) root++;
@@ -499,9 +496,8 @@ static Value bi_flonum_to_bits(VM *vm, Value *args, int nargs) {
 }
 static Value bi_bits_to_flonum(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("bits->flonum: expected an exact integer");
   double f;
-  int64_t bits = args[0].as.i;
+  int64_t bits = creme_arg_int(args, nargs, 0, "bits->flonum");
   memcpy(&f, &bits, sizeof(f));
   return v_float(f);
 }
@@ -510,25 +506,24 @@ static Value bi_bits_to_flonum(VM *vm, Value *args, int nargs) {
  * wrappers over as_double (already used by abs/magnitude/etc., accepts
  * T_INT/T_RATIONAL/T_FLOAT), same "always returns a float" contract as
  * native's own Math.sin/cos/etc.-based implementation. */
-static Value bi_sin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("sin: expected an argument"); return v_float(sin(as_double(args[0], "sin"))); }
-static Value bi_cos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("cos: expected an argument"); return v_float(cos(as_double(args[0], "cos"))); }
-static Value bi_tan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("tan: expected an argument"); return v_float(tan(as_double(args[0], "tan"))); }
-static Value bi_asin(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("asin: expected an argument"); return v_float(asin(as_double(args[0], "asin"))); }
-static Value bi_acos(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("acos: expected an argument"); return v_float(acos(as_double(args[0], "acos"))); }
-static Value bi_atan(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("atan: expected an argument"); return v_float(atan(as_double(args[0], "atan"))); }
-static Value bi_exp(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("exp: expected an argument"); return v_float(exp(as_double(args[0], "exp"))); }
-static Value bi_log2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("log2: expected an argument"); return v_float(log2(as_double(args[0], "log2"))); }
-static Value bi_log10(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1) creme_abort("log10: expected an argument"); return v_float(log10(as_double(args[0], "log10"))); }
-static Value bi_atan2(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("atan2: expected two arguments"); return v_float(atan2(as_double(args[0], "atan2"), as_double(args[1], "atan2"))); }
-static Value bi_pow(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("pow: expected two arguments"); return v_float(pow(as_double(args[0], "pow"), as_double(args[1], "pow"))); }
-static Value bi_hypot(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 2) creme_abort("hypot: expected two arguments"); return v_float(hypot(as_double(args[0], "hypot"), as_double(args[1], "hypot"))); }
+static Value bi_sin(VM *vm, Value *args, int nargs) { (void)vm; return v_float(sin(creme_arg_double(args, nargs, 0, "sin"))); }
+static Value bi_cos(VM *vm, Value *args, int nargs) { (void)vm; return v_float(cos(creme_arg_double(args, nargs, 0, "cos"))); }
+static Value bi_tan(VM *vm, Value *args, int nargs) { (void)vm; return v_float(tan(creme_arg_double(args, nargs, 0, "tan"))); }
+static Value bi_asin(VM *vm, Value *args, int nargs) { (void)vm; return v_float(asin(creme_arg_double(args, nargs, 0, "asin"))); }
+static Value bi_acos(VM *vm, Value *args, int nargs) { (void)vm; return v_float(acos(creme_arg_double(args, nargs, 0, "acos"))); }
+static Value bi_atan(VM *vm, Value *args, int nargs) { (void)vm; return v_float(atan(creme_arg_double(args, nargs, 0, "atan"))); }
+static Value bi_exp(VM *vm, Value *args, int nargs) { (void)vm; return v_float(exp(creme_arg_double(args, nargs, 0, "exp"))); }
+static Value bi_log2(VM *vm, Value *args, int nargs) { (void)vm; return v_float(log2(creme_arg_double(args, nargs, 0, "log2"))); }
+static Value bi_log10(VM *vm, Value *args, int nargs) { (void)vm; return v_float(log10(creme_arg_double(args, nargs, 0, "log10"))); }
+static Value bi_atan2(VM *vm, Value *args, int nargs) { (void)vm; return v_float(atan2(creme_arg_double(args, nargs, 0, "atan2"), creme_arg_double(args, nargs, 1, "atan2"))); }
+static Value bi_pow(VM *vm, Value *args, int nargs) { (void)vm; return v_float(pow(creme_arg_double(args, nargs, 0, "pow"), creme_arg_double(args, nargs, 1, "pow"))); }
+static Value bi_hypot(VM *vm, Value *args, int nargs) { (void)vm; return v_float(hypot(creme_arg_double(args, nargs, 0, "hypot"), creme_arg_double(args, nargs, 1, "hypot"))); }
 
 /* log's optional 2nd argument is an explicit base, computed as log(x)/
  * log(base) -- matches native's own MathLibrary#log exactly. */
 static Value bi_log(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("log: expected an argument");
-  double x = log(as_double(args[0], "log"));
+  double x = log(creme_arg_double(args, nargs, 0, "log"));
   return nargs >= 2 ? v_float(x / log(as_double(args[1], "log"))) : v_float(x);
 }
 
@@ -604,40 +599,33 @@ static Value bi_random_real(VM *vm, Value *args, int nargs) {
 
 static Value bi_random_integer(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("random-integer: expected an integer");
-  int64_t n = args[0].as.i;
+  int64_t n = creme_arg_int(args, nargs, 0, "random-integer");
   if (n <= 0) creme_abort("random-integer: n must be positive");
   return v_int((int64_t)(rng_next() % (uint64_t)n));
 }
 
 static Value bi_random_seed_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("random-seed!: expected an integer");
-  rng_state = (uint64_t)args[0].as.i;
+  rng_state = (uint64_t)creme_arg_int(args, nargs, 0, "random-seed!");
   return v_nil();
 }
 
 static Value bi_random_choice(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) creme_abort("random-choice: expects a list");
-  int n = 0;
-  Value cur = args[0];
-  while (cur.tag == T_PAIR) { n++; cur = cur.as.pair->cdr; }
+  int n = creme_list_length(args[0]);
   if (n == 0) creme_abort("random-choice: expects a non-empty list");
   int idx = (int)(rng_next() % (uint64_t)n);
-  cur = args[0];
+  Value cur = args[0];
   for (int i = 0; i < idx; i++) cur = cur.as.pair->cdr;
   return cur.as.pair->car;
 }
 
 static Value bi_random_shuffle(VM *vm, Value *args, int nargs) {
   if (nargs < 1) creme_abort("random-shuffle: expects a list");
-  int n = 0;
-  Value cur = args[0];
-  while (cur.tag == T_PAIR) { n++; cur = cur.as.pair->cdr; }
+  int n = creme_list_length(args[0]);
   Value *arr = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-  cur = args[0];
-  for (int i = 0; i < n; i++) { arr[i] = cur.as.pair->car; cur = cur.as.pair->cdr; }
+  creme_list_to_values(args[0], arr, n, "random-shuffle");
   /* Fisher-Yates */
   for (int i = n - 1; i > 0; i--) {
     int j = (int)(rng_next() % (uint64_t)(i + 1));
@@ -831,9 +819,7 @@ static Value bi_get_output_string(VM *vm, Value *args, int nargs) {
   /* Copies out (matches SchemeStr's own value-semantics — a fresh immutable
    * string each call), even though nothing in this bench mutates the port
    * afterward. GC_MALLOC'd like every other heap value here. */
-  char *copy = GC_MALLOC((size_t)p->len);
-  memcpy(copy, p->buf, (size_t)p->len);
-  return v_str(copy, p->len);
+  return creme_bytes_value(p->buf, p->len);
 }
 
 static Value bi_string_length(VM *vm, Value *args, int nargs) {
@@ -1280,15 +1266,13 @@ static Value bi_file_lines(VM *vm, Value *args, int nargs) {
   ssize_t got;
   while ((got = getline(&line, &linecap, f)) >= 0) {
     if (got > 0 && line[got - 1] == '\n') got--;
-    char *copy = GC_MALLOC((size_t)(got ? got : 1));
-    memcpy(copy, line, (size_t)got);
     if (n >= cap) {
       cap = cap ? cap * 2 : 16;
       Value *nc = GC_MALLOC(sizeof(Value) * (size_t)cap);
       if (collected) memcpy(nc, collected, sizeof(Value) * (size_t)n);
       collected = nc;
     }
-    collected[n++] = v_str(copy, (int)got);
+    collected[n++] = creme_bytes_value(line, (int)got);
   }
   free(line);
   fclose(f);
@@ -1314,9 +1298,7 @@ static Value bi_current_directory(VM *vm, Value *args, int nargs) {
   char buf[4096];
   if (!getcwd(buf, sizeof(buf))) creme_abort("current-directory: getcwd failed");
   int len = (int)strlen(buf);
-  char *copy = GC_MALLOC((size_t)(len ? len : 1));
-  memcpy(copy, buf, (size_t)len);
-  return v_str(copy, len);
+  return creme_bytes_value(buf, len);
 }
 
 /* Resolves the (optional, trailing) port argument for read-char/peek-char/
@@ -1468,10 +1450,10 @@ static Value bi_peek_u8(VM *vm, Value *args, int nargs) {
 
 static Value bi_write_u8(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("write-u8: expected a byte");
+  int64_t byte = creme_arg_int(args, nargs, 0, "write-u8");
   if (nargs < 2 || args[1].tag != T_PORT) creme_abort("write-u8: expects a port");
   Port *p = args[1].as.port;
-  char c = (char)args[0].as.i;
+  char c = (char)byte;
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fputc((int)(unsigned char)c, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
@@ -1485,8 +1467,7 @@ static Value bi_write_u8(VM *vm, Value *args, int nargs) {
 
 static Value bi_read_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("read-bytevector: expected a count");
-  int n = (int)args[0].as.i;
+  int n = (int)creme_arg_int(args, nargs, 0, "read-bytevector");
   if (n < 0) creme_abort("read-bytevector: count must be non-negative");
   Port *p = input_port_arg(vm, args, nargs, 1, "read-bytevector");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
@@ -1614,19 +1595,17 @@ static Value bi_read_line(VM *vm, Value *args, int nargs) {
     ssize_t got = getline(&line, &cap, stream);
     if (got < 0) { free(line); return bi_eof_object(vm, NULL, 0); }
     if (got > 0 && line[got - 1] == '\n') got--;
-    char *copy = GC_MALLOC((size_t)(got ? got : 1));
-    memcpy(copy, line, (size_t)got);
+    Value result = creme_bytes_value(line, (int)got);
     free(line);
-    return v_str(copy, (int)got);
+    return result;
   }
   if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
   int start = p->pos;
   while (p->pos < p->len && p->buf[p->pos] != '\n') p->pos++;
   int line_len = p->pos - start;
-  char *copy = GC_MALLOC((size_t)(line_len ? line_len : 1));
-  memcpy(copy, p->buf + start, (size_t)line_len);
+  Value result = creme_bytes_value(p->buf + start, line_len);
   if (p->pos < p->len) p->pos++; /* consume the newline itself */
-  return v_str(copy, line_len);
+  return result;
 }
 
 /* (read-string k [port]) -- note the arg order (k first, port second),
@@ -1639,8 +1618,7 @@ static Value bi_read_line(VM *vm, Value *args, int nargs) {
  * this edge case (confirmed by direct comparison: native's own
  * `(read-string 10 (open-input-string "hi"))` is `#<eof>`, not "hi"). */
 static Value bi_read_string(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("read-string: expected (k [port])");
-  int64_t k = args[0].as.i;
+  int64_t k = creme_arg_int(args, nargs, 0, "read-string");
   if (k < 0) creme_abort("read-string: count must be non-negative");
   Port *p = input_port_arg(vm, args, nargs, 1, "read-string");
   char *buf = GC_MALLOC((size_t)(k ? k : 1));
@@ -1828,14 +1806,10 @@ static Value read_hash(VM *vm, Port *p) {
   if (c == '(') {
     read_next(p);
     Value list = read_list(vm, p, ')');
-    int n = 0;
-    for (Value it = list; it.tag == T_PAIR; it = it.as.pair->cdr) n++;
-    Vector *vec = GC_MALLOC(sizeof(Vector));
-    vec->len = n;
-    vec->items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-    Value it = list;
-    for (int i = 0; i < n; i++) { Pair *pr = it.as.pair; vec->items[i] = pr->car; it = pr->cdr; }
-    return v_vector(vec);
+    int n = creme_list_length(list);
+    Value *items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
+    creme_list_to_values(list, items, n, "read");
+    return creme_vector_from_values(items, n);
   }
   if (c == 'u' && p->pos + 2 < p->len && p->buf[p->pos + 1] == '8' && p->buf[p->pos + 2] == '(') {
     read_next(p); read_next(p); read_next(p);
@@ -2705,8 +2679,8 @@ static Value bi_negative_p(VM *vm, Value *args, int nargs) {
   if (args[0].tag == T_RATIONAL) return v_bool(mpq_sgn(args[0].as.rational->q) < 0);
   creme_abort("negative?: not a number");
 }
-static Value bi_odd_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) creme_abort("odd?: expected an integer"); return v_bool(args[0].as.i % 2 != 0); }
-static Value bi_even_p(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) creme_abort("even?: expected an integer"); return v_bool(args[0].as.i % 2 == 0); }
+static Value bi_odd_p(VM *vm, Value *args, int nargs) { (void)vm; return v_bool(creme_arg_int(args, nargs, 0, "odd?") % 2 != 0); }
+static Value bi_even_p(VM *vm, Value *args, int nargs) { (void)vm; return v_bool(creme_arg_int(args, nargs, 0, "even?") % 2 == 0); }
 /* (square z) is equivalent to (* z z) -- reuse num_mul so it promotes
  * through the same int/rational/float/complex tower `*` itself does,
  * rather than re-deriving a narrower version here. */
@@ -2997,13 +2971,9 @@ static Value bi_append(VM *vm, Value *args, int nargs) {
   if (nargs == 0) return v_nil();
   Value result = args[nargs - 1];
   for (int i = nargs - 2; i >= 0; i--) {
-    int n = 0;
-    Value c = args[i];
-    while (c.tag == T_PAIR) { n++; c = c.as.pair->cdr; }
+    int n = creme_list_length(args[i]);
     Value *tmp = xmalloc(sizeof(Value) * (size_t)(n ? n : 1));
-    c = args[i];
-    int idx = 0;
-    while (c.tag == T_PAIR) { tmp[idx++] = c.as.pair->car; c = c.as.pair->cdr; }
+    creme_list_to_values(args[i], tmp, n, "append");
     for (int j = n - 1; j >= 0; j--) result = creme_cons(vm, tmp[j], result);
     free(tmp);
   }
@@ -3043,10 +3013,10 @@ static Value bi_list_set(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 static Value bi_make_list(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-list: expected (k [fill])");
+  int64_t k = creme_arg_int(args, nargs, 0, "make-list");
   Value fill = nargs >= 2 ? args[1] : v_bool(0);
   Value result = v_nil();
-  for (int64_t i = 0; i < args[0].as.i; i++) result = creme_cons(vm, fill, result);
+  for (int64_t i = 0; i < k; i++) result = creme_cons(vm, fill, result);
   return result;
 }
 static Value bi_list_copy(VM *vm, Value *args, int nargs) {
@@ -3373,7 +3343,7 @@ static Value bi_substring(VM *vm, Value *args, int nargs) {
   int start = (int)args[1].as.i;
   int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].aux;
   if (start < 0 || end > args[0].aux || start > end) creme_abort("substring: index out of range");
-  return v_str(copy_bytes(args[0].as.chars + start, end - start), end - start);
+  return creme_bytes_value(args[0].as.chars + start, end - start);
 }
 
 static Value bi_string_copy(VM *vm, Value *args, int nargs) {
@@ -3382,7 +3352,7 @@ static Value bi_string_copy(VM *vm, Value *args, int nargs) {
   int start = (nargs >= 2 && args[1].tag == T_INT) ? (int)args[1].as.i : 0;
   int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].aux;
   if (start < 0 || end > args[0].aux || start > end) creme_abort("string-copy: index out of range");
-  return v_str(copy_bytes(args[0].as.chars + start, end - start), end - start);
+  return creme_bytes_value(args[0].as.chars + start, end - start);
 }
 static Value bi_string_to_list(VM *vm, Value *args, int nargs) {
   if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->list: expected a string");
@@ -3408,8 +3378,7 @@ static Value bi_list_to_string(VM *vm, Value *args, int nargs) {
 }
 static Value bi_make_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("make-string: expected a length");
-  int64_t n = args[0].as.i;
+  int64_t n = creme_arg_int(args, nargs, 0, "make-string");
   char fill = (nargs >= 2 && args[1].tag == T_CHAR) ? (char)args[1].as.i : ' ';
   char *buf = GC_MALLOC((size_t)(n ? n : 1));
   memset(buf, fill, (size_t)n);
@@ -3645,12 +3614,10 @@ Value bi_number_to_string(VM *vm, Value *args, int nargs) {
   } else {
     creme_abort("number->string: not a number");
   }
-  char *copy = GC_MALLOC((size_t)len);
-  memcpy(copy, buf, (size_t)len);
-  return v_str(copy, len);
+  return creme_bytes_value(buf, len);
 }
 static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->symbol: expected a string"); return v_sym(copy_bytes(args[0].as.chars, args[0].aux), args[0].aux); }
-static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) creme_abort("symbol->string: expected a symbol"); return v_str(copy_bytes(args[0].as.chars, args[0].aux), args[0].aux); }
+static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) creme_abort("symbol->string: expected a symbol"); return creme_bytes_value(args[0].as.chars, args[0].aux); }
 
 /* (creme introspection)'s gensym -- a distinct symbol each call
  * ("prefix__N", N a process-wide counter), needed by defmacro-based
@@ -3675,7 +3642,7 @@ static Value bi_gensym(VM *vm, Value *args, int nargs) {
   return v_sym(buf, n);
 }
 static Value bi_char_to_integer(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char->integer: expected a char"); return v_int(args[0].as.i); }
-static Value bi_integer_to_char(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_INT) creme_abort("integer->char: expected an integer"); return v_char(args[0].as.i); }
+static Value bi_integer_to_char(VM *vm, Value *args, int nargs) { (void)vm; return v_char(creme_arg_int(args, nargs, 0, "integer->char")); }
 static Value bi_char_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 2) creme_abort("char=?: expected at least two chars");
@@ -3858,11 +3825,7 @@ static Value bi_string_ci_ge(VM *vm, Value *args, int nargs) { (void)vm; return 
 /* ---- vectors ---- */
 static Value bi_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  Vector *vec = GC_MALLOC(sizeof(Vector));
-  vec->len = nargs;
-  vec->items = GC_MALLOC(sizeof(Value) * (size_t)(nargs ? nargs : 1));
-  for (int i = 0; i < nargs; i++) vec->items[i] = args[i];
-  return v_vector(vec);
+  return creme_vector_from_values(args, nargs);
 }
 static Value bi_vector_to_list(VM *vm, Value *args, int nargs) {
   if (nargs < 1 || args[0].tag != T_VECTOR) creme_abort("vector->list: expected a vector");
@@ -3880,16 +3843,10 @@ static Value bi_vector_to_list(VM *vm, Value *args, int nargs) {
 static Value bi_list_to_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1) creme_abort("list->vector: expected a list");
-  int n = 0;
-  Value c = args[0];
-  while (c.tag == T_PAIR) { n++; c = c.as.pair->cdr; }
-  Vector *vec = GC_MALLOC(sizeof(Vector));
-  vec->len = n;
-  vec->items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-  c = args[0];
-  int i = 0;
-  while (c.tag == T_PAIR) { vec->items[i++] = c.as.pair->car; c = c.as.pair->cdr; }
-  return v_vector(vec);
+  int n = creme_list_length(args[0]);
+  Value *items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
+  creme_list_to_values(args[0], items, n, "list->vector");
+  return creme_vector_from_values(items, n);
 }
 
 /* ---- misc ---- */
@@ -4179,7 +4136,7 @@ static Value bi_time_to_string(VM *vm, Value *args, int nargs) {
   fmt[fmt_len] = '\0';
   char buf[512];
   size_t n = strftime(buf, sizeof(buf), fmt, &tmv);
-  return v_str(copy_bytes(buf, (int)n), (int)n);
+  return creme_bytes_value(buf, (int)n);
 }
 
 /* A portable timegm(3) replacement -- civil_from_days is Howard Hinnant's
@@ -4267,9 +4224,7 @@ static Value bi_get_environment_variable(VM *vm, Value *args, int nargs) {
   free(name);
   if (!val) return v_bool(0);
   int len = (int)strlen(val);
-  char *copy = GC_MALLOC((size_t)(len ? len : 1));
-  memcpy(copy, val, (size_t)len);
-  return v_str(copy, len);
+  return creme_bytes_value(val, len);
 }
 
 /* (scheme process-context)'s get-environment-variables -- the whole
@@ -4290,8 +4245,8 @@ static Value bi_get_environment_variables(VM *vm, Value *args, int nargs) {
     if (!eq) continue;
     int name_len = (int)(eq - entry);
     int val_len = (int)strlen(eq + 1);
-    Value name = v_str(copy_bytes(entry, name_len), name_len);
-    Value val = v_str(copy_bytes(eq + 1, val_len), val_len);
+    Value name = creme_bytes_value(entry, name_len);
+    Value val = creme_bytes_value(eq + 1, val_len);
     result = creme_cons(vm, creme_cons(vm, name, val), result);
   }
   return result;
@@ -4362,12 +4317,7 @@ static Value bi_delete_environment_variable(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 
-static Value bi_litstr_runtime(const char *s) {
-  int len = (int)strlen(s);
-  char *buf = GC_MALLOC((size_t)len);
-  memcpy(buf, s, (size_t)len);
-  return v_str(buf, len);
-}
+static Value bi_litstr_runtime(const char *s) { return creme_cstr_value(s); }
 
 /* Same as bi_litstr_runtime, but tagged as a symbol -- used for this
  * alist's own keys (vm/compiler/version/os/arch) so `(assq 'vm (runtime))`
