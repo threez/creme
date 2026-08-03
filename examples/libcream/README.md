@@ -4,13 +4,15 @@ A minimal C host program embedding `icecreme` via `libcreme.a`. It:
 
 - registers its own native function, `host-greet`, as a Scheme global
 - registers its own native value, `host-version`, as a Scheme global
-- registers four more native functions exercising `embed.h`'s list/vector/
+- registers five more native functions exercising `embed.h`'s list/vector/
   number helpers on both sides of the call boundary: `host-sum` (a Scheme
   list of integers in, a single integer out), `host-scale-vector` (a
   vector + a scale factor in, a new vector out), `host-word-lengths` (a
   list of strings in, an alist out — fed into a real `(creme hash-table)`
-  hash table on the Scheme side, to show host-returned data flowing into
-  any Scheme feature, not just display), and `host-stats` (a variadic run
+  hash table on the Scheme side), `host-table-lookup` (a REAL hash-table
+  key/value access performed from the host's own C code — takes that same
+  hash table plus a key, and returns the value by calling back into the
+  registered `hash-table-ref` procedure), and `host-stats` (a variadic run
   of numbers in, a 3-element `#(min max avg)` vector out)
 - runs `host_demo.scm` — a plain Scheme script (no precompilation step, no
   `.ice` file) that calls/reads all of the above
@@ -41,8 +43,13 @@ libcream host demo 0.1
 15
 #(2.5 5.0 7.5)
 9
+9
 #(1.0 9.0 3.875)
 ```
+
+(the two `9`s are the same `hash-table-ref` lookup done once from Scheme,
+once from the host's own C code via `host-table-lookup` — same table, same
+key, same answer.)
 
 `make` first builds `../../icecreme/libcreme.a` if it doesn't already exist
 (`$(MAKE) -C ../../icecreme lib`), which in turn needs `bin/creme` already

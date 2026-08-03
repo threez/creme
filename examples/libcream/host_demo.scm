@@ -24,7 +24,13 @@
 (define lengths (make-hash-table))
 (for-each (lambda (pair) (hash-table-set! lengths (car pair) (cdr pair)))
           (host-word-lengths '("scheme" "is" "wonderful")))
+
+;; real hash-table key/value access, once from Scheme and once from the
+;; host's own C code (host-table-lookup) -- same table, same key, same
+;; answer either way.
 (display (hash-table-ref lengths "wonderful" #f))
+(newline)
+(display (host-table-lookup lengths "wonderful"))
 (newline)
 
 ;; variadic numbers -> vector

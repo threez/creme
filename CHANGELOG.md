@@ -68,7 +68,11 @@ both reaching their current shape) — not itemized individually here;
   `host-sum` (list of integers in, integer out), `host-scale-vector`
   (vector + number in, vector out), `host-word-lengths` (list of strings
   in, an alist out — fed into a real `(creme hash-table)` hash table on
-  the Scheme side), and `host-stats` (variadic numbers in, a 3-element
+  the Scheme side), `host-table-lookup` (a REAL hash-table key/value
+  access performed from the host's own C code, bridging into the
+  registered `hash-table-ref` procedure via `creme_global_intern`/
+  `creme_apply` rather than reaching into `CremeHashTable`'s own private
+  fields), and `host-stats` (variadic numbers in, a 3-element
   `#(min max avg)` vector out), exercising `creme_list_length`/
   `creme_list_to_values`/`creme_list_from_values`/`creme_arg_vector`/
   `creme_vector_from_values`/`creme_arg_int`/`creme_arg_double` on both
