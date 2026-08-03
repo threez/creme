@@ -517,11 +517,18 @@ writing a native function's own body — `creme_arg_int`/`creme_arg_double`/
 `creme_arg_bytes` the raw `(pointer, length)` slice with no copy, for
 read-only use), `creme_cstr_value`/`creme_bytes_value`/`creme_format_value`
 (build a fresh Scheme string from a C string/raw byte slice/`printf`-style
-format respectively, no manual length-counting), and `creme_list_length`/
+format respectively, no manual length-counting), `creme_list_length`/
 `creme_list_to_values`/`creme_list_from_values`/`creme_vector_from_values`
-(convert a Scheme list/vector to/from a plain C array of `Value`s). None of
-these add anything to `libcreme.a` itself (pure `static inline`, free to
-compile away) — icecreme's own `bi_*` builtins use them directly too, not
+(convert a Scheme list/vector to/from a plain C array of `Value`s), and
+`creme_list(vm, a, b, c, ...)` (a macro building a fixed, statically-known
+list in one call — `creme_list(vm, a, b, c)` instead of nested
+`creme_cons(vm, a, creme_cons(vm, b, creme_cons(vm, c, v_nil())))` — the
+element count comes from `sizeof` on a `(Value[]){...}` compound literal,
+not a sentinel value or separate count argument, and is safe even when an
+argument has side effects, since `sizeof`'s operand is never evaluated
+for a non-VLA type). None of these add anything to `libcreme.a` itself
+(pure `static inline`/macro, free to compile away) — icecreme's own
+`bi_*` builtins use them directly too, not
 just an external embedder — see each one's own doc comment in `embed.h`, and
 `examples/libcream/host_demo.c`'s `host_welcome` for a real (2-line) use.
 

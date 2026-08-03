@@ -293,6 +293,26 @@ static inline Value creme_list_from_values(VM *vm, Value *items, int n) {
   return list;
 }
 
+/* Builds a proper Scheme list from a fixed, statically-known set of
+ * Values in one call — `creme_list(vm, a, b, c)` instead of nested
+ * `creme_cons(vm, a, creme_cons(vm, b, creme_cons(vm, c, v_nil())))`. A
+ * macro, not a true variadic function: the element count is derived at
+ * compile time via `sizeof` on a `(Value[]){...}` compound literal (the
+ * same array-literal idiom this codebase's own call sites already use,
+ * e.g. builtins.c's `(Value[]){args[0], entry.as.pair->car}`), which
+ * needs no sentinel value (that could collide with a real list element)
+ * and no separate count argument to keep in sync with the argument list.
+ * Safe against double-evaluating an argument with side effects (e.g.
+ * `read_datum(vm, p)`, which advances the reader's own position) even
+ * though the compound literal appears twice in the expansion: `sizeof`'s
+ * operand is never evaluated for a non-VLA type (C11 6.5.3.4p2), so only
+ * the ONE compound literal actually passed as `creme_list_from_values`'s
+ * `items` argument runs its element expressions — the one inside
+ * `sizeof` contributes only its type/size, nothing at runtime. Delegates
+ * to `creme_list_from_values` above for the actual cons chain. */
+#define creme_list(vm, ...) \
+  creme_list_from_values((vm), (Value[]){__VA_ARGS__}, (int)(sizeof((Value[]){__VA_ARGS__}) / sizeof(Value)))
+
 /* Builds a fresh Scheme vector from a C array of `n` Values — a straight
  * GC_MALLOC'd copy (Vector, value.h, is a flat, GC-owned `Value*`+length
  * pair, needing no VM state to allocate, unlike creme_list_from_values'

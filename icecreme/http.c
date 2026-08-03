@@ -536,7 +536,7 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
   Value status_pair = creme_cons(vm, v_litstr("status"), v_int(status));
   Value headers_pair = creme_cons(vm, v_litstr("headers"), header_list);
   Value body_pair = creme_cons(vm, v_litstr("body"), v_str(final_body, final_len));
-  return creme_cons(vm, status_pair, creme_cons(vm, headers_pair, creme_cons(vm, body_pair, v_nil())));
+  return creme_list(vm, status_pair, headers_pair, body_pair);
 }
 
 static Value bi_http_get(VM *vm, Value *args, int nargs) {

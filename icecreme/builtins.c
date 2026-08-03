@@ -1868,12 +1868,12 @@ static Value read_datum(VM *vm, Port *p) {
   if (c == ')' || c == ']') creme_abort("read: unexpected '%c'", c);
   if (c == '"') return read_string_literal(p);
   if (c == '#') return read_hash(vm, p);
-  if (c == '\'') { read_next(p); return creme_cons(vm, v_sym("quote", 5), creme_cons(vm, read_datum(vm, p), v_nil())); }
-  if (c == '`') { read_next(p); return creme_cons(vm, v_sym("quasiquote", 10), creme_cons(vm, read_datum(vm, p), v_nil())); }
+  if (c == '\'') { read_next(p); return creme_list(vm, v_sym("quote", 5), read_datum(vm, p)); }
+  if (c == '`') { read_next(p); return creme_list(vm, v_sym("quasiquote", 10), read_datum(vm, p)); }
   if (c == ',') {
     read_next(p);
-    if (read_peek(p) == '@') { read_next(p); return creme_cons(vm, v_sym("unquote-splicing", 16), creme_cons(vm, read_datum(vm, p), v_nil())); }
-    return creme_cons(vm, v_sym("unquote", 7), creme_cons(vm, read_datum(vm, p), v_nil()));
+    if (read_peek(p) == '@') { read_next(p); return creme_list(vm, v_sym("unquote-splicing", 16), read_datum(vm, p)); }
+    return creme_list(vm, v_sym("unquote", 7), read_datum(vm, p));
   }
   return read_token(p);
 }

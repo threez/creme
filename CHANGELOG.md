@@ -53,13 +53,20 @@ both reaching their current shape) — not itemized individually here;
   `creme_arg_bytes` for the raw `(pointer, length)` slice with no copy),
   `creme_cstr_value`/`creme_bytes_value`/`creme_format_value` (build a
   fresh Scheme string from a C string/raw byte slice/`printf`-style format,
-  no manual length-counting), and `creme_list_length`/
+  no manual length-counting), `creme_list_length`/
   `creme_list_to_values`/`creme_list_from_values`/`creme_vector_from_values`
-  (convert a Scheme list/vector to/from a plain C array of `Value`s) — none
-  add anything to `libcreme.a` itself (pure `static inline`). icecreme's
-  own `bi_*` builtins across every `.c` file now use these directly too,
-  in place of their previous hand-rolled arity/type checks and
-  `GC_MALLOC`/`memcpy`/manual-list-walking boilerplate.
+  (convert a Scheme list/vector to/from a plain C array of `Value`s), and
+  `creme_list(vm, a, b, c, ...)` (a macro building a fixed,
+  statically-known list in one call, counting its own arguments via
+  `sizeof` on a `(Value[]){...}` compound literal rather than a sentinel
+  value or separate count argument — safe against double-evaluating a
+  side-effecting argument since `sizeof`'s operand is never evaluated for
+  a non-VLA type) — none add anything to `libcreme.a` itself (pure
+  `static inline`/macro). icecreme's own `bi_*` builtins across every
+  `.c` file now use these directly too, in place of their previous
+  hand-rolled arity/type checks, `GC_MALLOC`/`memcpy`/manual-list-walking
+  boilerplate, and (http.c/term.c/builtins.c's reader) nested
+  `creme_cons` chains for a fixed-shape list.
 - `embed.h` also gains boxed-type convenience helpers for hash-table/
   treelist/bigdecimal/regex/sql/actor-ref — each type's own payload
   struct (`CremeHashTable`/`RRBNode`/`BigDecimal`/`pcre2_code`/`sqlite3`/

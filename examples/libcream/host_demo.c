@@ -82,15 +82,14 @@ int main(void) {
   creme_register_global(vm, "host-store-name", creme_cstr_value("Acme Grocery"));
 
   /* The pending orders themselves — real input data for the report
-   * script, a native list of (item . quantity) pairs built directly with
-   * embed.h's creme_cons/creme_list_from_values. */
-  {
-    const char *names[4] = {"apple", "apple", "bread", "milk"};
-    int qtys[4] = {3, 2, 1, 2};
-    Value order_pairs[4];
-    for (int i = 0; i < 4; i++) order_pairs[i] = creme_cons(vm, creme_cstr_value(names[i]), v_int(qtys[i]));
-    creme_register_global(vm, "host-orders", creme_list_from_values(vm, order_pairs, 4));
-  }
+   * script, a native list of (item . quantity) pairs. This fixed, small
+   * set is exactly the static case embed.h's creme_list macro exists
+   * for — one direct call instead of a C array + loop. */
+  creme_register_global(vm, "host-orders",
+                         creme_list(vm, creme_cons(vm, creme_cstr_value("apple"), v_int(3)),
+                                    creme_cons(vm, creme_cstr_value("apple"), v_int(2)),
+                                    creme_cons(vm, creme_cstr_value("bread"), v_int(1)),
+                                    creme_cons(vm, creme_cstr_value("milk"), v_int(2))));
 
   /* Compiles-and-runs host_demo.scm directly, via the self-hosted compiler
    * bundled into libcreme.a at build time (icecreme/Makefile's embedded_

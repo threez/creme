@@ -77,7 +77,7 @@ static Value kind_alist(VM *vm, const char *kind) {
 static Value char_alist(VM *vm, int byte) {
   Value kind_pair = creme_cons(vm, term_lit_sym("kind"), term_lit_str("char"));
   Value char_pair = creme_cons(vm, term_lit_sym("char"), v_char(byte));
-  return creme_cons(vm, kind_pair, creme_cons(vm, char_pair, v_nil()));
+  return creme_list(vm, kind_pair, char_pair);
 }
 
 /* (term-raw-mode-enter!) */
