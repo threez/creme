@@ -307,4 +307,239 @@ static inline Value creme_vector_from_values(Value *items, int n) {
   return v_vector(vec);
 }
 
+/* ===========================================================================
+ * Boxed-type convenience helpers (hash-table/treelist/bigdecimal/regex/
+ * sql/actor-ref)
+ * ===========================================================================
+ *
+ * A `T_BOX` Value's own payload struct (`CremeHashTable`/`RRBNode`/
+ * `BigDecimal`/`pcre2_code`/`sqlite3`/`ActorRef`) is `static`/private to
+ * the one `.c` file that defines it (hashtable.c/treelist.c/bigdecimal.c/
+ * regex.c/sql.c/actor.c) — embed.h has no access to any of them directly,
+ * nor should it duplicate that logic. Instead, every helper below bridges
+ * through that type's own already-registered Scheme-level procedure by
+ * name, via `creme_call_global` — the same lookup-and-call sequence a
+ * plain `(hash-table-set! table key value)` call from Scheme itself goes
+ * through, just issued from C. This means every helper below works
+ * exactly the same regardless of which `CREME_WITH_<NAME>` macros
+ * (builtin_config.h) a build was compiled with: calling e.g.
+ * `creme_sql_open` against a build with `CREME_WITH_SQL=0` simply aborts
+ * at runtime with `creme_call_global`'s own "unbound global" message,
+ * same degrade-gracefully behavior any other compiled-out family already
+ * has — no `#ifdef` needed here.
+ *
+ * Each type gets a small, fixed CORE set (create/get/set/length-style
+ * essentials), not full parity with every one of e.g. treelist's ~60
+ * Scheme-level procedures — call `creme_call_global` directly by name for
+ * anything beyond what's covered here. */
+
+/* Looks up `name` as a global (interning it if not already present, same
+ * as `creme_register_builtin`/`creme_register_global` do at registration
+ * time) and applies it to `args`/`nargs` — the generic primitive every
+ * boxed-type helper below is built on. Aborts if `name` isn't actually
+ * bound to anything (creme_global_intern itself only interns a slot, it
+ * doesn't fail on an unknown name, so this adds the missing check). Also
+ * useful directly for calling any Scheme-level procedure by name that
+ * doesn't have its own dedicated `creme_*` wrapper below. */
+static inline Value creme_call_global(VM *vm, const char *name, Value *args, int nargs) {
+  int slot = creme_global_intern(vm, name, (int)strlen(name));
+  if (!vm->globals[slot].bound) creme_abort("creme_call_global: unbound global \"%s\"", name);
+  return creme_apply(vm, vm->globals[slot].value, args, nargs);
+}
+
+/* Tag-check predicates for each boxed type below — a plain `T_BOX` +
+ * `BOX_KIND_*` check, no VM/global lookup needed (mirrors each type's own
+ * internal `bi_*_p` predicate). */
+static inline int creme_hash_table_p(Value v) { return v.tag == T_BOX && v.aux == BOX_KIND_HASHTABLE; }
+static inline int creme_treelist_p(Value v) { return v.tag == T_BOX && v.aux == BOX_KIND_TREELIST; }
+static inline int creme_bigdecimal_p(Value v) { return v.tag == T_BOX && v.aux == BOX_KIND_BIGDECIMAL; }
+static inline int creme_regexp_p(Value v) { return v.tag == T_BOX && v.aux == BOX_KIND_REGEX; }
+static inline int creme_sql_connection_p(Value v) { return v.tag == T_BOX && v.aux == BOX_KIND_SQL; }
+static inline int creme_actor_ref_p(Value v) { return v.tag == T_BOX && v.aux == BOX_KIND_ACTOR_REF; }
+
+/* ---- hash-table (hashtable.c, always-on -- a hard dependency of the
+ * bundled self-hosted compiler, see builtin_config.h) ---- */
+
+/* `(make-hash-table)`. */
+static inline Value creme_hash_table_new(VM *vm) { return creme_call_global(vm, "make-hash-table", NULL, 0); }
+
+/* `(hash-table-set! table key value)`. */
+static inline void creme_hash_table_set(VM *vm, Value table, Value key, Value value) {
+  Value args[3] = {table, key, value};
+  creme_call_global(vm, "hash-table-set!", args, 3);
+}
+
+/* `(hash-table-ref table key default)` -- the 3-arg form, so a missing
+ * key returns `default_val` (verbatim, unless it's itself a closure/
+ * builtin, in which case hash-table-ref calls it as a thunk, same as
+ * calling this from Scheme would) rather than aborting. */
+static inline Value creme_hash_table_get(VM *vm, Value table, Value key, Value default_val) {
+  Value args[3] = {table, key, default_val};
+  return creme_call_global(vm, "hash-table-ref", args, 3);
+}
+
+/* `(hash-table-contains? table key)`. */
+static inline int creme_hash_table_contains(VM *vm, Value table, Value key) {
+  Value args[2] = {table, key};
+  return !v_falsy(creme_call_global(vm, "hash-table-contains?", args, 2));
+}
+
+/* `(hash-table-delete! table key)`. */
+static inline void creme_hash_table_delete(VM *vm, Value table, Value key) {
+  Value args[2] = {table, key};
+  creme_call_global(vm, "hash-table-delete!", args, 2);
+}
+
+/* No native `hash-table-length` exists -- computed via `(hash-table-keys
+ * table)` (a plain list) then `creme_list_length` on the result. */
+static inline int creme_hash_table_length(VM *vm, Value table) {
+  Value args[1] = {table};
+  return creme_list_length(creme_call_global(vm, "hash-table-keys", args, 1));
+}
+
+/* ---- treelist (treelist.c, gated by CREME_WITH_TREELIST) ----
+ * Immutable treelists (BOX_KIND_TREELIST) only -- mutable-treelist
+ * (BOX_KIND_MUTABLE_TREELIST) is a separate box kind, not covered here. */
+
+/* `(vector->treelist v)`, built from a plain C array via the existing
+ * creme_vector_from_values. */
+static inline Value creme_treelist_from_values(VM *vm, Value *items, int n) {
+  Value args[1] = {creme_vector_from_values(items, n)};
+  return creme_call_global(vm, "vector->treelist", args, 1);
+}
+
+/* `(treelist-length tl)`. */
+static inline int creme_treelist_length(VM *vm, Value tl) {
+  Value args[1] = {tl};
+  return (int)creme_call_global(vm, "treelist-length", args, 1).as.i;
+}
+
+/* `(treelist-ref tl index)`. */
+static inline Value creme_treelist_ref(VM *vm, Value tl, int index) {
+  Value args[2] = {tl, v_int(index)};
+  return creme_call_global(vm, "treelist-ref", args, 2);
+}
+
+/* Copies a treelist's elements into `out` (caller-provided, room for at
+ * least `max` -- see creme_treelist_length to size it first) via
+ * `(treelist->vector tl)` + creme_arg_vector, mirroring creme_list_to_
+ * values' own copy-into-caller-buffer shape. Aborts via `who` if the
+ * treelist has more than `max` elements. */
+static inline int creme_treelist_to_values(VM *vm, Value tl, Value *out, int max, const char *who) {
+  Value args[1] = {tl};
+  Value vec = creme_call_global(vm, "treelist->vector", args, 1);
+  int len;
+  Value *items = creme_arg_vector(&vec, 1, 0, who, &len);
+  if (len > max) creme_abort("%s: treelist has more than %d element(s)", who, max);
+  for (int i = 0; i < len; i++) out[i] = items[i];
+  return len;
+}
+
+/* ---- bigdecimal (bigdecimal.c, gated by CREME_WITH_BIGDECIMAL) ---- */
+
+/* `(string->bigdecimal s)`. */
+static inline Value creme_bigdecimal_from_cstr(VM *vm, const char *s) {
+  Value args[1] = {creme_cstr_value(s)};
+  return creme_call_global(vm, "string->bigdecimal", args, 1);
+}
+
+/* `(integer->bigdecimal n)`. */
+static inline Value creme_bigdecimal_from_int(VM *vm, int64_t n) {
+  Value args[1] = {v_int(n)};
+  return creme_call_global(vm, "integer->bigdecimal", args, 1);
+}
+
+static inline Value creme_bigdecimal_add(VM *vm, Value a, Value b) {
+  Value args[2] = {a, b};
+  return creme_call_global(vm, "bigdecimal-add", args, 2);
+}
+static inline Value creme_bigdecimal_sub(VM *vm, Value a, Value b) {
+  Value args[2] = {a, b};
+  return creme_call_global(vm, "bigdecimal-sub", args, 2);
+}
+static inline Value creme_bigdecimal_mul(VM *vm, Value a, Value b) {
+  Value args[2] = {a, b};
+  return creme_call_global(vm, "bigdecimal-mul", args, 2);
+}
+static inline Value creme_bigdecimal_div(VM *vm, Value a, Value b) {
+  Value args[2] = {a, b};
+  return creme_call_global(vm, "bigdecimal-div", args, 2);
+}
+
+/* `(bigdecimal->string bd)` -- returns the resulting Scheme string Value
+ * directly; use creme_arg_cstr/creme_arg_bytes on it if a real C string
+ * is needed. */
+static inline Value creme_bigdecimal_to_value(VM *vm, Value bd) {
+  Value args[1] = {bd};
+  return creme_call_global(vm, "bigdecimal->string", args, 1);
+}
+
+/* ---- regex (regex.c, always-on -- a hard dependency of the bundled
+ * self-hosted compiler, see builtin_config.h) ---- */
+
+/* `(regexp pattern)`, taking a plain C string pattern. */
+static inline Value creme_regexp_compile(VM *vm, const char *pattern) {
+  Value args[1] = {creme_cstr_value(pattern)};
+  return creme_call_global(vm, "regexp", args, 1);
+}
+
+/* `(regexp-matches? re subject)`, taking a plain C string subject. */
+static inline int creme_regexp_matches(VM *vm, Value re, const char *subject) {
+  Value args[2] = {re, creme_cstr_value(subject)};
+  return !v_falsy(creme_call_global(vm, "regexp-matches?", args, 2));
+}
+
+/* ---- sql (sql.c, gated by CREME_WITH_SQL) -- no bound-parameter support
+ * in this core cut; call creme_call_global directly with a params list
+ * for that. ---- */
+
+/* `(sql-open path)`, taking a plain C string path (":memory:" for an
+ * in-memory database). */
+static inline Value creme_sql_open(VM *vm, const char *path) {
+  Value args[1] = {creme_cstr_value(path)};
+  return creme_call_global(vm, "sql-open", args, 1);
+}
+
+/* `(sql-close conn)`. */
+static inline void creme_sql_close(VM *vm, Value conn) {
+  Value args[1] = {conn};
+  creme_call_global(vm, "sql-close", args, 1);
+}
+
+/* `(sql-execute conn sql)`, taking a plain C string SQL statement. */
+static inline Value creme_sql_execute(VM *vm, Value conn, const char *sql) {
+  Value args[2] = {conn, creme_cstr_value(sql)};
+  return creme_call_global(vm, "sql-execute", args, 2);
+}
+
+/* `(sql-query conn sql)`. */
+static inline Value creme_sql_query(VM *vm, Value conn, const char *sql) {
+  Value args[2] = {conn, creme_cstr_value(sql)};
+  return creme_call_global(vm, "sql-query", args, 2);
+}
+
+/* `(sql-scalar conn sql)`. */
+static inline Value creme_sql_scalar(VM *vm, Value conn, const char *sql) {
+  Value args[2] = {conn, creme_cstr_value(sql)};
+  return creme_call_global(vm, "sql-scalar", args, 2);
+}
+
+/* ---- actor-ref (actor.c, gated by CREME_WITH_ACTOR) -- deliberately no
+ * `spawn` wrapper here: it takes a Scheme closure argument a C host
+ * rarely has ready-made; spawning is expected to happen from within the
+ * running script itself, or via creme_call_global directly with a
+ * closure Value the host already has. ---- */
+
+/* `(send! target message)`. */
+static inline void creme_actor_send(VM *vm, Value target, Value message) {
+  Value args[2] = {target, message};
+  creme_call_global(vm, "send!", args, 2);
+}
+
+/* `(actor-ref-id ref)` -- returns the id as a Scheme string Value. */
+static inline Value creme_actor_ref_id(VM *vm, Value ref) {
+  Value args[1] = {ref};
+  return creme_call_global(vm, "actor-ref-id", args, 1);
+}
+
 #endif

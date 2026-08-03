@@ -525,6 +525,30 @@ compile away) — icecreme's own `bi_*` builtins use them directly too, not
 just an external embedder — see each one's own doc comment in `embed.h`, and
 `examples/libcream/host_demo.c`'s `host_greet` for a real (2-line) use.
 
+**Boxed-type convenience helpers** (hash-table/treelist/bigdecimal/regex/
+sql/actor-ref): each type's own payload struct (`CremeHashTable`/
+`RRBNode`/`BigDecimal`/`pcre2_code`/`sqlite3`/`ActorRef`) is private to the
+one `.c` file that defines it, so `embed.h` can't reach into any of them
+directly — instead, a small generic primitive, `creme_call_global(vm,
+name, args, nargs)`, looks up any Scheme-level procedure by name and
+applies it (the same lookup-and-call sequence `(hash-table-set! ...)`
+itself goes through, just issued from C), and every boxed-type helper
+below is built on it: `creme_hash_table_new`/`_set`/`_get`/`_contains`/
+`_delete`/`_length`, `creme_treelist_from_values`/`_length`/`_ref`/
+`_to_values`, `creme_bigdecimal_from_cstr`/`_from_int`/`_add`/`_sub`/
+`_mul`/`_div`/`_to_value`, `creme_regexp_compile`/`_matches`,
+`creme_sql_open`/`_close`/`_execute`/`_query`/`_scalar`, and
+`creme_actor_send`/`_ref_id`, plus a `creme_<type>_p` tag-check predicate
+for each. These cover each type's CORE operations, not full parity with
+its whole Scheme-level surface (e.g. treelist has ~60 procedures) — call
+`creme_call_global` directly by name for anything beyond what's listed.
+Since every one of these only ever calls a name, they work identically
+regardless of which `CREME_WITH_<NAME>` macros a build was compiled with
+(see "Trimming dependencies" below) — calling e.g. `creme_sql_open`
+against a build with `CREME_WITH_SQL=0` just aborts at runtime with a
+clear "unbound global" message, the same degrade-gracefully behavior any
+other compiled-out family already has.
+
 `creme_run_repl(vm)` drops into an interactive stdin/stdout REPL, by
 compiling-and-running `icecreme/repl.scm` (the 2-line `(creme repl)` shim)
 through the same bundled-compiler mechanism as `creme_run_scheme_file` —

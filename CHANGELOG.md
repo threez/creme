@@ -60,6 +60,23 @@ both reaching their current shape) — not itemized individually here;
   own `bi_*` builtins across every `.c` file now use these directly too,
   in place of their previous hand-rolled arity/type checks and
   `GC_MALLOC`/`memcpy`/manual-list-walking boilerplate.
+- `embed.h` also gains boxed-type convenience helpers for hash-table/
+  treelist/bigdecimal/regex/sql/actor-ref — each type's own payload
+  struct (`CremeHashTable`/`RRBNode`/`BigDecimal`/`pcre2_code`/`sqlite3`/
+  `ActorRef`) is private to the one `.c` file that defines it, so these
+  bridge through each type's already-registered Scheme-level procedure by
+  name instead, via one new generic primitive, `creme_call_global(vm,
+  name, args, nargs)`. Covers each type's CORE operations only:
+  `creme_hash_table_new`/`_set`/`_get`/`_contains`/`_delete`/`_length`,
+  `creme_treelist_from_values`/`_length`/`_ref`/`_to_values`,
+  `creme_bigdecimal_from_cstr`/`_from_int`/`_add`/`_sub`/`_mul`/`_div`/
+  `_to_value`, `creme_regexp_compile`/`_matches`, `creme_sql_open`/
+  `_close`/`_execute`/`_query`/`_scalar`, `creme_actor_send`/`_ref_id`,
+  plus a `creme_<type>_p` tag-check predicate for each. Since every one
+  only ever calls a name, they compile/link/behave identically regardless
+  of which `CREME_WITH_<NAME>` macros a build was compiled with — a
+  compiled-out family's helper just aborts at runtime with a clear
+  "unbound global" message.
 - New example: `examples/libcream/` — a complete, minimal C host program
   registering its own native function (`host-greet`) and native value
   (`host-version`) as Scheme globals, then running a plain `.scm` script
@@ -69,10 +86,10 @@ both reaching their current shape) — not itemized individually here;
   (vector + number in, vector out), `host-word-lengths` (list of strings
   in, an alist out — fed into a real `(creme hash-table)` hash table on
   the Scheme side), `host-table-lookup` (a REAL hash-table key/value
-  access performed from the host's own C code, bridging into the
-  registered `hash-table-ref` procedure via `creme_global_intern`/
-  `creme_apply` rather than reaching into `CremeHashTable`'s own private
-  fields), and `host-stats` (variadic numbers in, a 3-element
+  access performed from the host's own C code, via the new
+  `creme_hash_table_get` helper below rather than reaching into
+  `CremeHashTable`'s own private fields), and `host-stats` (variadic
+  numbers in, a 3-element
   `#(min max avg)` vector out), exercising `creme_list_length`/
   `creme_list_to_values`/`creme_list_from_values`/`creme_arg_vector`/
   `creme_vector_from_values`/`creme_arg_int`/`creme_arg_double` on both

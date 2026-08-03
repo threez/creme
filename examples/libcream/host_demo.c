@@ -83,23 +83,20 @@ static Value host_word_lengths(VM *vm, Value *args, int nargs) {
 }
 
 /* host-table-lookup: (host-table-lookup table "key") => the value stored
- * under "key" — a REAL hash-table key/value access performed FROM the
- * host's own C code, not just Scheme code the host happens to run.
- * `CremeHashTable`'s own fields are private to hashtable.c (see
- * hashtable.h), so this doesn't reach into the struct directly — it
- * bridges through the already-registered "hash-table-ref" Scheme
- * procedure instead (creme_global_intern finds its global slot,
- * creme_apply calls it), the same way any two pieces of Scheme code would
- * call each other. `args[0]` is still validated as a real hash table
- * first (creme_arg_box against BOX_KIND_HASHTABLE), so a wrong-typed
- * first argument aborts here with a clear message rather than inside
- * hash-table-ref itself. */
+ * under "key" (or #f if absent) — a REAL hash-table key/value access
+ * performed FROM the host's own C code, not just Scheme code the host
+ * happens to run. `CremeHashTable`'s own fields are private to
+ * hashtable.c (see hashtable.h), so this doesn't reach into the struct
+ * directly — embed.h's own creme_hash_table_get bridges through the
+ * already-registered "hash-table-ref" Scheme procedure instead, the same
+ * way any two pieces of Scheme code would call each other. `args[0]` is
+ * still validated as a real hash table first (creme_arg_box against
+ * BOX_KIND_HASHTABLE), so a wrong-typed first argument aborts here with a
+ * clear message rather than inside hash-table-ref itself. */
 static Value host_table_lookup(VM *vm, Value *args, int nargs) {
   creme_check_exact_args(nargs, 2, "host-table-lookup");
   creme_arg_box(args, nargs, 0, BOX_KIND_HASHTABLE, "host-table-lookup");
-  int slot = creme_global_intern(vm, "hash-table-ref", 14);
-  Value call_args[2] = {args[0], args[1]};
-  return creme_apply(vm, vm->globals[slot].value, call_args, 2);
+  return creme_hash_table_get(vm, args[0], args[1], v_bool(0));
 }
 
 /* host-stats: (host-stats 3 1 4 1 5 9 2 6) => #(min max avg) — a variadic
