@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "digest.h"
+#include "embed.h"
 
 static void hex_encode_into(const unsigned char *bytes, unsigned int len, Value *out) {
   static const char hexchars[] = "0123456789abcdef";
@@ -67,20 +68,23 @@ static void value_bytes(Value v, const char **out_ptr, int *out_len, const char 
 
 static Value bi_digest_md5(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("digest-md5: expected string, got a non-string value");
-  return hex_digest(EVP_md5(), args[0].as.chars, args[0].aux);
+  int len;
+  const char *data = creme_arg_bytes(args, nargs, 0, "digest-md5", &len);
+  return hex_digest(EVP_md5(), data, len);
 }
 
 static Value bi_digest_sha1(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("digest-sha1: expected string, got a non-string value");
-  return hex_digest(EVP_sha1(), args[0].as.chars, args[0].aux);
+  int len;
+  const char *data = creme_arg_bytes(args, nargs, 0, "digest-sha1", &len);
+  return hex_digest(EVP_sha1(), data, len);
 }
 
 static Value bi_digest_sha256(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("digest-sha256: expected string, got a non-string value");
-  return hex_digest(EVP_sha256(), args[0].as.chars, args[0].aux);
+  int len;
+  const char *data = creme_arg_bytes(args, nargs, 0, "digest-sha256", &len);
+  return hex_digest(EVP_sha256(), data, len);
 }
 
 static Value bi_digest_sha384(VM *vm, Value *args, int nargs) {
@@ -135,9 +139,8 @@ static const char B64_ALPHABET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 
 static Value bi_base64_encode(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("base64-encode: expected string, got a non-string value");
-  const unsigned char *in = (const unsigned char *)args[0].as.chars;
-  int len = args[0].aux;
+  int len;
+  const unsigned char *in = (const unsigned char *)creme_arg_bytes(args, nargs, 0, "base64-encode", &len);
   int out_len = ((len + 2) / 3) * 4;
   char *out = GC_MALLOC((size_t)(out_len ? out_len : 1));
   int oi = 0, i = 0;
@@ -176,9 +179,8 @@ static int b64_value(char c) {
 
 static Value bi_base64_decode(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("base64-decode: expected string, got a non-string value");
-  const char *s = args[0].as.chars;
-  int len = args[0].aux;
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "base64-decode", &len);
   if (len == 0) return v_str(GC_MALLOC(1), 0);
   if (len % 4 != 0) creme_abort("base64-decode: invalid base64: input length must be a multiple of 4");
 

@@ -44,6 +44,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#include "embed.h"
 #include "term.h"
 
 /* Same value as term.cr's ESC_TIMEOUT/TUI::Keys::ESC_TIMEOUT -- how long to
@@ -220,11 +221,8 @@ static Value bi_term_read_key(VM *vm, Value *args, int nargs) {
  * axis skips that axis's escape sequence entirely). */
 static Value bi_term_move_cursor(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_INT || args[1].tag != T_INT) {
-    creme_abort("term-move-cursor!: expected two integers");
-  }
-  int64_t rows = args[0].as.i;
-  int64_t cols = args[1].as.i;
+  int64_t rows = creme_arg_int(args, nargs, 0, "term-move-cursor!");
+  int64_t cols = creme_arg_int(args, nargs, 1, "term-move-cursor!");
   if (rows != 0) {
     printf("\x1b[%lld%c", (long long)(rows > 0 ? rows : -rows), rows > 0 ? 'B' : 'A');
   }
@@ -249,8 +247,9 @@ static Value bi_term_clear_to_eol(VM *vm, Value *args, int nargs) {
  * flush-on-newline. */
 static Value bi_term_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("term-write!: expected a string");
-  fwrite(args[0].as.chars, 1, (size_t)args[0].aux, stdout);
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "term-write!", &len);
+  fwrite(s, 1, (size_t)len, stdout);
   fflush(stdout);
   return v_nil();
 }

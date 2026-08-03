@@ -35,6 +35,7 @@
 #include <string.h>
 
 #include "bigdecimal.h"
+#include "embed.h"
 
 typedef struct {
   mpz_t mantissa;
@@ -198,9 +199,9 @@ static Value bi_string_to_bigdecimal(VM *vm, Value *args, int nargs) {
 
 static Value bi_integer_to_bigdecimal(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_INT) creme_abort("integer->bigdecimal: expected integer, got a non-integer value");
+  int64_t n = creme_arg_int(args, nargs, 0, "integer->bigdecimal");
   BigDecimal *bd = bd_new();
-  mpz_set_si(bd->mantissa, (long)args[0].as.i);
+  mpz_set_si(bd->mantissa, (long)n);
   bd->scale = 0;
   return v_bigdecimal(bd);
 }

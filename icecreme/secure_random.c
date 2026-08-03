@@ -11,17 +11,18 @@
 #include <gc.h>
 #include <openssl/rand.h>
 
+#include "embed.h"
 #include "secure_random.h"
 
-static int secure_random_count_arg(Value v, const char *who) {
-  if (v.tag != T_INT || v.as.i < 0) creme_abort("%s: expected a non-negative integer, got a value of the wrong type", who);
-  return (int)v.as.i;
+static int secure_random_count_arg(Value *args, int nargs, const char *who) {
+  int64_t n = creme_arg_int(args, nargs, 0, who);
+  if (n < 0) creme_abort("%s: expected a non-negative integer", who);
+  return (int)n;
 }
 
 static Value bi_secure_random_bytes(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("secure-random-bytes: expected an argument");
-  int n = secure_random_count_arg(args[0], "secure-random-bytes");
+  int n = secure_random_count_arg(args, nargs, "secure-random-bytes");
   unsigned char *buf = GC_MALLOC((size_t)(n ? n : 1));
   if (n > 0 && !RAND_bytes(buf, n)) creme_abort("secure-random-bytes: RAND_bytes failed");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
@@ -32,8 +33,7 @@ static Value bi_secure_random_bytes(VM *vm, Value *args, int nargs) {
 
 static Value bi_secure_random_hex(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("secure-random-hex: expected an argument");
-  int n = secure_random_count_arg(args[0], "secure-random-hex");
+  int n = secure_random_count_arg(args, nargs, "secure-random-hex");
   unsigned char *raw = GC_MALLOC((size_t)(n ? n : 1));
   if (n > 0 && !RAND_bytes(raw, n)) creme_abort("secure-random-hex: RAND_bytes failed");
   static const char hexchars[] = "0123456789abcdef";
@@ -49,8 +49,7 @@ static const char B64_ALPHABET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 
 static Value bi_secure_random_base64(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("secure-random-base64: expected an argument");
-  int n = secure_random_count_arg(args[0], "secure-random-base64");
+  int n = secure_random_count_arg(args, nargs, "secure-random-base64");
   unsigned char *in = GC_MALLOC((size_t)(n ? n : 1));
   if (n > 0 && !RAND_bytes(in, n)) creme_abort("secure-random-base64: RAND_bytes failed");
 

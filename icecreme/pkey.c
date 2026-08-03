@@ -29,6 +29,7 @@
 #include <openssl/rsa.h>
 #include <string.h>
 
+#include "embed.h"
 #include "pkey.h"
 
 /* The low-level RSA/EC_KEY pointer API (RSA_free/EC_KEY_free, EVP_PKEY_set1_RSA/
@@ -305,13 +306,8 @@ static Value bi_pkey_to_pem(VM *vm, Value *args, int nargs) {
 
 static Value bi_pem_to_pkey(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("pem->pkey: expected a string");
-  const char *pem_in = args[0].as.chars;
+  const char *pem = creme_arg_cstr(args, nargs, 0, "pem->pkey");
   int pem_len = args[0].aux;
-
-  char *pem = GC_MALLOC((size_t)pem_len + 1);
-  memcpy(pem, pem_in, (size_t)pem_len);
-  pem[pem_len] = '\0';
 
   RSA *rsa = pem_try_rsa_private(pem, pem_len);
   if (rsa) {

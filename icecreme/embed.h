@@ -1,9 +1,16 @@
 /* Embedding-convenience API for a host C program linking against
  * libcreme.a — see embed.c's own header comment and icecreme/README.md's
  * "Embedding" section for the full minimal call sequence a host program
- * needs. Not used by icecreme's own CLI (main.c) — these are net-new
- * capabilities for an external consumer, kept out of the CLI binary's own
- * SRCS so the CLI's behavior/size is unaffected. */
+ * needs. The functions declared above this header's own "Value/argument
+ * helpers" section (`creme_runtime_init`/`creme_register_global`/
+ * `creme_run_repl`/`creme_run_scheme_file`) are net-new capabilities for an
+ * external embedder, implemented in embed.c and kept out of the CLI
+ * binary's own SRCS (main.c never calls them). The `static inline`
+ * "Value/argument helpers" section below it, though, is plain header-only
+ * code with no link-time footprint — icecreme's own `bi_*` builtins
+ * (builtins.c/creme_ffi.c/etc.) use those directly too, to avoid
+ * duplicating the same arity/type-check/GC_MALLOC boilerplate this header
+ * exists to collect in one place. */
 #ifndef CREME_EMBED_H
 #define CREME_EMBED_H
 
@@ -136,6 +143,19 @@ static inline const char *creme_arg_cstr(Value *args, int nargs, int index, cons
   return copy;
 }
 
+/* Extracts argument `index` as a `T_STR` value's raw `(pointer, length)`
+ * slice — no copy, no NUL termination, just the validated Scheme string's
+ * own backing bytes exactly as `args[index].as.chars`/`.aux` already hold
+ * them. For read-only use (hashing, scanning, anything that doesn't need
+ * a real C string handed to an external API) — use creme_arg_cstr instead
+ * when a NUL-terminated copy is genuinely needed. */
+static inline const char *creme_arg_bytes(Value *args, int nargs, int index, const char *who, int *len_out) {
+  if (index >= nargs) creme_abort("%s: missing argument %d", who, index + 1);
+  if (args[index].tag != T_STR) creme_abort("%s: argument %d: expected a string", who, index + 1);
+  *len_out = args[index].aux;
+  return args[index].as.chars;
+}
+
 /* Extracts argument `index` as a `T_VECTOR` value's backing storage
  * directly (no copy needed — Vector, value.h, is already a flat, already-
  * GC-owned `Value*`+length pair). Writes the vector's length to `*len_out`
@@ -159,6 +179,19 @@ static inline Value creme_cstr_value(const char *s) {
   char *copy = GC_MALLOC(len + 1);
   memcpy(copy, s, len + 1); /* +1: copies the NUL too, harmless (v_str below ignores it) */
   return v_str(copy, (int)len);
+}
+
+/* Copies a raw `(pointer, length)` byte slice into a fresh, owned Scheme
+ * string Value — the shared, public equivalent of a copy-and-wrap helper
+ * several icecreme .c files each used to hand-roll their own private copy
+ * of (e.g. builtins.c's own `copy_bytes`) — for building a return value
+ * out of a slice that ISN'T already a NUL-terminated C string (that's
+ * creme_cstr_value below). `ptr` need not be NUL-terminated and may
+ * contain embedded NULs; exactly `len` bytes are copied. */
+static inline Value creme_bytes_value(const char *ptr, int len) {
+  char *copy = GC_MALLOC((size_t)(len > 0 ? len : 1));
+  if (len > 0) memcpy(copy, ptr, (size_t)len);
+  return v_str(copy, len);
 }
 
 /* Builds a fresh Scheme string Value via a `printf`-style format string —

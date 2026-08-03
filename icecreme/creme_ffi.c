@@ -53,6 +53,7 @@
 #include <string.h>
 
 #include "creme_ffi.h"
+#include "embed.h"
 
 enum {
   FFI_T_VOID = 0,
@@ -104,10 +105,8 @@ static ffi_type *libffi_type_for_kind(int kind) {
 
 static Value bi_ffi_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) creme_abort("ffi-open: expected a library path/name string");
-  char *path = GC_MALLOC((size_t)args[0].aux + 1);
-  memcpy(path, args[0].as.chars, (size_t)args[0].aux);
-  path[args[0].aux] = '\0';
+  if (nargs != 1) creme_abort("ffi-open: expected a library path/name string");
+  const char *path = creme_arg_cstr(args, nargs, 0, "ffi-open");
   dlerror();
   void *handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
   if (!handle) {
@@ -132,9 +131,7 @@ static Value bi_ffi_function(VM *vm, Value *args, int nargs) {
     creme_abort("ffi-function: expected (lib name-string ret-type-symbol arg-type-symbol-list)");
   }
   void *handle = args[0].as.ptr;
-  char *name = GC_MALLOC((size_t)args[1].aux + 1);
-  memcpy(name, args[1].as.chars, (size_t)args[1].aux);
-  name[args[1].aux] = '\0';
+  const char *name = creme_arg_cstr(args, nargs, 1, "ffi-function");
 
   dlerror();
   void *fnptr = dlsym(handle, name);
@@ -143,14 +140,14 @@ static Value bi_ffi_function(VM *vm, Value *args, int nargs) {
 
   int ret_kind = ffi_type_kind_from_sym(args[2], "ffi-function");
 
-  int n_args = 0;
-  for (Value cur = args[3]; cur.tag == T_PAIR; cur = cur.as.pair->cdr) n_args++;
+  int n_args = creme_list_length(args[3]);
+  Value *arg_syms = GC_MALLOC(sizeof(Value) * (size_t)(n_args ? n_args : 1));
+  creme_list_to_values(args[3], arg_syms, n_args, "ffi-function");
 
   int *arg_kinds = GC_MALLOC(sizeof(int) * (size_t)(n_args ? n_args : 1));
   ffi_type **arg_types = GC_MALLOC(sizeof(ffi_type *) * (size_t)(n_args ? n_args : 1));
-  int i = 0;
-  for (Value cur = args[3]; cur.tag == T_PAIR; cur = cur.as.pair->cdr, i++) {
-    arg_kinds[i] = ffi_type_kind_from_sym(cur.as.pair->car, "ffi-function");
+  for (int i = 0; i < n_args; i++) {
+    arg_kinds[i] = ffi_type_kind_from_sym(arg_syms[i], "ffi-function");
     arg_types[i] = libffi_type_for_kind(arg_kinds[i]);
   }
 
@@ -225,14 +222,8 @@ static Value marshal_return(int kind, FfiSlot *slot) {
   case FFI_T_INT64: return v_int(slot->i64);
   case FFI_T_DOUBLE: return v_float(slot->d);
   case FFI_T_BOOL: return v_bool(slot->i32 != 0);
-  case FFI_T_STRING: {
-    if (!slot->ptr) return v_bool(0);
-    const char *s = (const char *)slot->ptr;
-    int len = (int)strlen(s);
-    char *buf = GC_MALLOC((size_t)(len ? len : 1));
-    memcpy(buf, s, (size_t)len);
-    return v_str(buf, len);
-  }
+  case FFI_T_STRING:
+    return slot->ptr ? creme_cstr_value((const char *)slot->ptr) : v_bool(0);
   case FFI_T_POINTER:
     if (!slot->ptr) return v_bool(0);
     return v_box(slot->ptr, BOX_KIND_FFI_POINTER);
@@ -248,15 +239,16 @@ static Value bi_ffi_call(VM *vm, Value *args, int nargs) {
   }
   FfiFunc *f = (FfiFunc *)args[0].as.ptr;
 
-  int given = 0;
-  for (Value cur = args[1]; cur.tag == T_PAIR; cur = cur.as.pair->cdr) given++;
+  int given = creme_list_length(args[1]);
   if (given != f->n_args) creme_abort("ffi-call: expected %d argument(s), got %d", f->n_args, given);
+
+  Value *call_args = GC_MALLOC(sizeof(Value) * (size_t)(given ? given : 1));
+  creme_list_to_values(args[1], call_args, given, "ffi-call");
 
   FfiSlot *slots = GC_MALLOC(sizeof(FfiSlot) * (size_t)(f->n_args ? f->n_args : 1));
   void **arg_ptrs = GC_MALLOC(sizeof(void *) * (size_t)(f->n_args ? f->n_args : 1));
-  int i = 0;
-  for (Value cur = args[1]; cur.tag == T_PAIR; cur = cur.as.pair->cdr, i++) {
-    marshal_arg_into(cur.as.pair->car, f->arg_kinds[i], &slots[i], "ffi-call");
+  for (int i = 0; i < given; i++) {
+    marshal_arg_into(call_args[i], f->arg_kinds[i], &slots[i], "ffi-call");
     arg_ptrs[i] = &slots[i];
   }
 
@@ -319,8 +311,10 @@ static Value bi_ffi_type_size(VM *vm, Value *args, int nargs) {
  * no matching free is ever REQUIRED, unlike a libc-malloc'd buffer. */
 static Value bi_ffi_gc_malloc(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_INT || args[0].as.i < 0) creme_abort("ffi-gc-malloc: expected a non-negative size");
-  return v_box(GC_MALLOC((size_t)args[0].as.i), BOX_KIND_FFI_POINTER);
+  if (nargs != 1) creme_abort("ffi-gc-malloc: expected a non-negative size");
+  int64_t size = creme_arg_int(args, nargs, 0, "ffi-gc-malloc");
+  if (size < 0) creme_abort("ffi-gc-malloc: expected a non-negative size");
+  return v_box(GC_MALLOC((size_t)size), BOX_KIND_FFI_POINTER);
 }
 
 /* (ffi-gc-free ptr) -- an OPTIONAL early release of memory ffi-gc-malloc

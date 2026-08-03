@@ -33,6 +33,7 @@
 
 #include <gc.h>
 
+#include "embed.h"
 #include "process.h"
 
 static void pr_buf_grow(char **buf, size_t *cap, size_t len, size_t extra) {
@@ -103,15 +104,16 @@ static void pr_drain_pipes(int out_fd, int err_fd,
 
 static Value bi_process_run(VM *vm, Value *args, int nargs) {
   if (nargs != 2) creme_abort("process-run: expected (cmd args)");
-  char *cmd = pr_cstring(args[0], "process-run");
+  const char *cmd = creme_arg_cstr(args, nargs, 0, "process-run");
 
-  int argc = 1;
-  for (Value c = args[1]; c.tag == T_PAIR; c = c.as.pair->cdr) argc++;
-  char **argv = GC_MALLOC(sizeof(char *) * (size_t)(argc + 1));
-  argv[0] = cmd;
-  int i = 1;
-  for (Value c = args[1]; c.tag == T_PAIR; c = c.as.pair->cdr) argv[i++] = pr_cstring(c.as.pair->car, "process-run");
-  argv[argc] = NULL;
+  int n = creme_list_length(args[1]);
+  Value *arg_vals = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
+  creme_list_to_values(args[1], arg_vals, n, "process-run");
+
+  char **argv = GC_MALLOC(sizeof(char *) * (size_t)(n + 2));
+  argv[0] = (char *)cmd;
+  for (int i = 0; i < n; i++) argv[i + 1] = pr_cstring(arg_vals[i], "process-run");
+  argv[n + 1] = NULL;
 
   int out_pipe[2], err_pipe[2];
   if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0) creme_abort("process-run: pipe() failed");
@@ -160,11 +162,12 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
  * call under icecreme at all; before this, icecreme had no sleep of any kind. */
 static Value bi_sleep_ms(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_INT || args[0].as.i < 0)
-    creme_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
+  if (nargs != 1) creme_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
+  int64_t ms = creme_arg_int(args, nargs, 0, "sleep-ms!");
+  if (ms < 0) creme_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
   struct timespec req;
-  req.tv_sec = args[0].as.i / 1000;
-  req.tv_nsec = (args[0].as.i % 1000) * 1000000L;
+  req.tv_sec = ms / 1000;
+  req.tv_nsec = (ms % 1000) * 1000000L;
   while (nanosleep(&req, &req) != 0 && errno == EINTR) {
     /* interrupted by a signal -- nanosleep already refilled req with the
      * remaining time, so just retry until the full duration has elapsed */
