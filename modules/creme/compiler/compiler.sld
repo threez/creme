@@ -91,7 +91,8 @@
 (define-library (creme compiler compiler)
   (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form
           define-syntax-expand-form mark-self-hosted-library-loaded! import!-apply-aliases!
-          required-native-families-list mark-redefined! unmark-redefined! fusable-prim-names)
+          required-native-families-list mark-redefined! unmark-redefined! fusable-prim-names
+          import-set-resolved-bindings)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
           (creme bytecode) (creme bootstrap) (creme introspection) (creme compiler reader)
           (creme file))
