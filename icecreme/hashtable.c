@@ -26,6 +26,7 @@
 #include <gc.h>
 #include <stdbool.h>
 
+#include "embed.h"
 #include "hashtable.h"
 
 static void *creme_ht_malloc(size_t size) {
@@ -60,8 +61,7 @@ typedef struct {
 } CremeHashTable;
 
 static CremeHashTable *as_hash_table(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_HASHTABLE) creme_abort("%s: expected a hash table", who);
-  return (CremeHashTable *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_HASHTABLE, who);
 }
 
 static Value bi_make_hash_table(VM *vm, Value *args, int nargs) {

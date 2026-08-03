@@ -68,8 +68,7 @@ static void value_bytes(Value v, const unsigned char **out_ptr, int *out_len, co
 }
 
 static PKeyBox *pkey_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_PKEY) creme_abort("%s: expected a pkey, got a value of the wrong type", who);
-  return (PKeyBox *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_PKEY, who);
 }
 
 static Value pkey_box(int kind, int is_private, const char *pem, int pem_len) {

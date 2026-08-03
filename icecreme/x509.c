@@ -85,18 +85,15 @@ static Value x509_csr_box(const char *pem, int pem_len) {
 }
 
 static const char *x509_cert_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_X509_CERT) creme_abort("%s: expected an x509 certificate", who);
-  return (const char *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_X509_CERT, who);
 }
 
 static const char *x509_csr_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_X509_CSR) creme_abort("%s: expected an x509 CSR", who);
-  return (const char *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_X509_CSR, who);
 }
 
 static PKeyBox *pkey_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_PKEY) creme_abort("%s: expected a pkey", who);
-  return (PKeyBox *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_PKEY, who);
 }
 
 /* ---- PEM helpers ----------------------------------------------------------- */

@@ -1520,8 +1520,7 @@ static Value bi_whereis(VM *vm, Value *args, int nargs) {
 
 static Value bi_actor_ref_id(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_ACTOR_REF) creme_abort("actor-ref-id: expected an actor ref");
-  ActorRef *ref = args[0].as.ptr;
+  ActorRef *ref = creme_arg_box(args, nargs, 0, BOX_KIND_ACTOR_REF, "actor-ref-id");
   return v_str(ref->id, (int)strlen(ref->id));
 }
 

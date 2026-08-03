@@ -63,8 +63,7 @@ static Value bi_regexp_p(VM *vm, Value *args, int nargs) {
 }
 
 static pcre2_code *regex_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_REGEX) creme_abort("%s: expected a regexp", who);
-  return (pcre2_code *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_REGEX, who);
 }
 
 /* Matches `re` against subj[start..subj_len) once. Returns 1 with

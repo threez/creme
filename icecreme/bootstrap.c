@@ -93,8 +93,7 @@ static Value bi_make_environment(VM *vm, Value *args, int nargs) {
 }
 
 static VM *as_environment_vm(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_ENVIRONMENT) creme_abort("%s: expected an environment", who);
-  return (VM *)v.as.ptr;
+  return (VM *)creme_arg_box(&v, 1, 0, BOX_KIND_ENVIRONMENT, who);
 }
 
 /* (environment-copy-global! env-box external-name internal-name) --

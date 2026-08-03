@@ -367,9 +367,8 @@ typedef struct {
 
 static Value bi_csv_reader_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("csv-reader-open: expected an input port");
   CremeCsvReader *r = GC_MALLOC(sizeof(CremeCsvReader));
-  r->port = args[0].as.port;
+  r->port = creme_arg_port(args, nargs, 0, "csv-reader-open");
   r->sep = csv_char_arg(args, nargs, 1, ',');
   r->quote = csv_char_arg(args, nargs, 2, '"');
   /* args[3] (chunk-size) is accepted for native-signature compatibility
@@ -387,9 +386,7 @@ static Value bi_csv_reader_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_reader_read_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_CSV_READER)
-    creme_abort("csv-reader-read!: expected a csv reader");
-  CremeCsvReader *r = args[0].as.ptr;
+  CremeCsvReader *r = creme_arg_box(args, nargs, 0, BOX_KIND_CSV_READER, "csv-reader-read!");
   CharSrc src = {port_next, port_peek, r->port};
   Value *cells;
   int n;
@@ -402,9 +399,8 @@ static Value bi_csv_reader_read_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_writer_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("csv-writer-open: expected an output port");
   CremeCsvWriter *w = GC_MALLOC(sizeof(CremeCsvWriter));
-  w->port = args[0].as.port;
+  w->port = creme_arg_port(args, nargs, 0, "csv-writer-open");
   w->sep = csv_char_arg(args, nargs, 1, ',');
   w->quoting = csv_quoting_arg(args, nargs, 2);
   w->quote = '"';
@@ -419,9 +415,7 @@ static Value bi_csv_writer_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_writer_row_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_CSV_WRITER)
-    creme_abort("csv-writer-row!: expected a csv writer");
-  CremeCsvWriter *w = args[0].as.ptr;
+  CremeCsvWriter *w = creme_arg_box(args, nargs, 0, BOX_KIND_CSV_WRITER, "csv-writer-row!");
   DynBuf out = {NULL, 0, 0};
   csv_write_row(&out, args + 1, nargs - 1, w->sep, w->quote, w->quoting);
   creme_port_write_bytes(w->port, out.buf ? out.buf : "", out.len);

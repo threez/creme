@@ -169,6 +169,30 @@ static inline Value *creme_arg_vector(Value *args, int nargs, int index, const c
   return args[index].as.vec->items;
 }
 
+/* Extracts argument `index` as a `T_PORT` value's `Port *` directly (no
+ * copy — a `Port` is already a GC-owned struct, value.h). Does not itself
+ * check the port's `kind` (input vs. output, string vs. file/stdio) —
+ * callers needing a specific direction/backing still check `->kind`
+ * themselves afterward, same as every existing `bi_*` port builtin does. */
+static inline Port *creme_arg_port(Value *args, int nargs, int index, const char *who) {
+  if (index >= nargs) creme_abort("%s: missing argument %d", who, index + 1);
+  if (args[index].tag != T_PORT) creme_abort("%s: argument %d: expected a port", who, index + 1);
+  return args[index].as.port;
+}
+
+/* Extracts argument `index` as a `T_BOX` value's opaque `void *` payload,
+ * validating it's specifically a box of `expected_kind` (one of value.h's
+ * own `BOX_KIND_*` constants — the same second discriminant every existing
+ * `args[i].tag != T_BOX || args[i].aux != BOX_KIND_X` check already tests).
+ * A box's kind constants are defined per-feature-file, not by embed.h
+ * itself, so `expected_kind` is a plain `int` here rather than a named
+ * enum — pass the file's own `BOX_KIND_*` constant at each call site. */
+static inline void *creme_arg_box(Value *args, int nargs, int index, int expected_kind, const char *who) {
+  if (index >= nargs) creme_abort("%s: missing argument %d", who, index + 1);
+  if (args[index].tag != T_BOX || args[index].aux != expected_kind) creme_abort("%s: argument %d: unexpected type", who, index + 1);
+  return args[index].as.ptr;
+}
+
 /* Wraps an already NUL-terminated C string into a fresh Scheme string
  * Value (strlen's it, GC_MALLOC's an owned copy, then `v_str`s it) — for
  * returning a plain string (or defining a `creme_register_global` constant)

@@ -11,8 +11,7 @@
 #include "sql.h"
 
 static sqlite3 *as_sql(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_SQL) creme_abort("%s: expected a sql connection", who);
-  return (sqlite3 *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_SQL, who);
 }
 
 static void bind_param(sqlite3_stmt *stmt, int idx, Value v) {

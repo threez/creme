@@ -34,6 +34,7 @@
 #include <gc.h>
 #include <string.h>
 
+#include "embed.h"
 #include "treelist.h"
 
 #define RRB_WIDTH 32
@@ -445,13 +446,11 @@ static Value v_mutable_treelist(RRBNode *root) {
 }
 
 static RRBNode *tl_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_TREELIST) creme_abort("%s: expected a treelist", who);
-  return (RRBNode *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_TREELIST, who);
 }
 
 static MutableTreelistState *mtl_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_MUTABLE_TREELIST) creme_abort("%s: expected a mutable treelist", who);
-  return (MutableTreelistState *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_MUTABLE_TREELIST, who);
 }
 
 static RRBNode *any_tree_arg(Value v, const char *who) {

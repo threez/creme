@@ -52,8 +52,7 @@ static BigDecimal *bd_new(void) {
 static Value v_bigdecimal(BigDecimal *bd) { return v_box(bd, BOX_KIND_BIGDECIMAL); }
 
 static BigDecimal *bigdecimal_arg(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_BIGDECIMAL) creme_abort("%s: expected bigdecimal, got a non-bigdecimal value", who);
-  return v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_BIGDECIMAL, who);
 }
 
 /* Parses a plain decimal literal: [sign] digits ['.' digits]. No

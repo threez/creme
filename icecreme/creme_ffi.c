@@ -118,10 +118,8 @@ static Value bi_ffi_open(VM *vm, Value *args, int nargs) {
 
 static Value bi_ffi_close(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_FFI_LIB) {
-    creme_abort("ffi-close: expected a value from ffi-open");
-  }
-  dlclose(args[0].as.ptr);
+  if (nargs != 1) creme_abort("ffi-close: expected a value from ffi-open");
+  dlclose(creme_arg_box(args, nargs, 0, BOX_KIND_FFI_LIB, "ffi-close"));
   return v_nil();
 }
 
@@ -234,10 +232,8 @@ static Value marshal_return(int kind, FfiSlot *slot) {
 
 static Value bi_ffi_call(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_FFI_FUNC) {
-    creme_abort("ffi-call: expected (func arg-list)");
-  }
-  FfiFunc *f = (FfiFunc *)args[0].as.ptr;
+  if (nargs != 2) creme_abort("ffi-call: expected (func arg-list)");
+  FfiFunc *f = (FfiFunc *)creme_arg_box(args, nargs, 0, BOX_KIND_FFI_FUNC, "ffi-call");
 
   int given = creme_list_length(args[1]);
   if (given != f->n_args) creme_abort("ffi-call: expected %d argument(s), got %d", f->n_args, given);
@@ -265,9 +261,9 @@ static Value bi_ffi_call(VM *vm, Value *args, int nargs) {
  * anywhere, same as real C). */
 static void *ffi_pointer_base_arg(Value v, const char *who) {
   if (v.tag == T_BOOL && !v.as.b) creme_abort("%s: pointer is null", who);
-  if (v.tag != T_BOX || v.aux != BOX_KIND_FFI_POINTER) creme_abort("%s: expected a pointer argument", who);
-  if (!v.as.ptr) creme_abort("%s: pointer is null", who);
-  return v.as.ptr;
+  void *ptr = creme_arg_box(&v, 1, 0, BOX_KIND_FFI_POINTER, who);
+  if (!ptr) creme_abort("%s: pointer is null", who);
+  return ptr;
 }
 
 static Value bi_ffi_pointer_ref(VM *vm, Value *args, int nargs) {
@@ -355,10 +351,8 @@ static Value bi_ffi_pointer_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_ffi_null_pointer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_BOX || args[0].aux != BOX_KIND_FFI_POINTER) {
-    creme_abort("ffi-null-pointer?: expected a pointer");
-  }
-  return v_bool(args[0].as.ptr == NULL);
+  if (nargs != 1) creme_abort("ffi-null-pointer?: expected a pointer");
+  return v_bool(creme_arg_box(args, nargs, 0, BOX_KIND_FFI_POINTER, "ffi-null-pointer?") == NULL);
 }
 
 void creme_register_ffi_builtins(VM *vm) {

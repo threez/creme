@@ -135,13 +135,11 @@ typedef struct {
 } MuxServer;
 
 static MuxApp *as_mux_app(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_MUX_ROUTER) creme_abort("%s: expected a mux router", who);
-  return (MuxApp *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_MUX_ROUTER, who);
 }
 
 static MuxServer *as_mux_server(Value v, const char *who) {
-  if (v.tag != T_BOX || v.aux != BOX_KIND_MUX_SERVER) creme_abort("%s: expected a mux server", who);
-  return (MuxServer *)v.as.ptr;
+  return creme_arg_box(&v, 1, 0, BOX_KIND_MUX_SERVER, who);
 }
 
 static char *gc_strndup(const char *s, size_t len) {

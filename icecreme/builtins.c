@@ -813,8 +813,7 @@ static Value bi_open_output_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_get_output_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("get-output-string: expected a port");
-  Port *p = args[0].as.port;
+  Port *p = creme_arg_port(args, nargs, 0, "get-output-string");
   if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("get-output-string: expected a string output port");
   /* Copies out (matches SchemeStr's own value-semantics — a fresh immutable
    * string each call), even though nothing in this bench mutates the port
@@ -1012,8 +1011,7 @@ static Value bi_eof_object_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_close_port(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("close-port: expected a port");
-  Port *p = args[0].as.port;
+  Port *p = creme_arg_port(args, nargs, 0, "close-port");
   if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
   p->closed = 1;
   return v_nil();
@@ -1384,8 +1382,7 @@ static Value bi_open_output_bytevector(VM *vm, Value *args, int nargs) {
 
 static Value bi_get_output_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("get-output-bytevector: expected a port");
-  Port *p = args[0].as.port;
+  Port *p = creme_arg_port(args, nargs, 0, "get-output-bytevector");
   if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("get-output-bytevector: expected a bytevector output port");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
   bv->len = p->len;
@@ -1408,15 +1405,13 @@ static Value bi_textual_port_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_input_port_open_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("input-port-open?: expected a port");
-  Port *p = args[0].as.port;
+  Port *p = creme_arg_port(args, nargs, 0, "input-port-open?");
   return v_bool(port_is_input(p) && !p->closed);
 }
 
 static Value bi_output_port_open_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_PORT) creme_abort("output-port-open?: expected a port");
-  Port *p = args[0].as.port;
+  Port *p = creme_arg_port(args, nargs, 0, "output-port-open?");
   return v_bool(port_is_output(p) && !p->closed);
 }
 
@@ -1451,8 +1446,7 @@ static Value bi_peek_u8(VM *vm, Value *args, int nargs) {
 static Value bi_write_u8(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t byte = creme_arg_int(args, nargs, 0, "write-u8");
-  if (nargs < 2 || args[1].tag != T_PORT) creme_abort("write-u8: expects a port");
-  Port *p = args[1].as.port;
+  Port *p = creme_arg_port(args, nargs, 1, "write-u8");
   char c = (char)byte;
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fputc((int)(unsigned char)c, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
@@ -1513,9 +1507,8 @@ static Value bi_read_bytevector_bang(VM *vm, Value *args, int nargs) {
 static Value bi_write_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs < 1 || args[0].tag != T_BYTEVECTOR) creme_abort("write-bytevector: expected a bytevector");
-  if (nargs < 2 || args[1].tag != T_PORT) creme_abort("write-bytevector: expects a port");
   Bytevector *bv = args[0].as.bv;
-  Port *p = args[1].as.port;
+  Port *p = creme_arg_port(args, nargs, 1, "write-bytevector");
   int first, last;
   byte_range_args(args, nargs, 2, bv->len, &first, &last);
   int len = last - first;
@@ -1535,8 +1528,8 @@ static Value bi_write_bytevector(VM *vm, Value *args, int nargs) {
  * with-output-file's own unconditional-close pattern above, just for an
  * already-open port instead of one this function opens itself. */
 static Value bi_call_with_port(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_PORT) creme_abort("call-with-port: expected (port proc)");
-  Port *p = args[0].as.port;
+  if (nargs < 2) creme_abort("call-with-port: expected (port proc)");
+  Port *p = creme_arg_port(args, nargs, 0, "call-with-port");
   Value result = creme_apply(vm, args[1], args, 1);
   if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
   p->closed = 1;
