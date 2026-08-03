@@ -18,13 +18,13 @@
  * (private to hashtable.c) directly. */
 static Value g_catalog;
 
-/* host-welcome: (host-welcome "Alice") => "Welcome to Ionos Grocery,
+/* host-welcome: (host-welcome "Alice") => "Welcome to Acme Grocery,
  * Alice!" — creme_arg_cstr/creme_format_value, exactly the shape every
  * icecreme-internal `bi_*` function already has. */
 static Value host_welcome(VM *vm, Value *args, int nargs) {
   (void)vm;
   const char *name = creme_arg_cstr(args, nargs, 0, "host-welcome");
-  return creme_format_value("Welcome to Ionos Grocery, %s!", name);
+  return creme_format_value("Welcome to Acme Grocery, %s!", name);
 }
 
 /* host-price-lookup: (host-price-lookup "apple") => 150 (cents; or #f if
@@ -79,7 +79,7 @@ int main(void) {
   creme_register_builtin(vm, "host-welcome", host_welcome);
   creme_register_builtin(vm, "host-price-lookup", host_price_lookup);
   creme_register_builtin(vm, "host-log", host_log);
-  creme_register_global(vm, "host-store-name", creme_cstr_value("Ionos Grocery"));
+  creme_register_global(vm, "host-store-name", creme_cstr_value("Acme Grocery"));
 
   /* The pending orders themselves — real input data for the report
    * script, a native list of (item . quantity) pairs built directly with

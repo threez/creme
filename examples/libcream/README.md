@@ -51,12 +51,12 @@ binary itself needs the repo root as its CWD.
 Expected output (stdout):
 
 ```
-Welcome to Ionos Grocery, Alice!
+Welcome to Acme Grocery, Alice!
 apple: 5 x $1.50 = $7.50
 bread: 1 x $3.20 = $3.20
 milk: 2 x $2.75 = $5.50
 total: $16.20
-thank you for shopping at Ionos Grocery
+thank you for shopping at Acme Grocery
 ```
 
 `host-log`'s two messages go to stderr, not stdout:
