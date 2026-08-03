@@ -536,8 +536,15 @@ above), `creme_alist_pair` (one `(key . value)` alist entry, combine with
 `creme_bytevector_wrap`/`creme_bytevector_value` (the `Bytevector`
 equivalents of `v_str`'s own zero-copy wrap and `creme_bytes_value`'s
 copy, respectively — a `Bytevector`, unlike a `T_STR`, needs its own
-small struct allocated even for a zero-copy wrap). None of these add
-anything to `libcreme.a` itself (pure `static inline`/macro, free to
+small struct allocated even for a zero-copy wrap), `creme_arg_blob`
+(extracts argument N as a `T_STR` OR `T_BYTEVECTOR`'s raw bytes,
+whichever it is — for a builtin accepting a "blob" interchangeably, e.g.
+a key that's often raw binary straight from `(creme secure-random)`),
+and `creme_dupn` (copies a raw `(pointer, length)` slice into a fresh,
+NUL-terminated C string — `creme_arg_cstr`'s own underlying copy, exposed
+directly for building a C string out of something that ISN'T argument N
+of the current call, e.g. a substring or a struct field). None of these
+add anything to `libcreme.a` itself (pure `static inline`/macro, free to
 compile away) — icecreme's own
 `bi_*` builtins use them directly too, not
 just an external embedder — see each one's own doc comment in `embed.h`, and

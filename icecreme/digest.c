@@ -51,25 +51,6 @@ static Value hmac_hex_digest(const EVP_MD *md, const char *key, int keylen, cons
   return result;
 }
 
-/* Unlike the original three digest-*'s string-only contract (left
- * untouched below), every NEW procedure added in this file accepts
- * EITHER a bytevector or a string for its argument(s) -- a key is often
- * raw binary (e.g. straight from (creme secure-random)) -- matching
- * native's own digest_bytes_arg (src/creme/modules/creme/digest.cr). */
-static void value_bytes(Value v, const char **out_ptr, int *out_len, const char *who) {
-  if (v.tag == T_STR) {
-    *out_ptr = v.as.chars;
-    *out_len = v.aux;
-    return;
-  }
-  if (v.tag == T_BYTEVECTOR) {
-    *out_ptr = (const char *)v.as.bv->bytes;
-    *out_len = v.as.bv->len;
-    return;
-  }
-  creme_abort("%s: expected a blob or string argument", who);
-}
-
 static Value bi_digest_md5(VM *vm, Value *args, int nargs) {
   (void)vm;
   int len;
@@ -91,51 +72,47 @@ static Value bi_digest_sha256(VM *vm, Value *args, int nargs) {
   return hex_digest(EVP_sha256(), data, len);
 }
 
+/* Unlike the original three digest-*'s string-only contract above, every
+ * procedure below accepts EITHER a bytevector or a string for its
+ * argument(s) -- a key is often raw binary (e.g. straight from (creme
+ * secure-random)) -- matching native's own digest_bytes_arg
+ * (src/creme/modules/creme/digest.cr); creme_arg_blob (embed.h) is the
+ * shared helper for that string-or-bytevector union. */
 static Value bi_digest_sha384(VM *vm, Value *args, int nargs) {
   (void)vm;
-  creme_check_min_args(nargs, 1, "digest-sha384");
-  const char *ptr;
   int len;
-  value_bytes(args[0], &ptr, &len, "digest-sha384");
+  const char *ptr = (const char *)creme_arg_blob(args, nargs, 0, "digest-sha384", &len);
   return hex_digest(EVP_sha384(), ptr, len);
 }
 
 static Value bi_digest_sha512(VM *vm, Value *args, int nargs) {
   (void)vm;
-  creme_check_min_args(nargs, 1, "digest-sha512");
-  const char *ptr;
   int len;
-  value_bytes(args[0], &ptr, &len, "digest-sha512");
+  const char *ptr = (const char *)creme_arg_blob(args, nargs, 0, "digest-sha512", &len);
   return hex_digest(EVP_sha512(), ptr, len);
 }
 
 static Value bi_hmac_sha256(VM *vm, Value *args, int nargs) {
   (void)vm;
-  creme_check_min_args(nargs, 2, "hmac-sha256");
-  const char *kptr, *dptr;
   int klen, dlen;
-  value_bytes(args[0], &kptr, &klen, "hmac-sha256");
-  value_bytes(args[1], &dptr, &dlen, "hmac-sha256");
+  const char *kptr = (const char *)creme_arg_blob(args, nargs, 0, "hmac-sha256", &klen);
+  const char *dptr = (const char *)creme_arg_blob(args, nargs, 1, "hmac-sha256", &dlen);
   return hmac_hex_digest(EVP_sha256(), kptr, klen, dptr, dlen);
 }
 
 static Value bi_hmac_sha384(VM *vm, Value *args, int nargs) {
   (void)vm;
-  creme_check_min_args(nargs, 2, "hmac-sha384");
-  const char *kptr, *dptr;
   int klen, dlen;
-  value_bytes(args[0], &kptr, &klen, "hmac-sha384");
-  value_bytes(args[1], &dptr, &dlen, "hmac-sha384");
+  const char *kptr = (const char *)creme_arg_blob(args, nargs, 0, "hmac-sha384", &klen);
+  const char *dptr = (const char *)creme_arg_blob(args, nargs, 1, "hmac-sha384", &dlen);
   return hmac_hex_digest(EVP_sha384(), kptr, klen, dptr, dlen);
 }
 
 static Value bi_hmac_sha512(VM *vm, Value *args, int nargs) {
   (void)vm;
-  creme_check_min_args(nargs, 2, "hmac-sha512");
-  const char *kptr, *dptr;
   int klen, dlen;
-  value_bytes(args[0], &kptr, &klen, "hmac-sha512");
-  value_bytes(args[1], &dptr, &dlen, "hmac-sha512");
+  const char *kptr = (const char *)creme_arg_blob(args, nargs, 0, "hmac-sha512", &klen);
+  const char *dptr = (const char *)creme_arg_blob(args, nargs, 1, "hmac-sha512", &dlen);
   return hmac_hex_digest(EVP_sha512(), kptr, klen, dptr, dlen);
 }
 

@@ -80,11 +80,18 @@ both reaching their current shape) — not itemized individually here;
   `creme_bytevector_wrap`/`creme_bytevector_value` (the `Bytevector`
   equivalents of `v_str`'s own zero-copy wrap and `creme_bytes_value`'s
   copy — cipher.c/pkey.c/secure_random.c each hand-rolled the zero-copy
-  wrap identically). icecreme's own `bi_*` builtins across every `.c`
-  file now use all of these directly too, in place of their previous
-  hand-rolled arity/type checks, `GC_MALLOC`/`memcpy`/manual-list-walking
-  boilerplate, and (http.c/term.c/builtins.c's reader) nested
-  `creme_cons` chains for a fixed-shape list.
+  wrap identically), `creme_arg_blob` (extracts argument N as a `T_STR`
+  OR `T_BYTEVECTOR`'s raw bytes, whichever it is — cipher.c/pkey.c's own
+  private `value_bytes` were byte-for-byte identical, digest.c's own
+  differed only in the output pointer's exact type), and `creme_dupn`
+  (copies a raw slice into a fresh NUL-terminated C string —
+  `creme_arg_cstr`'s own underlying copy, exposed directly — actor.c's
+  and http.c's own `dupn`, x509.c's own `gc_strndup`, were all
+  byte-for-byte/near-identical). icecreme's own `bi_*` builtins across
+  every `.c` file now use all of these directly too, in place of their
+  previous hand-rolled arity/type checks, `GC_MALLOC`/`memcpy`/
+  manual-list-walking boilerplate, and (http.c/term.c/builtins.c's
+  reader) nested `creme_cons` chains for a fixed-shape list.
 - `embed.h` also gains boxed-type convenience helpers for hash-table/
   treelist/bigdecimal/regex/sql/actor-ref — each type's own payload
   struct (`CremeHashTable`/`RRBNode`/`BigDecimal`/`pcre2_code`/`sqlite3`/

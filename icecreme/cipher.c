@@ -36,20 +36,6 @@
 #define CIPHER_NONCE_SIZE 12 /* GCM's standard 96-bit nonce */
 #define CIPHER_TAG_SIZE 16
 
-static void value_bytes(Value v, const unsigned char **out_ptr, int *out_len, const char *who) {
-  if (v.tag == T_STR) {
-    *out_ptr = (const unsigned char *)v.as.chars;
-    *out_len = v.aux;
-    return;
-  }
-  if (v.tag == T_BYTEVECTOR) {
-    *out_ptr = v.as.bv->bytes;
-    *out_len = v.as.bv->len;
-    return;
-  }
-  creme_abort("%s: expected a blob or string argument", who);
-}
-
 static Value random_bytevector(int n, const char *who) {
   unsigned char *buf = GC_MALLOC((size_t)n);
   if (!RAND_bytes(buf, n)) creme_abort("%s: RAND_bytes failed", who);
@@ -108,12 +94,13 @@ static void cipher_feed_aad(EVP_CIPHER_CTX *ctx, const unsigned char *aad, int a
 
 static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 3, "aes-256-gcm-encrypt");
-  const unsigned char *key, *nonce, *pt, *aad = NULL;
-  int keylen, noncelen, ptlen, aadlen = 0;
-  value_bytes(args[0], &key, &keylen, "aes-256-gcm-encrypt");
-  value_bytes(args[1], &nonce, &noncelen, "aes-256-gcm-encrypt");
-  value_bytes(args[2], &pt, &ptlen, "aes-256-gcm-encrypt");
-  if (nargs >= 4) value_bytes(args[3], &aad, &aadlen, "aes-256-gcm-encrypt");
+  const unsigned char *aad = NULL;
+  int aadlen = 0;
+  int keylen, noncelen, ptlen;
+  const unsigned char *key = creme_arg_blob(args, nargs, 0, "aes-256-gcm-encrypt", &keylen);
+  const unsigned char *nonce = creme_arg_blob(args, nargs, 1, "aes-256-gcm-encrypt", &noncelen);
+  const unsigned char *pt = creme_arg_blob(args, nargs, 2, "aes-256-gcm-encrypt", &ptlen);
+  if (nargs >= 4) aad = creme_arg_blob(args, nargs, 3, "aes-256-gcm-encrypt", &aadlen);
 
   EVP_CIPHER_CTX *ctx = cipher_new_ctx(key, keylen, nonce, noncelen, 1, "aes-256-gcm-encrypt");
   cipher_feed_aad(ctx, aad, aadlen, "aes-256-gcm-encrypt");
@@ -146,13 +133,14 @@ static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
 static Value bi_aes_256_gcm_decrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 4, "aes-256-gcm-decrypt");
-  const unsigned char *key, *nonce, *ct, *tag, *aad = NULL;
-  int keylen, noncelen, ctlen, taglen, aadlen = 0;
-  value_bytes(args[0], &key, &keylen, "aes-256-gcm-decrypt");
-  value_bytes(args[1], &nonce, &noncelen, "aes-256-gcm-decrypt");
-  value_bytes(args[2], &ct, &ctlen, "aes-256-gcm-decrypt");
-  value_bytes(args[3], &tag, &taglen, "aes-256-gcm-decrypt");
-  if (nargs >= 5) value_bytes(args[4], &aad, &aadlen, "aes-256-gcm-decrypt");
+  const unsigned char *aad = NULL;
+  int aadlen = 0;
+  int keylen, noncelen, ctlen, taglen;
+  const unsigned char *key = creme_arg_blob(args, nargs, 0, "aes-256-gcm-decrypt", &keylen);
+  const unsigned char *nonce = creme_arg_blob(args, nargs, 1, "aes-256-gcm-decrypt", &noncelen);
+  const unsigned char *ct = creme_arg_blob(args, nargs, 2, "aes-256-gcm-decrypt", &ctlen);
+  const unsigned char *tag = creme_arg_blob(args, nargs, 3, "aes-256-gcm-decrypt", &taglen);
+  if (nargs >= 5) aad = creme_arg_blob(args, nargs, 4, "aes-256-gcm-decrypt", &aadlen);
   if (taglen != CIPHER_TAG_SIZE) creme_abort("aes-256-gcm-decrypt: expected a %d-byte tag, got %d bytes", CIPHER_TAG_SIZE, taglen);
 
   EVP_CIPHER_CTX *ctx = cipher_new_ctx(key, keylen, nonce, noncelen, 0, "aes-256-gcm-decrypt");

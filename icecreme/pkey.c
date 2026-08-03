@@ -48,22 +48,6 @@
  * behavior change. */
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-static Value bytevector_value(const unsigned char *bytes, int len) { return creme_bytevector_wrap((unsigned char *)bytes, len); }
-
-static void value_bytes(Value v, const unsigned char **out_ptr, int *out_len, const char *who) {
-  if (v.tag == T_STR) {
-    *out_ptr = (const unsigned char *)v.as.chars;
-    *out_len = v.aux;
-    return;
-  }
-  if (v.tag == T_BYTEVECTOR) {
-    *out_ptr = v.as.bv->bytes;
-    *out_len = v.as.bv->len;
-    return;
-  }
-  creme_abort("%s: expected a blob or string argument", who);
-}
-
 static PKeyBox *pkey_arg(Value v, const char *who) {
   return creme_arg_box(&v, 1, 0, BOX_KIND_PKEY, who);
 }
@@ -334,9 +318,8 @@ static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 2, "pkey-sign");
   PKeyBox *box = pkey_arg(args[0], "pkey-sign");
   if (!box->is_private) creme_abort("pkey-sign: expected a private key");
-  const unsigned char *msg;
   int msg_len;
-  value_bytes(args[1], &msg, &msg_len, "pkey-sign");
+  const unsigned char *msg = creme_arg_blob(args, nargs, 1, "pkey-sign", &msg_len);
 
   EVP_PKEY *pkey = pkeybox_to_evp(box, "pkey-sign");
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
@@ -364,17 +347,16 @@ static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
   }
   EVP_MD_CTX_free(ctx);
   EVP_PKEY_free(pkey);
-  return bytevector_value(sig, (int)sig_len);
+  return creme_bytevector_wrap(sig, (int)sig_len);
 }
 
 static Value bi_pkey_verify(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 3, "pkey-verify");
   PKeyBox *box = pkey_arg(args[0], "pkey-verify");
-  const unsigned char *msg, *sig;
   int msg_len, sig_len;
-  value_bytes(args[1], &msg, &msg_len, "pkey-verify");
-  value_bytes(args[2], &sig, &sig_len, "pkey-verify");
+  const unsigned char *msg = creme_arg_blob(args, nargs, 1, "pkey-verify", &msg_len);
+  const unsigned char *sig = creme_arg_blob(args, nargs, 2, "pkey-verify", &sig_len);
 
   EVP_PKEY *pkey = pkeybox_to_evp(box, "pkey-verify");
   EVP_MD_CTX *ctx = EVP_MD_CTX_new();
@@ -462,15 +444,14 @@ static Value bi_rsa_encrypt(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 2, "rsa-encrypt");
   PKeyBox *box = pkey_arg(args[0], "rsa-encrypt");
   if (box->kind != PKEY_KIND_RSA) creme_abort("rsa-encrypt: expected an RSA key");
-  const unsigned char *pt;
   int pt_len;
-  value_bytes(args[1], &pt, &pt_len, "rsa-encrypt");
+  const unsigned char *pt = creme_arg_blob(args, nargs, 1, "rsa-encrypt", &pt_len);
 
   RSA *rsa = pem_to_rsa(box->pem, box->pem_len, "rsa-encrypt");
   int out_len;
   unsigned char *out = rsa_oaep_op(rsa, pt, pt_len, 1, &out_len, "rsa-encrypt");
   RSA_free(rsa);
-  return bytevector_value(out, out_len);
+  return creme_bytevector_wrap(out, out_len);
 }
 
 static Value bi_rsa_decrypt(VM *vm, Value *args, int nargs) {
@@ -479,15 +460,14 @@ static Value bi_rsa_decrypt(VM *vm, Value *args, int nargs) {
   PKeyBox *box = pkey_arg(args[0], "rsa-decrypt");
   if (box->kind != PKEY_KIND_RSA) creme_abort("rsa-decrypt: expected an RSA key");
   if (!box->is_private) creme_abort("rsa-decrypt: expected a private key");
-  const unsigned char *ct;
   int ct_len;
-  value_bytes(args[1], &ct, &ct_len, "rsa-decrypt");
+  const unsigned char *ct = creme_arg_blob(args, nargs, 1, "rsa-decrypt", &ct_len);
 
   RSA *rsa = pem_to_rsa(box->pem, box->pem_len, "rsa-decrypt");
   int out_len;
   unsigned char *out = rsa_oaep_op(rsa, ct, ct_len, 0, &out_len, "rsa-decrypt");
   RSA_free(rsa);
-  return bytevector_value(out, out_len);
+  return creme_bytevector_wrap(out, out_len);
 }
 
 void creme_register_pkey_builtins(VM *vm) {

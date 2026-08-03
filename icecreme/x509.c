@@ -50,15 +50,8 @@
 #define X509_CERT_SERIAL_CA_SIGNED 2
 #define NID_BASIC_CONSTRAINTS_ 87
 
-static char *gc_strndup(const char *s, int len) {
-  char *buf = GC_MALLOC((size_t)len + 1);
-  memcpy(buf, s, (size_t)len);
-  buf[len] = '\0';
-  return buf;
-}
-
 static Value x509_cert_box(const char *pem, int pem_len) {
-  char *pem_buf = gc_strndup(pem, pem_len);
+  char *pem_buf = creme_dupn(pem, pem_len);
   Value v;
   v.tag = T_BOX;
   v.aux = BOX_KIND_X509_CERT;
@@ -67,7 +60,7 @@ static Value x509_cert_box(const char *pem, int pem_len) {
 }
 
 static Value x509_csr_box(const char *pem, int pem_len) {
-  char *pem_buf = gc_strndup(pem, pem_len);
+  char *pem_buf = creme_dupn(pem, pem_len);
   Value v;
   v.tag = T_BOX;
   v.aux = BOX_KIND_X509_CSR;
@@ -195,7 +188,7 @@ static X509_NAME *x509_build_name(Value subject, const char *who) {
     }
     Value field = pair.as.pair->car;
     Value value = pair.as.pair->cdr;
-    char *field_str = gc_strndup(field.as.chars, field.aux);
+    char *field_str = creme_dupn(field.as.chars, field.aux);
     int ret = X509_NAME_add_entry_by_txt(name, field_str, MBSTRING_UTF8, (const unsigned char *)value.as.chars, value.aux, -1, 0);
     if (ret != 1) {
       X509_NAME_free(name);

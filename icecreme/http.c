@@ -105,12 +105,6 @@ static void hbuf_printf(HBuf *b, const char *fmt, ...) {
   hbuf_puts(b, big, n);
 }
 
-static char *dupn(const char *s, int len) {
-  char *out = GC_MALLOC((size_t)(len > 0 ? len : 1) + 1);
-  if (len > 0) memcpy(out, s, (size_t)len);
-  out[len > 0 ? len : 0] = '\0';
-  return out;
-}
 
 static Value v_litstr(const char *s) { return creme_cstr_value(s); }
 
@@ -178,9 +172,9 @@ static void parse_url(const char *url, int len, ParsedUrl *out, const char *who)
     port = atoi(portbuf);
   }
 
-  out->host = dupn(host_port, host_len);
+  out->host = creme_dupn(host_port, host_len);
   out->port = port;
-  out->path = dupn(path, path_len);
+  out->path = creme_dupn(path, path_len);
   out->https = https;
 }
 
@@ -201,8 +195,8 @@ static HeaderLine *parse_headers_arg(Value v, const char *who) {
       creme_abort("%s: expected (name . value) pair in headers", who);
     }
     HeaderLine *hl = GC_MALLOC(sizeof(HeaderLine));
-    hl->name = dupn(entry.as.pair->car.as.chars, entry.as.pair->car.aux);
-    hl->value = dupn(entry.as.pair->cdr.as.chars, entry.as.pair->cdr.aux);
+    hl->name = creme_dupn(entry.as.pair->car.as.chars, entry.as.pair->car.aux);
+    hl->value = creme_dupn(entry.as.pair->cdr.as.chars, entry.as.pair->cdr.aux);
     hl->next = NULL;
     *tail = hl;
     tail = &hl->next;
@@ -498,8 +492,8 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
       while (value_start < line_endp && *value_start == ' ') value_start++;
       int value_len = (int)(line_endp - value_start);
       HeaderLine *hl = GC_MALLOC(sizeof(HeaderLine));
-      hl->name = dupn(resp.buf + pos, name_len);
-      hl->value = dupn(value_start, value_len);
+      hl->name = creme_dupn(resp.buf + pos, name_len);
+      hl->value = creme_dupn(value_start, value_len);
       hl->next = NULL;
       *rt = hl;
       rt = &hl->next;
@@ -516,7 +510,7 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
   if (chunked) {
     final_body = dechunk(raw_body, raw_body_len, &final_len);
   } else {
-    final_body = dupn(raw_body, raw_body_len);
+    final_body = creme_dupn(raw_body, raw_body_len);
     final_len = raw_body_len;
   }
 
@@ -567,7 +561,7 @@ static Value bi_http_patch(VM *vm, Value *args, int nargs) {
 
 static Value bi_http_request(VM *vm, Value *args, int nargs) {
   if (nargs < 2 || args[0].tag != T_STR) creme_abort("http-request: expected (method url [headers [body]])");
-  char *method = dupn(args[0].as.chars, args[0].aux);
+  char *method = creme_dupn(args[0].as.chars, args[0].aux);
   return http_do(vm, method, args[1], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, nargs >= 4 ? args[3] : v_nil(), nargs >= 4, "http-request");
 }
 

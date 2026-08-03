@@ -373,12 +373,6 @@ static void move_context_to_system(ActorContext *ctx, ActorSystem *new_sys) {
 
 typedef struct PReader PReader;
 
-static char *dupn(const char *s, int len) {
-  char *out = GC_MALLOC((size_t)(len > 0 ? len : 1) + 1);
-  if (len > 0) memcpy(out, s, (size_t)len);
-  out[len > 0 ? len : 0] = '\0';
-  return out;
-}
 
 /* The full dialable URI for actor `id` on `sys`, whichever transport it
  * was started with -- mirrors native's own node_address_uri (shared by
@@ -1000,7 +994,7 @@ static Value read_datum(PReader *r) {
   if (end == tok + tok_len) return v_int(iv);
   double dv = strtod(tok, &end);
   if (end == tok + tok_len) return v_float(dv);
-  return v_sym(dupn(tok, tok_len), tok_len);
+  return v_sym(creme_dupn(tok, tok_len), tok_len);
 }
 
 /* Returns 0 (and drops the message) on any malformed wire data --
@@ -1033,7 +1027,7 @@ static Value make_ref_from_uri(const char *uri, int len, const char *who, PReade
   const char *at = memchr(rest, '@', (size_t)rest_len);
   if (!at) URI_FAIL("%s: malformed actor URI", who);
   int id_len = (int)(at - rest);
-  char *id = dupn(rest, id_len);
+  char *id = creme_dupn(rest, id_len);
   const char *addr = at + 1;
   int addr_len = rest_len - (int)(addr - rest);
 
@@ -1046,7 +1040,7 @@ static Value make_ref_from_uri(const char *uri, int len, const char *who, PReade
       }
     }
     if (ci < 0) URI_FAIL("%s: malformed tcp actor URI (missing port)", who);
-    char *host = dupn(addr, ci);
+    char *host = creme_dupn(addr, ci);
     char portbuf[16];
     int plen = addr_len - ci - 1;
     if (plen <= 0 || plen >= (int)sizeof(portbuf)) URI_FAIL("%s: malformed tcp actor URI (bad port)", who);
@@ -1055,7 +1049,7 @@ static Value make_ref_from_uri(const char *uri, int len, const char *who, PReade
     return v_actor_ref_tcp(id, host, atoi(portbuf));
   }
   if (scheme_len == 4 && memcmp(uri, "unix", 4) == 0) {
-    char *path = dupn(addr, addr_len);
+    char *path = creme_dupn(addr, addr_len);
     return v_actor_ref_unix(id, path);
   }
   if (scheme_len == 5 && memcmp(uri, "local", 5) == 0) {
@@ -1297,7 +1291,7 @@ static Connection *connection_for(ActorSystem *sys, const char *key, int key_len
   if (existing) return existing;
 
   Connection *fresh = dial(sys, addr_kind, host, port, path);
-  fresh->key = dupn(key, key_len);
+  fresh->key = creme_dupn(key, key_len);
 
   pthread_mutex_lock(&sys->mutex);
   existing = find_connection_locked(sys, key, key_len);
@@ -1372,7 +1366,7 @@ static void *handle_inbound_main(void *arg) {
     if (!decode_message(payload, payload_len, sys->creator_vm, &msg)) continue; /* malformed -- drop quietly */
 
     /* deliver_local's own by-id-then-by-name fallback (actor.cr:256-261). */
-    char *to_copy = dupn(to, to_len);
+    char *to_copy = creme_dupn(to, to_len);
     pthread_mutex_lock(&sys->mutex);
     ActorContext *target = find_context_by_id_locked(sys, to_copy);
     if (!target) {
@@ -1547,8 +1541,8 @@ static ActorSystem *alloc_actor_system(void) {
 }
 
 static void start_tcp_node(ActorSystem *sys, const char *host, int host_len, int port, const char *cookie, int cookie_len) {
-  sys->tcp_host = dupn(host, host_len);
-  sys->cookie = dupn(cookie, cookie_len);
+  sys->tcp_host = creme_dupn(host, host_len);
+  sys->cookie = creme_dupn(cookie, cookie_len);
   sys->cookie_len = cookie_len;
 
   struct addrinfo hints;
@@ -1596,8 +1590,8 @@ static void start_tcp_node(ActorSystem *sys, const char *host, int host_len, int
 }
 
 static void start_unix_node(ActorSystem *sys, const char *path, int path_len, const char *cookie, int cookie_len) {
-  sys->unix_path = dupn(path, path_len);
-  sys->cookie = dupn(cookie, cookie_len);
+  sys->unix_path = creme_dupn(path, path_len);
+  sys->cookie = creme_dupn(cookie, cookie_len);
   sys->cookie_len = cookie_len;
 
   unlink(sys->unix_path); /* drop a stale socket file from a prior crashed run */
@@ -1652,9 +1646,9 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
       if (nargs < 3 || (args[1].tag != T_SYM && args[1].tag != T_STR) || (args[2].tag != T_SYM && args[2].tag != T_STR)) {
         creme_abort("start-node: 'local expects (name cookie)");
       }
-      sys->node_name = dupn(args[1].as.chars, args[1].aux);
+      sys->node_name = creme_dupn(args[1].as.chars, args[1].aux);
       sys->node_name_len = args[1].aux;
-      sys->cookie = dupn(args[2].as.chars, args[2].aux);
+      sys->cookie = creme_dupn(args[2].as.chars, args[2].aux);
       sys->cookie_len = args[2].aux;
       pthread_mutex_lock(&g_node_registry_mutex);
       sys->next = g_local_nodes;

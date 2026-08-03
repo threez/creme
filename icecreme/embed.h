@@ -146,6 +146,23 @@ static inline int creme_arg_bool(Value *args, int nargs, int index, const char *
   return args[index].as.b;
 }
 
+/* Copies a raw `(pointer, length)` byte slice into a fresh, GC_MALLOC'd,
+ * NUL-terminated C string — the plain-C-string equivalent of
+ * creme_bytes_value below (which wraps the identical copy as a Scheme
+ * Value instead). Several icecreme .c files each hand-rolled this exact
+ * copy-and-NUL-terminate helper under their own name (actor.c's and
+ * http.c's own `dupn`, x509.c's own `gc_strndup`) for building an owned C
+ * string out of a Value's own (not-NUL-terminated-guaranteed) backing
+ * bytes, a substring, or any other raw slice needing a real C string
+ * handed to an external API — `creme_arg_cstr` below is built on this
+ * directly. */
+static inline char *creme_dupn(const char *s, int len) {
+  char *out = GC_MALLOC((size_t)(len > 0 ? len : 1) + 1);
+  if (len > 0) memcpy(out, s, (size_t)len);
+  out[len > 0 ? len : 0] = '\0';
+  return out;
+}
+
 /* Extracts argument `index` as a `T_STR` value, returned as a fresh,
  * GC_MALLOC'd, NUL-terminated C string (icecreme's own Scheme strings are
  * a pointer+length pair, value.h, not NUL-terminated-guaranteed — see
@@ -153,11 +170,7 @@ static inline int creme_arg_bool(Value *args, int nargs, int index, const char *
 static inline const char *creme_arg_cstr(Value *args, int nargs, int index, const char *who) {
   if (index >= nargs) creme_abort("%s: missing argument %d", who, index + 1);
   if (args[index].tag != T_STR) creme_abort("%s: argument %d: expected a string", who, index + 1);
-  int len = args[index].aux;
-  char *copy = GC_MALLOC((size_t)len + 1);
-  memcpy(copy, args[index].as.chars, (size_t)len);
-  copy[len] = '\0';
-  return copy;
+  return creme_dupn(args[index].as.chars, args[index].aux);
 }
 
 /* Extracts argument `index` as a `T_STR` value's raw `(pointer, length)`
@@ -171,6 +184,30 @@ static inline const char *creme_arg_bytes(Value *args, int nargs, int index, con
   if (args[index].tag != T_STR) creme_abort("%s: argument %d: expected a string", who, index + 1);
   *len_out = args[index].aux;
   return args[index].as.chars;
+}
+
+/* Extracts argument `index` as a `T_STR` OR `T_BYTEVECTOR` value's raw
+ * `(pointer, length)` bytes, whichever it is — no copy either way — for
+ * a builtin that accepts a "blob" interchangeably (a string used as raw
+ * bytes, or an actual bytevector; a key/message is often raw binary
+ * straight from e.g. (creme secure-random), not always a T_STR). Several
+ * icecreme .c files each hand-rolled an identical private `value_bytes`
+ * helper for exactly this union before this shared version existed
+ * (cipher.c/pkey.c's own, byte-for-byte identical; digest.c's own,
+ * differing only in the output pointer's exact type) — unlike
+ * creme_arg_bytes above (T_STR only), this accepts either type. */
+static inline const unsigned char *creme_arg_blob(Value *args, int nargs, int index, const char *who, int *len_out) {
+  if (index >= nargs) creme_abort("%s: missing argument %d", who, index + 1);
+  Value v = args[index];
+  if (v.tag == T_STR) {
+    *len_out = v.aux;
+    return (const unsigned char *)v.as.chars;
+  }
+  if (v.tag == T_BYTEVECTOR) {
+    *len_out = v.as.bv->len;
+    return v.as.bv->bytes;
+  }
+  creme_abort("%s: argument %d: expected a blob (string or bytevector)", who, index + 1);
 }
 
 /* Extracts argument `index` as a `T_VECTOR` value's backing storage
