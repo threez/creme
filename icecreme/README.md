@@ -540,12 +540,16 @@ small struct allocated even for a zero-copy wrap), `creme_arg_blob`
 (extracts argument N as a `T_STR` OR `T_BYTEVECTOR`'s raw bytes,
 whichever it is — for a builtin accepting a "blob" interchangeably, e.g.
 a key that's often raw binary straight from `(creme secure-random)`),
-and `creme_dupn` (copies a raw `(pointer, length)` slice into a fresh,
+`creme_dupn` (copies a raw `(pointer, length)` slice into a fresh,
 NUL-terminated C string — `creme_arg_cstr`'s own underlying copy, exposed
 directly for building a C string out of something that ISN'T argument N
-of the current call, e.g. a substring or a struct field). None of these
-add anything to `libcreme.a` itself (pure `static inline`/macro, free to
-compile away) — icecreme's own
+of the current call, e.g. a substring or a struct field), and
+`creme_hex_value` (encodes a raw `(pointer, length)` byte slice as a
+fresh lowercase hex Scheme string — `digest.c`'s digest-hex-string
+results and `secure-random-hex` each hand-rolled this identical
+nibble-to-hexchar encoding). None of these add anything to `libcreme.a`
+itself (pure `static inline`/macro, free to compile away) — icecreme's
+own
 `bi_*` builtins use them directly too, not
 just an external embedder — see each one's own doc comment in `embed.h`, and
 `examples/libcream/host_demo.c`'s `host_welcome` for a real (2-line) use.

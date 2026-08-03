@@ -321,6 +321,21 @@ static inline Value creme_bytevector_value(const unsigned char *ptr, int len) {
   return creme_bytevector_wrap(copy, len);
 }
 
+/* Encodes a raw `(pointer, length)` byte slice as a fresh, lowercase hex
+ * Scheme string Value (2 hex chars per byte) — digest.c's own
+ * `hex_encode_into` and secure_random.c's own inline encoding loop each
+ * hand-rolled this identical nibble-to-hexchar table before this shared
+ * version existed. */
+static inline Value creme_hex_value(const unsigned char *bytes, int len) {
+  static const char hexchars[] = "0123456789abcdef";
+  char *buf = GC_MALLOC((size_t)(len > 0 ? len * 2 : 1));
+  for (int i = 0; i < len; i++) {
+    buf[2 * i] = hexchars[bytes[i] >> 4];
+    buf[2 * i + 1] = hexchars[bytes[i] & 0xf];
+  }
+  return v_str(buf, len * 2);
+}
+
 /* Builds a fresh Scheme string Value via a `printf`-style format string —
  * e.g. `creme_format_value("Hello from C, %s!", name)`. Sizes the result
  * with one `vsnprintf(NULL, 0, ...)` pass (per C99, returns the length

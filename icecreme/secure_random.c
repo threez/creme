@@ -37,13 +37,7 @@ static Value bi_secure_random_hex(VM *vm, Value *args, int nargs) {
   int n = secure_random_count_arg(args, nargs, "secure-random-hex");
   unsigned char *raw = GC_MALLOC((size_t)(n ? n : 1));
   if (n > 0 && !RAND_bytes(raw, n)) creme_abort("secure-random-hex: RAND_bytes failed");
-  static const char hexchars[] = "0123456789abcdef";
-  char *buf = GC_MALLOC((size_t)(n ? n * 2 : 1));
-  for (int i = 0; i < n; i++) {
-    buf[2 * i] = hexchars[raw[i] >> 4];
-    buf[2 * i + 1] = hexchars[raw[i] & 0xf];
-  }
-  return v_str(buf, n * 2);
+  return creme_hex_value(raw, n);
 }
 
 static const char B64_ALPHABET[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

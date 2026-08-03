@@ -83,11 +83,14 @@ both reaching their current shape) — not itemized individually here;
   wrap identically), `creme_arg_blob` (extracts argument N as a `T_STR`
   OR `T_BYTEVECTOR`'s raw bytes, whichever it is — cipher.c/pkey.c's own
   private `value_bytes` were byte-for-byte identical, digest.c's own
-  differed only in the output pointer's exact type), and `creme_dupn`
+  differed only in the output pointer's exact type), `creme_dupn`
   (copies a raw slice into a fresh NUL-terminated C string —
   `creme_arg_cstr`'s own underlying copy, exposed directly — actor.c's
   and http.c's own `dupn`, x509.c's own `gc_strndup`, were all
-  byte-for-byte/near-identical). icecreme's own `bi_*` builtins across
+  byte-for-byte/near-identical), and `creme_hex_value` (encodes a raw
+  slice as a lowercase hex Scheme string — digest.c's own
+  `hex_encode_into` and secure_random.c's own inline encoding loop were
+  identical). icecreme's own `bi_*` builtins across
   every `.c` file now use all of these directly too, in place of their
   previous hand-rolled arity/type checks, `GC_MALLOC`/`memcpy`/
   manual-list-walking boilerplate, and (http.c/term.c/builtins.c's

@@ -23,32 +23,18 @@
 #include "digest.h"
 #include "embed.h"
 
-static void hex_encode_into(const unsigned char *bytes, unsigned int len, Value *out) {
-  static const char hexchars[] = "0123456789abcdef";
-  char *buf = GC_MALLOC((size_t)len * 2);
-  for (unsigned int i = 0; i < len; i++) {
-    buf[2 * i] = hexchars[bytes[i] >> 4];
-    buf[2 * i + 1] = hexchars[bytes[i] & 0xf];
-  }
-  *out = v_str(buf, (int)len * 2);
-}
-
 static Value hex_digest(const EVP_MD *md, const char *data, int len) {
   unsigned char out[EVP_MAX_MD_SIZE];
   unsigned int outlen = 0;
   EVP_Digest(data, (size_t)len, out, &outlen, md, NULL);
-  Value result;
-  hex_encode_into(out, outlen, &result);
-  return result;
+  return creme_hex_value(out, (int)outlen);
 }
 
 static Value hmac_hex_digest(const EVP_MD *md, const char *key, int keylen, const char *data, int datalen) {
   unsigned char out[EVP_MAX_MD_SIZE];
   unsigned int outlen = 0;
   HMAC(md, key, keylen, (const unsigned char *)data, (size_t)datalen, out, &outlen);
-  Value result;
-  hex_encode_into(out, outlen, &result);
-  return result;
+  return creme_hex_value(out, (int)outlen);
 }
 
 static Value bi_digest_md5(VM *vm, Value *args, int nargs) {
