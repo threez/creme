@@ -50,19 +50,6 @@
 #define X509_CERT_SERIAL_CA_SIGNED 2
 #define NID_BASIC_CONSTRAINTS_ 87
 
-/* ---- Value helpers (matching cipher.c/digest.c/pkey.c's own per-file style) */
-
-static Value str_lit(const char *s) { return v_str(s, (int)strlen(s)); }
-
-static Value cons2(Value car, Value cdr) {
-  Pair *p = GC_MALLOC(sizeof(Pair));
-  p->car = car;
-  p->cdr = cdr;
-  return v_pair(p);
-}
-
-static Value alist_pair(const char *key, Value val) { return cons2(str_lit(key), val); }
-
 static char *gc_strndup(const char *s, int len) {
   char *buf = GC_MALLOC((size_t)len + 1);
   memcpy(buf, s, (size_t)len);
@@ -228,9 +215,9 @@ static Value x509_name_alist(X509_NAME *name) {
     if (idx < 0) continue;
     int n = X509_NAME_get_text_by_NID(name, SUBJECT_NIDS[i].nid, (char *)buf, (int)sizeof(buf));
     if (n < 0) continue;
-    pairs[n_pairs++] = alist_pair(SUBJECT_NIDS[i].field, creme_bytes_value((const char *)buf, n));
+    pairs[n_pairs++] = creme_alist_pair(SUBJECT_NIDS[i].field, creme_bytes_value((const char *)buf, n));
   }
-  for (int i = n_pairs - 1; i >= 0; i--) result = cons2(pairs[i], result);
+  for (int i = n_pairs - 1; i >= 0; i--) result = creme_raw_cons(pairs[i], result);
   return result;
 }
 

@@ -938,10 +938,7 @@ static Value read_list(PReader *r) {
 
   Value result = has_tail ? tail : v_nil();
   for (int i = n - 1; i >= 0; i--) {
-    Pair *p = GC_MALLOC(sizeof(Pair));
-    p->car = items[i];
-    p->cdr = result;
-    result = v_pair(p);
+    result = creme_raw_cons(items[i], result);
   }
   return result;
 }

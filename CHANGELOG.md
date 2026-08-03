@@ -62,8 +62,26 @@ both reaching their current shape) — not itemized individually here;
   value or separate count argument — safe against double-evaluating a
   side-effecting argument since `sizeof`'s operand is never evaluated for
   a non-VLA type) — none add anything to `libcreme.a` itself (pure
-  `static inline`/macro). icecreme's own `bi_*` builtins across every
-  `.c` file now use these directly too, in place of their previous
+  `static inline`/macro). A follow-up review of `bi_*` builtins across the
+  whole codebase for the same kind of recurring, hand-rolled pattern
+  turned up four more shared helpers: `creme_str_lit`/`creme_sym_lit`
+  (zero-copy `T_STR`/`T_SYM` wraps for a static string literal only —
+  cipher.c/x509.c/term.c/bootstrap.c/pkey.c each hand-rolled this
+  identically before), `creme_raw_cons` (one cons pair via a raw
+  `GC_MALLOC`, no `VM*` needed — actor.c/cipher.c/json.c/x509.c/yaml.c
+  each hand-rolled this identical 4-line pattern; `loader.c`'s own
+  near-identical site is left alone, since its pair must be allocated
+  BEFORE recursively reading car/cdr, for datum-label self-reference
+  support), `creme_alist_pair` (one `(key . value)` alist entry —
+  cipher.c/x509.c's own private `alist_pair` used to zero-copy-wrap a
+  literal key directly, an aliasing/crash risk the moment Scheme code
+  `string-set!`s a returned alist's key; `creme_alist_pair` copies every
+  key instead, a real safety fix as much as a dedup), and
+  `creme_bytevector_wrap`/`creme_bytevector_value` (the `Bytevector`
+  equivalents of `v_str`'s own zero-copy wrap and `creme_bytes_value`'s
+  copy — cipher.c/pkey.c/secure_random.c each hand-rolled the zero-copy
+  wrap identically). icecreme's own `bi_*` builtins across every `.c`
+  file now use all of these directly too, in place of their previous
   hand-rolled arity/type checks, `GC_MALLOC`/`memcpy`/manual-list-walking
   boilerplate, and (http.c/term.c/builtins.c's reader) nested
   `creme_cons` chains for a fixed-shape list.

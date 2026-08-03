@@ -526,8 +526,19 @@ list in one call — `creme_list(vm, a, b, c)` instead of nested
 element count comes from `sizeof` on a `(Value[]){...}` compound literal,
 not a sentinel value or separate count argument, and is safe even when an
 argument has side effects, since `sizeof`'s operand is never evaluated
-for a non-VLA type). None of these add anything to `libcreme.a` itself
-(pure `static inline`/macro, free to compile away) — icecreme's own
+for a non-VLA type). Also `creme_str_lit`/`creme_sym_lit` (zero-copy
+`T_STR`/`T_SYM` wraps for a genuine static string literal only — several
+`.c` files each hand-rolled this identically before these existed),
+`creme_raw_cons` (one cons pair via a raw `GC_MALLOC`, no `VM*` needed —
+for a context with none in scope, unlike `creme_cons`/`creme_list*`
+above), `creme_alist_pair` (one `(key . value)` alist entry, combine with
+`creme_list` to build a whole alist in one expression), and
+`creme_bytevector_wrap`/`creme_bytevector_value` (the `Bytevector`
+equivalents of `v_str`'s own zero-copy wrap and `creme_bytes_value`'s
+copy, respectively — a `Bytevector`, unlike a `T_STR`, needs its own
+small struct allocated even for a zero-copy wrap). None of these add
+anything to `libcreme.a` itself (pure `static inline`/macro, free to
+compile away) — icecreme's own
 `bi_*` builtins use them directly too, not
 just an external embedder — see each one's own doc comment in `embed.h`, and
 `examples/libcream/host_demo.c`'s `host_welcome` for a real (2-line) use.

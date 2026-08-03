@@ -261,19 +261,11 @@ static Value yaml_parse_mapping(yaml_parser_t *parser) {
     Value val = yaml_parse_value(parser, &vev);
     yaml_event_delete(&vev);
 
-    Pair *p = GC_MALLOC(sizeof(Pair));
-    p->car = key;
-    p->cdr = val;
-    varr_push(&entries, v_pair(p));
+    varr_push(&entries, creme_raw_cons(key, val));
   }
   if (entries.len == 0) return v_nil(); /* an empty mapping conflates with null -- see this file's own header comment */
   Value result = v_nil();
-  for (int i = entries.len - 1; i >= 0; i--) {
-    Pair *p = GC_MALLOC(sizeof(Pair));
-    p->car = entries.items[i];
-    p->cdr = result;
-    result = v_pair(p);
-  }
+  for (int i = entries.len - 1; i >= 0; i--) result = creme_raw_cons(entries.items[i], result);
   return result;
 }
 

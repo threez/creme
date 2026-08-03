@@ -112,11 +112,7 @@ static char *dupn(const char *s, int len) {
   return out;
 }
 
-/* T_STR is mutable (string-set!) -- a Value pointing directly at a
- * string literal in .rodata would segfault the moment Scheme code
- * mutated it, so every literal handed to Scheme (the alist keys below)
- * needs its own GC-owned copy (mirrors sql.c/mux.c's own v_litstr). */
-static Value v_litstr(const char *s) { return v_str(dupn(s, (int)strlen(s)), (int)strlen(s)); }
+static Value v_litstr(const char *s) { return creme_cstr_value(s); }
 
 static int ci_eq(const char *a, const char *b) {
   while (*a && *b) {

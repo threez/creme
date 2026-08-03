@@ -50,28 +50,10 @@ static void value_bytes(Value v, const unsigned char **out_ptr, int *out_len, co
   creme_abort("%s: expected a blob or string argument", who);
 }
 
-static Value str_lit(const char *s) { return v_str(s, (int)strlen(s)); }
-
-static Value cons2(Value car, Value cdr) {
-  Pair *p = GC_MALLOC(sizeof(Pair));
-  p->car = car;
-  p->cdr = cdr;
-  return v_pair(p);
-}
-
-static Value alist_pair(const char *key, Value val) { return cons2(str_lit(key), val); }
-
-static Value bytevector_value(const unsigned char *bytes, int len) {
-  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
-  bv->bytes = (unsigned char *)bytes;
-  bv->len = len;
-  return v_bytevector(bv);
-}
-
 static Value random_bytevector(int n, const char *who) {
   unsigned char *buf = GC_MALLOC((size_t)n);
   if (!RAND_bytes(buf, n)) creme_abort("%s: RAND_bytes failed", who);
-  return bytevector_value(buf, n);
+  return creme_bytevector_wrap(buf, n);
 }
 
 static Value bi_aes_256_gcm_random_key(VM *vm, Value *args, int nargs) {
@@ -125,7 +107,6 @@ static void cipher_feed_aad(EVP_CIPHER_CTX *ctx, const unsigned char *aad, int a
 }
 
 static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
-  (void)vm;
   creme_check_min_args(nargs, 3, "aes-256-gcm-encrypt");
   const unsigned char *key, *nonce, *pt, *aad = NULL;
   int keylen, noncelen, ptlen, aadlen = 0;
@@ -158,8 +139,8 @@ static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
   }
   EVP_CIPHER_CTX_free(ctx);
 
-  return cons2(alist_pair("ciphertext", bytevector_value(outbuf, total)),
-               cons2(alist_pair("tag", bytevector_value(tag, CIPHER_TAG_SIZE)), v_nil()));
+  return creme_list(vm, creme_alist_pair("ciphertext", creme_bytevector_wrap(outbuf, total)),
+                     creme_alist_pair("tag", creme_bytevector_wrap(tag, CIPHER_TAG_SIZE)));
 }
 
 static Value bi_aes_256_gcm_decrypt(VM *vm, Value *args, int nargs) {
@@ -196,7 +177,7 @@ static Value bi_aes_256_gcm_decrypt(VM *vm, Value *args, int nargs) {
   if (ok != 1) creme_abort("aes-256-gcm-decrypt: authentication failed (tag mismatch)");
   total += finlen;
 
-  return bytevector_value(outbuf, total);
+  return creme_bytevector_wrap(outbuf, total);
 }
 
 void creme_register_cipher_builtins(VM *vm) {

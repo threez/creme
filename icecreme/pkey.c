@@ -48,14 +48,7 @@
  * behavior change. */
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-/* ---- Value helpers (matching cipher.c/digest.c's own per-file style) ---- */
-
-static Value bytevector_value(const unsigned char *bytes, int len) {
-  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
-  bv->bytes = (unsigned char *)bytes;
-  bv->len = len;
-  return v_bytevector(bv);
-}
+static Value bytevector_value(const unsigned char *bytes, int len) { return creme_bytevector_wrap((unsigned char *)bytes, len); }
 
 static void value_bytes(Value v, const unsigned char **out_ptr, int *out_len, const char *who) {
   if (v.tag == T_STR) {
@@ -274,8 +267,7 @@ static Value bi_pkey_type(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "pkey-type");
   PKeyBox *box = pkey_arg(args[0], "pkey-type");
-  const char *name = box->kind == PKEY_KIND_RSA ? "rsa" : "ec";
-  return v_sym(name, (int)strlen(name));
+  return creme_sym_lit(box->kind == PKEY_KIND_RSA ? "rsa" : "ec");
 }
 
 static Value bi_pkey_public_key(VM *vm, Value *args, int nargs) {

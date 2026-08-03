@@ -116,11 +116,7 @@ static Value bi_bytevector_copy(VM *vm, Value *args, int nargs) {
   Bytevector *src = args[0].as.bv;
   int first, last;
   byte_range_args(args, nargs, 1, src->len, &first, &last);
-  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
-  bv->len = last - first;
-  bv->bytes = GC_MALLOC((size_t)(bv->len ? bv->len : 1));
-  memcpy(bv->bytes, src->bytes + first, (size_t)bv->len);
-  return v_bytevector(bv);
+  return creme_bytevector_value(src->bytes + first, last - first);
 }
 
 static Value bi_bytevector_copy_bang(VM *vm, Value *args, int nargs) {
@@ -175,12 +171,7 @@ static Value bi_string_to_utf8(VM *vm, Value *args, int nargs) {
   if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->utf8: expected a string");
   int first, last;
   byte_range_args(args, nargs, 1, args[0].aux, &first, &last);
-  int len = last - first;
-  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
-  bv->len = len;
-  bv->bytes = GC_MALLOC((size_t)(len ? len : 1));
-  memcpy(bv->bytes, args[0].as.chars + first, (size_t)len);
-  return v_bytevector(bv);
+  return creme_bytevector_value((const unsigned char *)args[0].as.chars + first, last - first);
 }
 
 /* force: mirrors Interpreter#force's own memoization exactly (see
@@ -1384,11 +1375,7 @@ static Value bi_get_output_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
   Port *p = creme_arg_port(args, nargs, 0, "get-output-bytevector");
   if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("get-output-bytevector: expected a bytevector output port");
-  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
-  bv->len = p->len;
-  bv->bytes = GC_MALLOC((size_t)(p->len ? p->len : 1));
-  memcpy(bv->bytes, p->buf, (size_t)p->len);
-  return v_bytevector(bv);
+  return creme_bytevector_value((const unsigned char *)p->buf, p->len);
 }
 
 static Value bi_binary_port_p(VM *vm, Value *args, int nargs) {

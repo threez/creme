@@ -29,10 +29,7 @@ static Value bi_secure_random_bytes(VM *vm, Value *args, int nargs) {
   int n = secure_random_count_arg(args, nargs, "secure-random-bytes");
   unsigned char *buf = GC_MALLOC((size_t)(n ? n : 1));
   if (n > 0 && !RAND_bytes(buf, n)) creme_abort("secure-random-bytes: RAND_bytes failed");
-  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
-  bv->bytes = buf;
-  bv->len = n;
-  return v_bytevector(bv);
+  return creme_bytevector_wrap(buf, n);
 }
 
 static Value bi_secure_random_hex(VM *vm, Value *args, int nargs) {

@@ -222,6 +222,29 @@ static inline Value creme_cstr_value(const char *s) {
   return v_str(copy, (int)len);
 }
 
+/* Wraps a genuine STATIC STRING LITERAL (or any other buffer guaranteed
+ * to outlive the VM and never be freed/mutated) directly as a Scheme
+ * string Value — zero-copy, unlike creme_cstr_value above. T_STR is
+ * mutable via `string-set!`, so passing anything other than a true
+ * `.rodata` literal here risks a crash the moment Scheme code mutates it
+ * (or silent aliasing if two Values end up sharing one buffer) — several
+ * icecreme .c files each hand-rolled this exact one-liner for their own
+ * fixed alist-key/tag-name literals (e.g. cipher.c/x509.c's own
+ * `str_lit`, term.c's `term_lit_str`) before this shared version existed;
+ * use creme_cstr_value instead for anything that ISN'T a compile-time
+ * literal. */
+static inline Value creme_str_lit(const char *s) { return v_str(s, (int)strlen(s)); }
+
+/* Wraps a genuine static string literal directly as a Scheme SYMBOL
+ * Value — zero-copy, the `T_SYM` equivalent of `creme_str_lit` above.
+ * Safer than `creme_str_lit`'s own zero-copy wrap in one respect:
+ * symbols are immutable (no `string-set!`-equivalent mutator exists for
+ * `T_SYM`, see value.h's own comment — "only ever loaded into a register
+ * and discarded"), so there's no mutation-aliasing risk to worry about,
+ * only the ordinary "the buffer must outlive the VM" requirement every
+ * zero-copy wrap here already has. */
+static inline Value creme_sym_lit(const char *s) { return v_sym(s, (int)strlen(s)); }
+
 /* Copies a raw `(pointer, length)` byte slice into a fresh, owned Scheme
  * string Value — the shared, public equivalent of a copy-and-wrap helper
  * several icecreme .c files each used to hand-roll their own private copy
@@ -233,6 +256,32 @@ static inline Value creme_bytes_value(const char *ptr, int len) {
   char *copy = GC_MALLOC((size_t)(len > 0 ? len : 1));
   if (len > 0) memcpy(copy, ptr, (size_t)len);
   return v_str(copy, len);
+}
+
+/* Wraps an already-owned raw byte buffer as a fresh Bytevector Value —
+ * zero-copy, the Bytevector equivalent of creme_str_lit above (unlike
+ * T_STR, a Bytevector's own bytes aren't inline in the Value itself —
+ * value.h's Bytevector is a separate GC-owned `unsigned char*`+length
+ * struct, so even a "just wrap this pointer" constructor still needs to
+ * allocate that one small struct). `bytes` should be a buffer nothing
+ * else holds a reference to (typically one just GC_MALLOC'd for exactly
+ * this purpose, e.g. cipher/RAND_bytes output) — for a foreign or shared
+ * buffer that must not be aliased, use creme_bytevector_value below
+ * instead, which copies. */
+static inline Value creme_bytevector_wrap(unsigned char *bytes, int len) {
+  Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
+  bv->bytes = bytes;
+  bv->len = len;
+  return v_bytevector(bv);
+}
+
+/* Copies a raw `(pointer, length)` byte slice into a fresh, owned
+ * Bytevector Value — the Bytevector equivalent of creme_bytes_value
+ * (T_STR) above. */
+static inline Value creme_bytevector_value(const unsigned char *ptr, int len) {
+  unsigned char *copy = GC_MALLOC((size_t)(len > 0 ? len : 1));
+  if (len > 0) memcpy(copy, ptr, (size_t)len);
+  return creme_bytevector_wrap(copy, len);
 }
 
 /* Builds a fresh Scheme string Value via a `printf`-style format string —
@@ -281,6 +330,37 @@ static inline int creme_list_to_values(Value list, Value *out, int max, const ch
   if (list.tag != T_NIL) creme_abort("%s: expected a proper (nil-terminated) list", who);
   return n;
 }
+
+/* Builds a single cons pair via a raw GC_MALLOC — NOT through the VM's
+ * own batch-refilled pair freelist (that's `creme_cons`, vm.h/vm.c,
+ * preferred whenever a `VM*` is already in scope and freelist reuse
+ * matters). Several icecreme .c files each hand-rolled this identical
+ * 4-line `GC_MALLOC(sizeof(Pair))`+`->car`/`->cdr`+`v_pair` pattern in a
+ * context with no `VM*` handy at all (e.g. cipher.c/x509.c's own
+ * per-file `cons2`, or a parser/decoder building a result value-by-value
+ * with no VM reference threaded through, json.c/yaml.c/actor.c) —
+ * needing no `vm` argument is the point, not an oversight. */
+static inline Value creme_raw_cons(Value car, Value cdr) {
+  Pair *p = GC_MALLOC(sizeof(Pair));
+  p->car = car;
+  p->cdr = cdr;
+  return v_pair(p);
+}
+
+/* Builds one `(key . value)` alist entry — `creme_cons(vm, ...)`'s raw,
+ * no-`VM*`-needed equivalent for the single most common shape a boxed
+ * Value's own alist-returning builtin constructs: a C-string key plus an
+ * arbitrary Value. `key` is always copied (via creme_cstr_value, not
+ * creme_str_lit) even when it happens to be a literal, deliberately —
+ * several per-file `alist_pair` helpers this replaces (cipher.c/x509.c)
+ * used to zero-copy-wrap literal keys directly into `.rodata`, which is
+ * an aliasing/crash risk the moment Scheme code mutates a returned
+ * alist's own key via `string-set!`; copying every key removes that risk
+ * for a cost too small to matter (alist keys are short and this isn't a
+ * hot path). Combine with `creme_list` to build a whole alist in one
+ * expression: `creme_list(vm, creme_alist_pair("status", v_int(200)),
+ * creme_alist_pair("body", body_val))`. */
+static inline Value creme_alist_pair(const char *key, Value value) { return creme_raw_cons(creme_cstr_value(key), value); }
 
 /* Builds a proper Scheme list from a C array of `n` Values, via
  * `creme_cons` (vm.h/vm.c — the VM's own batch-refilled pair freelist,

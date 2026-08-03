@@ -56,18 +56,11 @@
  * just a standalone Escape keypress. */
 #define TERM_ESC_TIMEOUT_USEC 50000
 
-/* Builds a Value from a C string literal/static buffer directly (no copy)
- * -- safe because v_str/v_sym (value.h) just store the pointer, and every
- * string this file ever wraps this way is a `static const char *` literal
- * with the process's whole lifetime, exactly like actor.c's/vm.c's own
- * v_sym("...", N) call sites (see those files for the established
- * convention this follows). */
-static Value term_lit_str(const char *s) { return v_str(s, (int)strlen(s)); }
-static Value term_lit_sym(const char *s) { return v_sym(s, (int)strlen(s)); }
-
-/* ((kind . "<kind>")) -- every non-char key event's alist shape. */
+/* ((kind . "<kind>")) -- every non-char key event's alist shape. `kind`
+ * is always a `static const char *` literal with the process's whole
+ * lifetime, so creme_str_lit/creme_sym_lit's zero-copy wrap is safe. */
 static Value kind_alist(VM *vm, const char *kind) {
-  Value pair = creme_cons(vm, term_lit_sym("kind"), term_lit_str(kind));
+  Value pair = creme_cons(vm, creme_sym_lit("kind"), creme_str_lit(kind));
   return creme_cons(vm, pair, v_nil());
 }
 
@@ -75,8 +68,8 @@ static Value kind_alist(VM *vm, const char *kind) {
  * payload; `byte` is treated as its own Latin-1-ish codepoint (see this
  * file's header comment on the UTF-8 limitation). */
 static Value char_alist(VM *vm, int byte) {
-  Value kind_pair = creme_cons(vm, term_lit_sym("kind"), term_lit_str("char"));
-  Value char_pair = creme_cons(vm, term_lit_sym("char"), v_char(byte));
+  Value kind_pair = creme_cons(vm, creme_sym_lit("kind"), creme_str_lit("char"));
+  Value char_pair = creme_cons(vm, creme_sym_lit("char"), v_char(byte));
   return creme_list(vm, kind_pair, char_pair);
 }
 

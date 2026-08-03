@@ -237,10 +237,7 @@ static Value json_parse_object(JReader *r) {
     r->pos++;
     jr_skip_ws(r);
     Value val = json_parse_value(r);
-    Pair *p = GC_MALLOC(sizeof(Pair));
-    p->car = key;
-    p->cdr = val;
-    varr_push(&entries, v_pair(p));
+    varr_push(&entries, creme_raw_cons(key, val));
     jr_skip_ws(r);
     if (r->pos < r->len && r->s[r->pos] == ',') {
       r->pos++;
@@ -253,12 +250,7 @@ static Value json_parse_object(JReader *r) {
     creme_abort("json-read: invalid json: expected ',' or '}' in object");
   }
   Value result = v_nil();
-  for (int i = entries.len - 1; i >= 0; i--) {
-    Pair *p = GC_MALLOC(sizeof(Pair));
-    p->car = entries.items[i];
-    p->cdr = result;
-    result = v_pair(p);
-  }
+  for (int i = entries.len - 1; i >= 0; i--) result = creme_raw_cons(entries.items[i], result);
   return result;
 }
 

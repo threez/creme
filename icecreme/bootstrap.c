@@ -274,7 +274,7 @@ static Value bi_library_exports(VM *vm, Value *args, int nargs) {
 
   Value result = v_nil();
   for (int i = n_exports - 1; i >= 0; i--) {
-    Value sym = v_sym(exports[i], (int)strlen(exports[i]));
+    Value sym = creme_sym_lit(exports[i]);
     result = creme_cons(vm, creme_cons(vm, sym, sym), result);
   }
   return result;
