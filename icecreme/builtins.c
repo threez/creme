@@ -8,6 +8,7 @@
  * expose it unconditionally). */
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,41 +25,40 @@
 #include "profiler.h"
 #include "vm.h"
 
-/* Every plain-malloc/realloc call site below is a scratch buffer this
- * same function pairs with an explicit free(3) before returning (a C
- * string handed to fopen/access/getenv/setenv/execvp, or a short-lived
- * Value* staging array whose contents stay reachable through the
- * original Scheme argument they were read from) -- so these stay libc
- * allocations rather than GC_MALLOC/GC_REALLOC; mixing allocators for
- * memory the caller itself frees would be its own hazard. All this adds
- * over a bare malloc()/realloc() is a checked, catchable abort on
- * allocation failure instead of an unchecked NULL deref. */
+/* Every remaining xmalloc call site is a short-lived C string handed to
+ * fopen/access/getenv/setenv/execvp and free(3)'d before returning within the
+ * SAME function, with no user-code callback in between -- so these stay libc
+ * allocations rather than GC_MALLOC; mixing allocators for memory the caller
+ * itself frees would be its own hazard. (Value* staging arrays that span a
+ * creme_apply now use GC_MALLOC instead, since creme_apply can longjmp out via
+ * call/cc or raise and skip the free.) All this adds over a bare malloc() is a
+ * checked, catchable abort on allocation failure instead of a NULL deref. */
 static void *xmalloc(size_t n) {
   void *p = malloc(n);
   if (!p) creme_abort("out of memory (requested %zu bytes)", n);
   return p;
 }
-static void *xrealloc(void *old, size_t n) {
-  void *p = realloc(old, n);
-  if (!p) creme_abort("out of memory (requested %zu bytes)", n);
-  return p;
-}
 
 static void port_buf_grow(Port *p, int extra) {
-  if (p->len + extra > p->cap) {
-    p->cap = (p->cap ? p->cap * 2 : 64);
-    while (p->cap < p->len + extra) p->cap *= 2;
-    p->buf = GC_REALLOC(p->buf, (size_t)p->cap);
+  /* size_t math + cap: int `p->len + extra` / `p->cap * 2` wrap near 2 GB. */
+  size_t need = (size_t)p->len + (size_t)(extra > 0 ? extra : 0);
+  if (need > (size_t)p->cap) {
+    size_t newcap = p->cap ? (size_t)p->cap * 2 : 64;
+    while (newcap < need) newcap *= 2;
+    if (newcap > INT_MAX) creme_abort("port buffer too large");
+    p->cap = (int)newcap;
+    p->buf = GC_REALLOC(p->buf, newcap);
   }
 }
 
 static Value bi_make_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t n = creme_arg_int(args, nargs, 0, "make-vector");
+  if (n < 0 || n > INT_MAX) creme_abort("make-vector: invalid length %lld", (long long)n);
   Value fill = nargs >= 2 ? args[1] : v_bool(0);
   Vector *vec = GC_MALLOC(sizeof(Vector));
   vec->len = (int)n;
-  vec->items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
+  vec->items = creme_alloc_array((size_t)n, sizeof(Value), "make-vector");
   for (int64_t i = 0; i < n; i++) vec->items[i] = fill;
   return v_vector(vec);
 }
@@ -66,11 +66,12 @@ static Value bi_make_vector(VM *vm, Value *args, int nargs) {
 static Value bi_make_bytevector(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t n = creme_arg_int(args, nargs, 0, "make-bytevector");
+  if (n < 0 || n > INT_MAX) creme_abort("make-bytevector: invalid length %lld", (long long)n);
   int64_t fill = nargs >= 2 && args[1].tag == T_INT ? args[1].as.i : 0;
   if (fill < 0 || fill > 255) creme_abort("make-bytevector: fill value out of byte range");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
   bv->len = (int)n;
-  bv->bytes = GC_MALLOC((size_t)(n ? n : 1));
+  bv->bytes = creme_alloc_array((size_t)n, 1, "make-bytevector");
   for (int64_t i = 0; i < n; i++) bv->bytes[i] = (unsigned char)fill;
   return v_bytevector(bv);
 }
@@ -124,26 +125,27 @@ static Value bi_bytevector_copy_bang(VM *vm, Value *args, int nargs) {
   if (nargs < 3 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT || args[2].tag != T_BYTEVECTOR)
     creme_abort("bytevector-copy!: expected (to at from [start [end]])");
   Bytevector *to = args[0].as.bv;
-  int at = (int)args[1].as.i;
+  int64_t at = args[1].as.i; /* keep int64 for the bounds check: (int)at + count overflows */
   Bytevector *from = args[2].as.bv;
   int first, last;
   byte_range_args(args, nargs, 3, from->len, &first, &last);
   int count = last - first;
   if (at < 0 || at + count > to->len) creme_abort("bytevector-copy!: destination too small");
-  memmove(to->bytes + at, from->bytes + first, (size_t)count);
+  memmove(to->bytes + (int)at, from->bytes + first, (size_t)count);
   return v_nil();
 }
 
 static Value bi_bytevector_append(VM *vm, Value *args, int nargs) {
   (void)vm;
-  int total = 0;
+  int64_t total = 0; /* int64: summing lengths in int overflows for ~2 GB aggregate input */
   for (int i = 0; i < nargs; i++) {
     if (args[i].tag != T_BYTEVECTOR) creme_abort("bytevector-append: expected bytevectors");
     total += args[i].as.bv->len;
   }
+  if (total > INT_MAX) creme_abort("bytevector-append: result bytevector too large");
   Bytevector *bv = GC_MALLOC(sizeof(Bytevector));
-  bv->len = total;
-  bv->bytes = GC_MALLOC((size_t)(total ? total : 1));
+  bv->len = (int)total;
+  bv->bytes = creme_alloc_array((size_t)(total ? total : 1), 1, "bytevector-append");
   int offset = 0;
   for (int i = 0; i < nargs; i++) {
     memcpy(bv->bytes + offset, args[i].as.bv->bytes, (size_t)args[i].as.bv->len);
@@ -410,9 +412,18 @@ static Value bi_lcm(VM *vm, Value *args, int nargs) {
   return v_int(acc < 0 ? -acc : acc);
 }
 
+/* Overflow-checked integer power. Aborts on overflow to match `*`'s own
+ * documented overflow-abort (an unchecked signed `*=` is UB and diverges from
+ * the rest of the numeric tower). The |base|<=1 early-outs also avoid looping
+ * `exp` times for a huge exponent -- for |base|>=2 overflow fires within ~63
+ * iterations anyway. */
 static int64_t i64_pow(int64_t base, int64_t exp) {
+  if (base == 0) return exp == 0 ? 1 : 0;
+  if (base == 1) return 1;
+  if (base == -1) return (exp % 2 == 0) ? 1 : -1;
   int64_t result = 1;
-  for (int64_t i = 0; i < exp; i++) result *= base;
+  for (int64_t i = 0; i < exp; i++)
+    if (__builtin_mul_overflow(result, base, &result)) creme_abort("expt: integer result too large");
   return result;
 }
 
@@ -428,6 +439,16 @@ static Value bi_expt(VM *vm, Value *args, int nargs) {
   Value base = args[0], ex = args[1];
   if (base.tag == T_INT && ex.tag == T_INT) {
     if (ex.as.i >= 0) return v_int(i64_pow(base.as.i, ex.as.i));
+    /* Negative exponent -> reciprocal 1/base^|exp|. Handle the bases whose
+     * result doesn't depend on the (possibly un-negatable) magnitude first:
+     * base 0 is a zero denominator (reject like `/`); +-1 depend only on the
+     * exponent's parity. Then guard exp==INT64_MIN, whose magnitude 2^63 can't
+     * be negated in int64 (UB) and only base +-1/0 -- all handled above -- could
+     * avoid overflow anyway. */
+    if (base.as.i == 0) creme_abort("expt: division by zero (0 raised to a negative power)");
+    if (base.as.i == 1) return v_int(1);
+    if (base.as.i == -1) return v_int((ex.as.i % 2 == 0) ? 1 : -1);
+    if (ex.as.i == INT64_MIN) creme_abort("expt: integer result too large");
     int64_t denom = i64_pow(base.as.i, -ex.as.i);
     int64_t num = 1;
     if (denom < 0) { denom = -denom; num = -1; }
@@ -2434,16 +2455,16 @@ static Value bi_vector_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check
 static Value bi_vector_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[0].tag != T_VECTOR || args[1].tag != T_INT) creme_abort("vector-ref: expected (vector index)");
-  int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.vec->len) creme_abort("vector-ref: index %d out of range", idx);
+  int64_t idx = args[1].as.i; /* compare in int64: (int)idx would wrap a >2^31 index in-bounds */
+  if (idx < 0 || idx >= args[0].as.vec->len) creme_abort("vector-ref: index %lld out of range", (long long)idx);
   return args[0].as.vec->items[idx];
 }
 
 static Value bi_vector_set(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 3 || args[0].tag != T_VECTOR || args[1].tag != T_INT) creme_abort("vector-set!: expected (vector index value)");
-  int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.vec->len) creme_abort("vector-set!: index %d out of range", idx);
+  int64_t idx = args[1].as.i; /* compare in int64: (int)idx would wrap a >2^31 index in-bounds */
+  if (idx < 0 || idx >= args[0].as.vec->len) creme_abort("vector-set!: index %lld out of range", (long long)idx);
   args[0].as.vec->items[idx] = args[2];
   return v_nil();
 }
@@ -2482,12 +2503,13 @@ static Value bi_vector_copy_bang(VM *vm, Value *args, int nargs) {
   if (nargs < 3 || args[0].tag != T_VECTOR || args[1].tag != T_INT || args[2].tag != T_VECTOR)
     creme_abort("vector-copy!: expected (to at from ...)");
   Vector *to = args[0].as.vec;
-  int at = (int)args[1].as.i;
+  int64_t at64 = args[1].as.i; /* keep int64 for the bounds check: (int)at + n overflows */
   Vector *from = args[2].as.vec;
   int first, last;
   vector_range_args(from->len, args, nargs, 3, &first, &last);
   int n = last - first;
-  if (at < 0 || at + n > to->len) creme_abort("vector-copy!: destination range out of bounds");
+  if (at64 < 0 || at64 + n > to->len) creme_abort("vector-copy!: destination range out of bounds");
+  int at = (int)at64; /* safe: at64 <= to->len (an int) here */
   if (to == from && at > first) {
     for (int i = n - 1; i >= 0; i--) to->items[at + i] = from->items[first + i];
   } else {
@@ -2509,14 +2531,15 @@ static Value bi_vector_fill(VM *vm, Value *args, int nargs) {
 
 static Value bi_vector_append(VM *vm, Value *args, int nargs) {
   (void)vm;
-  int total = 0;
+  int64_t total = 0; /* int64: summing lengths in int overflows for ~2 GB aggregate input */
   for (int i = 0; i < nargs; i++) {
     if (args[i].tag != T_VECTOR) creme_abort("vector-append: expected a vector");
     total += args[i].as.vec->len;
   }
+  if (total > INT_MAX) creme_abort("vector-append: result vector too large");
   Vector *vec = GC_MALLOC(sizeof(Vector));
-  vec->len = total;
-  vec->items = GC_MALLOC(sizeof(Value) * (size_t)(total ? total : 1));
+  vec->len = (int)total;
+  vec->items = creme_alloc_array((size_t)(total ? total : 1), sizeof(Value), "vector-append");
   int pos = 0;
   for (int i = 0; i < nargs; i++) {
     Vector *src = args[i].as.vec;
@@ -2528,16 +2551,16 @@ static Value bi_vector_append(VM *vm, Value *args, int nargs) {
 static Value bi_string_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_INT) creme_abort("string-ref: expected (string index)");
-  int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].aux) creme_abort("string-ref: index %d out of range", idx);
+  int64_t idx = args[1].as.i; /* compare in int64: (int)idx would wrap a >2^31 index in-bounds */
+  if (idx < 0 || idx >= args[0].aux) creme_abort("string-ref: index %lld out of range", (long long)idx);
   return v_char((unsigned char)args[0].as.chars[idx]);
 }
 
 static Value bi_string_set(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_CHAR) creme_abort("string-set!: expected (string index char)");
-  int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].aux) creme_abort("string-set!: index %d out of range", idx);
+  int64_t idx = args[1].as.i; /* compare in int64: (int)idx would wrap a >2^31 index in-bounds */
+  if (idx < 0 || idx >= args[0].aux) creme_abort("string-set!: index %lld out of range", (long long)idx);
   ((char *)args[0].as.chars)[idx] = (char)args[2].as.i;
   return v_nil();
 }
@@ -2545,16 +2568,16 @@ static Value bi_string_set(VM *vm, Value *args, int nargs) {
 static Value bi_bytevector_u8_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 2 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT) creme_abort("bytevector-u8-ref: expected (bytevector index)");
-  int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.bv->len) creme_abort("bytevector-u8-ref: index %d out of range", idx);
+  int64_t idx = args[1].as.i; /* compare in int64: (int)idx would wrap a >2^31 index in-bounds */
+  if (idx < 0 || idx >= args[0].as.bv->len) creme_abort("bytevector-u8-ref: index %lld out of range", (long long)idx);
   return v_int(args[0].as.bv->bytes[idx]);
 }
 
 static Value bi_bytevector_u8_set(VM *vm, Value *args, int nargs) {
   (void)vm;
   if (nargs != 3 || args[0].tag != T_BYTEVECTOR || args[1].tag != T_INT || args[2].tag != T_INT) creme_abort("bytevector-u8-set!: expected (bytevector index byte)");
-  int idx = (int)args[1].as.i;
-  if (idx < 0 || idx >= args[0].as.bv->len) creme_abort("bytevector-u8-set!: index %d out of range", idx);
+  int64_t idx = args[1].as.i; /* compare in int64: (int)idx would wrap a >2^31 index in-bounds */
+  if (idx < 0 || idx >= args[0].as.bv->len) creme_abort("bytevector-u8-set!: index %lld out of range", (long long)idx);
   if (args[2].as.i < 0 || args[2].as.i > 255) creme_abort("bytevector-u8-set!: byte out of range");
   args[0].as.bv->bytes[idx] = (unsigned char)args[2].as.i;
   return v_nil();
@@ -2966,10 +2989,12 @@ static Value bi_append(VM *vm, Value *args, int nargs) {
   Value result = args[nargs - 1];
   for (int i = nargs - 2; i >= 0; i--) {
     int n = creme_list_length(args[i]);
-    Value *tmp = xmalloc(sizeof(Value) * (size_t)(n ? n : 1));
+    /* GC_MALLOC, not xmalloc/free: creme_list_to_values aborts (longjmp) on an
+     * improper list, which would skip a trailing free(). The staged Values are
+     * already reachable via args[i], so GC visibility is fine. */
+    Value *tmp = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
     creme_list_to_values(args[i], tmp, n, "append");
     for (int j = n - 1; j >= 0; j--) result = creme_cons(vm, tmp[j], result);
-    free(tmp);
   }
   return result;
 }
@@ -3009,6 +3034,7 @@ static Value bi_list_set(VM *vm, Value *args, int nargs) {
 }
 static Value bi_make_list(VM *vm, Value *args, int nargs) {
   int64_t k = creme_arg_int(args, nargs, 0, "make-list");
+  if (k < 0) creme_abort("make-list: invalid length %lld", (long long)k);
   Value fill = nargs >= 2 ? args[1] : v_bool(0);
   Value result = v_nil();
   for (int64_t i = 0; i < k; i++) result = creme_cons(vm, fill, result);
@@ -3151,20 +3177,20 @@ static Value bi_apply(VM *vm, Value *args, int nargs) {
   Value c = list_arg;
   while (c.tag == T_PAIR) { n_list++; c = c.as.pair->cdr; }
   int total = n_extra + n_list;
-  Value *call_args = xmalloc(sizeof(Value) * (size_t)(total ? total : 1));
+  /* GC_MALLOC (not xmalloc/free): creme_apply can escape via call/cc or raise
+   * (a longjmp), which would skip a trailing free() and leak. */
+  Value *call_args = GC_MALLOC(sizeof(Value) * (size_t)(total ? total : 1));
   for (int i = 0; i < n_extra; i++) call_args[i] = args[1 + i];
   c = list_arg;
   int idx = n_extra;
   while (c.tag == T_PAIR) { call_args[idx++] = c.as.pair->car; c = c.as.pair->cdr; }
-  Value result = creme_apply(vm, args[0], call_args, total);
-  free(call_args);
-  return result;
+  return creme_apply(vm, args[0], call_args, total);
 }
 static Value bi_map(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 2, "map");
   int n_lists = nargs - 1;
-  Value *cursors = xmalloc(sizeof(Value) * (size_t)n_lists);
-  Value *items = xmalloc(sizeof(Value) * (size_t)n_lists);
+  Value *cursors = GC_MALLOC(sizeof(Value) * (size_t)n_lists);
+  Value *items = GC_MALLOC(sizeof(Value) * (size_t)n_lists);
   for (int i = 0; i < n_lists; i++) cursors[i] = args[1 + i];
   Value *acc = NULL;
   int acc_len = 0, acc_cap = 0;
@@ -3183,15 +3209,13 @@ static Value bi_map(VM *vm, Value *args, int nargs) {
   }
   Value result = v_nil();
   for (int i = acc_len - 1; i >= 0; i--) result = creme_cons(vm, acc[i], result);
-  free(cursors);
-  free(items);
   return result;
 }
 static Value bi_for_each(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 2, "for-each");
   int n_lists = nargs - 1;
-  Value *cursors = xmalloc(sizeof(Value) * (size_t)n_lists);
-  Value *items = xmalloc(sizeof(Value) * (size_t)n_lists);
+  Value *cursors = GC_MALLOC(sizeof(Value) * (size_t)n_lists);
+  Value *items = GC_MALLOC(sizeof(Value) * (size_t)n_lists);
   for (int i = 0; i < n_lists; i++) cursors[i] = args[1 + i];
   for (;;) {
     int done = 0;
@@ -3200,8 +3224,6 @@ static Value bi_for_each(VM *vm, Value *args, int nargs) {
     for (int i = 0; i < n_lists; i++) { items[i] = cursors[i].as.pair->car; cursors[i] = cursors[i].as.pair->cdr; }
     creme_apply(vm, args[0], items, n_lists);
   }
-  free(cursors);
-  free(items);
   return v_nil();
 }
 static Value bi_vector_map(VM *vm, Value *args, int nargs) {
@@ -3216,12 +3238,11 @@ static Value bi_vector_map(VM *vm, Value *args, int nargs) {
   Vector *result = GC_MALLOC(sizeof(Vector));
   result->len = minlen;
   result->items = GC_MALLOC(sizeof(Value) * (size_t)(minlen ? minlen : 1));
-  Value *items = xmalloc(sizeof(Value) * (size_t)n_vecs);
+  Value *items = GC_MALLOC(sizeof(Value) * (size_t)n_vecs);
   for (int i = 0; i < minlen; i++) {
     for (int j = 0; j < n_vecs; j++) items[j] = args[1 + j].as.vec->items[i];
     result->items[i] = creme_apply(vm, args[0], items, n_vecs);
   }
-  free(items);
   return v_vector(result);
 }
 static Value bi_vector_for_each(VM *vm, Value *args, int nargs) {
@@ -3233,12 +3254,11 @@ static Value bi_vector_for_each(VM *vm, Value *args, int nargs) {
     int len = args[1 + i].as.vec->len;
     if (minlen < 0 || len < minlen) minlen = len;
   }
-  Value *items = xmalloc(sizeof(Value) * (size_t)n_vecs);
+  Value *items = GC_MALLOC(sizeof(Value) * (size_t)n_vecs);
   for (int i = 0; i < minlen; i++) {
     for (int j = 0; j < n_vecs; j++) items[j] = args[1 + j].as.vec->items[i];
     creme_apply(vm, args[0], items, n_vecs);
   }
-  free(items);
   return v_nil();
 }
 static Value bi_string_for_each(VM *vm, Value *args, int nargs) {
@@ -3250,12 +3270,11 @@ static Value bi_string_for_each(VM *vm, Value *args, int nargs) {
     int len = args[1 + i].aux;
     if (minlen < 0 || len < minlen) minlen = len;
   }
-  Value *chars = xmalloc(sizeof(Value) * (size_t)n_strs);
+  Value *chars = GC_MALLOC(sizeof(Value) * (size_t)n_strs);
   for (int idx = 0; idx < minlen; idx++) {
     for (int i = 0; i < n_strs; i++) chars[i] = v_char((unsigned char)args[1 + i].as.chars[idx]);
     creme_apply(vm, args[0], chars, n_strs);
   }
-  free(chars);
   return v_nil();
 }
 static Value bi_filter(VM *vm, Value *args, int nargs) {
@@ -3267,14 +3286,13 @@ static Value bi_filter(VM *vm, Value *args, int nargs) {
     Value item = cur.as.pair->car;
     Value keep = creme_apply(vm, args[0], &item, 1);
     if (!v_falsy(keep)) {
-      if (len >= cap) { cap = cap ? cap * 2 : 8; acc = xrealloc(acc, sizeof(Value) * (size_t)cap); }
+      if (len >= cap) { cap = cap ? cap * 2 : 8; acc = GC_REALLOC(acc, sizeof(Value) * (size_t)cap); }
       acc[len++] = item;
     }
     cur = cur.as.pair->cdr;
   }
   Value result = v_nil();
   for (int i = len - 1; i >= 0; i--) result = creme_cons(vm, acc[i], result);
-  free(acc);
   return result;
 }
 
@@ -3371,8 +3389,9 @@ static Value bi_list_to_string(VM *vm, Value *args, int nargs) {
 static Value bi_make_string(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t n = creme_arg_int(args, nargs, 0, "make-string");
+  if (n < 0 || n > INT_MAX) creme_abort("make-string: invalid length %lld", (long long)n);
   char fill = (nargs >= 2 && args[1].tag == T_CHAR) ? (char)args[1].as.i : ' ';
-  char *buf = GC_MALLOC((size_t)(n ? n : 1));
+  char *buf = creme_alloc_array((size_t)n, 1, "make-string");
   memset(buf, fill, (size_t)n);
   return v_str(buf, (int)n);
 }
@@ -3483,13 +3502,13 @@ static Value bi_string_copy_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
   int tolen, fromlen;
   const char *to = creme_arg_bytes(args, nargs, 0, "string-copy!", &tolen);
-  int at = (int)creme_arg_int(args, nargs, 1, "string-copy!");
+  int64_t at = creme_arg_int(args, nargs, 1, "string-copy!"); /* int64: (int)at + count overflows */
   const char *from = creme_arg_bytes(args, nargs, 2, "string-copy!", &fromlen);
   int first, last;
   byte_range_args(args, nargs, 3, fromlen, &first, &last);
   int count = last - first;
   if (at < 0 || at + count > tolen) creme_abort("string-copy!: destination range out of bounds");
-  memmove((char *)to + at, from + first, (size_t)count);
+  memmove((char *)to + (int)at, from + first, (size_t)count);
   return v_nil();
 }
 
@@ -3546,6 +3565,8 @@ static Value bi_string_to_number(VM *vm, Value *args, int nargs) {
   const char *s = creme_arg_bytes(args, nargs, 0, "string->number", &len);
   int radix = 10;
   if (nargs >= 2) radix = (int)creme_arg_int(args, nargs, 1, "string->number");
+  /* strtoll's behavior is undefined for any base other than 0 or 2..36. */
+  if (radix < 2 || radix > 36) creme_abort("string->number: radix must be between 2 and 36, got %d", radix);
   char *buf = xmalloc((size_t)len + 1);
   memcpy(buf, s, (size_t)len);
   buf[len] = 0;
@@ -3574,6 +3595,9 @@ Value bi_number_to_string(VM *vm, Value *args, int nargs) {
     if (args[1].tag != T_INT) creme_abort("number->string: expected an integer radix");
     radix = (int)args[1].as.i;
   }
+  /* Radix must be 2..36: radix 0 divides by zero and radix 1 never shrinks
+   * `un`, spinning forever and overrunning the tmp[] stack buffer below. */
+  if (radix < 2 || radix > 36) creme_abort("number->string: radix must be between 2 and 36, got %d", radix);
   char buf[128];
   int len;
   if (radix != 10) {
@@ -3825,6 +3849,8 @@ static Value bi_vector_to_list(VM *vm, Value *args, int nargs) {
   /* Optional start/end -- R7RS's (vector->list vector [start [end]]),
    * defaulting to the whole vector. (list->vector has no such args in
    * R7RS -- only this direction does -- so that one is left as-is.) */
+  if (nargs >= 2 && args[1].tag != T_INT) creme_abort("vector->list: start must be an integer");
+  if (nargs >= 3 && args[2].tag != T_INT) creme_abort("vector->list: end must be an integer");
   int64_t start = nargs >= 2 ? args[1].as.i : 0;
   int64_t end = nargs >= 3 ? args[2].as.i : vec->len;
   if (start < 0 || end > vec->len || start > end) creme_abort("vector->list: start/end out of range");

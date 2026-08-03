@@ -17,6 +17,7 @@
  * function call (checking whether the head resolves to a macro before
  * falling back to an ordinary Call) -- so any REPL-style use of the
  * compiler running under icecreme needs both names to at least exist. */
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -341,6 +342,9 @@ static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
   if (fseek(f, 0, SEEK_END) != 0) creme_abort("read-whole-file: cannot seek %s", path);
   long size = ftell(f);
   if (size < 0) creme_abort("read-whole-file: cannot determine size of %s", path);
+  /* Scheme strings carry an int length (v_str's aux); a file past INT_MAX would
+   * be truncated to a negative/wrong length that then flows into byte math. */
+  if (size > INT_MAX) creme_abort("read-whole-file: %s is too large (%ld bytes)", path, size);
   rewind(f);
 
   char *buf = GC_MALLOC((size_t)(size ? size : 1));

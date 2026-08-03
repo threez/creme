@@ -149,16 +149,23 @@ static EC_KEY *pkey_pem_to_ec(const char *pem, int pem_len, const char *who) {
 }
 
 static EVP_PKEY *pkeybox_to_evp(PKeyBox *box, const char *who) {
-  EVP_PKEY *pkey = EVP_PKEY_new();
-  if (!pkey) creme_abort("%s: EVP_PKEY_new failed", who);
+  /* Parse the key material BEFORE allocating the EVP_PKEY, so an abort inside
+   * pkey_pem_to_rsa/_ec (unparseable PEM) has nothing to leak. */
+  EVP_PKEY *pkey;
   if (box->kind == PKEY_KIND_RSA) {
     RSA *rsa = pkey_pem_to_rsa(box->pem, box->pem_len, who);
-    EVP_PKEY_set1_RSA(pkey, rsa);
+    pkey = EVP_PKEY_new();
+    if (!pkey) { RSA_free(rsa); creme_abort("%s: EVP_PKEY_new failed", who); }
+    int ok = EVP_PKEY_set1_RSA(pkey, rsa);
     RSA_free(rsa);
+    if (ok != 1) { EVP_PKEY_free(pkey); creme_abort("%s: failed to assemble RSA key", who); }
   } else {
     EC_KEY *ec = pkey_pem_to_ec(box->pem, box->pem_len, who);
-    EVP_PKEY_set1_EC_KEY(pkey, ec);
+    pkey = EVP_PKEY_new();
+    if (!pkey) { EC_KEY_free(ec); creme_abort("%s: EVP_PKEY_new failed", who); }
+    int ok = EVP_PKEY_set1_EC_KEY(pkey, ec);
     EC_KEY_free(ec);
+    if (ok != 1) { EVP_PKEY_free(pkey); creme_abort("%s: failed to assemble EC key", who); }
   }
   return pkey;
 }
@@ -259,8 +266,10 @@ static Value bi_x509_self_signed_certificate(VM *vm, Value *args, int nargs) {
     days = (long)args[2].as.i;
   }
 
-  EVP_PKEY *pkey = pkeybox_to_evp(key, "x509-self-signed-certificate");
+  /* Build the name first: if it aborts on a malformed subject, no pkey exists
+   * yet to leak. */
   X509_NAME *name = x509_build_name(args[1], "x509-self-signed-certificate");
+  EVP_PKEY *pkey = pkeybox_to_evp(key, "x509-self-signed-certificate");
 
   X509 *cert = X509_new();
   X509_set_version(cert, 2);
@@ -290,8 +299,10 @@ static Value bi_x509_create_csr(VM *vm, Value *args, int nargs) {
   PKeyBox *key = pkey_arg(args[0], "x509-create-csr");
   if (!key->is_private) creme_abort("x509-create-csr: expected a private key");
 
-  EVP_PKEY *pkey = pkeybox_to_evp(key, "x509-create-csr");
+  /* Name first (see x509-self-signed-certificate): a malformed-subject abort
+   * then can't leak the pkey. */
   X509_NAME *name = x509_build_name(args[1], "x509-create-csr");
+  EVP_PKEY *pkey = pkeybox_to_evp(key, "x509-create-csr");
 
   X509_REQ *req = X509_REQ_new();
   X509_REQ_set_version(req, 0);

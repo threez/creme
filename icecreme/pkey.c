@@ -160,16 +160,23 @@ static EC_KEY *pem_to_ec(const char *pem, int pem_len, const char *who) {
 }
 
 static EVP_PKEY *pkeybox_to_evp(PKeyBox *box, const char *who) {
-  EVP_PKEY *pkey = EVP_PKEY_new();
-  if (!pkey) creme_abort("%s: EVP_PKEY_new failed", who);
+  /* Parse the key material BEFORE allocating the EVP_PKEY, so an abort inside
+   * pem_to_rsa/pem_to_ec (unparseable PEM) has nothing to leak. */
+  EVP_PKEY *pkey;
   if (box->kind == PKEY_KIND_RSA) {
     RSA *rsa = pem_to_rsa(box->pem, box->pem_len, who);
-    EVP_PKEY_set1_RSA(pkey, rsa);
+    pkey = EVP_PKEY_new();
+    if (!pkey) { RSA_free(rsa); creme_abort("%s: EVP_PKEY_new failed", who); }
+    int ok = EVP_PKEY_set1_RSA(pkey, rsa);
     RSA_free(rsa);
+    if (ok != 1) { EVP_PKEY_free(pkey); creme_abort("%s: failed to assemble RSA key", who); }
   } else {
     EC_KEY *ec = pem_to_ec(box->pem, box->pem_len, who);
-    EVP_PKEY_set1_EC_KEY(pkey, ec);
+    pkey = EVP_PKEY_new();
+    if (!pkey) { EC_KEY_free(ec); creme_abort("%s: EVP_PKEY_new failed", who); }
+    int ok = EVP_PKEY_set1_EC_KEY(pkey, ec);
     EC_KEY_free(ec);
+    if (ok != 1) { EVP_PKEY_free(pkey); creme_abort("%s: failed to assemble EC key", who); }
   }
   return pkey;
 }
@@ -387,7 +394,7 @@ static unsigned char *rsa_oaep_op(RSA *rsa, const unsigned char *input, int inpu
                                    const char *who) {
   EVP_PKEY *pkey = EVP_PKEY_new();
   if (!pkey) creme_abort("%s: EVP_PKEY_new failed", who);
-  EVP_PKEY_set1_RSA(pkey, rsa);
+  if (EVP_PKEY_set1_RSA(pkey, rsa) != 1) { EVP_PKEY_free(pkey); creme_abort("%s: failed to assemble RSA key", who); }
   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(pkey, NULL);
   if (!ctx) {
     EVP_PKEY_free(pkey);

@@ -18,6 +18,7 @@
  * are cached locals, refreshed only right after an op that can change which
  * frame is on top (a call or a return) — everything else reuses them
  * as-is, matching the invariant that only those ops touch `vm->depth`. */
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -151,10 +152,21 @@ int creme_global_intern(VM *vm, const char *name, int len) {
     }
   }
   if (vm->n_globals >= CREME_GLOBALS_CAP) creme_abort("icecreme: global table full (CREME_GLOBALS_CAP=%d)", CREME_GLOBALS_CAP);
-  int slot = vm->n_globals++;
-  vm->globals[slot].name = name;
+  int slot = vm->n_globals;
+  /* Copy into an owned, NUL-terminated buffer: some callers (bootstrap.c's
+   * environment/eval helpers, expand-if-macro) pass a raw Scheme string/symbol
+   * slice that is NOT guaranteed NUL-terminated (value.h), and every future
+   * intern strlen()s the stored names above -- storing the caller's pointer
+   * verbatim would read past such a slice. */
+  vm->globals[slot].name = creme_dupn(name, len);
   vm->globals[slot].value = v_nil();
   vm->globals[slot].bound = 0;
+  /* Publish the fully-initialized slot BEFORE bumping the count: an actor
+   * network decode thread (actor.c read_list) walks globals[0..n_globals)
+   * without a lock, so this release store must be the last write -- otherwise
+   * the reader could observe a slot whose .name isn't set yet and strlen() it.
+   * globals[] is a fixed array (never realloc'd), so no pointer can tear. */
+  __atomic_store_n(&vm->n_globals, slot + 1, __ATOMIC_RELEASE);
   return slot;
 }
 
@@ -1804,7 +1816,11 @@ static Value creme_dispatch(VM *vm, int target_depth) {
         Value name = rb.names[i];
         int slot = creme_global_intern(vm, name.as.chars, name.aux);
         vm->globals[slot].value = rb.values[i];
-        vm->globals[slot].bound = 1;
+        /* Release-store `bound` AFTER `.value`: the actor decode thread
+         * (actor.c read_list) acquire-loads bound before reading a record
+         * type's value, so this ordering prevents it observing bound==1 with a
+         * torn/half-written Value for a type defined at runtime while serving. */
+        __atomic_store_n(&vm->globals[slot].bound, 1, __ATOMIC_RELEASE);
       }
       /* eval_define_record_type returns the raw type-name form itself
        * (not the type descriptor) -- record_type_names.cr's `names[0]`/
@@ -1840,7 +1856,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     Value vec = upvalue_get(frame->closure->upvalues[ins->b]);
     Value idxv = stack[base + ins->c];
     if (vec.tag != T_VECTOR || idxv.tag != T_INT) creme_abort("vector-ref: bad arguments");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-ref: index %d out of range", idx);
     stack[base + ins->a] = vec.as.vec->items[idx];
     NEXT();
@@ -1849,7 +1866,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     Value vec = upvalue_get(frame->closure->upvalues[ins->a]);
     Value idxv = stack[base + ins->b];
     if (vec.tag != T_VECTOR || idxv.tag != T_INT) creme_abort("vector-set!: bad arguments");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-set!: index %d out of range", idx);
     vec.as.vec->items[idx] = stack[base + ins->c];
     stack[base + ins->d] = vec;
@@ -1860,7 +1878,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (bv.tag != T_BYTEVECTOR) creme_abort("bytevector-u8-ref: not a bytevector");
     Value idxv = stack[base + ins->c];
     if (idxv.tag != T_INT) creme_abort("bytevector-u8-ref: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-ref: index %d out of range", idx);
     stack[base + ins->a] = v_int(bv.as.bv->bytes[idx]);
     NEXT();
@@ -1870,7 +1889,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (bv.tag != T_BYTEVECTOR) creme_abort("bytevector-u8-set!: not a bytevector");
     Value idxv = stack[base + ins->b];
     if (idxv.tag != T_INT) creme_abort("bytevector-u8-set!: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-set!: index %d out of range", idx);
     Value val = stack[base + ins->c];
     if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) creme_abort("bytevector-u8-set!: byte out of range");
@@ -1899,7 +1919,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     Value bv = upvalue_get(frame->closure->upvalues[ins->b]);
     Value idxv = stack[base + ins->c];
     if (bv.tag != T_BYTEVECTOR || idxv.tag != T_INT) creme_abort("bytevector-u8-ref: bad arguments");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-ref: index %d out of range", idx);
     stack[base + ins->a] = v_int(bv.as.bv->bytes[idx]);
     NEXT();
@@ -1908,7 +1929,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     Value bv = upvalue_get(frame->closure->upvalues[ins->a]);
     Value idxv = stack[base + ins->b];
     if (bv.tag != T_BYTEVECTOR || idxv.tag != T_INT) creme_abort("bytevector-u8-set!: bad arguments");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= bv.as.bv->len) creme_abort("bytevector-u8-set!: index %d out of range", idx);
     Value val = stack[base + ins->c];
     if (val.tag != T_INT || val.as.i < 0 || val.as.i > 255) creme_abort("bytevector-u8-set!: byte out of range");
@@ -2027,7 +2049,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (sv.tag != T_STR) creme_abort("string-ref: not a string");
     Value idxv = stack[base + ins->c];
     if (idxv.tag != T_INT) creme_abort("string-ref: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= sv.aux) creme_abort("string-ref: index %d out of range", idx);
     stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
@@ -2043,7 +2066,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (sv.tag != T_STR) creme_abort("string-set!: not a string");
     Value idxv = stack[base + ins->b];
     if (idxv.tag != T_INT) creme_abort("string-set!: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= sv.aux) creme_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
     if (ch.tag != T_CHAR) creme_abort("string-set!: not a character");
@@ -2065,7 +2089,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (sv.tag != T_STR) creme_abort("string-ref: not a string");
     Value idxv = stack[base + ins->c];
     if (idxv.tag != T_INT) creme_abort("string-ref: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= sv.aux) creme_abort("string-ref: index %d out of range", idx);
     stack[base + ins->a] = v_char((unsigned char)sv.as.chars[idx]);
     NEXT();
@@ -2075,7 +2100,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (sv.tag != T_STR) creme_abort("string-set!: not a string");
     Value idxv = stack[base + ins->b];
     if (idxv.tag != T_INT) creme_abort("string-set!: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= sv.aux) creme_abort("string-set!: index %d out of range", idx);
     Value ch = stack[base + ins->c];
     if (ch.tag != T_CHAR) creme_abort("string-set!: not a character");
@@ -2160,7 +2186,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (vec.tag != T_VECTOR) creme_abort("vector-ref: not a vector");
     Value idxv = stack[base + ins->c];
     if (idxv.tag != T_INT) creme_abort("vector-ref: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-ref: index %d out of range", idx);
     stack[base + ins->a] = vec.as.vec->items[idx];
     NEXT();
@@ -2176,7 +2203,8 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     if (vec.tag != T_VECTOR) creme_abort("vector-set!: not a vector");
     Value idxv = stack[base + ins->b];
     if (idxv.tag != T_INT) creme_abort("vector-set!: not an integer index");
-    int idx = (int)idxv.as.i;
+    if (idxv.as.i < 0 || idxv.as.i > INT_MAX) creme_abort("index %lld out of range", (long long)idxv.as.i);
+    int idx = (int)idxv.as.i; /* safe: guarded to [0, INT_MAX] above; per-op bounds check follows */
     if (idx < 0 || idx >= vec.as.vec->len) creme_abort("vector-set!: index %d out of range", idx);
     vec.as.vec->items[idx] = stack[base + ins->c];
     NEXT();

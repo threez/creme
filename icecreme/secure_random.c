@@ -13,6 +13,7 @@
 #if CREME_WITH_SECURE_RANDOM
 
 #include <gc.h>
+#include <limits.h>
 #include <openssl/rand.h>
 
 #include "embed.h"
@@ -20,7 +21,9 @@
 
 static int secure_random_count_arg(Value *args, int nargs, const char *who) {
   int64_t n = creme_arg_int(args, nargs, 0, who);
-  if (n < 0) creme_abort("%s: expected a non-negative integer", who);
+  /* Reject > INT_MAX before the cast: a value like 2^31 would truncate to
+   * INT_MIN and reach GC_MALLOC/RAND_bytes as a negative length. */
+  if (n < 0 || n > INT_MAX) creme_abort("%s: expected a non-negative integer count", who);
   return (int)n;
 }
 

@@ -217,13 +217,19 @@ static void marshal_arg_into(Value v, int kind, FfiSlot *slot, const char *who) 
   }
 }
 
-static Value marshal_return(int kind, FfiSlot *slot) {
+/* `from_reg` distinguishes the two callers' storage conventions for sub-word
+ * (int32/bool) values: an ffi_call RETURN buffer is a full FfiSlot in which
+ * libffi word-widens the result, so read the whole word (i64) and narrow --
+ * reading i32 would be the value only on little-endian. A ffi-pointer-ref slot
+ * instead points DIRECTLY into raw (possibly 4-byte) memory, so it must read
+ * exactly the declared width (i32) -- reading i64 there over-reads 8 bytes. */
+static Value marshal_return(int kind, FfiSlot *slot, int from_reg) {
   switch (kind) {
   case FFI_T_VOID: return v_nil();
-  case FFI_T_INT32: return v_int(slot->i32);
+  case FFI_T_INT32: return v_int(from_reg ? (int32_t)slot->i64 : slot->i32);
   case FFI_T_INT64: return v_int(slot->i64);
   case FFI_T_DOUBLE: return v_float(slot->d);
-  case FFI_T_BOOL: return v_bool(slot->i32 != 0);
+  case FFI_T_BOOL: return v_bool(from_reg ? (slot->i64 != 0) : (slot->i32 != 0));
   case FFI_T_STRING:
     return slot->ptr ? creme_cstr_value((const char *)slot->ptr) : v_bool(0);
   case FFI_T_POINTER:
@@ -254,7 +260,7 @@ static Value bi_ffi_call(VM *vm, Value *args, int nargs) {
 
   FfiSlot ret_slot;
   ffi_call(&f->cif, FFI_FN(f->fnptr), &ret_slot, arg_ptrs);
-  return marshal_return(f->ret_kind, &ret_slot);
+  return marshal_return(f->ret_kind, &ret_slot, 1 /* from a widened register */);
 }
 
 /* Shared by ffi-pointer-ref/ffi-pointer-set! -- extracts the raw base
@@ -277,7 +283,7 @@ static Value bi_ffi_pointer_ref(VM *vm, Value *args, int nargs) {
   int kind = ffi_type_kind_from_sym(args[2], "ffi-pointer-ref");
   if (kind == FFI_T_VOID) creme_abort("ffi-pointer-ref: type must not be void");
   FfiSlot *slot = (FfiSlot *)((char *)base + args[1].as.i);
-  return marshal_return(kind, slot);
+  return marshal_return(kind, slot, 0 /* raw memory: read exact declared width */);
 }
 
 static Value bi_ffi_pointer_set(VM *vm, Value *args, int nargs) {

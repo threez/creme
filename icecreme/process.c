@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <string.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -78,7 +79,7 @@ static void pr_drain_pipes(int out_fd, int err_fd,
     int pr = poll(fds, (nfds_t)nfds, -1);
     if (pr < 0) {
       if (errno == EINTR) continue;
-      break;
+      break; /* fds still open here are closed after the loop */
     }
 
     if (out_open && (fds[out_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
@@ -104,6 +105,27 @@ static void pr_drain_pipes(int out_fd, int err_fd,
       }
     }
   }
+  /* Close any fd still open (e.g. after a poll() error break) so they don't leak. */
+  if (out_open) close(out_fd);
+  if (err_open) close(err_fd);
+}
+
+/* Close every descriptor above stdio in the just-forked child so the spawned
+ * program can't touch our inherited listener/DB/actor sockets (also drops the
+ * pipe fds, so no explicit closes are needed before execvp). */
+static void close_inherited_fds(void) {
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
+  closefrom(3);
+#else
+#if defined(__linux__) && defined(SYS_close_range)
+  /* One syscall on Linux >= 5.9 instead of an O(RLIMIT_NOFILE) close() loop;
+   * fall through to the loop if the kernel is older (ENOSYS). */
+  if (syscall(SYS_close_range, 3, ~0U, 0) == 0) return;
+#endif
+  long maxfd = sysconf(_SC_OPEN_MAX);
+  if (maxfd < 0) maxfd = 1024;
+  for (int fd = 3; fd < (int)maxfd; fd++) close(fd);
+#endif
 }
 
 static Value bi_process_run(VM *vm, Value *args, int nargs) {
@@ -120,18 +142,25 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
   argv[n + 1] = NULL;
 
   int out_pipe[2], err_pipe[2];
-  if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0) creme_abort("process-run: pipe() failed");
+  if (pipe(out_pipe) != 0) creme_abort("process-run: pipe() failed");
+  if (pipe(err_pipe) != 0) {
+    close(out_pipe[0]);
+    close(out_pipe[1]);
+    creme_abort("process-run: pipe() failed");
+  }
 
   pid_t pid = fork();
-  if (pid < 0) creme_abort("process-run: fork() failed");
-
-  if (pid == 0) {
-    dup2(out_pipe[1], STDOUT_FILENO);
-    dup2(err_pipe[1], STDERR_FILENO);
+  if (pid < 0) {
     close(out_pipe[0]);
     close(out_pipe[1]);
     close(err_pipe[0]);
     close(err_pipe[1]);
+    creme_abort("process-run: fork() failed");
+  }
+
+  if (pid == 0) {
+    if (dup2(out_pipe[1], STDOUT_FILENO) < 0 || dup2(err_pipe[1], STDERR_FILENO) < 0) _exit(127);
+    close_inherited_fds();
     execvp(cmd, argv);
     _exit(127); /* execvp only returns on failure */
   }
@@ -144,8 +173,9 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
   pr_drain_pipes(out_pipe[0], err_pipe[0], &out_buf, &out_len, &err_buf, &err_len);
 
   int status = 0;
-  waitpid(pid, &status, 0);
-  int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  pid_t w;
+  do { w = waitpid(pid, &status, 0); } while (w < 0 && errno == EINTR);
+  int exit_code = (w >= 0 && WIFEXITED(status)) ? WEXITSTATUS(status) : -1;
 
   Value result = v_nil();
   result = creme_cons(vm, v_bool(exit_code == 0), result);

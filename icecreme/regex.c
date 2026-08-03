@@ -20,10 +20,31 @@
 #include <pcre2.h>
 
 #include <gc.h>
+#include <pthread.h>
 #include <string.h>
 
 #include "embed.h"
 #include "regex.h"
+
+/* A process-wide match context carrying explicit match/depth limits, so a
+ * pathological (program-supplied) pattern over a possibly-untrusted subject
+ * can't burn unbounded CPU or overflow the stack via catastrophic backtracking
+ * (ReDoS). Read-only during matching, so it's safe to share across threads. On
+ * a match-limit hit pcre2_match returns a negative error, which every call site
+ * already treats as "no match" -- a safe failure. */
+static pcre2_match_context *g_match_ctx;
+static pthread_once_t g_match_ctx_once = PTHREAD_ONCE_INIT;
+static void init_match_ctx(void) {
+  g_match_ctx = pcre2_match_context_create(NULL);
+  if (g_match_ctx) {
+    pcre2_set_match_limit(g_match_ctx, 10000000);
+    pcre2_set_depth_limit(g_match_ctx, 10000);
+  }
+}
+static pcre2_match_context *match_ctx(void) {
+  pthread_once(&g_match_ctx_once, init_match_ctx);
+  return g_match_ctx; /* NULL on alloc failure -> pcre2_match falls back to defaults */
+}
 
 static Value bi_regexp(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -51,7 +72,7 @@ static Value bi_regexp_matches_p(VM *vm, Value *args, int nargs) {
    * long-lived state, don't over-engineer" convention), this genuinely
    * has no reason to survive past this one call. */
   pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
-  int rc = pcre2_match(re, (PCRE2_SPTR)args[1].as.chars, (PCRE2_SIZE)args[1].aux, 0, 0, md, NULL);
+  int rc = pcre2_match(re, (PCRE2_SPTR)args[1].as.chars, (PCRE2_SIZE)args[1].aux, 0, 0, md, match_ctx());
   pcre2_match_data_free(md);
   return v_bool(rc >= 0);
 }
@@ -73,7 +94,7 @@ static pcre2_code *regex_arg(Value v, const char *who) {
  * optional group becomes #f), or 0 if there's no match at all. */
 static int regex_match_once(VM *vm, pcre2_code *re, const char *subj, int subj_len, int start, int *match_start, int *match_end, Value *groups) {
   pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
-  int rc = pcre2_match(re, (PCRE2_SPTR)subj, (PCRE2_SIZE)subj_len, (PCRE2_SIZE)start, 0, md, NULL);
+  int rc = pcre2_match(re, (PCRE2_SPTR)subj, (PCRE2_SIZE)subj_len, (PCRE2_SIZE)start, 0, md, match_ctx());
   if (rc < 0) {
     pcre2_match_data_free(md);
     return 0;
@@ -209,7 +230,11 @@ static Value bi_regexp_split(VM *vm, Value *args, int nargs) {
   const char *subj = args[1].as.chars;
   int len = args[1].aux;
   Value pieces = v_nil();
-  Value *collected = GC_MALLOC(sizeof(Value) * (size_t)(len + 1));
+  /* An empty-capable pattern matches at every position 0..len, so the loop can
+   * push up to len+1 pieces; the unconditional tail write after the loop needs
+   * one slot beyond that -> len+2 total (see the OOB this used to have when
+   * sized len+1, e.g. (regexp-split (regexp "") "ab")). */
+  Value *collected = GC_MALLOC(sizeof(Value) * (size_t)(len + 2));
   int n = 0;
   int pos = 0, last = 0;
   while (pos <= len) {

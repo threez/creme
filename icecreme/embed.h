@@ -15,6 +15,7 @@
 #define CREME_EMBED_H
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -172,6 +173,21 @@ static inline char *creme_dupn(const char *s, int len) {
   if (len > 0) memcpy(out, s, (size_t)len);
   out[len > 0 ? len : 0] = '\0';
   return out;
+}
+
+/* Overflow-checked array allocation: GC_MALLOC(count * elem) after verifying
+ * the product can't wrap size_t. Several builtins compute `count * sizeof(T)`
+ * from a user-supplied count (make-vector, make-bytevector, ...) or double a
+ * capacity (`cap * 2`) in narrow int arithmetic, both of which silently wrap
+ * for large sizes and hand GC_MALLOC a bogus (tiny or huge) length -> heap
+ * overflow or spurious OOM. Route any `count * elem` allocation whose count
+ * isn't already bounded (e.g. by the loader's read_count cap) through here.
+ * `count == 0` allocates one element so callers never see a NULL/zero-size
+ * object, matching the `n ? n : 1` idiom these sites already used. */
+static inline void *creme_alloc_array(size_t count, size_t elem, const char *who) {
+  if (count == 0) count = 1;
+  if (count > SIZE_MAX / elem) creme_abort("%s: allocation size overflow", who);
+  return GC_MALLOC(count * elem);
 }
 
 /* Extracts argument `index` as a `T_STR` value, returned as a fresh,
@@ -350,7 +366,9 @@ static inline Value creme_bytevector_value(const unsigned char *ptr, int len) {
  * version existed. */
 static inline Value creme_hex_value(const unsigned char *bytes, int len) {
   static const char hexchars[] = "0123456789abcdef";
-  char *buf = GC_MALLOC((size_t)(len > 0 ? len * 2 : 1));
+  /* (size_t)len * 2: computing `len * 2` in int overflows for len > ~1 GiB and
+   * would under-allocate. */
+  char *buf = GC_MALLOC(len > 0 ? (size_t)len * 2 : 1);
   for (int i = 0; i < len; i++) {
     buf[2 * i] = hexchars[bytes[i] >> 4];
     buf[2 * i + 1] = hexchars[bytes[i] & 0xf];

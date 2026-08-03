@@ -37,6 +37,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <gc.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -71,16 +72,21 @@ static void hbuf_init(HBuf *b) {
 }
 
 static void hbuf_reserve(HBuf *b, int extra) {
-  if (b->len + extra <= b->cap) return;
-  int newcap = b->cap * 2;
-  while (newcap < b->len + extra) newcap *= 2;
-  char *nb = GC_MALLOC((size_t)newcap);
+  /* size_t math + cap: `b->len + extra` and `newcap * 2` overflow int to a
+   * negative value near 2 GB, which would feed GC_MALLOC a bogus size. */
+  size_t need = (size_t)b->len + (size_t)(extra > 0 ? extra : 0);
+  if (need <= (size_t)b->cap) return;
+  size_t newcap = (size_t)b->cap * 2;
+  while (newcap < need) newcap *= 2;
+  if (newcap > INT_MAX) creme_abort("http: response body too large");
+  char *nb = GC_MALLOC(newcap);
   memcpy(nb, b->buf, (size_t)b->len);
   b->buf = nb;
-  b->cap = newcap;
+  b->cap = (int)newcap;
 }
 
 static void hbuf_puts(HBuf *b, const char *s, int n) {
+  if (n <= 0) return; /* defensive: never memcpy a negative (-> huge size_t) length */
   hbuf_reserve(b, n);
   memcpy(b->buf + b->len, s, (size_t)n);
   b->len += n;
@@ -304,14 +310,27 @@ static int connect_tls(Conn *c, const char *host, int port, const char *who) {
   c->fd = connect_tcp(host, port);
   if (c->fd < 0) return -1;
   c->ssl = SSL_new(g_ssl_ctx);
-  if (!c->ssl) creme_abort("%s: failed to create an SSL session", who);
+  /* Every abort below must close c->fd (and free c->ssl once created): SSL_set_fd
+   * uses a BIO_NOCLOSE socket BIO, so SSL_free never closes the fd, and creme_abort
+   * longjmps past http_do's conn_close -- otherwise each failed handshake leaks a
+   * socket + SSL object (fd exhaustion for a script retrying inside a guard). */
+  if (!c->ssl) { close(c->fd); creme_abort("%s: failed to create an SSL session", who); }
   SSL_set_fd(c->ssl, c->fd);
   SSL_set_tlsext_host_name(c->ssl, host);
-  SSL_set1_host(c->ssl, host);
+  /* SSL_set1_host is the security-critical half (it's what makes SSL_VERIFY_PEER
+   * actually check the cert matches THIS host); if it fails the verify param
+   * carries no expected name and a valid cert for any other host would pass. */
+  if (SSL_set1_host(c->ssl, host) != 1) {
+    SSL_free(c->ssl);
+    close(c->fd);
+    creme_abort("%s: failed to set TLS hostname verification for %s", who, host);
+  }
   if (SSL_connect(c->ssl) != 1) {
     unsigned long e = ERR_get_error();
     char ebuf[256];
     ERR_error_string_n(e, ebuf, sizeof(ebuf));
+    SSL_free(c->ssl);
+    close(c->fd);
     creme_abort("%s: TLS handshake with %s:%d failed: %s", who, host, port, ebuf);
   }
   return 0;
@@ -335,9 +354,16 @@ static void conn_read_all_until_eof(Conn *c, HBuf *out) {
   char chunk[4096];
   for (;;) {
     int r = SSL_read(c->ssl, chunk, sizeof(chunk));
-    if (r <= 0) break; /* SSL_ERROR_ZERO_RETURN (clean close) or any other error: done either way */
+    if (r <= 0) break; /* EOF (close_notify or transport FIN) or error */
     hbuf_puts(out, chunk, r);
   }
+  /* NOTE: this client frames the response purely by connection-close (it sends
+   * `Connection: close` and reads to EOF, with no Content-Length enforcement),
+   * so a clean transport EOF is the ONLY end-of-body signal available. Many real
+   * servers/proxies close with a TCP FIN and no TLS close_notify, so treating a
+   * non-SSL_ERROR_ZERO_RETURN EOF as an error would reject legitimate, complete
+   * responses -- TLS truncation therefore cannot be reliably distinguished here
+   * and is deliberately not treated as a hard error. */
 }
 
 static void conn_close(Conn *c) {
@@ -403,12 +429,17 @@ static char *dechunk(const char *body, int body_len, int *out_len) {
     sizebuf[hexlen] = '\0';
     long chunk_size = strtol(sizebuf, NULL, 16);
     pos = next;
-    if (chunk_size <= 0) break; /* terminating chunk */
-    if (pos + (int)chunk_size > body_len) {
-      hbuf_puts(&out, body + pos, body_len - pos); /* truncated -- best effort */
+    if (chunk_size <= 0) break; /* terminating chunk (or malformed) */
+    /* Compare as long BEFORE any int cast: a server-sent size with bit 31 set
+     * (e.g. "80000000") is a valid positive long but casts to a negative int,
+     * making `pos + (int)chunk_size > body_len` false and feeding a negative
+     * length to hbuf_puts -> memcpy((size_t)negative) heap corruption. */
+    long avail = (long)(body_len - pos);
+    if (chunk_size > avail) {
+      if (avail > 0) hbuf_puts(&out, body + pos, (int)avail); /* truncated -- best effort */
       break;
     }
-    hbuf_puts(&out, body + pos, (int)chunk_size);
+    hbuf_puts(&out, body + pos, (int)chunk_size); /* chunk_size <= avail <= body_len, fits int */
     pos += (int)chunk_size;
     if (pos < body_len && body[pos] == '\r') pos++;
     if (pos < body_len && body[pos] == '\n') pos++;
@@ -418,6 +449,14 @@ static char *dechunk(const char *body, int body_len, int *out_len) {
 }
 
 /* ---- the shared request/response driver behind every http-* builtin --- */
+
+/* Reject a CR or LF anywhere in a NUL-terminated field that gets written into
+ * the request line/headers verbatim -- an embedded "\r\n" would let untrusted
+ * input inject extra headers or smuggle a second request. */
+static void reject_crlf(const char *s, const char *what, const char *who) {
+  for (; *s; s++)
+    if (*s == '\r' || *s == '\n') creme_abort("%s: illegal CR/LF in %s", who, what);
+}
 
 static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, int has_headers, Value body_v, int has_body, const char *who) {
   if (url_v.tag != T_STR) creme_abort("%s: expected string, got a non-string value", who);
@@ -436,6 +475,14 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
     if (body_v.tag != T_STR) creme_abort("%s: expected a string body", who);
     req_body = body_v.as.chars;
     req_body_len = body_v.aux;
+  }
+
+  reject_crlf(method, "request method", who);
+  reject_crlf(u.host, "request host", who);
+  reject_crlf(u.path, "request path", who);
+  for (HeaderLine *h = user_headers; h; h = h->next) {
+    reject_crlf(h->name, "header name", who);
+    reject_crlf(h->value, "header value", who);
   }
 
   Conn conn;

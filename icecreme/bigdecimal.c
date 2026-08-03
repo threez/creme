@@ -204,7 +204,13 @@ static Value bi_integer_to_bigdecimal(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t n = creme_arg_int(args, nargs, 0, "integer->bigdecimal");
   BigDecimal *bd = bd_new();
-  mpz_set_si(bd->mantissa, (long)n);
+  /* mpz_set_si takes a signed long (32-bit on LLP64, e.g. Windows), which would
+   * truncate a full int64. Import the magnitude as one 64-bit word, then apply
+   * the sign -- correct on every platform. (mag computed in unsigned so
+   * INT64_MIN doesn't overflow.) */
+  uint64_t mag = (n < 0) ? (uint64_t)0 - (uint64_t)n : (uint64_t)n;
+  mpz_import(bd->mantissa, 1, 1, sizeof(mag), 0, 0, &mag);
+  if (n < 0) mpz_neg(bd->mantissa, bd->mantissa);
   bd->scale = 0;
   return v_bigdecimal(bd);
 }

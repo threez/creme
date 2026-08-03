@@ -54,6 +54,7 @@ typedef struct {
   int n_labels;
   int datum_depth;  /* current read_datum_rec nesting -- see its own guard */
   int chunk_depth;  /* current read_chunk nesting (nested protos) -- ditto */
+  int qq_depth;     /* current read_qq_template nesting -- see its own guard */
 } Reader;
 
 static void must_read(Reader *r, void *dst, size_t n) {
@@ -210,7 +211,11 @@ static Value read_datum_rec(Reader *r, VM *vm);
  * DoS (or worse, on a platform without stack-overflow protection) rather
  * than the clean "corrupt bytecode" rejection every other malformed-
  * input case here already gives. */
-#define CREME_LOADER_MAX_DATUM_DEPTH 100000
+/* A few thousand levels is generous for any real literal while still fitting
+ * comfortably in a default 8 MB thread stack -- the old 100000 needed ~20 MB
+ * through the read_datum_rec -> _impl -> read_datum_rec chain and so could
+ * overflow the C stack *before* this cap ever fired, defeating its purpose. */
+#define CREME_LOADER_MAX_DATUM_DEPTH 4000
 
 /* General recursive datum reader (mirrors ChunkSerializer's write_datum) —
  * used both for an ordinary chunk const and for a QQ_CONST template node's
@@ -304,6 +309,11 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
     if (den == 0) {
       creme_abort("icecreme: corrupt bytecode in %s: rational constant has a zero denominator", r->path);
     }
+    /* mpq_set_si takes an UNSIGNED denominator; a negative den would be
+     * reinterpreted as a huge magnitude, silently producing the wrong value. */
+    if (den < 0) {
+      creme_abort("icecreme: corrupt bytecode in %s: rational constant has a negative denominator", r->path);
+    }
     mpq_t q;
     mpq_init(q);
     mpq_set_si(q, (long)num, (unsigned long)den);
@@ -388,7 +398,17 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
   }
 }
 
+/* Same untrusted-input, C-stack-overflow rationale as CREME_LOADER_MAX_DATUM_
+ * DEPTH: read_qq_template recurses per nested QQ_LIST/QQ_VECTOR item with no
+ * other bound. qq_depth is balanced (inc on entry, dec before the normal
+ * return) so it self-resets between top-level templates; a creme_abort mid-parse
+ * fails the whole load anyway. */
+#define CREME_LOADER_MAX_QQ_DEPTH 4000
+
 static QQTemplate *read_qq_template(Reader *r, VM *vm) {
+  if (r->qq_depth >= CREME_LOADER_MAX_QQ_DEPTH)
+    creme_abort("icecreme: corrupt bytecode in %s: quasiquote template nesting too deep (max %d)", r->path, CREME_LOADER_MAX_QQ_DEPTH);
+  r->qq_depth++;
   QQTemplate *t = GC_MALLOC(sizeof(QQTemplate));
   t->tag = read_u8(r);
   switch (t->tag) {
@@ -412,6 +432,7 @@ static QQTemplate *read_qq_template(Reader *r, VM *vm) {
   default:
     creme_abort("icecreme: unknown QQTemplate tag %d in %s", t->tag, r->path);
   }
+  r->qq_depth--;
   return t;
 }
 
@@ -584,6 +605,52 @@ static Value global_name_const(Chunk *c, int idx, const char *path) {
   return name;
 }
 
+static void check_pool_index(int idx, int count, const char *what, const char *path) {
+  if (idx < 0 || idx >= count)
+    creme_abort("icecreme: corrupt bytecode in %s: %s index %d out of range (count=%d)", path, what, idx, count);
+}
+
+/* Load-time bytecode validation, run once per chunk (recursively) BEFORE
+ * resolve_globals rewrites any operand. Two guarantees for the untrusted
+ * bytecode this loader reads (a compiled-elsewhere .ice or a load-chunk-bytes
+ * blob -- see this file's header):
+ *
+ *   1. Every opcode is a real on-disk op id (< OP_COUNT). The dispatch table
+ *      (vm.c) has a real entry for every op in [0, OP_COUNT) but is only
+ *      OP_QUICK_COUNT wide, and its runtime-only quickened slots (>= OP_COUNT)
+ *      must never be reachable from a serialized chunk. Rejecting op >= OP_COUNT
+ *      here stops both a spoofed quickened op and an out-of-table `goto *` wild
+ *      jump ("unknown opcode -> quit the program").
+ *   2. Every operand that indexes a chunk pool (consts/qq_templates/case_tables/
+ *      protos) is in range, closing the type-confusion / OOB-read class the
+ *      global-name checks (global_name_const) already fixed for their own ops.
+ *
+ * SCOPE / RESIDUAL RISK (deliberately out of scope, matching the chosen minimal
+ * fix): register operands (stack[base + ins->a/b/c/d]) are NOT bounds-checked
+ * against num_registers, and relative jump offsets / absolute CaseDispatch
+ * targets are NOT validated against n_instrs. A hostile-but-well-formed chunk
+ * can still corrupt the register window or jump to a bad ip. A full per-operand
+ * pass would be needed to close those. */
+static void validate_chunk(Chunk *c, const char *path) {
+  for (int i = 0; i < c->n_instrs; i++) {
+    Instruction *ins = &c->instrs[i];
+    if (ins->op < 0 || ins->op >= OP_COUNT)
+      creme_abort("icecreme: corrupt bytecode in %s: unknown opcode %d at instruction %d", path, ins->op, i);
+    switch (ins->op) {
+    case OP_LOADK:           check_pool_index(ins->b, c->n_consts, "const-pool", path); break;
+    case OP_THROW:           check_pool_index(ins->a, c->n_consts, "const-pool", path); break;
+    case OP_HELPERFORM:      check_pool_index(ins->b, c->n_consts, "const-pool", path); break;
+    case OP_HELPERFORMLOCAL: check_pool_index(ins->b, c->n_consts, "const-pool", path); break;
+    case OP_CASEMATCH:       check_pool_index(ins->c, c->n_consts, "const-pool", path); break;
+    case OP_QUASIQUOTE:      check_pool_index(ins->b, c->n_qq_templates, "qq-template", path); break;
+    case OP_CASEDISPATCH:    check_pool_index(ins->b, c->n_case_tables, "case-table", path); break;
+    case OP_CLOSURE:         check_pool_index(ins->b, c->n_protos, "proto", path); break;
+    default: break;
+    }
+  }
+  for (int i = 0; i < c->n_protos; i++) validate_chunk(c->protos[i], path);
+}
+
 static void resolve_globals(VM *vm, Chunk *c, const char *path) {
   for (int i = 0; i < c->n_instrs; i++) {
     Instruction *ins = &c->instrs[i];
@@ -682,6 +749,7 @@ Chunk *creme_load(const char *path, VM *vm, char ***required_families_out, int *
   Chunk *chunk = read_chunk(&r, vm);
   fclose(r.f);
 
+  validate_chunk(chunk, path);
   resolve_globals(vm, chunk, path);
   return chunk;
 }
@@ -702,6 +770,7 @@ Chunk *creme_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len, cha
   read_required_families(&r, required_families_out, required_families_count_out);
 
   Chunk *chunk = read_chunk(&r, vm);
+  validate_chunk(chunk, r.path);
   resolve_globals(vm, chunk, r.path);
   return chunk;
 }

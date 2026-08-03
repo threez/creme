@@ -19,6 +19,7 @@
 #if CREME_WITH_CSV
 
 #include <gc.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -138,10 +139,14 @@ typedef struct {
 } DynBuf;
 
 static void dynbuf_append(DynBuf *b, const char *bytes, int len) {
-  if (b->len + len > b->cap) {
-    b->cap = b->cap ? b->cap * 2 : 64;
-    while (b->cap < b->len + len) b->cap *= 2;
-    b->buf = GC_REALLOC(b->buf, (size_t)b->cap);
+  /* size_t math + cap: int `b->len + len` / `cap * 2` wrap near 2 GB. */
+  size_t need = (size_t)b->len + (size_t)(len > 0 ? len : 0);
+  if (need > (size_t)b->cap) {
+    size_t newcap = b->cap ? (size_t)b->cap * 2 : 64;
+    while (newcap < need) newcap *= 2;
+    if (newcap > INT_MAX) creme_abort("csv: buffer too large");
+    b->cap = (int)newcap;
+    b->buf = GC_REALLOC(b->buf, newcap);
   }
   memcpy(b->buf + b->len, bytes, (size_t)len);
   b->len += len;

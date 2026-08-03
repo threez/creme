@@ -25,6 +25,7 @@
 #if CREME_WITH_STRING
 
 #include <gc.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -240,6 +241,9 @@ static Value bi_string_repeat(VM *vm, Value *args, int nargs) {
   const char *s = creme_arg_bytes(args, nargs, 0, "string-repeat", &slen);
   int64_t n = creme_arg_int(args, nargs, 1, "string-repeat");
   if (n < 0) creme_abort("string-repeat: count must be non-negative");
+  /* Bound the result length: it must fit a Scheme string's int length, and an
+   * unbounded slen*n (up to ~2^63) is a trivial multi-GB OOM DoS. */
+  if (slen > 0 && n > INT_MAX / slen) creme_abort("string-repeat: result string too large");
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)slen * (size_t)(n > 0 ? n : 1));
   for (int64_t i = 0; i < n; i++) buf = sdscatlen(buf, s, (size_t)slen);
   return sds_to_value(buf);
@@ -252,6 +256,7 @@ static Value bi_string_pad(VM *vm, Value *args, int nargs) {
   int64_t target = creme_arg_int(args, nargs, 1, "string-pad");
   const char *pad = creme_arg_bytes(args, nargs, 2, "string-pad", &padlen);
   if (padlen != 1) creme_abort("string-pad: pad string must be exactly 1 char");
+  if (target > INT_MAX) creme_abort("string-pad: result string too large");
   if (slen >= target) return args[0];
   char padc = pad[0];
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)target);
@@ -267,6 +272,7 @@ static Value bi_string_pad_right(VM *vm, Value *args, int nargs) {
   int64_t target = creme_arg_int(args, nargs, 1, "string-pad-right");
   const char *pad = creme_arg_bytes(args, nargs, 2, "string-pad-right", &padlen);
   if (padlen != 1) creme_abort("string-pad-right: pad string must be exactly 1 char");
+  if (target > INT_MAX) creme_abort("string-pad-right: result string too large");
   if (slen >= target) return args[0];
   char padc = pad[0];
   sds buf = sdsMakeRoomFor(sdsempty(), (size_t)target);

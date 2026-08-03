@@ -173,10 +173,16 @@ static void sigprof_handler(int sig) {
   VM *vm = g_profiled_vm;
   if (vm) {
     Profiler *p = &vm->profiler;
-    int idx = __atomic_fetch_add(&p->n_native_samples, 1, __ATOMIC_RELAXED);
-    if (idx < CREME_PROFILE_NATIVE_SAMPLES_CAP) {
-      NativeSample *s = &p->native_samples[idx];
-      s->n_pcs = backtrace(s->pcs, (int)(sizeof(s->pcs) / sizeof(s->pcs[0])));
+    /* Gate the increment behind a load so the counter can't grow without bound
+     * (and eventually wrap negative, making `idx < CAP` pass with a negative idx
+     * -> OOB write). Once full it stops counting; a brief over-count by at most
+     * the number of concurrent handlers is harmless and can never wrap. */
+    if (__atomic_load_n(&p->n_native_samples, __ATOMIC_RELAXED) < CREME_PROFILE_NATIVE_SAMPLES_CAP) {
+      int idx = __atomic_fetch_add(&p->n_native_samples, 1, __ATOMIC_RELAXED);
+      if (idx >= 0 && idx < CREME_PROFILE_NATIVE_SAMPLES_CAP) {
+        NativeSample *s = &p->native_samples[idx];
+        s->n_pcs = backtrace(s->pcs, (int)(sizeof(s->pcs) / sizeof(s->pcs[0])));
+      }
     }
   }
   errno = saved_errno;

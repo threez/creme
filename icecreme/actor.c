@@ -795,10 +795,21 @@ static void encode_message(Value msg, ActorSystem *sys, char **out_buf, int *out
 struct PReader {
   const char *s;
   int pos, len;
+  int depth; /* current read_list nesting -- guards against C-stack overflow */
   VM *vm; /* for resolving an "@record" type name against */
   jmp_buf err_jb;
   char errbuf[256];
 };
+
+/* Cap on inbound wire-data nesting. read_datum<->read_list recurse one C frame
+ * per '(' with no other bound, so a post-auth peer sending "(((((..." would
+ * overflow this I/O thread's stack (an uncatchable SIGSEGV -- preader_fail's
+ * longjmp can't recover a hard fault). Each read_list frame also puts a
+ * `Value items[256]` (~4 KB) on the stack, so the cap must be low enough that
+ * MAX_DEPTH such frames fit the inbound thread's default stack (~2 MB here)
+ * with headroom -- otherwise the crash happens before the guard trips. 256
+ * frames ~= 1 MB. */
+#define CREME_ACTOR_MAX_WIRE_DEPTH 256
 
 /* decode_message (the only caller) always runs on a bare network I/O
  * thread with no VM of its own on this call stack -- g_current_vm is
@@ -879,6 +890,7 @@ static Value read_string(PReader *r) {
 }
 
 static Value read_list(PReader *r) {
+  if (++r->depth > CREME_ACTOR_MAX_WIRE_DEPTH) preader_fail(r, "actor: wire data nested too deep (max %d)", CREME_ACTOR_MAX_WIRE_DEPTH);
   r->pos++; /* consume '(' */
   Value items[256];
   int n = 0;
@@ -910,9 +922,19 @@ static Value read_list(PReader *r) {
     Value type_name_v = items[1];
     if (type_name_v.tag != T_STR) preader_fail(r, "actor: malformed @record wire data (missing type name)");
     int slot = -1;
-    for (int i = 0; i < r->vm->n_globals; i++) {
+    /* Acquire-load pairs with creme_global_intern's release store so we only
+     * ever see fully-initialized slots (this runs on a bare network I/O thread
+     * concurrent with the creator VM's own runtime define/intern). */
+    int ng = __atomic_load_n(&r->vm->n_globals, __ATOMIC_ACQUIRE);
+    for (int i = 0; i < ng; i++) {
+      /* Acquire-load `bound`: it pairs with the release-store the record-type
+       * define does AFTER writing `.value` (vm.c OP_HELPERFORM c==2), so if we
+       * see bound==1 the 16-byte Value is fully written -- no torn read of a
+       * record type being defined at runtime concurrent with this decode. */
+      if (!__atomic_load_n(&r->vm->globals[i].bound, __ATOMIC_ACQUIRE)) continue;
+      Value gv = r->vm->globals[i].value;
       const char *gn = r->vm->globals[i].name;
-      if (r->vm->globals[i].bound && r->vm->globals[i].value.tag == T_RECORD_TYPE &&
+      if (gv.tag == T_RECORD_TYPE &&
           (int)strlen(gn) == type_name_v.aux && memcmp(gn, type_name_v.as.chars, (size_t)type_name_v.aux) == 0) {
         slot = i;
         break;
@@ -927,6 +949,7 @@ static Value read_list(PReader *r) {
     int nf = n - 2;
     rec->fields = GC_MALLOC(sizeof(Value) * (size_t)(nf > 0 ? nf : 1));
     for (int i = 0; i < nf; i++) rec->fields[i] = items[2 + i];
+    r->depth--;
     return v_record(rec);
   }
 
@@ -934,6 +957,7 @@ static Value read_list(PReader *r) {
   for (int i = n - 1; i >= 0; i--) {
     result = creme_raw_cons(items[i], result);
   }
+  r->depth--;
   return result;
 }
 
@@ -1005,6 +1029,7 @@ static int decode_message(const char *text, int text_len, VM *vm, Value *out) {
   r.s = text;
   r.pos = 0;
   r.len = text_len;
+  r.depth = 0;
   r.vm = vm;
   if (setjmp(r.err_jb) != 0) return 0;
   *out = read_datum(&r);
@@ -1130,11 +1155,23 @@ static int write_frame_fd(int fd, uint8_t type, const unsigned char *body, uint3
   return 0;
 }
 
-static int read_frame_fd(int fd, uint8_t *type, unsigned char **body, uint32_t *body_len) {
+/* Upper bound on a single actor wire frame's body. The 5-byte header carries a
+ * fully attacker-controlled 32-bit length; without a cap an unauthenticated
+ * peer (the handshake reads a frame BEFORE the cookie is checked) could force a
+ * ~4 GiB GC_MALLOC per connection. Callers pass the tightest bound they know
+ * (exactly the handshake body size for the pre-auth path). */
+#define CREME_ACTOR_MAX_FRAME (16u * 1024 * 1024)
+/* Cap on concurrent inbound connection threads -- accept_loop_main spawns one
+ * detached thread per accepted connection with no other limit. */
+#define CREME_ACTOR_MAX_INBOUND 256
+static int g_inbound_count; /* live handle_inbound_main threads (atomic) */
+
+static int read_frame_fd(int fd, uint8_t *type, unsigned char **body, uint32_t *body_len, uint32_t max_len) {
   unsigned char hdr[5];
   if (read_all(fd, hdr, sizeof(hdr)) != 0) return -1;
   *type = hdr[0];
   uint32_t len = ((uint32_t)hdr[1] << 24) | ((uint32_t)hdr[2] << 16) | ((uint32_t)hdr[3] << 8) | (uint32_t)hdr[4];
+  if (len > max_len) return -1; /* reject before allocating anything */
   unsigned char *buf = len > 0 ? GC_MALLOC(len) : NULL;
   if (len > 0 && read_all(fd, buf, len) != 0) return -1;
   *body = buf;
@@ -1144,7 +1181,7 @@ static int read_frame_fd(int fd, uint8_t *type, unsigned char **body, uint32_t *
 
 static int handshake_initiate(int fd, const char *cookie, int cookie_len) {
   unsigned char nonce[NONCE_SIZE];
-  RAND_bytes(nonce, NONCE_SIZE);
+  if (RAND_bytes(nonce, NONCE_SIZE) != 1) return -1;
   unsigned char mac[32];
   hmac_sha256(cookie, cookie_len, nonce, NONCE_SIZE, mac);
   unsigned char body[NONCE_SIZE * 2];
@@ -1155,7 +1192,7 @@ static int handshake_initiate(int fd, const char *cookie, int cookie_len) {
   uint8_t type;
   unsigned char *rbody;
   uint32_t rlen;
-  if (read_frame_fd(fd, &type, &rbody, &rlen) != 0) return -1;
+  if (read_frame_fd(fd, &type, &rbody, &rlen, NONCE_SIZE * 2) != 0) return -1;
   if (type != FRAME_HANDSHAKE || rlen != NONCE_SIZE * 2) return -1;
   unsigned char *resp_nonce = rbody, *resp_hmac = rbody + NONCE_SIZE;
   unsigned char combined[NONCE_SIZE * 2];
@@ -1171,7 +1208,8 @@ static int handshake_respond(int fd, const char *cookie, int cookie_len) {
   uint8_t type;
   unsigned char *body;
   uint32_t len;
-  if (read_frame_fd(fd, &type, &body, &len) != 0) return -1;
+  /* Pre-auth: bound the body to exactly the handshake size before allocating. */
+  if (read_frame_fd(fd, &type, &body, &len, NONCE_SIZE * 2) != 0) return -1;
   if (type != FRAME_HANDSHAKE || len != NONCE_SIZE * 2) return -1;
   unsigned char *init_nonce = body, *init_hmac = body + NONCE_SIZE;
   unsigned char expected[32];
@@ -1181,7 +1219,7 @@ static int handshake_respond(int fd, const char *cookie, int cookie_len) {
     return -1;
   }
   unsigned char resp_nonce[NONCE_SIZE];
-  RAND_bytes(resp_nonce, NONCE_SIZE);
+  if (RAND_bytes(resp_nonce, NONCE_SIZE) != 1) return -1;
   unsigned char combined[NONCE_SIZE * 2];
   memcpy(combined, init_nonce, NONCE_SIZE);
   memcpy(combined + NONCE_SIZE, resp_nonce, NONCE_SIZE);
@@ -1325,9 +1363,19 @@ static void send_remote(ActorSystem *sys, ActorRef *ref, Value msg) {
   }
 
   pthread_mutex_lock(&conn->write_mutex);
-  int rc = write_frame_fd(conn->fd, FRAME_DELIVER, body, body_len);
+  int rc = (conn->fd < 0) ? -1 : write_frame_fd(conn->fd, FRAME_DELIVER, body, body_len);
+  if (rc != 0 && conn->fd >= 0) { close(conn->fd); conn->fd = -1; }
   pthread_mutex_unlock(&conn->write_mutex);
-  if (rc != 0) creme_abort("send!: connection to %s failed", ref->id);
+  if (rc != 0) {
+    /* Evict the dead connection from the cache so it isn't retried forever
+     * (unlinking under sys->mutex; not holding write_mutex here). */
+    pthread_mutex_lock(&sys->mutex);
+    for (Connection **pp = &sys->connections; *pp; pp = &(*pp)->next) {
+      if (*pp == conn) { *pp = conn->next; break; }
+    }
+    pthread_mutex_unlock(&sys->mutex);
+    creme_abort("send!: connection to %s failed", ref->id);
+  }
 }
 
 /* ---- inbound: one pthread per accepted connection ------------------------ */
@@ -1348,6 +1396,7 @@ static void *handle_inbound_main(void *arg) {
 
   if (handshake_respond(fd, sys->cookie, sys->cookie_len) != 0) {
     close(fd);
+    __atomic_sub_fetch(&g_inbound_count, 1, __ATOMIC_SEQ_CST);
     return NULL;
   }
 
@@ -1355,7 +1404,7 @@ static void *handle_inbound_main(void *arg) {
     uint8_t type;
     unsigned char *body;
     uint32_t body_len;
-    if (read_frame_fd(fd, &type, &body, &body_len) != 0) break;
+    if (read_frame_fd(fd, &type, &body, &body_len, CREME_ACTOR_MAX_FRAME) != 0) break;
     if (type != FRAME_DELIVER) continue;
 
     const char *to, *payload;
@@ -1378,6 +1427,7 @@ static void *handle_inbound_main(void *arg) {
   }
 
   close(fd);
+  __atomic_sub_fetch(&g_inbound_count, 1, __ATOMIC_SEQ_CST);
   return NULL;
 }
 
@@ -1401,11 +1451,18 @@ static void *accept_loop_main(void *arg) {
       if (errno == EINTR) continue;
       break; /* listener closed (stop-node!) or a real error -- either way, stop accepting */
     }
+    /* Bound concurrent inbound threads; handle_inbound_main decrements on exit. */
+    if (__atomic_add_fetch(&g_inbound_count, 1, __ATOMIC_SEQ_CST) > CREME_ACTOR_MAX_INBOUND) {
+      __atomic_sub_fetch(&g_inbound_count, 1, __ATOMIC_SEQ_CST);
+      close(fd);
+      continue;
+    }
     InboundArgs *ia = GC_MALLOC(sizeof(InboundArgs));
     ia->fd = fd;
     ia->sys = sys;
     pthread_t tid;
     if (pthread_create(&tid, NULL, handle_inbound_main, ia) != 0) {
+      __atomic_sub_fetch(&g_inbound_count, 1, __ATOMIC_SEQ_CST);
       close(fd);
       continue;
     }
@@ -1744,7 +1801,16 @@ static Value bi_stop_node_bang(VM *vm, Value *args, int nargs) {
     close(sys->listener_fd);
     sys->listener_fd = -1;
   }
-  for (Connection *c = sys->connections; c; c = c->next) close(c->fd);
+  /* Take each conn's write_mutex before closing its fd and invalidate it, so a
+   * concurrent send_remote (which holds only write_mutex, not sys->mutex) can't
+   * write to a just-closed fd whose number may already be reused. Lock order is
+   * sys->mutex -> write_mutex; send_remote never holds write_mutex while taking
+   * sys->mutex, so this can't deadlock. */
+  for (Connection *c = sys->connections; c; c = c->next) {
+    pthread_mutex_lock(&c->write_mutex);
+    if (c->fd >= 0) { close(c->fd); c->fd = -1; }
+    pthread_mutex_unlock(&c->write_mutex);
+  }
   sys->connections = NULL;
   pthread_mutex_unlock(&sys->mutex);
 

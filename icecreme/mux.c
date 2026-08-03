@@ -100,6 +100,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <gc.h>
+#include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -298,13 +299,17 @@ static int ci_contains_len(const char *hay, size_t haylen, const char *needle) {
   return 0;
 }
 
-/* -1 on a non-digit anywhere (malformed Content-Length) -- callers treat
- * that the same as "absent". */
+/* -1 on a non-digit anywhere (malformed Content-Length) -- callers treat that
+ * the same as "absent". -2 on numeric overflow: WITHOUT this, a long-enough
+ * digit string wraps `v` to a negative value, the caller's `content_length > 0`
+ * test then fails, the request is dispatched body-less, and the real body bytes
+ * are reparsed as a second pipelined request (classic request smuggling). */
 static long parse_long_len(const char *s, size_t len) {
   if (len == 0) return -1;
   long v = 0;
   for (size_t i = 0; i < len; i++) {
     if (s[i] < '0' || s[i] > '9') return -1;
+    if (v > (LONG_MAX - 9) / 10) return -2;
     v = v * 10 + (s[i] - '0');
   }
   return v;
@@ -347,6 +352,11 @@ static const char *status_reason(int status) {
 }
 
 #define MUX_MAX_HEADERS 100
+/* Request-size caps: without them a single client can grow c->buf/chunk_body
+ * without bound (endless headers with no CRLFCRLF, a huge Content-Length, or an
+ * endless chunked stream) and exhaust memory. */
+#define MUX_MAX_HEADER_BYTES (64 * 1024)
+#define MUX_MAX_BODY_BYTES (64L * 1024 * 1024)
 
 /* ---- request building ---- */
 
@@ -586,12 +596,25 @@ static ssize_t conn_read_into(Conn *c) {
  * on `c`) is ready to dispatch, 0 if more bytes are needed (keep polling
  * this fd for POLLIN), or -1 if a parse/decode error was already
  * responded to (400) and the connection should be closed. */
+/* Write a bare status line + close-marker response, for the request-rejection
+ * paths (400/413/431). Mirrors the inline 400 handling already used below. */
+static void conn_error_response(Conn *c, int status, const char *reason) {
+  sds errbuf = sdsempty();
+  write_status_response(&errbuf, status, reason, 0);
+  write_all_sds(c->fd, errbuf);
+  sdsfree(errbuf);
+}
+
 static int conn_advance(Conn *c) {
   if (c->phase == CONN_READING_HEADERS) {
     size_t num_headers = MUX_MAX_HEADERS;
     int pret = phr_parse_request(c->buf, sdslen(c->buf), &c->method, &c->method_len, &c->path, &c->path_len, &c->minor_version,
                                   c->headers, &num_headers, c->last_len);
     if (pret == -2) {
+      if (sdslen(c->buf) > MUX_MAX_HEADER_BYTES) { /* headers never terminated */
+        conn_error_response(c, 431, "Request Header Fields Too Large");
+        return -1;
+      }
       c->last_len = sdslen(c->buf);
       return 0;
     }
@@ -606,10 +629,12 @@ static int conn_advance(Conn *c) {
     c->header_len = (size_t)pret;
     c->content_length = -1;
     c->chunked = 0;
+    int saw_content_length = 0;
     c->keep_alive = c->minor_version >= 1; /* HTTP/1.1 defaults to persistent, 1.0 to close, unless overridden below */
     for (size_t i = 0; i < c->num_headers; i++) {
       if (!c->headers[i].name) continue;
       if (ci_eq_len(c->headers[i].name, c->headers[i].name_len, "content-length")) {
+        saw_content_length = 1;
         c->content_length = parse_long_len(c->headers[i].value, c->headers[i].value_len);
       } else if (ci_eq_len(c->headers[i].name, c->headers[i].name_len, "transfer-encoding")) {
         if (ci_contains_len(c->headers[i].value, c->headers[i].value_len, "chunked")) c->chunked = 1;
@@ -617,6 +642,19 @@ static int conn_advance(Conn *c) {
         if (ci_contains_len(c->headers[i].value, c->headers[i].value_len, "close")) c->keep_alive = 0;
         else if (ci_contains_len(c->headers[i].value, c->headers[i].value_len, "keep-alive")) c->keep_alive = 1;
       }
+    }
+    /* A present-but-invalid Content-Length must be rejected, never treated as
+     * "absent" (-1): otherwise the request is dispatched body-less and the real
+     * body bytes are reparsed as a pipelined request (smuggling). -2 = numeric
+     * overflow / too big (413); -1 with the header present = non-numeric/empty
+     * (400); a valid value over the cap = 413. */
+    if (c->content_length == -2 || c->content_length > MUX_MAX_BODY_BYTES) {
+      conn_error_response(c, 413, "Payload Too Large");
+      return -1;
+    }
+    if (saw_content_length && c->content_length < 0) {
+      conn_error_response(c, 400, "Bad Request");
+      return -1;
     }
     if (c->chunked) {
       /* No client in this codebase ever sends a chunked REQUEST body
@@ -637,6 +675,10 @@ static int conn_advance(Conn *c) {
   }
 
   if (c->chunked) {
+    if (sdslen(c->chunk_body) > (size_t)MUX_MAX_BODY_BYTES) { /* endless chunked stream */
+      conn_error_response(c, 413, "Payload Too Large");
+      return -1;
+    }
     size_t bufsz = sdslen(c->chunk_body);
     ssize_t rret = phr_decode_chunked(&c->decoder, c->chunk_body, &bufsz);
     sdssetlen(c->chunk_body, bufsz);
@@ -874,12 +916,20 @@ static void fdset_add(FdSet *s, int fd) {
   pthread_mutex_unlock(&s->mu);
 }
 
-static void fdset_remove(FdSet *s, int fd) {
+/* Remove fd from the set AND close it, atomically under the set's lock, but
+ * only if it's still present. This is what makes a shrinking worker and
+ * mux-close! safe to race: whichever reaches a given fd first (under the same
+ * mutex) closes it and takes it out of the set; the other finds it gone and
+ * does nothing, so the fd is never closed twice (which could otherwise close an
+ * unrelated fd that reused the number). */
+static void fdset_remove_and_close(FdSet *s, int fd) {
   pthread_mutex_lock(&s->mu);
   for (int i = 0; i < s->n; i++) {
     if (s->fds[i] == fd) {
       s->fds[i] = s->fds[--s->n];
-      break;
+      close(fd);
+      pthread_mutex_unlock(&s->mu);
+      return;
     }
   }
   pthread_mutex_unlock(&s->mu);
@@ -889,6 +939,7 @@ typedef struct {
   VM *parent_vm;
   MuxApp *app;
   int fd;
+  int permanent; /* 1 = a base (pool_min floor) worker that must not self-shrink */
 } PoolWorkerArgs;
 
 static void *pool_worker_thread_main(void *arg);
@@ -916,10 +967,10 @@ static void pool_try_grow(void) {
   a->parent_vm = g_pool_cfg.parent_vm;
   a->app = g_pool_cfg.app;
   a->fd = fd;
+  a->permanent = 0; /* grown workers shrink back when idle */
   pthread_t tid;
   if (pthread_create(&tid, NULL, pool_worker_thread_main, a) != 0) {
-    fdset_remove(&g_pool_fds, fd);
-    close(fd);
+    fdset_remove_and_close(&g_pool_fds, fd);
     __atomic_fetch_sub(&g_pool_count, 1, __ATOMIC_SEQ_CST);
     return;
   }
@@ -1022,14 +1073,22 @@ static void pool_worker_loop(VM *vm, MuxApp *app, int fd, int permanent) {
       idle_ticks++;
       if (!permanent && idle_ticks >= POOL_SHRINK_IDLE_TICKS) {
         __atomic_fetch_sub(&g_pool_count, 1, __ATOMIC_SEQ_CST);
-        fdset_remove(&g_pool_fds, fd);
-        close(fd);
+        fdset_remove_and_close(&g_pool_fds, fd);
         return;
       }
     } else {
       idle_ticks = 0;
       if (own_conns >= POOL_GROW_HIGH_WATER) pool_try_grow();
     }
+  }
+  /* Fell out of the serve loop (fd closed by mux-close!, or a poll() error). A
+   * grown (non-permanent) worker still holds a g_pool_count reservation and its
+   * pool fd -- release both so the count doesn't drift upward and starve future
+   * growth. The shrink path above already released and returned, so this can't
+   * double-release; permanent workers keep their slot (shutdown-only path). */
+  if (!permanent) {
+    __atomic_fetch_sub(&g_pool_count, 1, __ATOMIC_SEQ_CST);
+    fdset_remove_and_close(&g_pool_fds, fd);
   }
 }
 
@@ -1044,7 +1103,7 @@ static void *pool_worker_thread_main(void *arg) {
   creme_set_current_vm(vm);
   vm->has_actor_unwind = 1;
 
-  pool_worker_loop(vm, a->app, a->fd, /* permanent */ 0);
+  pool_worker_loop(vm, a->app, a->fd, a->permanent);
   GC_unregister_my_thread();
   return NULL;
 }
@@ -1196,6 +1255,7 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
       a->parent_vm = vm;
       a->app = app;
       a->fd = extra_fd;
+      a->permanent = 1; /* base (pool_min floor) worker -- must not self-shrink */
       pthread_t tid;
       if (pthread_create(&tid, NULL, pool_worker_thread_main, a) != 0) creme_abort("mux-listen!: failed to start a pool worker thread");
       pthread_detach(tid);
@@ -1349,6 +1409,7 @@ static Value bi_mux_close(VM *vm, Value *args, int nargs) {
      * mechanism the inline/non-pool modes already rely on for `fd`. */
     pthread_mutex_lock(&g_pool_fds.mu);
     for (int i = 0; i < g_pool_fds.n; i++) close(g_pool_fds.fds[i]);
+    g_pool_fds.n = 0; /* drop them so a shrinking worker can't close them again */
     pthread_mutex_unlock(&g_pool_fds.mu);
   } else {
     close(srv->fd);

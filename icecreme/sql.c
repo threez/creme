@@ -61,8 +61,22 @@ static Value column_to_value(sqlite3_stmt *stmt, int col) {
   }
 }
 
+static int param_is_bindable(Value v) {
+  switch (v.tag) {
+  case T_INT: case T_FLOAT: case T_CHAR: case T_STR: case T_SYM: case T_BOOL: case T_NIL:
+    return 1;
+  default:
+    return 0;
+  }
+}
+
 static sqlite3_stmt *prepare_and_bind(sqlite3 *db, Value sql_val, Value *params, int n_params) {
   if (sql_val.tag != T_STR) creme_abort("sql: expected a SQL string");
+  /* Reject any unsupported param type BEFORE preparing: otherwise bind_param
+   * aborts (longjmp) mid-loop with an already-prepared stmt that never gets
+   * sqlite3_finalize'd -- a real (non-GC) statement leak per bad call. */
+  for (int i = 0; i < n_params; i++)
+    if (!param_is_bindable(params[i])) creme_abort("sql: unsupported parameter value type");
   sqlite3_stmt *stmt;
   if (sqlite3_prepare_v2(db, sql_val.as.chars, sql_val.aux, &stmt, NULL) != SQLITE_OK) {
     creme_abort("sql: prepare failed: %s", sqlite3_errmsg(db));

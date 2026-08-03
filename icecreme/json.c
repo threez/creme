@@ -18,7 +18,9 @@
 
 #if CREME_WITH_JSON
 
+#include <errno.h>
 #include <gc.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,13 +43,16 @@ static void gbuf_init(GBuf *b) {
 }
 
 static void gbuf_reserve(GBuf *b, int extra) {
-  if (b->len + extra <= b->cap) return;
-  int newcap = b->cap * 2;
-  while (newcap < b->len + extra) newcap *= 2;
-  char *nb = GC_MALLOC((size_t)newcap);
+  /* size_t math + cap: int `b->len + extra` / `newcap * 2` wrap near 2 GB. */
+  size_t need = (size_t)b->len + (size_t)(extra > 0 ? extra : 0);
+  if (need <= (size_t)b->cap) return;
+  size_t newcap = (size_t)b->cap * 2;
+  while (newcap < need) newcap *= 2;
+  if (newcap > INT_MAX) creme_abort("json: buffer too large");
+  char *nb = GC_MALLOC(newcap);
   memcpy(nb, b->buf, (size_t)b->len);
   b->buf = nb;
-  b->cap = newcap;
+  b->cap = (int)newcap;
 }
 
 static void gbuf_putc(GBuf *b, char c) {
@@ -111,7 +116,13 @@ static void varr_push(VArr *a, Value v) {
 typedef struct {
   const char *s;
   int pos, len;
+  int depth; /* current object/array nesting -- guards against stack overflow */
 } JReader;
+
+/* Deeply nested arrays/objects recurse one C frame per level; cap it so a
+ * hostile document (json-read explicitly handles untrusted input) aborts
+ * cleanly instead of overflowing the C stack (an uncatchable SIGSEGV). */
+#define JSON_MAX_DEPTH 1000
 
 static void jr_skip_ws(JReader *r) {
   while (r->pos < r->len) {
@@ -159,11 +170,22 @@ static Value json_parse_string(JReader *r) {
           break;
         case 'u': {
           if (r->pos + 4 > r->len) creme_abort("json-read: invalid json: truncated \\u escape");
-          char hex[5];
-          memcpy(hex, r->s + r->pos, 4);
-          hex[4] = '\0';
+          /* Parse exactly 4 hex digits directly. This both VALIDATES (strtol
+           * would accept a leading sign/whitespace or stop at the first
+           * non-hex char, silently yielding a wrong codepoint) and is cheaper
+           * than the old memcpy-into-tmp + strtol -- and it stays entirely
+           * inside the \u branch, so the common no-escape path is untouched. */
+          int cp = 0;
+          for (int k = 0; k < 4; k++) {
+            unsigned char h = (unsigned char)r->s[r->pos + k];
+            int d;
+            if (h >= '0' && h <= '9') d = h - '0';
+            else if (h >= 'a' && h <= 'f') d = h - 'a' + 10;
+            else if (h >= 'A' && h <= 'F') d = h - 'A' + 10;
+            else creme_abort("json-read: invalid json: \\u escape requires 4 hex digits");
+            cp = (cp << 4) | d;
+          }
           r->pos += 4;
-          long cp = strtol(hex, NULL, 16);
           /* Encodes as UTF-8 bytes -- icecreme's own strings are raw bytes with
            * no real UTF-8 decoding elsewhere either, so this just needs to
            * round-trip, not decode further. No surrogate-pair handling
@@ -211,12 +233,14 @@ static Value json_parse_number(JReader *r) {
   }
   int tok_len = r->pos - start;
   if (tok_len == 0 || (tok_len == 1 && r->s[start] == '-')) creme_abort("json-read: invalid json: malformed number");
-  char tmp[64];
-  int n = tok_len < (int)sizeof(tmp) - 1 ? tok_len : (int)sizeof(tmp) - 1;
-  memcpy(tmp, r->s + start, (size_t)n);
-  tmp[n] = '\0';
+  /* Copy the WHOLE token (a fixed tmp[64] silently truncated long numbers to a
+   * wrong value) and check ERANGE so an out-of-int64 literal aborts. */
+  char *tmp = creme_dupn(r->s + start, tok_len);
   if (is_float) return v_float(strtod(tmp, NULL));
-  return v_int(strtoll(tmp, NULL, 10));
+  errno = 0;
+  long long iv = strtoll(tmp, NULL, 10);
+  if (errno == ERANGE) creme_abort("json-read: integer literal out of range");
+  return v_int(iv);
 }
 
 static Value json_parse_object(JReader *r) {
@@ -285,7 +309,18 @@ static Value json_parse_array(JReader *r) {
   return v_vector(vec);
 }
 
+static Value json_parse_value_impl(JReader *r);
+
+/* Depth-checked wrapper -- every recursive descent (object/array elements) goes
+ * through json_parse_value, so the cap is enforced at every nesting level. */
 static Value json_parse_value(JReader *r) {
+  if (++r->depth > JSON_MAX_DEPTH) creme_abort("json-read: nesting too deep (max %d)", JSON_MAX_DEPTH);
+  Value v = json_parse_value_impl(r);
+  r->depth--;
+  return v;
+}
+
+static Value json_parse_value_impl(JReader *r) {
   jr_skip_ws(r);
   if (r->pos >= r->len) creme_abort("json-read: invalid json: unexpected end of input");
   char c = r->s[r->pos];
@@ -316,6 +351,7 @@ static Value bi_json_read(VM *vm, Value *args, int nargs) {
   JReader r;
   r.s = creme_arg_bytes(args, nargs, 0, "json-read", &r.len);
   r.pos = 0;
+  r.depth = 0;
   Value result = json_parse_value(&r);
   jr_skip_ws(&r);
   if (r.pos != r.len) creme_abort("json-read: invalid json: unexpected trailing content");

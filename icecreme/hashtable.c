@@ -24,6 +24,7 @@
  * array in slot order, filtered by a liveness re-check against `map`,
  * reproduces insertion order for the common (no-overwrite) case. */
 #include <gc.h>
+#include <limits.h>
 #include <stdbool.h>
 
 #include "embed.h"
@@ -58,6 +59,10 @@ typedef struct {
                    * so iteration order can be reconstructed (see above) */
   Value *values;
   int n_values, cap_values;
+  int n_live; /* count of live (non-orphaned) slots; drives compaction. set!
+               * always appends, so n_values grows with total operations while
+               * n_live tracks the actual entry count -- when the dead ratio
+               * gets high we compact the side arrays back down (ht_compact). */
 } CremeHashTable;
 
 static CremeHashTable *as_hash_table(Value v, const char *who) {
@@ -74,6 +79,7 @@ static Value bi_make_hash_table(VM *vm, Value *args, int nargs) {
   ht->values = NULL;
   ht->n_values = 0;
   ht->cap_values = 0;
+  ht->n_live = 0;
   return v_box(ht, BOX_KIND_HASHTABLE);
 }
 
@@ -83,19 +89,56 @@ static Value bi_hash_table_p(VM *vm, Value *args, int nargs) {
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_HASHTABLE);
 }
 
+/* Rebuild keys/values keeping only live slots IN THEIR CURRENT ORDER (a slot
+ * is live iff the map still points AT this very slot -- same test collect_live
+ * uses), reclaiming every orphaned slot left by an overwrite or delete. Order
+ * is preserved, so hash-table-keys/->alist output is unchanged. */
+static void ht_compact(CremeHashTable *ht) {
+  int live = ht->n_live;
+  Value *nk = live ? creme_alloc_array((size_t)live, sizeof(Value), "hash-table") : NULL;
+  Value *nv = live ? creme_alloc_array((size_t)live, sizeof(Value), "hash-table") : NULL;
+  int n = 0;
+  for (int i = 0; i < ht->n_values; i++) {
+    creme_ht_idx_itr itr = creme_ht_idx_get(&ht->map, ht->keys[i]);
+    if (creme_ht_idx_is_end(itr) || itr.data->val - 1 != i) continue;
+    nk[n] = ht->keys[i];
+    nv[n] = ht->values[i];
+    n++;
+  }
+  for (int i = 0; i < n; i++) creme_ht_idx_insert(&ht->map, nk[i], i + 1); /* repoint at new index */
+  ht->keys = nk;
+  ht->values = nv;
+  ht->n_values = n;
+  ht->cap_values = live;
+  ht->n_live = n;
+}
+
+/* Amortized-O(1) trigger: compact once at least half the slots are dead (and
+ * the table is big enough that the O(n) rebuild is worth it). */
+static void ht_maybe_compact(CremeHashTable *ht) {
+  if (ht->n_values >= 16 && ht->n_values >= 2 * ht->n_live) ht_compact(ht);
+}
+
 Value bi_hash_table_set(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 3, "hash-table-set!");
   CremeHashTable *ht = as_hash_table(args[0], "hash-table-set!");
+  ht_maybe_compact(ht);
+  int existed = !creme_ht_idx_is_end(creme_ht_idx_get(&ht->map, args[1]));
   if (ht->n_values >= ht->cap_values) {
-    ht->cap_values = ht->cap_values ? ht->cap_values * 2 : 8;
-    ht->keys = GC_REALLOC(ht->keys, sizeof(Value) * (size_t)ht->cap_values);
-    ht->values = GC_REALLOC(ht->values, sizeof(Value) * (size_t)ht->cap_values);
+    /* size_t growth: `cap * 2` in int overflows to negative near INT_MAX/2 and
+     * then casts to a huge size_t, feeding GC_REALLOC a bogus length. */
+    size_t newcap = ht->cap_values ? (size_t)ht->cap_values * 2 : 8;
+    if (newcap > INT_MAX) creme_abort("hash-table-set!: table too large");
+    ht->cap_values = (int)newcap;
+    ht->keys = GC_REALLOC(ht->keys, sizeof(Value) * newcap);
+    ht->values = GC_REALLOC(ht->values, sizeof(Value) * newcap);
   }
   int idx = ht->n_values++;
   ht->keys[idx] = args[1];
   ht->values[idx] = args[2];
   creme_ht_idx_insert(&ht->map, args[1], idx + 1); /* +1: 0 would be ambiguous with "not found" */
+  if (!existed) ht->n_live++; /* overwrite reuses no slot -- only new keys add a live entry */
   return v_nil();
 }
 
@@ -195,7 +238,11 @@ static Value bi_hash_table_delete(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 2, "hash-table-delete!");
   CremeHashTable *ht = as_hash_table(args[0], "hash-table-delete!");
-  creme_ht_idx_erase(&ht->map, args[1]);
+  if (!creme_ht_idx_is_end(creme_ht_idx_get(&ht->map, args[1]))) {
+    creme_ht_idx_erase(&ht->map, args[1]);
+    ht->n_live--; /* slot stays in keys/values (now orphaned) until compaction */
+    ht_maybe_compact(ht);
+  }
   return v_nil();
 }
 

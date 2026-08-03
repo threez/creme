@@ -26,14 +26,16 @@
 static Value hex_digest(const EVP_MD *md, const char *data, int len) {
   unsigned char out[EVP_MAX_MD_SIZE];
   unsigned int outlen = 0;
-  EVP_Digest(data, (size_t)len, out, &outlen, md, NULL);
+  if (EVP_Digest(data, (size_t)len, out, &outlen, md, NULL) != 1)
+    creme_abort("digest: hashing failed");
   return creme_hex_value(out, (int)outlen);
 }
 
 static Value hmac_hex_digest(const EVP_MD *md, const char *key, int keylen, const char *data, int datalen) {
   unsigned char out[EVP_MAX_MD_SIZE];
   unsigned int outlen = 0;
-  HMAC(md, key, keylen, (const unsigned char *)data, (size_t)datalen, out, &outlen);
+  if (HMAC(md, key, keylen, (const unsigned char *)data, (size_t)datalen, out, &outlen) == NULL)
+    creme_abort("hmac: computation failed");
   return creme_hex_value(out, (int)outlen);
 }
 

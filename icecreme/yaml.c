@@ -41,7 +41,9 @@
 #if CREME_WITH_YAML
 
 #include <ctype.h>
+#include <errno.h>
 #include <gc.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,13 +67,16 @@ static void gbuf_init(GBuf *b) {
 }
 
 static void gbuf_reserve(GBuf *b, int extra) {
-  if (b->len + extra <= b->cap) return;
-  int newcap = b->cap * 2;
-  while (newcap < b->len + extra) newcap *= 2;
-  char *nb = GC_MALLOC((size_t)newcap);
+  /* size_t math + cap: int `b->len + extra` / `newcap * 2` wrap near 2 GB. */
+  size_t need = (size_t)b->len + (size_t)(extra > 0 ? extra : 0);
+  if (need <= (size_t)b->cap) return;
+  size_t newcap = (size_t)b->cap * 2;
+  while (newcap < need) newcap *= 2;
+  if (newcap > INT_MAX) creme_abort("yaml: buffer too large");
+  char *nb = GC_MALLOC(newcap);
   memcpy(nb, b->buf, (size_t)b->len);
   b->buf = nb;
-  b->cap = newcap;
+  b->cap = (int)newcap;
 }
 
 static void gbuf_puts(GBuf *b, const char *s, int n) {
@@ -155,8 +160,9 @@ static int yaml_try_parse_int(const char *s, int len, Value *out) {
     if (!okay) return 0;
   }
   char *endptr;
+  errno = 0;
   long long val = strtoll(buf + digits_start, &endptr, base);
-  if (*endptr != '\0') return 0;
+  if (*endptr != '\0' || errno == ERANGE) return 0; /* out of range -> treat as a plain string */
   *out = v_int(neg ? -val : val);
   return 1;
 }
@@ -219,9 +225,15 @@ static Value yaml_resolve_scalar(yaml_event_t *event) {
   return creme_bytes_value(s, len);
 }
 
-static Value yaml_parse_value(yaml_parser_t *parser, yaml_event_t *event);
+/* Deeply nested sequences/mappings recurse one C frame per level. `depth` is
+ * threaded through (rather than a static counter) so yaml-read stays thread-safe
+ * when several actors parse concurrently; a hostile document aborts cleanly
+ * instead of overflowing the C stack. */
+#define YAML_MAX_DEPTH 1000
 
-static Value yaml_parse_sequence(yaml_parser_t *parser) {
+static Value yaml_parse_value(yaml_parser_t *parser, yaml_event_t *event, int depth);
+
+static Value yaml_parse_sequence(yaml_parser_t *parser, int depth) {
   VArr items;
   varr_init(&items);
   for (;;) {
@@ -231,7 +243,7 @@ static Value yaml_parse_sequence(yaml_parser_t *parser) {
       yaml_event_delete(&ev);
       break;
     }
-    Value v = yaml_parse_value(parser, &ev);
+    Value v = yaml_parse_value(parser, &ev, depth);
     yaml_event_delete(&ev);
     varr_push(&items, v);
   }
@@ -242,7 +254,7 @@ static Value yaml_parse_sequence(yaml_parser_t *parser) {
   return v_vector(vec);
 }
 
-static Value yaml_parse_mapping(yaml_parser_t *parser) {
+static Value yaml_parse_mapping(yaml_parser_t *parser, int depth) {
   VArr entries;
   varr_init(&entries);
   for (;;) {
@@ -258,7 +270,7 @@ static Value yaml_parse_mapping(yaml_parser_t *parser) {
 
     yaml_event_t vev;
     yaml_next_event(parser, &vev);
-    Value val = yaml_parse_value(parser, &vev);
+    Value val = yaml_parse_value(parser, &vev, depth);
     yaml_event_delete(&vev);
 
     varr_push(&entries, creme_raw_cons(key, val));
@@ -269,14 +281,15 @@ static Value yaml_parse_mapping(yaml_parser_t *parser) {
   return result;
 }
 
-static Value yaml_parse_value(yaml_parser_t *parser, yaml_event_t *event) {
+static Value yaml_parse_value(yaml_parser_t *parser, yaml_event_t *event, int depth) {
+  if (depth > YAML_MAX_DEPTH) creme_abort("yaml-read: nesting too deep (max %d)", YAML_MAX_DEPTH);
   switch (event->type) {
     case YAML_SCALAR_EVENT:
       return yaml_resolve_scalar(event);
     case YAML_SEQUENCE_START_EVENT:
-      return yaml_parse_sequence(parser);
+      return yaml_parse_sequence(parser, depth + 1);
     case YAML_MAPPING_START_EVENT:
-      return yaml_parse_mapping(parser);
+      return yaml_parse_mapping(parser, depth + 1);
     case YAML_ALIAS_EVENT:
       creme_abort("yaml-read: anchors/aliases are not supported");
     default:
@@ -302,7 +315,7 @@ static Value bi_yaml_read(VM *vm, Value *args, int nargs) {
     }
     break;
   }
-  Value result = yaml_parse_value(&parser, &event);
+  Value result = yaml_parse_value(&parser, &event, 0);
   yaml_event_delete(&event);
   yaml_parser_delete(&parser);
   return result;
