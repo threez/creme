@@ -64,7 +64,15 @@ both reaching their current shape) — not itemized individually here;
   registering its own native function (`host-greet`) and native value
   (`host-version`) as Scheme globals, then running a plain `.scm` script
   that calls/reads both; `host_greet` itself is 2 lines, using the new
-  `creme_arg_cstr`/`creme_format_value` helpers above.
+  `creme_arg_cstr`/`creme_format_value` helpers above. Also registers
+  `host-sum` (list of integers in, integer out), `host-scale-vector`
+  (vector + number in, vector out), `host-word-lengths` (list of strings
+  in, an alist out — fed into a real `(creme hash-table)` hash table on
+  the Scheme side), and `host-stats` (variadic numbers in, a 3-element
+  `#(min max avg)` vector out), exercising `creme_list_length`/
+  `creme_list_to_values`/`creme_list_from_values`/`creme_arg_vector`/
+  `creme_vector_from_values`/`creme_arg_int`/`creme_arg_double` on both
+  sides of the host/Scheme call boundary.
 - See `icecreme/README.md`'s new "Embedding" section for the full minimal
   call sequence and the link-flag set a `libcreme.a` consumer needs to
   reproduce (static archives carry no transitive link flags).

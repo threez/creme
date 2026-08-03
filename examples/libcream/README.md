@@ -4,8 +4,16 @@ A minimal C host program embedding `icecreme` via `libcreme.a`. It:
 
 - registers its own native function, `host-greet`, as a Scheme global
 - registers its own native value, `host-version`, as a Scheme global
+- registers four more native functions exercising `embed.h`'s list/vector/
+  number helpers on both sides of the call boundary: `host-sum` (a Scheme
+  list of integers in, a single integer out), `host-scale-vector` (a
+  vector + a scale factor in, a new vector out), `host-word-lengths` (a
+  list of strings in, an alist out — fed into a real `(creme hash-table)`
+  hash table on the Scheme side, to show host-returned data flowing into
+  any Scheme feature, not just display), and `host-stats` (a variadic run
+  of numbers in, a 3-element `#(min max avg)` vector out)
 - runs `host_demo.scm` — a plain Scheme script (no precompilation step, no
-  `.ice` file) that calls/reads both
+  `.ice` file) that calls/reads all of the above
 
 See `host_demo.c` for the whole thing, and `../../icecreme/README.md`'s
 "Embedding" section for the general call-sequence writeup this mirrors.
@@ -30,6 +38,10 @@ Expected output:
 ```
 Hello from C, world!
 libcream host demo 0.1
+15
+#(2.5 5.0 7.5)
+9
+#(1.0 9.0 3.875)
 ```
 
 `make` first builds `../../icecreme/libcreme.a` if it doesn't already exist
