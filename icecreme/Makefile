@@ -95,7 +95,7 @@ LDFLAGS ?= -rdynamic
 EXECINFO_LIBS := $(if $(filter FreeBSD,$(shell uname -s)),-lexecinfo)
 LDLIBS := -lm -lpthread -lsqlite3 -ldl $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LIBS) $(SSL_LIBS) $(FFI_LIBS) $(YAML_LIBS) $(EXECINFO_LIBS)
 
-SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c secure_random.c cipher.c pkey.c x509.c \
+SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c secure_random.c cipher.c pkey.c x509.c builtin_families.c \
        vendor/sds/sds.c vendor/picohttpparser/picohttpparser.c
 OBJS = $(SRCS:.c=.o)
 BIN = icecreme
@@ -131,7 +131,7 @@ $(SANBIN): $(SANITIZE_OBJS)
 %.san.o: %.c *.h
 	$(CC) $(CFLAGS) $(SANITIZE_FLAGS) -c -o $@ $<
 
-# libFuzzer harness (fuzz/fuzz_loader.c) targeting cvm_load_from_bytes --
+# libFuzzer harness (fuzz/fuzz_loader.c) targeting creme_load_from_bytes --
 # the ICE1 bytecode deserializer, the one place icecreme treats a byte blob as
 # trusted input (see that file's own header comment). Needs clang
 # specifically (libFuzzer ships as part of clang's compiler-rt, not a
@@ -154,6 +154,50 @@ $(FUZZBIN): $(FUZZ_OBJS) fuzz/fuzz_loader.c
 %.fuzz.o: %.c *.h
 	clang $(CFLAGS) -fsanitize=fuzzer,address -c -o $@ $<
 
+# ---- libcreme.a: an embeddable static library, plus a self-contained -------
+# ---- compiler+REPL bundle, for a host C program (see examples/libcream/) ---
+#
+# Same `filter-out main.c` shape as the fuzz target above, archived (ar rcs)
+# instead of linked into a binary -- one monolithic library, same full
+# dependency set as the CLI binary itself (no per-feature opt-out exists in
+# this build, so libcreme.a doesn't invent one either). -fPIC on its own
+# object suffix (.lib.o, distinct from plain .o/.san.o/.fuzz.o) costs
+# nothing today and leaves the door open to a future .so from the same
+# objects.
+#
+# embed.c/embedded_compiler_run.c are library-ONLY additions -- deliberately
+# not part of $(SRCS)/the CLI binary, which keeps its own existing
+# file-based compiler-mode (main.c's CREME_COMPILER_DRIVER_PATH) completely
+# unchanged. Only the self-hosted-compiler driver gets bundled as embedded
+# bytes, not the REPL too -- creme_run_repl (embed.c) instead compiles
+# icecreme/repl.scm fresh through the same bundled-compiler mechanism at
+# call time (a precompiled repl.ice loaded standalone is missing
+# interaction-environment -- see embed.c's own comment on creme_run_repl).
+tools/bin2c: tools/bin2c.c
+	$(CC) -O2 -o $@ $<
+
+# Regenerated whenever compiler-run.scm changes, via a live bin/creme
+# --emit-icecreme (the project's own Crystal compiler) -- same rule shape
+# competition/Makefile already uses for compiler-run.ice.
+compiler-run.ice: compiler-run.scm
+	cd .. && ./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice
+
+embedded_compiler_run.c: compiler-run.ice tools/bin2c
+	tools/bin2c compiler-run.ice creme_embedded_compiler_run_ice > $@
+
+LIBCREME_SRCS := $(filter-out main.c,$(SRCS)) embed.c embedded_compiler_run.c
+LIBCREME_OBJS := $(LIBCREME_SRCS:.c=.lib.o)
+
+.PHONY: lib
+lib: libcreme.a
+
+libcreme.a: $(LIBCREME_OBJS)
+	ar rcs $@ $(LIBCREME_OBJS)
+
+%.lib.o: %.c *.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ $<
+
 clean:
-	rm -f $(OBJS) $(SANITIZE_OBJS) $(FUZZ_OBJS) $(BIN) $(SANBIN) $(FUZZBIN)
+	rm -f $(OBJS) $(SANITIZE_OBJS) $(FUZZ_OBJS) $(LIBCREME_OBJS) $(BIN) $(SANBIN) $(FUZZBIN) libcreme.a
+	rm -f tools/bin2c embedded_compiler_run.c
 	rm -rf fuzz/corpus

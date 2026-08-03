@@ -35,20 +35,8 @@
 
 #include <gc.h>
 
+#include "../builtin_families.h"
 #include "../vm.h"
-
-/* Real implementation lives in main.c, excluded here so libFuzzer's own
- * main() (from its runtime, linked in via -fsanitize=fuzzer) is the only
- * one. Nothing this harness calls (creme_load_from_bytes and what it calls
- * transitively) actually invokes builtin registration -- this stub only
- * exists to satisfy bootstrap.o's own reference to it (bi_load_chunk_
- * bytes/bi_load_chunk_bytes_into, neither of which this harness reaches
- * either, but the linker still needs the symbol to resolve). */
-void creme_register_required_builtins(VM *vm, char **families, int n_families) {
-  (void)vm;
-  (void)families;
-  (void)n_families;
-}
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   VM *vm = GC_MALLOC(sizeof(VM));

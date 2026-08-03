@@ -15,6 +15,44 @@ both reaching their current shape) — not itemized individually here;
 
 ## [Unreleased]
 
+### `libcreme.a`: an embeddable static library, plus `examples/libcream/`
+
+- `make -C icecreme lib` builds `libcreme.a`, a static library an external C
+  program can link against to embed `icecreme` directly, instead of
+  shelling out to the `icecreme` binary. `#include <icecreme/creme.h>`
+  pulls in the whole public surface in one line.
+- New embedding-convenience API (`icecreme/embed.c`/`embed.h`):
+  `creme_runtime_init()` (bundles `GC_INIT`/default heap sizing/
+  `GC_set_oom_fn`/GMP-via-GC redirection into one call), `creme_register_
+  global()` (the value-side counterpart of the existing `creme_register_
+  builtin()`, for a host-defined constant rather than a function),
+  `creme_run_repl()`, and `creme_run_scheme_file()`.
+- **The self-hosted compiler is bundled directly into the library at build
+  time**: `icecreme/tools/bin2c.c` (a tiny new build-time helper) turns the
+  precompiled `compiler-run.ice` into an embedded C byte array, so
+  `creme_run_scheme_file()` can compile-and-run a plain `.scm` file with
+  zero `--emit-icecreme` precompilation step and no `.ice` file for the
+  host to ship. `creme_run_repl()` compiles `icecreme/repl.scm` fresh
+  through that same mechanism rather than bundling a separately
+  precompiled `repl.ice` — the REPL script needs `read`/`eval`/
+  `interaction-environment`, only ever backed by the self-hosted
+  compiler's own toolchain setup (see the "REPL" section), so a
+  standalone precompiled `repl.ice` aborts on the first form submitted.
+- `creme_register_required_builtins()` (and its `BUILTIN_FAMILIES` table)
+  moves out of `main.c` into a new `icecreme/builtin_families.c`/`.h` — it
+  previously lived alongside `main()`, a real link-symbol clash for any
+  embedder building their own executable. Pure move, no CLI behavior
+  change. Also adds `creme_register_all_builtins()`, for an embedder
+  running scripts it doesn't want to (or can't) inspect ahead of time via
+  `creme_peek_required_families`.
+- New example: `examples/libcream/` — a complete, minimal C host program
+  registering its own native function (`host-greet`) and native value
+  (`host-version`) as Scheme globals, then running a plain `.scm` script
+  that calls/reads both.
+- See `icecreme/README.md`'s new "Embedding" section for the full minimal
+  call sequence and the link-flag set a `libcreme.a` consumer needs to
+  reproduce (static archives carry no transitive link flags).
+
 ### Breaking: standalone C VM (`cvm`) renamed to `icecreme` ("Ice Creme")
 
 - Continuing the project's dessert-themed branding (the Crystal implementation

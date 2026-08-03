@@ -23,6 +23,7 @@
 #include <gc.h>
 
 #include "bootstrap.h"
+#include "builtin_families.h"
 
 /* Set once by main.c before running the compiler driver (icecreme/compiler-
  * run.scm) in compiler mode -- the path it decided needs compiling, exposed

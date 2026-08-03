@@ -21,6 +21,16 @@ crystal-run-*.tm.core
 /icecreme/oom-*
 /icecreme/timeout-*
 
+# libcreme.a build artifacts: the archive itself, the bin2c-generated
+# source it bundles the compiler bytecode from, and the bin2c helper
+# binary itself -- see icecreme/Makefile's own comment.
+/icecreme/libcreme.a
+/icecreme/embedded_compiler_run.c
+/icecreme/tools/bin2c
+
+# examples/libcream/'s own build output.
+/examples/libcream/host_demo
+
 # (creme ffi)'s small precompiled dlopen/libffi shim (see ffi_shim.c's own
 # header comment) -- built by the root Makefile's ffi_shim.o rule, same
 # convention as /icecreme/*.o above.

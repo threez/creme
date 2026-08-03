@@ -373,10 +373,10 @@ struct VM {
   int has_actor_unwind;
   char abort_message[1024];
 
-  /* creme_register_required_builtins's (main.c) own idempotency tracking,
-   * PER-VM (an actor's creme_new_child_vm gets its own fresh globals table,
-   * so it needs its own fresh "what have I registered so far" state too,
-   * not a process-wide one). Needed because that function is now called
+  /* creme_register_required_builtins's (builtin_families.c) own idempotency
+   * tracking, PER-VM (an actor's creme_new_child_vm gets its own fresh globals
+   * table, so it needs its own fresh "what have I registered so far" state
+   * too, not a process-wide one). Needed because that function is now called
    * repeatedly over a single VM's lifetime -- not just once at startup,
    * but every time bootstrap.c's bi_load_chunk_bytes loads another chunk
    * (every nested self-hosted-compiler library load, every `eval` call) --
@@ -387,10 +387,10 @@ struct VM {
    * prim_call_spec.scm's own "deopts + to a runtime redefinition" cases,
    * which permanently shadow `+` at the global level) back to the
    * original native closure, breaking exactly that kind of test. See
-   * creme_register_required_builtins's own doc comment (main.c) for the bit
-   * layout `registered_family_mask` uses. */
+   * creme_register_required_builtins's own doc comment (builtin_families.c)
+   * for the bit layout `registered_family_mask` uses. */
   int base_write_registered;
-  /* uint64_t, not int -- BUILTIN_FAMILIES (main.c) plus the 3 CREME_EXTRA_BIT_*
+  /* uint64_t, not int -- BUILTIN_FAMILIES (builtin_families.c) plus the 3 CREME_EXTRA_BIT_*
    * bits now needs more than 31 usable bits (32-bit `int` overflowed --
    * UB on the shift itself once the family count + 2 reached 31 -- the
    * moment a new family got added past that point; confirmed via a real
@@ -445,20 +445,6 @@ Chunk *creme_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len, cha
  * NULL for both if not needed (though then there's no reason to call this
  * at all). */
 void creme_peek_required_families(const char *path, char ***names_out, int *count_out);
-
-/* main.c
- *
- * Registers the two always-on families (base/write) plus, for every other
- * name in `families`, whichever creme_register_*_builtins function that
- * family maps to (silently skipping a name icecreme has no native family for --
- * see this function's own doc comment in main.c). Called once at startup
- * with the loaded file's own required-families metadata, and again by
- * bootstrap.c's bi_load_chunk_bytes (icecreme's "compiler mode" case: the
- * startup call only sees precompiled compiler-run.ice's own near-empty
- * list, since the REAL target script's required families aren't known
- * until the self-hosted compiler actually compiles it, well after startup
- * registration already ran) with the real target's own list. */
-void creme_register_required_builtins(VM *vm, char **families, int n_families);
 
 /* vm.c */
 void creme_run_chunk(VM *vm, Chunk *chunk);

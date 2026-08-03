@@ -466,6 +466,88 @@ so the test's own initial "is it genuinely unbound?" check is moot there
 (see that file's own header comment). Not something this test suite is
 trying to fix.
 
+## Embedding
+
+`make -C icecreme lib` builds `libcreme.a`, a static library an external C
+program can link against instead of shelling out to the `icecreme` binary —
+`examples/libcream/` is a complete, minimal worked example (a host program
+registering its own native function and native value as Scheme globals,
+then running a plain `.scm` script that uses them). `#include
+<icecreme/creme.h>` pulls in the whole public surface (`vm.h`/`value.h`,
+`embed.h`'s embedding-convenience API below, `builtin_families.h`, and every
+per-family header) in one line.
+
+Minimal call sequence:
+
+```c
+#include <icecreme/creme.h>
+
+/* ... define any native functions of your own here, e.g.: */
+static Value my_native_fn(VM *vm, Value *args, int nargs) { /* ... */ }
+
+int main(void) {
+  creme_runtime_init();                 /* GC_INIT + GMP-via-GC + oom handler,
+                                            once per process */
+  VM *vm = creme_alloc_vm(0, 0);        /* 0, 0 = default stack/frame caps */
+  creme_set_current_vm(vm);
+
+  creme_register_all_builtins(vm);      /* every family this build knows
+                                            about; or creme_peek_required_
+                                            families + creme_register_
+                                            required_builtins for just what
+                                            a specific known script needs */
+
+  creme_register_builtin(vm, "my-native-fn", my_native_fn);
+  creme_register_global(vm, "my-constant", v_str("some value", 10));
+
+  creme_run_scheme_file(vm, "script.scm");   /* compiles + runs directly,
+                                                 via the compiler bundled
+                                                 into libcreme.a — no
+                                                 --emit-icecreme step, no
+                                                 .ice file needed */
+  return 0;
+}
+```
+
+`creme_run_repl(vm)` drops into an interactive stdin/stdout REPL, by
+compiling-and-running `icecreme/repl.scm` (the 2-line `(creme repl)` shim)
+through the same bundled-compiler mechanism as `creme_run_scheme_file` —
+see the "REPL" section above for why this must always run as source
+through the compiler-mode path rather than a separately precompiled
+`.ice` (`(creme repl)` needs `read`/`eval`/`interaction-environment`, only
+ever backed by the self-hosted compiler's own toolchain setup). For a
+precompiled `.ice` file instead of raw source, skip `creme_run_scheme_file`
+and call the lower-level `creme_load`/`creme_run_chunk` directly (same
+pair the CLI binary itself uses).
+
+**`creme_run_scheme_file`'s `scm_path` is resolved relative to the process's
+own current working directory, not the script's own directory or the host
+binary's location** — the self-hosted compiler it runs looks up every
+library the script imports (`(scheme base)`, etc.) via a repo-root-relative
+path (`modules/scheme/*.sld`), the same assumption `icecreme`'s own CLI
+already makes everywhere (`main.c`'s `CREME_COMPILER_DRIVER_PATH`, every
+`spec/creme/*_spec.scm`). A host embedding this from outside the repo needs
+either to run with the repo root as its CWD, or to vendor `modules/` (and
+pass a matching relative `scm_path`) alongside its own binary. See
+`examples/libcream/`'s own README for a concrete worked example of the
+"run from the repo root" case.
+
+A script can call/reference a host-registered name with no special
+declaration on the Scheme side — `analyze_var`/`resolve_globals` resolve
+any free identifier to an ordinary by-name global reference regardless of
+whether anything is bound to it yet, so `(host-greet "world")` compiles and
+runs exactly like calling any other global, as long as `host-greet` was
+registered (in either order relative to `creme_load`/`creme_load_from_bytes`,
+just before the chunk actually runs).
+
+`libcreme.a` is one monolithic archive — the same full dependency set
+(Boehm GC, PCRE2, GMP, OpenSSL libcrypto/libssl, libffi, libyaml, sqlite3)
+the `icecreme` binary itself links, since this build has no per-feature
+opt-out. A consumer needs the same link-flag set at their own link stage
+(static archives carry no transitive flags) — see `examples/libcream/
+Makefile` for the concrete, working recipe, or `icecreme/Makefile`'s own
+`LDLIBS`/pkg-config lines for the canonical, always-up-to-date list.
+
 ## Profiling
 
 `icecreme --profile <file.ice>` runs the program under two independent samplers
@@ -1327,4 +1409,18 @@ different path.
 - `compiler-run.scm` — the compiler-mode driver script (see "Compiler
   mode" above), precompiled into `compiler-run.ice`.
 - `profiler.c`/`profiler.h` — the `--profile` samplers, see "Profiling" above.
+- `builtin_families.c`/`builtin_families.h` — the required-families→
+  register-function table and `creme_register_required_builtins`/
+  `creme_register_all_builtins`, extracted out of `main.c` (which also
+  defines `main()`) so this logic can link into `libcreme.a` too — see
+  "Embedding" above.
+- `embed.c`/`embed.h` — the embedding-convenience API (`creme_runtime_init`,
+  `creme_register_global`, `creme_run_repl`, `creme_run_scheme_file`) and
+  the bin2c-embedded self-hosted-compiler bytecode it uses — library-only,
+  not part of the CLI binary. See "Embedding" above.
+- `creme.h` — the public umbrella header a `libcreme.a` consumer includes.
+- `tools/bin2c.c` — tiny build-time helper turning a compiled `.ice` file
+  into a `.c` source defining a `const unsigned char[]`/length pair; used
+  to bundle `compiler-run.ice` into `embed.c`'s embedded byte array at
+  library-build time.
 - `main.c` — entry point: load and run the one combined chunk.
