@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "cipher.h"
+#include "embed.h"
 
 #define CIPHER_KEY_SIZE 32   /* AES-256 */
 #define CIPHER_NONCE_SIZE 12 /* GCM's standard 96-bit nonce */
@@ -121,7 +122,7 @@ static void cipher_feed_aad(EVP_CIPHER_CTX *ctx, const unsigned char *aad, int a
 
 static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) creme_abort("aes-256-gcm-encrypt: expected at least 3 arguments");
+  creme_check_min_args(nargs, 3, "aes-256-gcm-encrypt");
   const unsigned char *key, *nonce, *pt, *aad = NULL;
   int keylen, noncelen, ptlen, aadlen = 0;
   value_bytes(args[0], &key, &keylen, "aes-256-gcm-encrypt");
@@ -159,7 +160,7 @@ static Value bi_aes_256_gcm_encrypt(VM *vm, Value *args, int nargs) {
 
 static Value bi_aes_256_gcm_decrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 4) creme_abort("aes-256-gcm-decrypt: expected at least 4 arguments");
+  creme_check_min_args(nargs, 4, "aes-256-gcm-decrypt");
   const unsigned char *key, *nonce, *ct, *tag, *aad = NULL;
   int keylen, noncelen, ctlen, taglen, aadlen = 0;
   value_bytes(args[0], &key, &keylen, "aes-256-gcm-decrypt");

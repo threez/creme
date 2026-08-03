@@ -79,13 +79,13 @@ static Value bi_make_hash_table(VM *vm, Value *args, int nargs) {
 
 static Value bi_hash_table_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("hash-table?: expected an argument");
+  creme_check_min_args(nargs, 1, "hash-table?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_HASHTABLE);
 }
 
 Value bi_hash_table_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) creme_abort("hash-table-set!: expected (table key value)");
+  creme_check_min_args(nargs, 3, "hash-table-set!");
   CremeHashTable *ht = as_hash_table(args[0], "hash-table-set!");
   if (ht->n_values >= ht->cap_values) {
     ht->cap_values = ht->cap_values ? ht->cap_values * 2 : 8;
@@ -108,7 +108,7 @@ static int hash_table_lookup(CremeHashTable *ht, Value key, Value *out) {
 
 static Value bi_hash_table_contains_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("hash-table-contains?: expected (table key)");
+  creme_check_min_args(nargs, 2, "hash-table-contains?");
   CremeHashTable *ht = as_hash_table(args[0], "hash-table-contains?");
   Value unused;
   return v_bool(hash_table_lookup(ht, args[1], &unused));
@@ -123,7 +123,7 @@ static Value bi_hash_table_contains_p(VM *vm, Value *args, int nargs) {
  * broke with "attempt to apply a non-procedure value" the moment icecreme ran
  * any script built on (creme dao). */
 Value bi_hash_table_ref(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("hash-table-ref: expected (table key [default])");
+  creme_check_min_args(nargs, 2, "hash-table-ref");
   CremeHashTable *ht = as_hash_table(args[0], "hash-table-ref");
   Value result;
   if (hash_table_lookup(ht, args[1], &result)) return result;
@@ -177,23 +177,23 @@ static Value collect_live(VM *vm, CremeHashTable *ht, CollectKind kind) {
 }
 
 static Value bi_hash_table_keys(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("hash-table-keys: expected a hash table");
+  creme_check_min_args(nargs, 1, "hash-table-keys");
   return collect_live(vm, as_hash_table(args[0], "hash-table-keys"), COLLECT_KEYS);
 }
 
 static Value bi_hash_table_values(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("hash-table-values: expected a hash table");
+  creme_check_min_args(nargs, 1, "hash-table-values");
   return collect_live(vm, as_hash_table(args[0], "hash-table-values"), COLLECT_VALUES);
 }
 
 static Value bi_hash_table_to_alist(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("hash-table->alist: expected a hash table");
+  creme_check_min_args(nargs, 1, "hash-table->alist");
   return collect_live(vm, as_hash_table(args[0], "hash-table->alist"), COLLECT_ALIST);
 }
 
 static Value bi_hash_table_delete(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("hash-table-delete!: expected (table key)");
+  creme_check_min_args(nargs, 2, "hash-table-delete!");
   CremeHashTable *ht = as_hash_table(args[0], "hash-table-delete!");
   creme_ht_idx_erase(&ht->map, args[1]);
   return v_nil();

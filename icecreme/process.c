@@ -103,7 +103,7 @@ static void pr_drain_pipes(int out_fd, int err_fd,
 }
 
 static Value bi_process_run(VM *vm, Value *args, int nargs) {
-  if (nargs != 2) creme_abort("process-run: expected (cmd args)");
+  creme_check_exact_args(nargs, 2, "process-run");
   const char *cmd = creme_arg_cstr(args, nargs, 0, "process-run");
 
   int n = creme_list_length(args[1]);
@@ -162,7 +162,7 @@ static Value bi_process_run(VM *vm, Value *args, int nargs) {
  * call under icecreme at all; before this, icecreme had no sleep of any kind. */
 static Value bi_sleep_ms(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
+  creme_check_exact_args(nargs, 1, "sleep-ms!");
   int64_t ms = creme_arg_int(args, nargs, 0, "sleep-ms!");
   if (ms < 0) creme_abort("sleep-ms!: expected a non-negative integer count of milliseconds");
   struct timespec req;

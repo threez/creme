@@ -89,7 +89,7 @@ static Value bi_digest_sha256(VM *vm, Value *args, int nargs) {
 
 static Value bi_digest_sha384(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("digest-sha384: expected an argument");
+  creme_check_min_args(nargs, 1, "digest-sha384");
   const char *ptr;
   int len;
   value_bytes(args[0], &ptr, &len, "digest-sha384");
@@ -98,7 +98,7 @@ static Value bi_digest_sha384(VM *vm, Value *args, int nargs) {
 
 static Value bi_digest_sha512(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("digest-sha512: expected an argument");
+  creme_check_min_args(nargs, 1, "digest-sha512");
   const char *ptr;
   int len;
   value_bytes(args[0], &ptr, &len, "digest-sha512");
@@ -107,7 +107,7 @@ static Value bi_digest_sha512(VM *vm, Value *args, int nargs) {
 
 static Value bi_hmac_sha256(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("hmac-sha256: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "hmac-sha256");
   const char *kptr, *dptr;
   int klen, dlen;
   value_bytes(args[0], &kptr, &klen, "hmac-sha256");
@@ -117,7 +117,7 @@ static Value bi_hmac_sha256(VM *vm, Value *args, int nargs) {
 
 static Value bi_hmac_sha384(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("hmac-sha384: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "hmac-sha384");
   const char *kptr, *dptr;
   int klen, dlen;
   value_bytes(args[0], &kptr, &klen, "hmac-sha384");
@@ -127,7 +127,7 @@ static Value bi_hmac_sha384(VM *vm, Value *args, int nargs) {
 
 static Value bi_hmac_sha512(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("hmac-sha512: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "hmac-sha512");
   const char *kptr, *dptr;
   int klen, dlen;
   value_bytes(args[0], &kptr, &klen, "hmac-sha512");

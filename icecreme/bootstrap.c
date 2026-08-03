@@ -221,7 +221,7 @@ static Value bi_load_chunk_bytes_into(VM *vm, Value *args, int nargs) {
  * cheap to guard for anyway), this quietly falls back to the original
  * no-op rather than aborting. */
 static Value bi_import_bang(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) creme_abort("import!: expected 1 argument");
+  creme_check_exact_args(nargs, 1, "import!");
   const char *bridge_name = "import!-apply-aliases!";
   int bridge_slot = creme_global_intern(vm, bridge_name, (int)strlen(bridge_name));
   if (!vm->globals[bridge_slot].bound) return v_nil();
@@ -254,7 +254,7 @@ static int sym_is(Value v, const char *s) {
  * same contract as native's own library-exports when the library isn't
  * registered. */
 static Value bi_library_exports(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) creme_abort("library-exports: expected 1 argument");
+  creme_check_exact_args(nargs, 1, "library-exports");
   Value name = args[0];
   if (name.tag != T_PAIR) return v_bool(0);
   Value first = name.as.pair->car;
@@ -301,7 +301,7 @@ static Value bi_library_exports(VM *vm, Value *args, int nargs) {
  * two exported procedures are that same logic, exported so this builtin
  * can reach either by name. */
 static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
-  if (nargs != 1) creme_abort("expand-if-macro: expected 1 argument");
+  creme_check_exact_args(nargs, 1, "expand-if-macro");
   Value form = args[0];
   if (form.tag != T_PAIR) return v_bool(0);
   Value head = form.as.pair->car;
@@ -333,7 +333,7 @@ static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
  * file it (include ...)s) at all. */
 static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("read-whole-file: expected a path string");
+  creme_check_exact_args(nargs, 1, "read-whole-file");
   const char *path = creme_arg_cstr(args, nargs, 0, "read-whole-file");
 
   FILE *f = fopen(path, "rb");
@@ -358,7 +358,7 @@ static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
  * matching src/creme/modules/creme/file.cr's own file-write contract. */
 static Value bi_file_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2) creme_abort("file-write: expected (path content)");
+  creme_check_exact_args(nargs, 2, "file-write");
   const char *path = creme_arg_cstr(args, nargs, 0, "file-write");
   int content_len;
   const char *content = creme_arg_bytes(args, nargs, 1, "file-write", &content_len);
@@ -373,7 +373,7 @@ static Value bi_file_write(VM *vm, Value *args, int nargs) {
 
 static Value bi_delete_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("delete-file: expected a path string");
+  creme_check_exact_args(nargs, 1, "delete-file");
   const char *path = creme_arg_cstr(args, nargs, 0, "delete-file");
   if (remove(path) != 0) creme_abort("delete-file: cannot remove %s", path);
   return v_nil();

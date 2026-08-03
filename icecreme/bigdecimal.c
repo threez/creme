@@ -178,7 +178,7 @@ static char *bd_to_string(const BigDecimal *bd, int *out_len) {
 
 static Value bi_string_to_bigdecimal(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("string->bigdecimal: expected a string or integer");
+  creme_check_min_args(nargs, 1, "string->bigdecimal");
   const char *s;
   int len;
   char intbuf[32];
@@ -207,7 +207,7 @@ static Value bi_integer_to_bigdecimal(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_add(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal-add: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal-add");
   BigDecimal *a = bigdecimal_arg(args[0], "bigdecimal-add");
   BigDecimal *b = bigdecimal_arg(args[1], "bigdecimal-add");
   mpz_t na, nb;
@@ -223,7 +223,7 @@ static Value bi_bigdecimal_add(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_sub(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal-sub: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal-sub");
   BigDecimal *a = bigdecimal_arg(args[0], "bigdecimal-sub");
   BigDecimal *b = bigdecimal_arg(args[1], "bigdecimal-sub");
   mpz_t na, nb;
@@ -239,7 +239,7 @@ static Value bi_bigdecimal_sub(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_mul(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal-mul: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal-mul");
   BigDecimal *a = bigdecimal_arg(args[0], "bigdecimal-mul");
   BigDecimal *b = bigdecimal_arg(args[1], "bigdecimal-mul");
   BigDecimal *r = bd_new();
@@ -252,7 +252,7 @@ static Value bi_bigdecimal_mul(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_div(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal-div: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal-div");
   BigDecimal *a = bigdecimal_arg(args[0], "bigdecimal-div");
   BigDecimal *b = bigdecimal_arg(args[1], "bigdecimal-div");
   if (mpz_sgn(b->mantissa) == 0) creme_abort("bigdecimal-div: division by zero");
@@ -321,7 +321,7 @@ static Value bi_bigdecimal_div(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_neg(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("bigdecimal-neg: expected a bigdecimal");
+  creme_check_min_args(nargs, 1, "bigdecimal-neg");
   BigDecimal *a = bigdecimal_arg(args[0], "bigdecimal-neg");
   BigDecimal *r = bd_new();
   mpz_neg(r->mantissa, a->mantissa);
@@ -331,7 +331,7 @@ static Value bi_bigdecimal_neg(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_compare(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal-compare: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal-compare");
   BigDecimal *a = bigdecimal_arg(args[0], "bigdecimal-compare");
   BigDecimal *b = bigdecimal_arg(args[1], "bigdecimal-compare");
   return v_int(bd_compare(a, b));
@@ -339,31 +339,31 @@ static Value bi_bigdecimal_compare(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal=?: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal=?");
   return v_bool(bd_compare(bigdecimal_arg(args[0], "bigdecimal=?"), bigdecimal_arg(args[1], "bigdecimal=?")) == 0);
 }
 
 static Value bi_bigdecimal_lt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal<?: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal<?");
   return v_bool(bd_compare(bigdecimal_arg(args[0], "bigdecimal<?"), bigdecimal_arg(args[1], "bigdecimal<?")) < 0);
 }
 
 static Value bi_bigdecimal_gt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("bigdecimal>?: expected two bigdecimals");
+  creme_check_min_args(nargs, 2, "bigdecimal>?");
   return v_bool(bd_compare(bigdecimal_arg(args[0], "bigdecimal>?"), bigdecimal_arg(args[1], "bigdecimal>?")) > 0);
 }
 
 static Value bi_bigdecimal_zero_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("bigdecimal-zero?: expected a bigdecimal");
+  creme_check_min_args(nargs, 1, "bigdecimal-zero?");
   return v_bool(mpz_sgn(bigdecimal_arg(args[0], "bigdecimal-zero?")->mantissa) == 0);
 }
 
 static Value bi_bigdecimal_to_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("bigdecimal->string: expected a bigdecimal");
+  creme_check_min_args(nargs, 1, "bigdecimal->string");
   BigDecimal *bd = bigdecimal_arg(args[0], "bigdecimal->string");
   int len;
   char *s = bd_to_string(bd, &len);
@@ -372,7 +372,7 @@ static Value bi_bigdecimal_to_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_bigdecimal_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("bigdecimal?: expected an argument");
+  creme_check_min_args(nargs, 1, "bigdecimal?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_BIGDECIMAL);
 }
 

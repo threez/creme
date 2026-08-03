@@ -442,7 +442,7 @@ static void json_write_value(GBuf *w, Value v, const char *who) {
 
 static Value bi_json_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("json-write: expected an argument");
+  creme_check_min_args(nargs, 1, "json-write");
   GBuf b;
   gbuf_init(&b);
   json_write_value(&b, args[0], "json-write");

@@ -25,6 +25,7 @@
 
 #include <gc.h>
 
+#include "embed.h"
 #include "opcodes.h"
 #include "profiler.h"
 #include "vm.h"
@@ -1028,18 +1029,18 @@ static Value call_record_callable(RecordCallable *rc, Value *args, int nargs) {
     return v_record(r);
   }
   case RC_PRED: {
-    if (nargs != 1) creme_abort("record predicate: expected 1 argument");
+    creme_check_exact_args(nargs, 1, "record predicate");
     Value v = args[0];
     return v_bool(v.tag == T_RECORD && v.as.record->type == rc->type);
   }
   case RC_ACCESSOR: {
-    if (nargs != 1) creme_abort("record accessor: expected 1 argument");
+    creme_check_exact_args(nargs, 1, "record accessor");
     Value v = args[0];
     if (v.tag != T_RECORD || v.as.record->type != rc->type) creme_abort("record accessor: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
     return v.as.record->fields[rc->field_index];
   }
   case RC_MUTATOR: {
-    if (nargs != 2) creme_abort("record mutator: expected 2 arguments");
+    creme_check_exact_args(nargs, 2, "record mutator");
     Value v = args[0];
     if (v.tag != T_RECORD || v.as.record->type != rc->type) creme_abort("record mutator: expected a %.*s record", rc->type->name.aux, rc->type->name.as.chars);
     v.as.record->fields[rc->field_index] = args[1];

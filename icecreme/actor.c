@@ -583,7 +583,7 @@ static void *actor_thread_main(void *arg) {
 }
 
 static Value bi_spawn(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("spawn: expected a thunk");
+  creme_check_min_args(nargs, 1, "spawn");
   VM *child_vm = creme_new_child_vm(vm);
   /* A spawned actor inherits the SPAWNING actor's own current system --
    * mirrors native's `child.actor_system = system` (actor.cr). */
@@ -1420,7 +1420,7 @@ static void *accept_loop_main(void *arg) {
 }
 
 static Value bi_send_bang(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("send!: expected (target message)");
+  creme_check_min_args(nargs, 2, "send!");
   Value target = args[0];
   if (target.tag == T_SYM || target.tag == T_STR) {
     ActorContext *ctx = resolve_target(vm, target, "send!");
@@ -1454,7 +1454,7 @@ static Value bi_self(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_monitor(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("monitor: expected a ref");
+  creme_check_min_args(nargs, 1, "monitor");
   ActorContext *watcher = ensure_context(vm);
   ActorContext *target = resolve_target(vm, args[0], "monitor");
 
@@ -1632,7 +1632,7 @@ static void start_unix_node(ActorSystem *sys, const char *path, int path_len, co
  * `current_interp.actor_system = system`) so any FUTURE spawn() from
  * this same thread lands its children in the new system too. */
 static Value bi_start_node(VM *vm, Value *args, int nargs) {
-  if (nargs < 3) creme_abort("start-node: expected at least 3 arguments");
+  creme_check_min_args(nargs, 3, "start-node");
   ActorSystem *sys = alloc_actor_system();
   sys->creator_vm = vm;
 
@@ -1706,7 +1706,7 @@ static Value bi_node_path(VM *vm, Value *args, int nargs) {
  * so no separate extraction path is needed. */
 static Value bi_node_address(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("node-address: expected (node id)");
+  creme_check_min_args(nargs, 2, "node-address");
   ActorSystem *sys = node_arg(args[0], "node-address");
 
   const char *id_chars;
@@ -1764,7 +1764,7 @@ static Value bi_stop_node_bang(VM *vm, Value *args, int nargs) {
 
 static Value bi_down_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("down?: expected an argument");
+  creme_check_min_args(nargs, 1, "down?");
   return v_bool(args[0].tag == T_RECORD && args[0].as.record->type == get_down_type());
 }
 

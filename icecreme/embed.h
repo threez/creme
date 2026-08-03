@@ -104,7 +104,24 @@ void creme_run_scheme_file(VM *vm, const char *scm_path);
  * of range or the argument has the wrong type; there is deliberately no
  * "did this fail" return code to check, matching every other icecreme
  * builtin's own error convention (an out-of-band C error/errno return
- * would be silently ignorable in a way an abort isn't). */
+ * would be silently ignorable in a way an abort isn't).
+ *
+ * `creme_check_min_args`/`creme_check_exact_args` cover the plain arity-only
+ * check every variadic-style builtin (`+`, `-`, `/`, `<`, list/vector
+ * constructors, etc.) already hand-rolls as a bare `if (nargs < N)
+ * creme_abort(...)` or `if (nargs != N) creme_abort(...)`, with no argument
+ * extraction alongside it — unlike every `creme_arg_*` above, these check
+ * arity alone and return nothing. */
+
+/* Aborts via `who` if `nargs` is less than `min`. */
+static inline void creme_check_min_args(int nargs, int min, const char *who) {
+  if (nargs < min) creme_abort("%s: expected at least %d argument%s, got %d", who, min, min == 1 ? "" : "s", nargs);
+}
+
+/* Aborts via `who` if `nargs` isn't exactly `exact`. */
+static inline void creme_check_exact_args(int nargs, int exact, const char *who) {
+  if (nargs != exact) creme_abort("%s: expected exactly %d argument%s, got %d", who, exact, exact == 1 ? "" : "s", nargs);
+}
 
 /* Extracts argument `index` as a `T_INT` value's raw `int64_t`. */
 static inline int64_t creme_arg_int(Value *args, int nargs, int index, const char *who) {

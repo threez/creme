@@ -58,7 +58,7 @@ static Value bi_regexp_matches_p(VM *vm, Value *args, int nargs) {
 
 static Value bi_regexp_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("regexp?: expected an argument");
+  creme_check_min_args(nargs, 1, "regexp?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_REGEX);
 }
 

@@ -105,7 +105,7 @@ static ffi_type *libffi_type_for_kind(int kind) {
 
 static Value bi_ffi_open(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("ffi-open: expected a library path/name string");
+  creme_check_exact_args(nargs, 1, "ffi-open");
   const char *path = creme_arg_cstr(args, nargs, 0, "ffi-open");
   dlerror();
   void *handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
@@ -118,7 +118,7 @@ static Value bi_ffi_open(VM *vm, Value *args, int nargs) {
 
 static Value bi_ffi_close(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("ffi-close: expected a value from ffi-open");
+  creme_check_exact_args(nargs, 1, "ffi-close");
   dlclose(creme_arg_box(args, nargs, 0, BOX_KIND_FFI_LIB, "ffi-close"));
   return v_nil();
 }
@@ -232,7 +232,7 @@ static Value marshal_return(int kind, FfiSlot *slot) {
 
 static Value bi_ffi_call(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2) creme_abort("ffi-call: expected (func arg-list)");
+  creme_check_exact_args(nargs, 2, "ffi-call");
   FfiFunc *f = (FfiFunc *)creme_arg_box(args, nargs, 0, BOX_KIND_FFI_FUNC, "ffi-call");
 
   int given = creme_list_length(args[1]);
@@ -289,7 +289,7 @@ static Value bi_ffi_pointer_set(VM *vm, Value *args, int nargs) {
 
 static Value bi_ffi_type_size(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("ffi-type-size: expected a type symbol");
+  creme_check_exact_args(nargs, 1, "ffi-type-size");
   int kind = ffi_type_kind_from_sym(args[0], "ffi-type-size");
   switch (kind) {
   case FFI_T_INT32: return v_int(4);
@@ -307,7 +307,7 @@ static Value bi_ffi_type_size(VM *vm, Value *args, int nargs) {
  * no matching free is ever REQUIRED, unlike a libc-malloc'd buffer. */
 static Value bi_ffi_gc_malloc(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("ffi-gc-malloc: expected a non-negative size");
+  creme_check_exact_args(nargs, 1, "ffi-gc-malloc");
   int64_t size = creme_arg_int(args, nargs, 0, "ffi-gc-malloc");
   if (size < 0) creme_abort("ffi-gc-malloc: expected a non-negative size");
   return v_box(GC_MALLOC((size_t)size), BOX_KIND_FFI_POINTER);
@@ -325,7 +325,7 @@ static Value bi_ffi_gc_malloc(VM *vm, Value *args, int nargs) {
  * this bridge's existing no-bounds-checking SECURITY posture. */
 static Value bi_ffi_gc_free(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("ffi-gc-free: expected a pointer");
+  creme_check_exact_args(nargs, 1, "ffi-gc-free");
   void *ptr = ffi_pointer_base_arg(args[0], "ffi-gc-free");
   GC_FREE(ptr);
   return v_nil();
@@ -333,25 +333,25 @@ static Value bi_ffi_gc_free(VM *vm, Value *args, int nargs) {
 
 static Value bi_ffi_lib_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("ffi-lib?: expected an argument");
+  creme_check_min_args(nargs, 1, "ffi-lib?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_FFI_LIB);
 }
 
 static Value bi_ffi_function_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("ffi-function?: expected an argument");
+  creme_check_min_args(nargs, 1, "ffi-function?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_FFI_FUNC);
 }
 
 static Value bi_ffi_pointer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("ffi-pointer?: expected an argument");
+  creme_check_min_args(nargs, 1, "ffi-pointer?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_FFI_POINTER);
 }
 
 static Value bi_ffi_null_pointer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1) creme_abort("ffi-null-pointer?: expected a pointer");
+  creme_check_exact_args(nargs, 1, "ffi-null-pointer?");
   return v_bool(creme_arg_box(args, nargs, 0, BOX_KIND_FFI_POINTER, "ffi-null-pointer?") == NULL);
 }
 

@@ -314,7 +314,7 @@ static Value bi_csv_read_headers(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("csv-write: expected a sequence of rows");
+  creme_check_min_args(nargs, 1, "csv-write");
   char sep = csv_char_arg(args, nargs, 1, ',');
   int quoting = csv_quoting_arg(args, nargs, 2);
   Value *rows;
@@ -332,7 +332,7 @@ static Value bi_csv_write(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_write_headers(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("csv-write-headers: expected (headers rows)");
+  creme_check_min_args(nargs, 2, "csv-write-headers");
   char sep = csv_char_arg(args, nargs, 2, ',');
   int quoting = csv_quoting_arg(args, nargs, 3);
   Value *headers;
@@ -380,7 +380,7 @@ static Value bi_csv_reader_open(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_reader_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("csv-reader?: expected an argument");
+  creme_check_min_args(nargs, 1, "csv-reader?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_CSV_READER);
 }
 
@@ -409,7 +409,7 @@ static Value bi_csv_writer_open(VM *vm, Value *args, int nargs) {
 
 static Value bi_csv_writer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("csv-writer?: expected an argument");
+  creme_check_min_args(nargs, 1, "csv-writer?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_CSV_WRITER);
 }
 

@@ -172,7 +172,7 @@ static Value bi_mux_router(VM *vm, Value *args, int nargs) {
 
 static Value bi_mux_router_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("mux-router?: expected an argument");
+  creme_check_min_args(nargs, 1, "mux-router?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_MUX_ROUTER);
 }
 
@@ -199,7 +199,7 @@ static Value bi_mux_patch(VM *vm, Value *args, int nargs) { register_route(vm, a
 
 static Value bi_mux_use(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("mux-use!: expected (router middleware)");
+  creme_check_min_args(nargs, 2, "mux-use!");
   MuxApp *app = as_mux_app(args[0], "mux-use!");
   if (app->n_middlewares >= app->cap_middlewares) {
     app->cap_middlewares = app->cap_middlewares ? app->cap_middlewares * 2 : 4;
@@ -1079,7 +1079,7 @@ static int bind_listener(const char *host, const char *port_str, int reuseport) 
 }
 
 static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("mux-listen!: expected (router port [options])");
+  creme_check_min_args(nargs, 2, "mux-listen!");
   MuxApp *app = as_mux_app(args[0], "mux-listen!");
 
   char port_buf[32];
@@ -1317,7 +1317,7 @@ static Value bi_mux_listen(VM *vm, Value *args, int nargs) {
 
 static Value bi_mux_base_url(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("mux-base-url: expected a server");
+  creme_check_min_args(nargs, 1, "mux-base-url");
   MuxServer *srv = as_mux_server(args[0], "mux-base-url");
   char buf[300];
   int len = snprintf(buf, sizeof(buf), "http://%s:%s", srv->host, srv->port);
@@ -1325,7 +1325,7 @@ static Value bi_mux_base_url(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_mux_address(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("mux-address: expected a server");
+  creme_check_min_args(nargs, 1, "mux-address");
   MuxServer *srv = as_mux_server(args[0], "mux-address");
   Value alist = v_nil();
   alist = creme_cons(vm, creme_cons(vm, v_litstr("port"), v_gcstr(srv->port, strlen(srv->port))), alist);
@@ -1335,7 +1335,7 @@ static Value bi_mux_address(VM *vm, Value *args, int nargs) {
 
 static Value bi_mux_close(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("mux-close!: expected a server");
+  creme_check_min_args(nargs, 1, "mux-close!");
   MuxServer *srv = as_mux_server(args[0], "mux-close!");
   if (srv->uses_pool) {
     /* Every current pool listener, permanent or grown -- closing each

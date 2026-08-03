@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "embed.h"
 #include "sds.h"
 #include "strings.h"
 
@@ -330,7 +331,7 @@ static void format_int_radix(int64_t n, int radix, char *out, size_t cap) {
  * falls back to ~a's own display rendering), ~c, ~%, ~~, ~d/~x/~o/~b. */
 static Value bi_format(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("format: expected (dest fmt . args)");
+  creme_check_min_args(nargs, 2, "format");
   if (args[0].tag != T_BOOL) creme_abort("format: expected #t or #f as destination");
   if (args[1].tag != T_STR) creme_abort("format: expected a format string");
   const char *fmt = args[1].as.chars;

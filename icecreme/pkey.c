@@ -256,19 +256,19 @@ static Value bi_ec_generate_key(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("pkey?: expected an argument");
+  creme_check_min_args(nargs, 1, "pkey?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_PKEY);
 }
 
 static Value bi_pkey_private_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("pkey-private?: expected an argument");
+  creme_check_min_args(nargs, 1, "pkey-private?");
   return v_bool(pkey_arg(args[0], "pkey-private?")->is_private);
 }
 
 static Value bi_pkey_type(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("pkey-type: expected an argument");
+  creme_check_min_args(nargs, 1, "pkey-type");
   PKeyBox *box = pkey_arg(args[0], "pkey-type");
   const char *name = box->kind == PKEY_KIND_RSA ? "rsa" : "ec";
   return v_sym(name, (int)strlen(name));
@@ -276,7 +276,7 @@ static Value bi_pkey_type(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_public_key(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("pkey-public-key: expected an argument");
+  creme_check_min_args(nargs, 1, "pkey-public-key");
   PKeyBox *box = pkey_arg(args[0], "pkey-public-key");
   if (!box->is_private) return pkey_box(box->kind, 0, box->pem, box->pem_len);
 
@@ -298,7 +298,7 @@ static Value bi_pkey_public_key(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_to_pem(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("pkey->pem: expected an argument");
+  creme_check_min_args(nargs, 1, "pkey->pem");
   PKeyBox *box = pkey_arg(args[0], "pkey->pem");
   return v_str(box->pem, box->pem_len);
 }
@@ -335,7 +335,7 @@ static Value bi_pem_to_pkey(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("pkey-sign: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "pkey-sign");
   PKeyBox *box = pkey_arg(args[0], "pkey-sign");
   if (!box->is_private) creme_abort("pkey-sign: expected a private key");
   const unsigned char *msg;
@@ -373,7 +373,7 @@ static Value bi_pkey_sign(VM *vm, Value *args, int nargs) {
 
 static Value bi_pkey_verify(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) creme_abort("pkey-verify: expected 3 arguments");
+  creme_check_min_args(nargs, 3, "pkey-verify");
   PKeyBox *box = pkey_arg(args[0], "pkey-verify");
   const unsigned char *msg, *sig;
   int msg_len, sig_len;
@@ -463,7 +463,7 @@ static unsigned char *rsa_oaep_op(RSA *rsa, const unsigned char *input, int inpu
 
 static Value bi_rsa_encrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("rsa-encrypt: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "rsa-encrypt");
   PKeyBox *box = pkey_arg(args[0], "rsa-encrypt");
   if (box->kind != PKEY_KIND_RSA) creme_abort("rsa-encrypt: expected an RSA key");
   const unsigned char *pt;
@@ -479,7 +479,7 @@ static Value bi_rsa_encrypt(VM *vm, Value *args, int nargs) {
 
 static Value bi_rsa_decrypt(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("rsa-decrypt: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "rsa-decrypt");
   PKeyBox *box = pkey_arg(args[0], "rsa-decrypt");
   if (box->kind != PKEY_KIND_RSA) creme_abort("rsa-decrypt: expected an RSA key");
   if (!box->is_private) creme_abort("rsa-decrypt: expected a private key");

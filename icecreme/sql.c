@@ -82,19 +82,19 @@ static Value bi_sql_open(VM *vm, Value *args, int nargs) {
 
 static Value bi_sql_close(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("sql-close: expected a connection");
+  creme_check_min_args(nargs, 1, "sql-close");
   sqlite3_close(as_sql(args[0], "sql-close"));
   return v_nil();
 }
 
 static Value bi_sql_connection_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("sql-connection?: expected an argument");
+  creme_check_min_args(nargs, 1, "sql-connection?");
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_SQL);
 }
 
 static Value bi_sql_execute(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("sql-execute: expected (conn sql . params)");
+  creme_check_min_args(nargs, 2, "sql-execute");
   sqlite3 *db = as_sql(args[0], "sql-execute");
   sqlite3_stmt *stmt = prepare_and_bind(db, args[1], args + 2, nargs - 2);
   int rc = sqlite3_step(stmt);
@@ -113,7 +113,7 @@ static Value bi_sql_execute(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_sql_query(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("sql-query: expected (conn sql . params)");
+  creme_check_min_args(nargs, 2, "sql-query");
   sqlite3 *db = as_sql(args[0], "sql-query");
   sqlite3_stmt *stmt = prepare_and_bind(db, args[1], args + 2, nargs - 2);
   int ncols = sqlite3_column_count(stmt);
@@ -159,7 +159,7 @@ static Value bi_sql_query(VM *vm, Value *args, int nargs) {
 
 static Value bi_sql_scalar(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("sql-scalar: expected (conn sql . params)");
+  creme_check_min_args(nargs, 2, "sql-scalar");
   sqlite3 *db = as_sql(args[0], "sql-scalar");
   sqlite3_stmt *stmt = prepare_and_bind(db, args[1], args + 2, nargs - 2);
   Value result = v_nil();

@@ -420,7 +420,7 @@ static int yaml_write_handler(void *data, unsigned char *buffer, size_t size) {
 
 static Value bi_yaml_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("yaml-write: expected an argument");
+  creme_check_min_args(nargs, 1, "yaml-write");
 
   GBuf out;
   gbuf_init(&out);

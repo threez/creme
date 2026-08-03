@@ -266,7 +266,7 @@ static long long x509_asn1_time_to_epoch(const ASN1_TIME *t, const char *who) {
 
 static Value bi_x509_self_signed_certificate(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("x509-self-signed-certificate: expected at least 2 arguments");
+  creme_check_min_args(nargs, 2, "x509-self-signed-certificate");
   PKeyBox *key = pkey_arg(args[0], "x509-self-signed-certificate");
   if (!key->is_private) creme_abort("x509-self-signed-certificate: expected a private key");
   long days = 365;
@@ -302,7 +302,7 @@ static Value bi_x509_self_signed_certificate(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_create_csr(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("x509-create-csr: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "x509-create-csr");
   PKeyBox *key = pkey_arg(args[0], "x509-create-csr");
   if (!key->is_private) creme_abort("x509-create-csr: expected a private key");
 
@@ -328,7 +328,7 @@ static Value bi_x509_create_csr(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_sign_csr(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3) creme_abort("x509-sign-csr: expected at least 3 arguments");
+  creme_check_min_args(nargs, 3, "x509-sign-csr");
   const char *csr_pem = x509_csr_arg(args[0], "x509-sign-csr");
   const char *ca_cert_pem = x509_cert_arg(args[1], "x509-sign-csr");
   PKeyBox *ca_key = pkey_arg(args[2], "x509-sign-csr");
@@ -385,7 +385,7 @@ static Value bi_x509_sign_csr(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_to_pem(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("x509-cert->pem: expected an argument");
+  creme_check_min_args(nargs, 1, "x509-cert->pem");
   const char *pem = x509_cert_arg(args[0], "x509-cert->pem");
   return v_str(pem, (int)strlen(pem));
 }
@@ -403,7 +403,7 @@ static Value bi_pem_to_x509_cert(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_subject(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("x509-cert-subject: expected an argument");
+  creme_check_min_args(nargs, 1, "x509-cert-subject");
   const char *pem = x509_cert_arg(args[0], "x509-cert-subject");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-subject");
   Value result = x509_name_alist(X509_get_subject_name(cert));
@@ -413,7 +413,7 @@ static Value bi_x509_cert_subject(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_issuer(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("x509-cert-issuer: expected an argument");
+  creme_check_min_args(nargs, 1, "x509-cert-issuer");
   const char *pem = x509_cert_arg(args[0], "x509-cert-issuer");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-issuer");
   Value result = x509_name_alist(X509_get_issuer_name(cert));
@@ -423,7 +423,7 @@ static Value bi_x509_cert_issuer(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_public_key(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("x509-cert-public-key: expected an argument");
+  creme_check_min_args(nargs, 1, "x509-cert-public-key");
   const char *pem = x509_cert_arg(args[0], "x509-cert-public-key");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-public-key");
   EVP_PKEY *pkey = X509_get_pubkey(cert);
@@ -449,7 +449,7 @@ static Value bi_x509_cert_public_key(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_not_before(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("x509-cert-not-before: expected an argument");
+  creme_check_min_args(nargs, 1, "x509-cert-not-before");
   const char *pem = x509_cert_arg(args[0], "x509-cert-not-before");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-not-before");
   long long epoch = x509_asn1_time_to_epoch(X509_getm_notBefore(cert), "x509-cert-not-before");
@@ -459,7 +459,7 @@ static Value bi_x509_cert_not_before(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_cert_not_after(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1) creme_abort("x509-cert-not-after: expected an argument");
+  creme_check_min_args(nargs, 1, "x509-cert-not-after");
   const char *pem = x509_cert_arg(args[0], "x509-cert-not-after");
   X509 *cert = x509_pem_to_cert(pem, (int)strlen(pem), "x509-cert-not-after");
   long long epoch = x509_asn1_time_to_epoch(X509_getm_notAfter(cert), "x509-cert-not-after");
@@ -471,7 +471,7 @@ static Value bi_x509_cert_not_after(VM *vm, Value *args, int nargs) {
 
 static Value bi_x509_verify_chain(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2) creme_abort("x509-verify-chain: expected 2 arguments");
+  creme_check_min_args(nargs, 2, "x509-verify-chain");
   const char *cert_pem = x509_cert_arg(args[0], "x509-verify-chain");
   Value ca_list = args[1];
   if (ca_list.tag != T_PAIR && ca_list.tag != T_NIL) creme_abort("x509-verify-chain: expected a list of x509 certificates");

@@ -48,6 +48,7 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 
+#include "embed.h"
 #include "http.h"
 
 /* ---- small growable buffer (this file's own self-contained copy --
@@ -535,32 +536,32 @@ static Value http_do(VM *vm, const char *method, Value url_v, Value headers_v, i
 }
 
 static Value bi_http_get(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("http-get: expected a url");
+  creme_check_min_args(nargs, 1, "http-get");
   return http_do(vm, "GET", args[0], nargs >= 2 ? args[1] : v_nil(), nargs >= 2, v_nil(), 0, "http-get");
 }
 
 static Value bi_http_head(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("http-head: expected a url");
+  creme_check_min_args(nargs, 1, "http-head");
   return http_do(vm, "HEAD", args[0], nargs >= 2 ? args[1] : v_nil(), nargs >= 2, v_nil(), 0, "http-head");
 }
 
 static Value bi_http_delete(VM *vm, Value *args, int nargs) {
-  if (nargs < 1) creme_abort("http-delete: expected a url");
+  creme_check_min_args(nargs, 1, "http-delete");
   return http_do(vm, "DELETE", args[0], nargs >= 2 ? args[1] : v_nil(), nargs >= 2, v_nil(), 0, "http-delete");
 }
 
 static Value bi_http_post(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("http-post: expected (url body [headers])");
+  creme_check_min_args(nargs, 2, "http-post");
   return http_do(vm, "POST", args[0], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, args[1], 1, "http-post");
 }
 
 static Value bi_http_put(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("http-put: expected (url body [headers])");
+  creme_check_min_args(nargs, 2, "http-put");
   return http_do(vm, "PUT", args[0], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, args[1], 1, "http-put");
 }
 
 static Value bi_http_patch(VM *vm, Value *args, int nargs) {
-  if (nargs < 2) creme_abort("http-patch: expected (url body [headers])");
+  creme_check_min_args(nargs, 2, "http-patch");
   return http_do(vm, "PATCH", args[0], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, args[1], 1, "http-patch");
 }
 
