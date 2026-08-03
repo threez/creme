@@ -182,7 +182,9 @@ static Value bi_mux_router_p(VM *vm, Value *args, int nargs) {
 
 static void register_route(VM *vm, Value *args, int nargs, const char *method) {
   (void)vm;
-  if (nargs < 3 || args[1].tag != T_STR) creme_abort("mux-%s!: expected (router path handler)", method);
+  creme_check_min_args(nargs, 3, "mux-route!");
+  int pathlen;
+  const char *path = creme_arg_bytes(args, nargs, 1, "mux-route!", &pathlen);
   MuxApp *app = as_mux_app(args[0], "mux-route!");
   if (app->n_routes >= app->cap_routes) {
     app->cap_routes = app->cap_routes ? app->cap_routes * 2 : 8;
@@ -190,7 +192,7 @@ static void register_route(VM *vm, Value *args, int nargs, const char *method) {
   }
   MuxRoute *r = &app->routes[app->n_routes++];
   r->method = (char *)method;
-  r->pattern = gc_strndup(args[1].as.chars, (size_t)args[1].aux);
+  r->pattern = gc_strndup(path, (size_t)pathlen);
   r->handler = args[2];
 }
 

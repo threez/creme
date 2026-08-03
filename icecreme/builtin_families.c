@@ -173,8 +173,8 @@ static const struct {
  * path, but affecting the ordinary native --emit-icecreme gate too,
  * independent of that: icecreme's own C-level register_fn split (builtins.c/
  * strings.c's own file/function boundaries) doesn't line up 1:1 with
- * Crystal's native family grouping (src/creme/modules/scheme/*.cr's own
- * register_library calls). A program using ONLY (scheme char)
+ * Crystal's native family grouping (each *.cr file under src/creme/modules/scheme
+ * has its own register_library calls). A program using ONLY (scheme char)
  * legitimately gets required_families = [..., "char"] (Crystal's char.cr
  * registers string-downcase/string-upcase/string-ci-comparisons/string-
  * foldcase under the SAME ["creme","builtin","char"] library as the

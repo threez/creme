@@ -168,10 +168,11 @@ static Value bi_utf8_to_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_to_utf8(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->utf8: expected a string");
+  int slen;
+  const char *s = creme_arg_bytes(args, nargs, 0, "string->utf8", &slen);
   int first, last;
-  byte_range_args(args, nargs, 1, args[0].aux, &first, &last);
-  return creme_bytevector_value((const unsigned char *)args[0].as.chars + first, last - first);
+  byte_range_args(args, nargs, 1, slen, &first, &last);
+  return creme_bytevector_value((const unsigned char *)s + first, last - first);
 }
 
 /* force: mirrors Interpreter#force's own memoization exactly (see
@@ -814,8 +815,9 @@ static Value bi_get_output_string(VM *vm, Value *args, int nargs) {
 
 static Value bi_string_length(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-length: expected a string");
-  return v_int(args[0].aux);
+  int len;
+  creme_arg_bytes(args, nargs, 0, "string-length", &len);
+  return v_int(len);
 }
 
 /* Sentinel Ports identifying (current-output-port)/(current-input-port) --
@@ -922,16 +924,17 @@ static Value bi_newline(VM *vm, Value *args, int nargs) {
 
 static Value bi_write_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_PORT) creme_abort("write-string: expected (string port)");
-  Port *p = args[1].as.port;
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "write-string", &len);
+  Port *p = creme_arg_port(args, nargs, 1, "write-string");
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
-    fwrite(args[0].as.chars, 1, (size_t)args[0].aux, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
+    fwrite(s, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
   }
   if (p->kind != PORT_KIND_OUTPUT_STRING) creme_abort("write-string: expected an output port");
-  port_buf_grow(p, args[0].aux);
-  memcpy(p->buf + p->len, args[0].as.chars, (size_t)args[0].aux);
-  p->len += args[0].aux;
+  port_buf_grow(p, len);
+  memcpy(p->buf + p->len, s, (size_t)len);
+  p->len += len;
   return v_nil();
 }
 
@@ -941,10 +944,10 @@ static Value bi_write_string(VM *vm, Value *args, int nargs) {
  * append/fputc mirrors that scope exactly. */
 static Value bi_write_char(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("write-char: expected a char");
+  int64_t ch = creme_arg_char(args, nargs, 0, "write-char");
   if (nargs >= 2 && args[1].tag != T_PORT) creme_abort("write-char: expected a port");
   Port *p = (nargs >= 2) ? args[1].as.port : g_current_output_port;
-  char c = (char)args[0].as.i;
+  char c = (char)ch;
   write_bytes_to_port(p, &c, 1, "write-char");
   return v_nil();
 }
@@ -956,12 +959,13 @@ static Value bi_write_char(VM *vm, Value *args, int nargs) {
 
 static Value bi_open_input_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("open-input-string: expected a string");
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "open-input-string", &len);
   Port *p = GC_MALLOC(sizeof(Port));
   p->kind = PORT_KIND_INPUT_STRING;
-  p->len = args[0].aux;
-  p->buf = GC_MALLOC((size_t)(p->len ? p->len : 1));
-  memcpy(p->buf, args[0].as.chars, (size_t)p->len);
+  p->len = len;
+  p->buf = GC_MALLOC((size_t)(len ? len : 1));
+  memcpy(p->buf, s, (size_t)len);
   p->pos = 0;
   return v_port(p);
 }
@@ -1076,7 +1080,9 @@ static Value bi_open_output_file(VM *vm, Value *args, int nargs) {
  * itself already closed it (bi_close_port/fclose are idempotent-safe
  * here since `closed` is checked first). */
 static Value bi_call_with_input_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) creme_abort("call-with-input-file: expected (string proc)");
+  creme_check_min_args(nargs, 2, "call-with-input-file");
+  int len;
+  creme_arg_bytes(args, nargs, 0, "call-with-input-file", &len);
   Value port_val = bi_open_input_file(vm, args, 1);
   Value result = creme_apply(vm, args[1], &port_val, 1);
   Port *p = port_val.as.port;
@@ -1086,7 +1092,9 @@ static Value bi_call_with_input_file(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_call_with_output_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) creme_abort("call-with-output-file: expected (string proc)");
+  creme_check_min_args(nargs, 2, "call-with-output-file");
+  int len;
+  creme_arg_bytes(args, nargs, 0, "call-with-output-file", &len);
   Value port_val = bi_open_output_file(vm, args, 1);
   Value result = creme_apply(vm, args[1], &port_val, 1);
   Port *p = port_val.as.port;
@@ -1179,7 +1187,9 @@ static Value bi_restore_output_port(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_with_input_from_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) creme_abort("with-input-from-file: expected (string thunk)");
+  creme_check_min_args(nargs, 2, "with-input-from-file");
+  int len;
+  creme_arg_bytes(args, nargs, 0, "with-input-from-file", &len);
   Value port_val = bi_open_input_file(vm, args, 1); /* aborts on a missing file, matching native */
   Port *new_port = port_val.as.port;
 
@@ -1201,7 +1211,9 @@ static Value bi_with_input_from_file(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_with_output_to_file(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) creme_abort("with-output-to-file: expected (string thunk)");
+  creme_check_min_args(nargs, 2, "with-output-to-file");
+  int len;
+  creme_arg_bytes(args, nargs, 0, "with-output-to-file", &len);
   Value port_val = bi_open_output_file(vm, args, 1);
   Port *new_port = port_val.as.port;
 
@@ -1228,14 +1240,17 @@ static Value bi_with_output_to_file(VM *vm, Value *args, int nargs) {
  * bootstrap.c -- see that file's own header comment.) */
 static Value bi_file_append(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("file-append: expected (string string)");
+  creme_check_min_args(nargs, 2, "file-append");
+  if (args[0].tag != T_STR) creme_abort("file-append: expected (string string)");
+  int len;
+  const char *data = creme_arg_bytes(args, nargs, 1, "file-append", &len);
   char *path = value_str_to_cstr(args[0]);
   FILE *f = fopen(path, "a");
   if (!f) {
     creme_abort("file-append: could not open: %s", path);
   }
   free(path);
-  fwrite(args[1].as.chars, 1, (size_t)args[1].aux, f);
+  fwrite(data, 1, (size_t)len, f);
   fclose(f);
   return v_nil();
 }
@@ -1642,7 +1657,6 @@ static Value bi_read_string(VM *vm, Value *args, int nargs) {
  * reader.sld (used by "compiler mode") remains the actual full R7RS
  * reader for anything that does. */
 
-static char *copy_bytes(const char *chars, int len);
 
 static int read_peek(Port *p) { return p->pos < p->len ? (unsigned char)p->buf[p->pos] : -1; }
 static int read_next(Port *p) { return p->pos < p->len ? (unsigned char)p->buf[p->pos++] : -1; }
@@ -1844,7 +1858,7 @@ static Value read_token(Port *p) {
   }
   double dv = strtod(buf, &endptr);
   if (endptr != buf && *endptr == 0 && len > 0) return v_float(dv);
-  return v_sym(copy_bytes(buf, len), len);
+  return creme_sym_value(buf, len);
 }
 
 static Value read_datum(VM *vm, Port *p) {
@@ -2961,9 +2975,9 @@ static Value bi_append(VM *vm, Value *args, int nargs) {
 }
 static Value bi_list_tail(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[1].tag != T_INT) creme_abort("list-tail: expected (list k)");
+  int64_t k0 = creme_arg_int(args, nargs, 1, "list-tail");
   Value cur = args[0];
-  for (int64_t k = args[1].as.i; k > 0; k--) {
+  for (int64_t k = k0; k > 0; k--) {
     if (cur.tag != T_PAIR) creme_abort("list-tail: index out of range");
     cur = cur.as.pair->cdr;
   }
@@ -2971,9 +2985,9 @@ static Value bi_list_tail(VM *vm, Value *args, int nargs) {
 }
 static Value bi_list_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[1].tag != T_INT) creme_abort("list-ref: expected (list k)");
+  int64_t k0 = creme_arg_int(args, nargs, 1, "list-ref");
   Value cur = args[0];
-  for (int64_t k = args[1].as.i; k > 0; k--) {
+  for (int64_t k = k0; k > 0; k--) {
     if (cur.tag != T_PAIR) creme_abort("list-ref: index out of range");
     cur = cur.as.pair->cdr;
   }
@@ -2982,9 +2996,10 @@ static Value bi_list_ref(VM *vm, Value *args, int nargs) {
 }
 static Value bi_list_set(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3 || args[1].tag != T_INT) creme_abort("list-set!: expected (list k obj)");
+  creme_check_min_args(nargs, 3, "list-set!");
+  int64_t k0 = creme_arg_int(args, nargs, 1, "list-set!");
   Value cur = args[0];
-  for (int64_t k = args[1].as.i; k > 0; k--) {
+  for (int64_t k = k0; k > 0; k--) {
     if (cur.tag != T_PAIR) creme_abort("list-set!: index out of range");
     cur = cur.as.pair->cdr;
   }
@@ -3311,33 +3326,30 @@ Value bi_string_append(VM *vm, Value *args, int nargs) {
  * conversion), now that T_STR is mutable via string-set!: aliasing the
  * source's buffer directly (as this prototype used to do) would let a
  * later mutation of one silently corrupt the other. */
-static char *copy_bytes(const char *chars, int len) {
-  char *buf = GC_MALLOC((size_t)(len ? len : 1));
-  if (len > 0) memcpy(buf, chars, (size_t)len);
-  return buf;
-}
-
 static Value bi_substring(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_INT) creme_abort("substring: expected (string start [end])");
-  int start = (int)args[1].as.i;
-  int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].aux;
-  if (start < 0 || end > args[0].aux || start > end) creme_abort("substring: index out of range");
-  return creme_bytes_value(args[0].as.chars + start, end - start);
+  int slen;
+  const char *s = creme_arg_bytes(args, nargs, 0, "substring", &slen);
+  int start = (int)creme_arg_int(args, nargs, 1, "substring");
+  int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : slen;
+  if (start < 0 || end > slen || start > end) creme_abort("substring: index out of range");
+  return creme_bytes_value(s + start, end - start);
 }
 
 static Value bi_string_copy(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string-copy: expected a string");
+  int slen;
+  const char *s = creme_arg_bytes(args, nargs, 0, "string-copy", &slen);
   int start = (nargs >= 2 && args[1].tag == T_INT) ? (int)args[1].as.i : 0;
-  int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : args[0].aux;
-  if (start < 0 || end > args[0].aux || start > end) creme_abort("string-copy: index out of range");
-  return creme_bytes_value(args[0].as.chars + start, end - start);
+  int end = (nargs >= 3 && args[2].tag == T_INT) ? (int)args[2].as.i : slen;
+  if (start < 0 || end > slen || start > end) creme_abort("string-copy: index out of range");
+  return creme_bytes_value(s + start, end - start);
 }
 static Value bi_string_to_list(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->list: expected a string");
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "string->list", &len);
   Value r = v_nil();
-  for (int i = args[0].aux - 1; i >= 0; i--) r = creme_cons(vm, v_char((unsigned char)args[0].as.chars[i]), r);
+  for (int i = len - 1; i >= 0; i--) r = creme_cons(vm, v_char((unsigned char)s[i]), r);
   return r;
 }
 static Value bi_list_to_string(VM *vm, Value *args, int nargs) {
@@ -3469,36 +3481,40 @@ static Value bi_string_map(VM *vm, Value *args, int nargs) {
  * overlapping range. */
 static Value bi_string_copy_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 3 || args[0].tag != T_STR || args[1].tag != T_INT || args[2].tag != T_STR)
-    creme_abort("string-copy!: expected (to at from [start [end]])");
-  int at = (int)args[1].as.i;
+  int tolen, fromlen;
+  const char *to = creme_arg_bytes(args, nargs, 0, "string-copy!", &tolen);
+  int at = (int)creme_arg_int(args, nargs, 1, "string-copy!");
+  const char *from = creme_arg_bytes(args, nargs, 2, "string-copy!", &fromlen);
   int first, last;
-  byte_range_args(args, nargs, 3, args[2].aux, &first, &last);
+  byte_range_args(args, nargs, 3, fromlen, &first, &last);
   int count = last - first;
-  if (at < 0 || at + count > args[0].aux) creme_abort("string-copy!: destination range out of bounds");
-  memmove((char *)args[0].as.chars + at, args[2].as.chars + first, (size_t)count);
+  if (at < 0 || at + count > tolen) creme_abort("string-copy!: destination range out of bounds");
+  memmove((char *)to + at, from + first, (size_t)count);
   return v_nil();
 }
 
 static Value bi_string_fill_bang(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_CHAR) creme_abort("string-fill!: expected (string char [start [end]])");
+  int slen;
+  const char *s = creme_arg_bytes(args, nargs, 0, "string-fill!", &slen);
+  int64_t c = creme_arg_char(args, nargs, 1, "string-fill!");
   int first, last;
-  byte_range_args(args, nargs, 2, args[0].aux, &first, &last);
-  memset((char *)args[0].as.chars + first, (int)(unsigned char)args[1].as.i, (size_t)(last - first));
+  byte_range_args(args, nargs, 2, slen, &first, &last);
+  memset((char *)s + first, (int)(unsigned char)c, (size_t)(last - first));
   return v_nil();
 }
 
 static Value bi_string_to_vector(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->vector: expected a string");
+  int slen;
+  const char *s = creme_arg_bytes(args, nargs, 0, "string->vector", &slen);
   int first, last;
-  byte_range_args(args, nargs, 1, args[0].aux, &first, &last);
+  byte_range_args(args, nargs, 1, slen, &first, &last);
   int len = last - first;
   Vector *vec = GC_MALLOC(sizeof(Vector));
   vec->len = len;
   vec->items = GC_MALLOC(sizeof(Value) * (size_t)(len ? len : 1));
-  for (int i = 0; i < len; i++) vec->items[i] = v_char((unsigned char)args[0].as.chars[first + i]);
+  for (int i = 0; i < len; i++) vec->items[i] = v_char((unsigned char)s[first + i]);
   return v_vector(vec);
 }
 
@@ -3526,15 +3542,12 @@ static Value bi_vector_to_string(VM *vm, Value *args, int nargs) {
  * tried there. */
 static Value bi_string_to_number(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->number: expected a string");
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "string->number", &len);
   int radix = 10;
-  if (nargs >= 2) {
-    if (args[1].tag != T_INT) creme_abort("string->number: expected an integer radix");
-    radix = (int)args[1].as.i;
-  }
-  int len = args[0].aux;
+  if (nargs >= 2) radix = (int)creme_arg_int(args, nargs, 1, "string->number");
   char *buf = xmalloc((size_t)len + 1);
-  memcpy(buf, args[0].as.chars, (size_t)len);
+  memcpy(buf, s, (size_t)len);
   buf[len] = 0;
   char *endptr;
   long long iv = strtoll(buf, &endptr, radix);
@@ -3596,7 +3609,12 @@ Value bi_number_to_string(VM *vm, Value *args, int nargs) {
   }
   return creme_bytes_value(buf, len);
 }
-static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_STR) creme_abort("string->symbol: expected a string"); return v_sym(copy_bytes(args[0].as.chars, args[0].aux), args[0].aux); }
+static Value bi_string_to_symbol(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "string->symbol", &len);
+  return creme_sym_value(s, len);
+}
 static Value bi_symbol_to_string(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_SYM) creme_abort("symbol->string: expected a symbol"); return creme_bytes_value(args[0].as.chars, args[0].aux); }
 
 /* (creme introspection)'s gensym -- a distinct symbol each call
@@ -3621,7 +3639,7 @@ static Value bi_gensym(VM *vm, Value *args, int nargs) {
   int n = snprintf(buf, (size_t)cap, "%.*s__%lld", prefix_len, prefix_chars, (long long)g_gensym_counter);
   return v_sym(buf, n);
 }
-static Value bi_char_to_integer(VM *vm, Value *args, int nargs) { (void)vm; if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char->integer: expected a char"); return v_int(args[0].as.i); }
+static Value bi_char_to_integer(VM *vm, Value *args, int nargs) { (void)vm; return v_int(creme_arg_char(args, nargs, 0, "char->integer")); }
 static Value bi_integer_to_char(VM *vm, Value *args, int nargs) { (void)vm; return v_char(creme_arg_int(args, nargs, 0, "integer->char")); }
 static Value bi_char_eq(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -3707,39 +3725,33 @@ static Value bi_char_foldcase(VM *vm, Value *args, int nargs) {
 
 static Value bi_digit_value(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("digit-value: expected a char");
-  int64_t c = args[0].as.i;
+  int64_t c = creme_arg_char(args, nargs, 0, "digit-value");
   return (c >= '0' && c <= '9') ? v_int(c - '0') : v_bool(0);
 }
 
 static Value bi_char_alphabetic_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-alphabetic?: expected a char");
-  return v_bool(isalpha((int)args[0].as.i) != 0);
+  return v_bool(isalpha((int)creme_arg_char(args, nargs, 0, "char-alphabetic?")) != 0);
 }
 
 static Value bi_char_numeric_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-numeric?: expected a char");
-  return v_bool(isdigit((int)args[0].as.i) != 0);
+  return v_bool(isdigit((int)creme_arg_char(args, nargs, 0, "char-numeric?")) != 0);
 }
 
 static Value bi_char_whitespace_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-whitespace?: expected a char");
-  return v_bool(isspace((int)args[0].as.i) != 0);
+  return v_bool(isspace((int)creme_arg_char(args, nargs, 0, "char-whitespace?")) != 0);
 }
 
 static Value bi_char_upper_case_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-upper-case?: expected a char");
-  return v_bool(isupper((int)args[0].as.i) != 0);
+  return v_bool(isupper((int)creme_arg_char(args, nargs, 0, "char-upper-case?")) != 0);
 }
 
 static Value bi_char_lower_case_p(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_CHAR) creme_abort("char-lower-case?: expected a char");
-  return v_bool(islower((int)args[0].as.i) != 0);
+  return v_bool(islower((int)creme_arg_char(args, nargs, 0, "char-lower-case?")) != 0);
 }
 
 static char creme_ascii_lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c; }
@@ -4107,12 +4119,13 @@ static Value bi_time_add(VM *vm, Value *args, int nargs) {
 
 static Value bi_time_to_string(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[1].tag != T_STR) creme_abort("time->string: expected (time format-string)");
+  int fmtarglen;
+  const char *fmtarg = creme_arg_bytes(args, nargs, 1, "time->string", &fmtarglen);
   struct tm tmv;
   epoch_to_tm(as_epoch_seconds(args[0], "time->string"), "time->string", &tmv);
   char fmt[256];
-  int fmt_len = args[1].aux < (int)sizeof(fmt) - 1 ? args[1].aux : (int)sizeof(fmt) - 1;
-  memcpy(fmt, args[1].as.chars, (size_t)fmt_len);
+  int fmt_len = fmtarglen < (int)sizeof(fmt) - 1 ? fmtarglen : (int)sizeof(fmt) - 1;
+  memcpy(fmt, fmtarg, (size_t)fmt_len);
   fmt[fmt_len] = '\0';
   char buf[512];
   size_t n = strftime(buf, sizeof(buf), fmt, &tmv);
@@ -4142,16 +4155,16 @@ static int64_t tm_to_epoch_utc(const struct tm *tmv) {
 
 static Value bi_string_to_time(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) {
-    creme_abort("string->time: expected (string format-string)");
-  }
+  int strarglen, fmtarglen;
+  const char *strarg = creme_arg_bytes(args, nargs, 0, "string->time", &strarglen);
+  const char *fmtarg = creme_arg_bytes(args, nargs, 1, "string->time", &fmtarglen);
   char str[512];
-  int str_len = args[0].aux < (int)sizeof(str) - 1 ? args[0].aux : (int)sizeof(str) - 1;
-  memcpy(str, args[0].as.chars, (size_t)str_len);
+  int str_len = strarglen < (int)sizeof(str) - 1 ? strarglen : (int)sizeof(str) - 1;
+  memcpy(str, strarg, (size_t)str_len);
   str[str_len] = '\0';
   char fmt[256];
-  int fmt_len = args[1].aux < (int)sizeof(fmt) - 1 ? args[1].aux : (int)sizeof(fmt) - 1;
-  memcpy(fmt, args[1].as.chars, (size_t)fmt_len);
+  int fmt_len = fmtarglen < (int)sizeof(fmt) - 1 ? fmtarglen : (int)sizeof(fmt) - 1;
+  memcpy(fmt, fmtarg, (size_t)fmt_len);
   fmt[fmt_len] = '\0';
   struct tm tmv;
   memset(&tmv, 0, sizeof(tmv));
@@ -4196,10 +4209,11 @@ static Value bi_jiffies_per_second(VM *vm, Value *args, int nargs) {
  * to read PORT, not a whole module for one function. */
 static Value bi_get_environment_variable(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("get-environment-variable: expected a string");
-  char *name = xmalloc((size_t)args[0].aux + 1);
-  memcpy(name, args[0].as.chars, (size_t)args[0].aux);
-  name[args[0].aux] = 0;
+  int namelen;
+  const char *namearg = creme_arg_bytes(args, nargs, 0, "get-environment-variable", &namelen);
+  char *name = xmalloc((size_t)namelen + 1);
+  memcpy(name, namearg, (size_t)namelen);
+  name[namelen] = 0;
   const char *val = getenv(name);
   free(name);
   if (!val) return v_bool(0);
@@ -4266,15 +4280,15 @@ static Value bi_command_line(VM *vm, Value *args, int nargs) {
  * each spec file). */
 static Value bi_set_environment_variable(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 2 || args[0].tag != T_STR || args[1].tag != T_STR) {
-    creme_abort("set-environment-variable!: expected two strings");
-  }
-  char *name = xmalloc((size_t)args[0].aux + 1);
-  memcpy(name, args[0].as.chars, (size_t)args[0].aux);
-  name[args[0].aux] = 0;
-  char *val = xmalloc((size_t)args[1].aux + 1);
-  memcpy(val, args[1].as.chars, (size_t)args[1].aux);
-  val[args[1].aux] = 0;
+  int namelen, vallen;
+  const char *namearg = creme_arg_bytes(args, nargs, 0, "set-environment-variable!", &namelen);
+  const char *valarg = creme_arg_bytes(args, nargs, 1, "set-environment-variable!", &vallen);
+  char *name = xmalloc((size_t)namelen + 1);
+  memcpy(name, namearg, (size_t)namelen);
+  name[namelen] = 0;
+  char *val = xmalloc((size_t)vallen + 1);
+  memcpy(val, valarg, (size_t)vallen);
+  val[vallen] = 0;
   setenv(name, val, 1);
   free(name);
   free(val);
@@ -4286,12 +4300,11 @@ static Value bi_set_environment_variable(VM *vm, Value *args, int nargs) {
  * src/creme/modules/creme/env.cr), so no existence check is needed here. */
 static Value bi_delete_environment_variable(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) {
-    creme_abort("delete-environment-variable!: expected a string");
-  }
-  char *name = xmalloc((size_t)args[0].aux + 1);
-  memcpy(name, args[0].as.chars, (size_t)args[0].aux);
-  name[args[0].aux] = 0;
+  int namelen;
+  const char *namearg = creme_arg_bytes(args, nargs, 0, "delete-environment-variable!", &namelen);
+  char *name = xmalloc((size_t)namelen + 1);
+  memcpy(name, namearg, (size_t)namelen);
+  name[namelen] = 0;
   unsetenv(name);
   free(name);
   return v_nil();

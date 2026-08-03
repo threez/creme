@@ -154,6 +154,40 @@ both reaching their current shape) — not itemized individually here;
   demo script only needs `(scheme base)`/`(scheme write)`), trimming its
   linked libraries down to just libm/pthread/Boehm GC/GMP/PCRE2 — no
   sqlite3/openssl/libffi/libyaml.
+- Two more `embed.h` helpers, found by a full retrofit pass over every
+  `icecreme/*.c` file's OWN `bi_*` builtins looking for combined arity/
+  type-check guards that had never been converted onto the helpers above:
+  `creme_arg_char` (a `T_CHAR` argument's raw codepoint — a distinct tag
+  from `T_INT` even though both store their payload in the same `.as.i`
+  field, so `creme_arg_int` must not be reused for a char argument; a
+  bug in an earlier draft of this same retrofit, caught before it shipped)
+  and `creme_sym_value` (the `T_SYM` equivalent of `creme_bytes_value` —
+  `builtins.c`'s own private `copy_bytes` helper did the identical
+  `GC_MALLOC`+`memcpy` for a symbol's payload at its only 2 call sites,
+  now removed in favor of this). The retrofit itself converts ~30 more
+  builtins across `builtins.c`/`strings.c`/`actor.c`/`http.c`/`mux.c` onto
+  the existing helper set, and deliberately leaves alone: functions using
+  a plain `malloc`/`free` (not GC-managed) to build a short-lived
+  C-string handed straight to a libc API (`fopen`/`access`/`stat`/
+  `getenv`/`setenv`/`unsetenv`, and `sql.c`'s own `sqlite3_open`) rather
+  than `creme_arg_cstr`'s GC-allocated copy; guards checking a union of
+  types (`T_SYM` or `T_STR`) no single helper models; and guards whose
+  arity requirement exceeds what they type-check, which keep an explicit
+  `creme_check_min_args`/`creme_check_exact_args` alongside the
+  extraction so the accepted-arity window isn't silently widened.
+- **Fix**: `(environment import-set ...)` (`(scheme eval)`) and the 2-arg
+  form of `eval` silently failed on every `only`/`except`/`prefix`/
+  `rename` import-set combinator with `unbound variable:
+  import-set-resolved-bindings` — the self-hosted compiler's own
+  `modules/creme/compiler/compiler.sld` defined
+  `import-set-resolved-bindings` (the function that actually resolves an
+  import-set's filtered/renamed binding list) but never added it to the
+  library's `(export ...)` clause, so `icecreme/compiler-run.scm`, which
+  calls it directly, could never see it. Fixed by adding it to the
+  export list. This was the root cause of all 6 previously-accepted
+  "pre-existing" failures in `spec/creme/r7rs/ch05_program_structure_
+  spec.scm` and `ch06_12_environments_eval_spec.scm`; both now pass in
+  full.
 
 ### Breaking: standalone C VM (`cvm`) renamed to `icecreme` ("Ice Creme")
 

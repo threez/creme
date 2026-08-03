@@ -510,14 +510,22 @@ int main(void) {
 ```
 
 `embed.h` also declares a set of `static inline` value/argument helpers for
-writing a native function's own body — `creme_arg_int`/`creme_arg_double`/
-`creme_arg_bool`/`creme_arg_cstr`/`creme_arg_bytes`/`creme_arg_vector`
+writing a native function's own body — `creme_arg_int`/`creme_arg_char`/
+`creme_arg_double`/`creme_arg_bool`/`creme_arg_cstr`/`creme_arg_bytes`/
+`creme_arg_vector`
 (extract+validate argument N, aborting by name on arity/type mismatch —
 `creme_arg_cstr` returns a NUL-terminated copy for handing to a C API,
 `creme_arg_bytes` the raw `(pointer, length)` slice with no copy, for
-read-only use), `creme_cstr_value`/`creme_bytes_value`/`creme_format_value`
+read-only use, `creme_arg_char` a `T_CHAR` argument's raw codepoint — a
+distinct tag from `T_INT` even though both store their payload in the
+same `.as.i` field, so `creme_arg_int` must NOT be reused for a char
+argument), `creme_cstr_value`/`creme_bytes_value`/`creme_format_value`
 (build a fresh Scheme string from a C string/raw byte slice/`printf`-style
-format respectively, no manual length-counting), `creme_list_length`/
+format respectively, no manual length-counting), `creme_sym_value` (the
+`T_SYM` equivalent of `creme_bytes_value` — copies a raw `(pointer,
+length)` slice into a fresh Scheme symbol, for a symbol built from
+something other than a genuine static literal, which is what
+`creme_sym_lit` below is for), `creme_list_length`/
 `creme_list_to_values`/`creme_list_from_values`/`creme_vector_from_values`
 (convert a Scheme list/vector to/from a plain C array of `Value`s), and
 `creme_list(vm, a, b, c, ...)` (a macro building a fixed, statically-known

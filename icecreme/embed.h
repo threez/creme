@@ -130,6 +130,17 @@ static inline int64_t creme_arg_int(Value *args, int nargs, int index, const cha
   return args[index].as.i;
 }
 
+/* Extracts argument `index` as a `T_CHAR` value's raw codepoint (an
+ * `int64_t`, stored in the same `.as.i` field as `T_INT` — a distinct tag
+ * from it, though, so this is NOT the same check as `creme_arg_int`: a
+ * plain integer argument where a char was expected (or vice versa) must
+ * still abort). */
+static inline int64_t creme_arg_char(Value *args, int nargs, int index, const char *who) {
+  if (index >= nargs) creme_abort("%s: missing argument %d", who, index + 1);
+  if (args[index].tag != T_CHAR) creme_abort("%s: argument %d: expected a char", who, index + 1);
+  return args[index].as.i;
+}
+
 /* Extracts argument `index` as a `double`, widening an exact int/rational
  * the same way every numeric builtin already does — see vm.h's own
  * `as_double` (vm.c), which this reuses directly rather than re-deriving
@@ -293,6 +304,17 @@ static inline Value creme_bytes_value(const char *ptr, int len) {
   char *copy = GC_MALLOC((size_t)(len > 0 ? len : 1));
   if (len > 0) memcpy(copy, ptr, (size_t)len);
   return v_str(copy, len);
+}
+
+/* Copies a raw `(pointer, length)` byte slice into a fresh Scheme SYMBOL
+ * Value — the `T_SYM` equivalent of `creme_bytes_value` above, for
+ * building a symbol out of a slice that ISN'T a genuine static literal
+ * (that's `creme_sym_lit` above) — e.g. `string->symbol`, or the
+ * self-hosted reader's own number-vs-symbol-token fallback. */
+static inline Value creme_sym_value(const char *ptr, int len) {
+  char *copy = GC_MALLOC((size_t)(len > 0 ? len : 1));
+  if (len > 0) memcpy(copy, ptr, (size_t)len);
+  return v_sym(copy, len);
 }
 
 /* Wraps an already-owned raw byte buffer as a fresh Bytevector Value —

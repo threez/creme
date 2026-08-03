@@ -1635,13 +1635,16 @@ static Value bi_start_node(VM *vm, Value *args, int nargs) {
     int tlen = args[0].aux;
     const char *tag = args[0].as.chars;
     if (tlen == 3 && memcmp(tag, "tcp", 3) == 0) {
-      if (nargs < 4 || args[1].tag != T_STR || args[2].tag != T_INT || args[3].tag != T_STR) {
-        creme_abort("start-node: 'tcp expects (host port cookie)");
-      }
-      start_tcp_node(sys, args[1].as.chars, args[1].aux, (int)args[2].as.i, args[3].as.chars, args[3].aux);
+      int hostlen, cookielen;
+      const char *host = creme_arg_bytes(args, nargs, 1, "start-node", &hostlen);
+      int64_t port = creme_arg_int(args, nargs, 2, "start-node");
+      const char *cookie = creme_arg_bytes(args, nargs, 3, "start-node", &cookielen);
+      start_tcp_node(sys, host, hostlen, (int)port, cookie, cookielen);
     } else if (tlen == 4 && memcmp(tag, "unix", 4) == 0) {
-      if (nargs < 3 || args[1].tag != T_STR || args[2].tag != T_STR) creme_abort("start-node: 'unix expects (path cookie)");
-      start_unix_node(sys, args[1].as.chars, args[1].aux, args[2].as.chars, args[2].aux);
+      int pathlen, cookielen;
+      const char *path = creme_arg_bytes(args, nargs, 1, "start-node", &pathlen);
+      const char *cookie = creme_arg_bytes(args, nargs, 2, "start-node", &cookielen);
+      start_unix_node(sys, path, pathlen, cookie, cookielen);
     } else if (tlen == 5 && memcmp(tag, "local", 5) == 0) {
       if (nargs < 3 || (args[1].tag != T_SYM && args[1].tag != T_STR) || (args[2].tag != T_SYM && args[2].tag != T_STR)) {
         creme_abort("start-node: 'local expects (name cookie)");

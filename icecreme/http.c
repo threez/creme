@@ -560,8 +560,8 @@ static Value bi_http_patch(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_http_request(VM *vm, Value *args, int nargs) {
-  if (nargs < 2 || args[0].tag != T_STR) creme_abort("http-request: expected (method url [headers [body]])");
-  char *method = creme_dupn(args[0].as.chars, args[0].aux);
+  creme_check_min_args(nargs, 2, "http-request");
+  const char *method = creme_arg_cstr(args, nargs, 0, "http-request");
   return http_do(vm, method, args[1], nargs >= 3 ? args[2] : v_nil(), nargs >= 3, nargs >= 4 ? args[3] : v_nil(), nargs >= 4, "http-request");
 }
 
