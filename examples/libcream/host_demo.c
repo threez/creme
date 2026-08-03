@@ -1,120 +1,50 @@
-/* Minimal libcreme.a embedding example: a host C program registers several
- * of its OWN native functions/values as Scheme globals, then runs a plain
- * .scm script that calls/reads them — no `--emit-icecreme` precompilation
- * step, no .ice file shipped, no Crystal toolchain involved at runtime at
- * all. See ../../icecreme/README.md's "Embedding" section for the full
- * call-sequence writeup this mirrors.
- *
- * Beyond host-greet/host-version (strings), the functions below exercise
- * embed.h's list/vector/number helpers on both sides of the boundary —
- * host-sum takes a Scheme list of integers, host-scale-vector a vector of
- * numbers, host-word-lengths a list of strings (returning an alist a
- * Scheme (creme hash-table) can be built from directly), host-table-
- * lookup performs a REAL hash-table key/value access from the host's own
- * C code (not just Scheme code the host happens to run), and host-stats a
- * variadic run of doubles — showing more of what a host's own native
- * functions can accept/return beyond a single string. */
+/* Minimal libcreme.a embedding example: a small "receipt generator". The
+ * host owns a live price catalog (a hash table it builds and could
+ * update at any time — a config reload, a live price feed, etc.) and a
+ * fixed list of pending orders, and delegates the actual report logic to
+ * a user-editable Scheme script (host_demo.scm) it doesn't want to
+ * recompile itself for every change — exactly the shape a real host
+ * program embeds icecreme for: a customizable pricing/report/policy
+ * layer on top of state and data the host itself owns. See
+ * ../../icecreme/README.md's "Embedding" section for the full
+ * call-sequence writeup this mirrors. */
 #include <stdio.h>
 
 #include <icecreme/creme.h>
 
-/* host-greet: (host-greet "world") => "Hello from C, world!" — a hand-
- * written BuiltinFn, exactly the shape every icecreme-internal `bi_*`
- * function already has, just using embed.h's own creme_arg_cstr/
- * creme_format_value helpers instead of hand-rolling the arity/type
- * check and GC_MALLOC/memcpy/snprintf dance directly. */
-static Value host_greet(VM *vm, Value *args, int nargs) {
+/* The host's own authoritative state — a live price catalog it owns and
+ * could update at any time. The Scheme side only ever reads it through
+ * host-price-lookup below, never touches CremeHashTable's own internals
+ * (private to hashtable.c) directly. */
+static Value g_catalog;
+
+/* host-welcome: (host-welcome "Alice") => "Welcome to Ionos Grocery,
+ * Alice!" — creme_arg_cstr/creme_format_value, exactly the shape every
+ * icecreme-internal `bi_*` function already has. */
+static Value host_welcome(VM *vm, Value *args, int nargs) {
   (void)vm;
-  const char *name = creme_arg_cstr(args, nargs, 0, "host-greet");
-  return creme_format_value("Hello from C, %s!", name);
+  const char *name = creme_arg_cstr(args, nargs, 0, "host-welcome");
+  return creme_format_value("Welcome to Ionos Grocery, %s!", name);
 }
 
-/* host-sum: (host-sum '(1 2 3 4 5)) => 15 — creme_list_length/_to_values
- * turn the Scheme list into a plain C array of Values, which
- * creme_arg_int (its normal (args, nargs, index, who) shape) then
- * extracts+validates one element at a time — the same helper used for a
- * BuiltinFn's own `args` array works just as well on any Value array. */
-static Value host_sum(VM *vm, Value *args, int nargs) {
+/* host-price-lookup: (host-price-lookup "apple") => 150 (cents; or #f if
+ * the item isn't in the catalog) — a REAL hash-table key/value access
+ * performed FROM the host's own C code against g_catalog, the host's own
+ * live state, via embed.h's creme_hash_table_get. */
+static Value host_price_lookup(VM *vm, Value *args, int nargs) {
+  const char *item = creme_arg_cstr(args, nargs, 0, "host-price-lookup");
+  return creme_hash_table_get(vm, g_catalog, creme_cstr_value(item), v_bool(0));
+}
+
+/* host-log: (host-log "message") — a side-effecting host capability
+ * (writes to stderr with a fixed prefix), not a value-returning
+ * computation; the kind of thing a script commonly needs from its host
+ * (logging, persistence, notifications) beyond pure data in/out. */
+static Value host_log(VM *vm, Value *args, int nargs) {
   (void)vm;
-  creme_check_exact_args(nargs, 1, "host-sum");
-  int n = creme_list_length(args[0]);
-  Value *items = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-  creme_list_to_values(args[0], items, n, "host-sum");
-  int64_t total = 0;
-  for (int i = 0; i < n; i++) total += creme_arg_int(items, n, i, "host-sum");
-  return v_int(total);
-}
-
-/* host-scale-vector: (host-scale-vector #(1 2 3) 2.5) => #(2.5 5.0 7.5) —
- * creme_arg_vector for the vector's own backing (Value*, length) pair,
- * creme_arg_double for the scale factor, creme_vector_from_values to
- * build the (freshly GC_MALLOC'd) result. */
-static Value host_scale_vector(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  creme_check_exact_args(nargs, 2, "host-scale-vector");
-  int len;
-  Value *items = creme_arg_vector(args, nargs, 0, "host-scale-vector", &len);
-  double scale = creme_arg_double(args, nargs, 1, "host-scale-vector");
-  Value *scaled = GC_MALLOC(sizeof(Value) * (size_t)(len ? len : 1));
-  for (int i = 0; i < len; i++) scaled[i] = v_float(creme_arg_double(items, len, i, "host-scale-vector") * scale);
-  return creme_vector_from_values(scaled, len);
-}
-
-/* host-word-lengths: (host-word-lengths '("a" "bb" "ccc")) =>
- * (("a" . 1) ("bb" . 2) ("ccc" . 3)) — an alist, exactly the shape
- * (creme hash-table)'s own alist->hash-table-ish patterns expect, so
- * host_demo.scm can feed it straight into a real Scheme hash table
- * without this C function needing to know anything about hash tables
- * itself. creme_arg_bytes gets each string's raw (pointer, length) with
- * no copy; creme_bytes_value then copies just that slice into the pair's
- * own car. */
-static Value host_word_lengths(VM *vm, Value *args, int nargs) {
-  creme_check_exact_args(nargs, 1, "host-word-lengths");
-  int n = creme_list_length(args[0]);
-  Value *words = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-  creme_list_to_values(args[0], words, n, "host-word-lengths");
-  Value *pairs = GC_MALLOC(sizeof(Value) * (size_t)(n ? n : 1));
-  for (int i = 0; i < n; i++) {
-    int len;
-    const char *s = creme_arg_bytes(words, n, i, "host-word-lengths", &len);
-    pairs[i] = creme_cons(vm, creme_bytes_value(s, len), v_int(len));
-  }
-  return creme_list_from_values(vm, pairs, n);
-}
-
-/* host-table-lookup: (host-table-lookup table "key") => the value stored
- * under "key" (or #f if absent) — a REAL hash-table key/value access
- * performed FROM the host's own C code, not just Scheme code the host
- * happens to run. `CremeHashTable`'s own fields are private to
- * hashtable.c (see hashtable.h), so this doesn't reach into the struct
- * directly — embed.h's own creme_hash_table_get bridges through the
- * already-registered "hash-table-ref" Scheme procedure instead, the same
- * way any two pieces of Scheme code would call each other. `args[0]` is
- * still validated as a real hash table first (creme_arg_box against
- * BOX_KIND_HASHTABLE), so a wrong-typed first argument aborts here with a
- * clear message rather than inside hash-table-ref itself. */
-static Value host_table_lookup(VM *vm, Value *args, int nargs) {
-  creme_check_exact_args(nargs, 2, "host-table-lookup");
-  creme_arg_box(args, nargs, 0, BOX_KIND_HASHTABLE, "host-table-lookup");
-  return creme_hash_table_get(vm, args[0], args[1], v_bool(0));
-}
-
-/* host-stats: (host-stats 3 1 4 1 5 9 2 6) => #(min max avg) — a variadic
- * BuiltinFn reading straight from its own `args`/`nargs`, no list/vector
- * wrapper needed on the Scheme side at all. */
-static Value host_stats(VM *vm, Value *args, int nargs) {
-  (void)vm;
-  creme_check_min_args(nargs, 1, "host-stats");
-  double min = creme_arg_double(args, nargs, 0, "host-stats");
-  double max = min, sum = 0;
-  for (int i = 0; i < nargs; i++) {
-    double v = creme_arg_double(args, nargs, i, "host-stats");
-    if (v < min) min = v;
-    if (v > max) max = v;
-    sum += v;
-  }
-  Value stats[3] = {v_float(min), v_float(max), v_float(sum / nargs)};
-  return creme_vector_from_values(stats, 3);
+  const char *msg = creme_arg_cstr(args, nargs, 0, "host-log");
+  fprintf(stderr, "[host] %s\n", msg);
+  return v_nil();
 }
 
 int main(void) {
@@ -134,16 +64,33 @@ int main(void) {
    * just the families a specific known script needs. */
   creme_register_all_builtins(vm);
 
-  /* The host's own native function and value — must be registered before
-   * creme_run_scheme_file below actually starts executing the script
-   * (order relative to the call itself doesn't matter beyond that). */
-  creme_register_builtin(vm, "host-greet", host_greet);
-  creme_register_global(vm, "host-version", creme_cstr_value("libcream host demo 0.1"));
-  creme_register_builtin(vm, "host-sum", host_sum);
-  creme_register_builtin(vm, "host-scale-vector", host_scale_vector);
-  creme_register_builtin(vm, "host-word-lengths", host_word_lengths);
-  creme_register_builtin(vm, "host-table-lookup", host_table_lookup);
-  creme_register_builtin(vm, "host-stats", host_stats);
+  /* Build the host's own price catalog once, at startup — a real
+   * embedder might load this from a config file/database instead. Prices
+   * are integer CENTS, not floats: money arithmetic on binary floats
+   * accumulates visible rounding noise (0.1 + 0.2 prints as
+   * 0.30000000000000004 in any IEEE-754 language, icecreme included) —
+   * exact integer cents is the standard way real point-of-sale/receipt
+   * code avoids that, not just a display trick. */
+  g_catalog = creme_hash_table_new(vm);
+  creme_hash_table_set(vm, g_catalog, creme_cstr_value("apple"), v_int(150));
+  creme_hash_table_set(vm, g_catalog, creme_cstr_value("bread"), v_int(320));
+  creme_hash_table_set(vm, g_catalog, creme_cstr_value("milk"), v_int(275));
+
+  creme_register_builtin(vm, "host-welcome", host_welcome);
+  creme_register_builtin(vm, "host-price-lookup", host_price_lookup);
+  creme_register_builtin(vm, "host-log", host_log);
+  creme_register_global(vm, "host-store-name", creme_cstr_value("Ionos Grocery"));
+
+  /* The pending orders themselves — real input data for the report
+   * script, a native list of (item . quantity) pairs built directly with
+   * embed.h's creme_cons/creme_list_from_values. */
+  {
+    const char *names[4] = {"apple", "apple", "bread", "milk"};
+    int qtys[4] = {3, 2, 1, 2};
+    Value order_pairs[4];
+    for (int i = 0; i < 4; i++) order_pairs[i] = creme_cons(vm, creme_cstr_value(names[i]), v_int(qtys[i]));
+    creme_register_global(vm, "host-orders", creme_list_from_values(vm, order_pairs, 4));
+  }
 
   /* Compiles-and-runs host_demo.scm directly, via the self-hosted compiler
    * bundled into libcreme.a at build time (icecreme/Makefile's embedded_

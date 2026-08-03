@@ -523,7 +523,7 @@ format respectively, no manual length-counting), and `creme_list_length`/
 these add anything to `libcreme.a` itself (pure `static inline`, free to
 compile away) — icecreme's own `bi_*` builtins use them directly too, not
 just an external embedder — see each one's own doc comment in `embed.h`, and
-`examples/libcream/host_demo.c`'s `host_greet` for a real (2-line) use.
+`examples/libcream/host_demo.c`'s `host_welcome` for a real (2-line) use.
 
 **Boxed-type convenience helpers** (hash-table/treelist/bigdecimal/regex/
 sql/actor-ref): each type's own payload struct (`CremeHashTable`/
@@ -634,7 +634,8 @@ own target script imports.
 
 `examples/libcream/` demonstrates the minimal case — its own `Makefile`
 builds `libcreme.a` with all 18 gateable families off, since
-`host_demo.scm` only needs `(scheme base)`/`(scheme write)`, and trims its
+`host_demo.scm` only needs `(scheme base)`/`(scheme write)`/`(creme
+hash-table)` (the last of which is always-on regardless), and trims its
 own `LDLIBS` to match (just libm/pthread/GC/GMP/PCRE2 — see that
 directory's own README for the `ldd`-confirmed result).
 

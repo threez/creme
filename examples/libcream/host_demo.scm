@@ -1,38 +1,48 @@
-;; A plain Scheme script — nothing marks host-greet/host-version/host-sum/
-;; host-scale-vector/host-word-lengths/host-stats as coming from the host
+;; The "report" script — a user-editable policy layer over the host's own
+;; data (host-orders) and live state (host-price-lookup queries the
+;; host's own price catalog). Nothing here marks host-welcome/host-log/
+;; host-price-lookup/host-store-name/host-orders as coming from the host
 ;; program below; they're just free identifiers, resolved by name against
 ;; whatever the C host registered before running this file. See
 ;; host_demo.c and icecreme/README.md's "Embedding" section.
 (import (scheme base) (scheme write) (creme hash-table))
 
-(display (host-greet "world"))
-(newline)
-(display host-version)
-(newline)
+;; Prices/totals are integer cents (see host_demo.c's own comment on why)
+;; -- this formats them back into a "$X.YZ" string for display.
+(define (cents->string c)
+  (let ((r (remainder c 100)))
+    (string-append "$" (number->string (quotient c 100)) "."
+                    (if (< r 10) (string-append "0" (number->string r)) (number->string r)))))
 
-;; list -> integer
-(display (host-sum '(1 2 3 4 5)))
+(display (host-welcome "Alice"))
 (newline)
+(host-log "generating receipt")
 
-;; vector + number -> vector
-(display (host-scale-vector #(1 2 3) 2.5))
-(newline)
+;; Tally quantities per item into the SCRIPT's own hash table — distinct
+;; from the host's own price catalog (g_catalog, host_demo.c), a real
+;; Scheme-side use of a real hash table, not a synthetic demo.
+(define tallies (make-hash-table))
+(for-each (lambda (order)
+            (let* ((item (car order))
+                   (qty (cdr order))
+                   (prev (hash-table-ref tallies item 0)))
+              (hash-table-set! tallies item (+ prev qty))))
+          host-orders)
 
-;; list of strings -> alist, fed straight into a real Scheme hash table --
-;; host-word-lengths itself knows nothing about hash tables at all, it
-;; just returns plain (string . length) pairs.
-(define lengths (make-hash-table))
-(for-each (lambda (pair) (hash-table-set! lengths (car pair) (cdr pair)))
-          (host-word-lengths '("scheme" "is" "wonderful")))
+(define total 0)
+(for-each (lambda (item)
+            (let* ((qty (hash-table-ref tallies item 0))
+                   (price (host-price-lookup item))
+                   (line-total (* qty price)))
+              (set! total (+ total line-total))
+              (display item) (display ": ") (display qty)
+              (display " x ") (display (cents->string price))
+              (display " = ") (display (cents->string line-total))
+              (newline)))
+          (hash-table-keys tallies))
 
-;; real hash-table key/value access, once from Scheme and once from the
-;; host's own C code (host-table-lookup) -- same table, same key, same
-;; answer either way.
-(display (hash-table-ref lengths "wonderful" #f))
+(display "total: ") (display (cents->string total))
 (newline)
-(display (host-table-lookup lengths "wonderful"))
+(display "thank you for shopping at ") (display host-store-name)
 (newline)
-
-;; variadic numbers -> vector
-(display (host-stats 3 1 4 1 5 9 2 6))
-(newline)
+(host-log "receipt complete")
