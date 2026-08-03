@@ -110,6 +110,7 @@
 #include "picohttpparser.h"
 #include "sds.h"
 
+#include "embed.h"
 #include "mux.h"
 
 typedef struct {
@@ -150,7 +151,7 @@ static char *gc_strndup(const char *s, size_t len) {
 }
 
 static Value v_gcstr(const char *s, size_t len) {
-  return v_str(gc_strndup(s, len), (int)len);
+  return creme_bytes_value(s, (int)len);
 }
 
 /* Same as v_gcstr, but for a C string literal (e.g. the alist keys below) —
@@ -158,7 +159,7 @@ static Value v_gcstr(const char *s, size_t len) {
  * directly at a literal in .rodata would segfault the moment Scheme code
  * mutated it; every literal handed to Scheme needs its own GC-owned copy. */
 static Value v_litstr(const char *s) {
-  return v_gcstr(s, strlen(s));
+  return creme_cstr_value(s);
 }
 
 /* ---- registration ---- */

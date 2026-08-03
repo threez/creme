@@ -63,6 +63,7 @@
 #include <openssl/rand.h>
 
 #include "actor.h"
+#include "embed.h"
 
 #define MAILBOX_CAP 64
 
@@ -1728,8 +1729,9 @@ static Value bi_node_address(VM *vm, Value *args, int nargs) {
 
 static Value bi_remote_ref(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("remote-ref: expected a URI string");
-  return make_ref_from_uri(args[0].as.chars, args[0].aux, "remote-ref", NULL);
+  int len;
+  const char *uri = creme_arg_bytes(args, nargs, 0, "remote-ref", &len);
+  return make_ref_from_uri(uri, len, "remote-ref", NULL);
 }
 
 /* stop-node!: 0 args means "the calling actor's own current node", 1 arg
