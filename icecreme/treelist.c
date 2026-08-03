@@ -31,6 +31,10 @@
  * -- see that class's own comment on why this makes mutable ops O(log n)
  * and mutable-treelist-snapshot O(1)).
  */
+#include "builtin_config.h"
+
+#if CREME_WITH_TREELIST
+
 #include <gc.h>
 #include <string.h>
 
@@ -1135,3 +1139,5 @@ void creme_register_treelist_builtins(VM *vm) {
   vm->globals[slot].value = v_treelist(rrb_empty_leaf());
   vm->globals[slot].bound = 1;
 }
+
+#endif /* CREME_WITH_TREELIST */

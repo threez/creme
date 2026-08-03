@@ -4,11 +4,24 @@
 # would actually write themselves, include path/link flags and all. See
 # icecreme/README.md's "Embedding" section and this directory's own README.
 #
-# The pkg-config lines below duplicate icecreme/Makefile's own (same
-# dependency set libcreme.a itself was built against — a static archive
-# carries no transitive link flags, so any consumer must reproduce them);
-# keep the two in sync if icecreme/Makefile's own dependency list ever
-# changes.
+# host_demo.scm only imports (scheme base)/(scheme write), so this demo
+# builds libcreme.a with every optional native builtin family
+# (icecreme/builtin_config.h) compiled OUT -- see the CREME_WITH_* flags
+# passed to `$(MAKE) -C $(ICECREME) lib` below -- demonstrating the
+# smallest dependency set an embedder can get. Only what's left
+# unconditional in icecreme/Makefile survives: libm, pthread (tied to GC
+# threading), Boehm GC, GMP (T_RATIONAL), and PCRE2 (regex is a hard,
+# non-gateable dependency of the bundled self-hosted compiler) -- no
+# sqlite3/openssl/libffi/libyaml. A host wanting one of those families back
+# just drops its CREME_WITH_<NAME>=0 override below (or overrides it back
+# to =1) and adds the matching pkg-config lines/LDLIBS, same as
+# icecreme/Makefile's own.
+#
+# The pkg-config lines below duplicate icecreme/Makefile's own trimmed
+# dependency set (the same one libcreme.a itself was built against here —
+# a static archive carries no transitive link flags, so any consumer must
+# reproduce them); keep the two in sync if icecreme/Makefile's own
+# dependency list ever changes.
 CC ?= cc
 ROOT := ../..
 ICECREME := $(ROOT)/icecreme
@@ -18,21 +31,24 @@ GC_LIBS := $(shell pkg-config --libs bdw-gc-threaded 2>/dev/null || pkg-config -
 PCRE2_LIBS := $(shell pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8)
 GMP_CFLAGS := $(shell pkg-config --cflags gmp 2>/dev/null)
 GMP_LIBS := $(shell pkg-config --libs gmp 2>/dev/null || echo -lgmp)
-CRYPTO_LIBS := $(shell pkg-config --libs libcrypto 2>/dev/null || echo -lcrypto)
-SSL_LIBS := $(shell pkg-config --libs libssl 2>/dev/null || echo -lssl)
-FFI_LIBS := $(shell pkg-config --libs libffi 2>/dev/null || echo -lffi)
-YAML_LIBS := $(shell pkg-config --libs yaml-0.1 2>/dev/null || echo -lyaml)
 EXECINFO_LIBS := $(if $(filter FreeBSD,$(shell uname -s)),-lexecinfo)
+
+# Every optional family off -- host_demo.scm needs none of them.
+MINIMAL_FAMILY_FLAGS := \
+  CREME_WITH_SQL=0 CREME_WITH_HTTP=0 CREME_WITH_CIPHER=0 CREME_WITH_PKEY=0 CREME_WITH_X509=0 \
+  CREME_WITH_DIGEST=0 CREME_WITH_SECURE_RANDOM=0 CREME_WITH_ACTOR=0 CREME_WITH_FFI=0 CREME_WITH_YAML=0 \
+  CREME_WITH_MUX=0 CREME_WITH_CSV=0 CREME_WITH_TREELIST=0 CREME_WITH_JSON=0 CREME_WITH_BIGDECIMAL=0 \
+  CREME_WITH_TERM=0 CREME_WITH_PROCESS=0 CREME_WITH_STRING=0
 
 CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -I$(ROOT) $(GC_CFLAGS) $(GMP_CFLAGS)
 LDFLAGS ?= -rdynamic
-LDLIBS := -lm -lpthread -lsqlite3 -ldl $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LIBS) $(SSL_LIBS) $(FFI_LIBS) $(YAML_LIBS) $(EXECINFO_LIBS)
+LDLIBS := -lm -lpthread $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(EXECINFO_LIBS)
 
 .PHONY: all clean
 all: host_demo
 
 $(ICECREME)/libcreme.a:
-	$(MAKE) -C $(ICECREME) lib
+	$(MAKE) -C $(ICECREME) lib $(MINIMAL_FAMILY_FLAGS)
 
 host_demo: host_demo.c $(ICECREME)/libcreme.a
 	$(CC) $(CFLAGS) -o $@ host_demo.c $(ICECREME)/libcreme.a $(LDFLAGS) $(LDLIBS)

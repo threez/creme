@@ -68,6 +68,29 @@ both reaching their current shape) — not itemized individually here;
 - See `icecreme/README.md`'s new "Embedding" section for the full minimal
   call sequence and the link-flag set a `libcreme.a` consumer needs to
   reproduce (static archives carry no transitive link flags).
+- **Compile-time opt-out for 18 native builtin families**
+  (`icecreme/builtin_config.h`'s new `CREME_WITH_<NAME>` macros, one per
+  family living in its own `.c` file with a real external-library or
+  standalone-`.o` footprint — `sql`/`http`/`cipher`/`pkey`/`x509`/
+  `digest`/`secure-random`/`actor` (openssl-touching, several sharing
+  `-lcrypto`), `ffi` (libffi + `dlopen`), `yaml` (libyaml), and `mux`/
+  `csv`/`treelist`/`json`/`bigdecimal`/`term`/`process`/`string`). Each
+  defaults to `1` (included, matching every prior release's behavior);
+  `make -C icecreme lib CREME_WITH_SQL=0 CREME_WITH_HTTP=0 ...` compiles
+  the listed family's `.c` file down to an empty translation unit (no
+  external header even processed) and drops its row from
+  `builtin_families.c`'s family table, so the linker never pulls in the
+  associated library either — `icecreme/Makefile`'s `LDLIBS` gates
+  `-lsqlite3`/`-lssl`/`-lcrypto`/`-lffi -ldl`/`-lyaml` to match. 8
+  zero-dependency families living inside the always-compiled `builtins.c`
+  monolith, plus `regex`/`hash-table`/`bootstrap`/`lazy` (hard
+  dependencies of the self-hosted compiler bundled into `libcreme.a`
+  itself) and `base`/`write`, stay always-on — see
+  `icecreme/builtin_config.h`'s own doc comment for the full breakdown.
+  `examples/libcream/`'s own `Makefile` now builds with all 18 off (its
+  demo script only needs `(scheme base)`/`(scheme write)`), trimming its
+  linked libraries down to just libm/pthread/Boehm GC/GMP/PCRE2 — no
+  sqlite3/openssl/libffi/libyaml.
 
 ### Breaking: standalone C VM (`cvm`) renamed to `icecreme` ("Ice Creme")
 

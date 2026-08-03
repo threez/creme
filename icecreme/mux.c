@@ -91,6 +91,10 @@
  * Since the one middleware this app actually registers (surf-log-
  * middleware) only logs and returns the status unchanged, this
  * simplification doesn't change this app's observable behavior. */
+#include "builtin_config.h"
+
+#if CREME_WITH_MUX
+
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
@@ -1365,3 +1369,5 @@ void creme_register_mux_builtins(VM *vm) {
   creme_register_builtin(vm, "mux-address", bi_mux_address);
   creme_register_builtin(vm, "mux-close!", bi_mux_close);
 }
+
+#endif /* CREME_WITH_MUX */

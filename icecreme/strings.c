@@ -20,6 +20,10 @@
  * ASCII-only (upcase/downcase/whitespace) — this prototype's strings are
  * plain bytes throughout (see string-ref's own comment in vm.c), not
  * Unicode-aware, matching every other string operation here. */
+#include "builtin_config.h"
+
+#if CREME_WITH_STRING
+
 #include <gc.h>
 #include <math.h>
 #include <stdio.h>
@@ -419,3 +423,5 @@ void creme_register_string_builtins(VM *vm) {
   creme_register_builtin(vm, "string-pad-right", bi_string_pad_right);
   creme_register_builtin(vm, "format", bi_format);
 }
+
+#endif /* CREME_WITH_STRING */

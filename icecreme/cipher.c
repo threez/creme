@@ -20,6 +20,10 @@
  * a repeated failure (e.g. a bad tag on every retry) can't leak an
  * EVP_CIPHER_CTX each time the way an unwinding C++ exception would
  * avoid via RAII but plain C longjmp does not. */
+#include "builtin_config.h"
+
+#if CREME_WITH_CIPHER
+
 #include <gc.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -201,3 +205,5 @@ void creme_register_cipher_builtins(VM *vm) {
   creme_register_builtin(vm, "aes-256-gcm-random-key", bi_aes_256_gcm_random_key);
   creme_register_builtin(vm, "aes-256-gcm-random-nonce", bi_aes_256_gcm_random_nonce);
 }
+
+#endif /* CREME_WITH_CIPHER */

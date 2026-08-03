@@ -37,6 +37,10 @@
  * one multi-byte one. Fine for v1 (ASCII-heavy REPL editing); a real
  * decoder would need to buffer continuation bytes across term-read-key
  * calls. */
+#include "builtin_config.h"
+
+#if CREME_WITH_TERM
+
 #include <errno.h>
 #include <gc.h>
 #include <stdlib.h>
@@ -283,3 +287,5 @@ void creme_register_term_builtins(VM *vm) {
   creme_register_builtin(vm, "stdout-tty?", bi_stdout_tty);
   creme_register_builtin(vm, "stdin-tty?", bi_stdin_tty);
 }
+
+#endif /* CREME_WITH_TERM */

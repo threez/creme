@@ -40,6 +40,32 @@ library's bundled self-hosted compiler/REPL bytecode (`compiler-run.ice`/
 library-build time, then baked directly into `libcreme.a`; nothing at
 `host_demo`'s own runtime touches Crystal at all.
 
+## Minimal dependency footprint
+
+`host_demo.scm` only imports `(scheme base)`/`(scheme write)`, so this
+example's own `Makefile` builds `libcreme.a` with every optional native
+builtin family (`icecreme/builtin_config.h`) compiled OUT —
+`CREME_WITH_SQL=0 CREME_WITH_HTTP=0 CREME_WITH_CIPHER=0 CREME_WITH_PKEY=0
+CREME_WITH_X509=0 CREME_WITH_DIGEST=0 CREME_WITH_SECURE_RANDOM=0
+CREME_WITH_ACTOR=0 CREME_WITH_FFI=0 CREME_WITH_YAML=0 CREME_WITH_MUX=0
+CREME_WITH_CSV=0 CREME_WITH_TREELIST=0 CREME_WITH_JSON=0
+CREME_WITH_BIGDECIMAL=0 CREME_WITH_TERM=0 CREME_WITH_PROCESS=0
+CREME_WITH_STRING=0`, in `MINIMAL_FAMILY_FLAGS` in this directory's own
+`Makefile`. The resulting `host_demo` binary links against just `libm`,
+`pthread` (tied to Boehm GC's threaded build), Boehm GC itself, GMP
+(`T_RATIONAL`), and PCRE2 (`regex` is a hard, non-gateable dependency of
+the bundled self-hosted compiler — see `icecreme/builtin_config.h`'s own
+doc comment) — no `sqlite3`/`openssl`/`libffi`/`libyaml` at all. Confirm
+with `ldd examples/libcream/host_demo` (or `otool -L` on macOS) after a
+build.
+
+Want a family back? Drop its `=0` override (or set it to `=1`) in
+`MINIMAL_FAMILY_FLAGS`, and add the matching pkg-config lines/`LDLIBS`
+entry from `icecreme/Makefile`'s own (e.g. re-enabling `CREME_WITH_SQL`
+needs `-lsqlite3` added back to this Makefile's own `LDLIBS`) — see
+`icecreme/README.md`'s "Embedding" section for the full family list and
+their external dependencies.
+
 Try editing `host_demo.scm` (e.g. change the displayed text) and re-running
 `./examples/libcream/host_demo` (from the repo root) with no rebuild —
 `creme_run_scheme_file` recompiles the script fresh on every run via the

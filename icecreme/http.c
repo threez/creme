@@ -29,6 +29,10 @@
  * Encoding response too, decoded as a second pass over whatever bytes
  * were already read (see dechunk() below) rather than needing to track
  * chunk boundaries mid-stream. */
+#include "builtin_config.h"
+
+#if CREME_WITH_HTTP
+
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
@@ -580,3 +584,5 @@ void creme_register_http_builtins(VM *vm) {
   creme_register_builtin(vm, "http-patch", bi_http_patch);
   creme_register_builtin(vm, "http-request", bi_http_request);
 }
+
+#endif /* CREME_WITH_HTTP */

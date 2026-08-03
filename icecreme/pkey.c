@@ -21,6 +21,10 @@
  * own icecreme/cipher.c established: creme_abort longjmps past any C++-style
  * RAII that doesn't exist in C, so every error branch below explicitly
  * frees whatever OpenSSL resource it opened first. */
+#include "builtin_config.h"
+
+#if CREME_WITH_PKEY
+
 #include <gc.h>
 #include <openssl/bio.h>
 #include <openssl/ec.h>
@@ -508,3 +512,5 @@ void creme_register_pkey_builtins(VM *vm) {
   creme_register_builtin(vm, "rsa-encrypt", bi_rsa_encrypt);
   creme_register_builtin(vm, "rsa-decrypt", bi_rsa_decrypt);
 }
+
+#endif /* CREME_WITH_PKEY */

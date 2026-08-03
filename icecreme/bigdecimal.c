@@ -29,6 +29,10 @@
  * string of trailing zeros), and merely a fixed (not infinite)
  * precision, not silently wrong, for a genuinely repeating quotient
  * (1/3 and the like) -- nothing here exercises that case. */
+#include "builtin_config.h"
+
+#if CREME_WITH_BIGDECIMAL
+
 #include <ctype.h>
 #include <gc.h>
 #include <stdio.h>
@@ -392,3 +396,5 @@ void creme_register_bigdecimal_builtins(VM *vm) {
   creme_register_builtin(vm, "bigdecimal->string", bi_bigdecimal_to_string);
   creme_register_builtin(vm, "bigdecimal?", bi_bigdecimal_p);
 }
+
+#endif /* CREME_WITH_BIGDECIMAL */

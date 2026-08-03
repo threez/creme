@@ -8,6 +8,10 @@
  * base64 encoding here are small hand-rolled encode-only loops, matching
  * digest.c's own per-file self-contained style rather than sharing code
  * across builtin files. */
+#include "builtin_config.h"
+
+#if CREME_WITH_SECURE_RANDOM
+
 #include <gc.h>
 #include <openssl/rand.h>
 
@@ -85,3 +89,5 @@ void creme_register_secure_random_builtins(VM *vm) {
   creme_register_builtin(vm, "secure-random-hex", bi_secure_random_hex);
   creme_register_builtin(vm, "secure-random-base64", bi_secure_random_base64);
 }
+
+#endif /* CREME_WITH_SECURE_RANDOM */

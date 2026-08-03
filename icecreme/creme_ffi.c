@@ -47,6 +47,10 @@
  * — an embedder MUST exclude "creme ffi" from any allowed_libraries
  * allowlist for untrusted guest scripts, exactly like (creme tui)/
  * (creme rfc8439)/etc. are already documented to be. */
+#include "builtin_config.h"
+
+#if CREME_WITH_FFI
+
 #include <dlfcn.h>
 #include <ffi.h>
 #include <gc.h>
@@ -370,3 +374,5 @@ void creme_register_ffi_builtins(VM *vm) {
   creme_register_builtin(vm, "ffi-pointer?", bi_ffi_pointer_p);
   creme_register_builtin(vm, "ffi-null-pointer?", bi_ffi_null_pointer_p);
 }
+
+#endif /* CREME_WITH_FFI */

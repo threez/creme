@@ -556,13 +556,70 @@ runs exactly like calling any other global, as long as `host-greet` was
 registered (in either order relative to `creme_load`/`creme_load_from_bytes`,
 just before the chunk actually runs).
 
-`libcreme.a` is one monolithic archive — the same full dependency set
-(Boehm GC, PCRE2, GMP, OpenSSL libcrypto/libssl, libffi, libyaml, sqlite3)
-the `icecreme` binary itself links, since this build has no per-feature
-opt-out. A consumer needs the same link-flag set at their own link stage
-(static archives carry no transitive flags) — see `examples/libcream/
-Makefile` for the concrete, working recipe, or `icecreme/Makefile`'s own
-`LDLIBS`/pkg-config lines for the canonical, always-up-to-date list.
+### Trimming dependencies: `CREME_WITH_<NAME>` build flags
+
+`libcreme.a` defaults to the same full dependency set (Boehm GC, PCRE2,
+GMP, OpenSSL libcrypto/libssl, libffi, libyaml, sqlite3) the `icecreme`
+binary itself links, but 18 native builtin families — each living in its
+own `.c` file with a real external-library or standalone-`.o` footprint —
+can be compiled out individually via `icecreme/builtin_config.h`'s
+`CREME_WITH_<NAME>` macros, passed as Make variables:
+
+| Macro | File | External dependency dropped when off |
+|---|---|---|
+| `CREME_WITH_SQL` | sql.c | sqlite3 |
+| `CREME_WITH_HTTP` | http.c | libssl (+ shares libcrypto) |
+| `CREME_WITH_CIPHER` | cipher.c | shares libcrypto |
+| `CREME_WITH_PKEY` | pkey.c | shares libcrypto |
+| `CREME_WITH_X509` | x509.c | shares libcrypto |
+| `CREME_WITH_DIGEST` | digest.c | shares libcrypto |
+| `CREME_WITH_SECURE_RANDOM` | secure_random.c | shares libcrypto |
+| `CREME_WITH_ACTOR` | actor.c | shares libcrypto |
+| `CREME_WITH_FFI` | creme_ffi.c | libffi, dlopen |
+| `CREME_WITH_YAML` | yaml.c | libyaml |
+| `CREME_WITH_MUX` | mux.c | none extra |
+| `CREME_WITH_CSV` | csv.c | none extra |
+| `CREME_WITH_TREELIST` | treelist.c | none extra |
+| `CREME_WITH_JSON` | json.c | none extra |
+| `CREME_WITH_BIGDECIMAL` | bigdecimal.c | none extra |
+| `CREME_WITH_TERM` | term.c | none extra |
+| `CREME_WITH_PROCESS` | process.c | none extra |
+| `CREME_WITH_STRING` | strings.c | none extra |
+
+Each defaults to `1` (included) — `make -C icecreme lib CREME_WITH_SQL=0
+CREME_WITH_HTTP=0 ...` drops the listed families entirely: their `.c`
+files compile down to an empty translation unit (the external header,
+e.g. `<sqlite3.h>`, is never even processed, so its `-dev` package needn't
+be installed), and their row disappears from `builtin_families.c`'s
+family table, so the linker never pulls in the associated library either.
+A script that still `(import (creme sql))` against a build compiled
+without it degrades exactly like requesting any other unimplemented
+family — silently skipped at registration time, then a normal "unbound
+variable" abort the moment it's actually called (see
+`builtin_families.c`'s own comment).
+
+Two tiers are **not** gateable this way: 8 zero-external-dependency
+families (`cxr`, `complex`, `char`, `process-context`, `math`,
+`introspection`, `file`, `env`) live as small function groups inside the
+one always-compiled `builtins.c` monolith and stay always-on (nothing to
+save by gating them); and 4 families (`regex`, `hash-table`, `bootstrap`,
+`lazy`) plus the always-on `base`/`write` pair are hard dependencies of
+the self-hosted compiler bundled into `libcreme.a` itself, needed by every
+`creme_run_scheme_file`/`creme_run_repl` embedder regardless of what their
+own target script imports.
+
+`examples/libcream/` demonstrates the minimal case — its own `Makefile`
+builds `libcreme.a` with all 18 gateable families off, since
+`host_demo.scm` only needs `(scheme base)`/`(scheme write)`, and trims its
+own `LDLIBS` to match (just libm/pthread/GC/GMP/PCRE2 — see that
+directory's own README for the `ldd`-confirmed result).
+
+`libcreme.a` is one monolithic archive regardless of which families are
+included — a consumer needs the same link-flag set at their own link
+stage (static archives carry no transitive flags): see `examples/libcream/
+Makefile` for the concrete, working (trimmed) recipe, or `icecreme/
+Makefile`'s own `LDLIBS`/pkg-config lines for the canonical, always-
+up-to-date full list.
 
 ## Profiling
 

@@ -14,6 +14,10 @@
  * pair is written as a JSON object, any other proper list as a JSON
  * array (so plain Scheme lists round-trip too), an improper list or any
  * other unsupported value raises. */
+#include "builtin_config.h"
+
+#if CREME_WITH_JSON
+
 #include <gc.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -453,3 +457,5 @@ void creme_register_json_builtins(VM *vm) {
   creme_register_builtin(vm, "json-read", bi_json_read);
   creme_register_builtin(vm, "json-write", bi_json_write);
 }
+
+#endif /* CREME_WITH_JSON */

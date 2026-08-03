@@ -11,6 +11,10 @@
  * that make matching Crystal's own Base64.strict_encode/decode_string
  * behavior -- including raising a clear error on invalid input -- more
  * awkward than just writing the ~40 lines directly). */
+#include "builtin_config.h"
+
+#if CREME_WITH_DIGEST
+
 #include <gc.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -225,3 +229,5 @@ void creme_register_digest_builtins(VM *vm) {
   creme_register_builtin(vm, "base64-encode", bi_base64_encode);
   creme_register_builtin(vm, "base64-decode", bi_base64_decode);
 }
+
+#endif /* CREME_WITH_DIGEST */

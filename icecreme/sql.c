@@ -2,6 +2,10 @@
  * matching the competition/c/demo-todo C11 twin's own reasoning) — unlike
  * the real sql.cr, no separate reader/writer WAL split (that's only needed
  * for concurrent real-file access, not a single in-process VM). */
+#include "builtin_config.h"
+
+#if CREME_WITH_SQL
+
 #include <gc.h>
 #include <sqlite3.h>
 #include <stdlib.h>
@@ -176,3 +180,5 @@ void creme_register_sql_builtins(VM *vm) {
   creme_register_builtin(vm, "sql-query", bi_sql_query);
   creme_register_builtin(vm, "sql-scalar", bi_sql_scalar);
 }
+
+#endif /* CREME_WITH_SQL */

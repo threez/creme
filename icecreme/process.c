@@ -24,6 +24,10 @@
  * other file that happens to run afterward. Real process isolation
  * sidesteps that risk entirely, so it was worth adding here rather than
  * working around its absence. */
+#include "builtin_config.h"
+
+#if CREME_WITH_PROCESS
+
 #include <errno.h>
 #include <poll.h>
 #include <string.h>
@@ -179,3 +183,5 @@ void creme_register_process_builtins(VM *vm) {
   creme_register_builtin(vm, "process-run", bi_process_run);
   creme_register_builtin(vm, "sleep-ms!", bi_sleep_ms);
 }
+
+#endif /* CREME_WITH_PROCESS */

@@ -36,6 +36,10 @@
  * scalar; anything single/double-quoted or block (|/>) stays a string
  * unconditionally, matching every other YAML implementation's own rule
  * that quoting is an explicit "this is definitely a string" signal. */
+#include "builtin_config.h"
+
+#if CREME_WITH_YAML
+
 #include <ctype.h>
 #include <gc.h>
 #include <math.h>
@@ -454,3 +458,5 @@ void creme_register_yaml_builtins(VM *vm) {
   creme_register_builtin(vm, "yaml-read", bi_yaml_read);
   creme_register_builtin(vm, "yaml-write", bi_yaml_write);
 }
+
+#endif /* CREME_WITH_YAML */

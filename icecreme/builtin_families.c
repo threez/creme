@@ -3,9 +3,21 @@
  * into libcreme.a without pulling in main.c's own main() (a real symbol
  * clash for any embedder building its own executable). main.c itself still
  * calls these exactly as before; nothing about the CLI's own behavior
- * changes here, this is a pure move. */
+ * changes here, this is a pure move.
+ *
+ * 18 of the table's entries below are wrapped in a `#if CREME_WITH_<NAME>`
+ * (builtin_config.h) matching the same macro that wraps that family's own
+ * .c file entirely — see that header's own doc comment for which families
+ * are gateable this way vs. always-on. When a macro is 0, its row simply
+ * doesn't exist in BUILTIN_FAMILIES: the lookup loop below already treats
+ * an unrecognized required-families name as "not implemented, skip it, let
+ * an actual call fail loudly with 'unbound variable' later" (see that
+ * loop's own comment) — a compiled-out family degrades exactly the same
+ * way, no separate error handling needed. */
 #include <stdint.h>
 #include <string.h>
+
+#include "builtin_config.h"
 
 #include "actor.h"
 #include "bigdecimal.h"
@@ -53,26 +65,62 @@ static const struct {
     {"file", creme_register_file_builtins},
     {"env", creme_register_env_builtins},
     {"hash-table", creme_register_hashtable_builtins},
+#if CREME_WITH_SQL
     {"sql", creme_register_sql_builtins},
+#endif
+#if CREME_WITH_MUX
     {"mux", creme_register_mux_builtins},
+#endif
+#if CREME_WITH_STRING
     {"string", creme_register_string_builtins},
+#endif
     {"bootstrap", creme_register_bootstrap_builtins},
     {"regex", creme_register_regex_builtins},
+#if CREME_WITH_PROCESS
     {"process", creme_register_process_builtins},
+#endif
+#if CREME_WITH_CSV
     {"csv", creme_register_csv_builtins},
+#endif
+#if CREME_WITH_TREELIST
     {"treelist", creme_register_treelist_builtins},
+#endif
+#if CREME_WITH_ACTOR
     {"actor", creme_register_actor_builtins},
+#endif
+#if CREME_WITH_DIGEST
     {"digest", creme_register_digest_builtins},
+#endif
+#if CREME_WITH_SECURE_RANDOM
     {"secure-random", creme_register_secure_random_builtins},
+#endif
+#if CREME_WITH_CIPHER
     {"cipher", creme_register_cipher_builtins},
+#endif
+#if CREME_WITH_PKEY
     {"pkey", creme_register_pkey_builtins},
+#endif
+#if CREME_WITH_X509
     {"x509", creme_register_x509_builtins},
+#endif
+#if CREME_WITH_JSON
     {"json", creme_register_json_builtins},
+#endif
+#if CREME_WITH_YAML
     {"yaml", creme_register_yaml_builtins},
+#endif
+#if CREME_WITH_BIGDECIMAL
     {"bigdecimal", creme_register_bigdecimal_builtins},
+#endif
+#if CREME_WITH_HTTP
     {"http", creme_register_http_builtins},
+#endif
+#if CREME_WITH_TERM
     {"term", creme_register_term_builtins},
+#endif
+#if CREME_WITH_FFI
     {"ffi", creme_register_ffi_builtins},
+#endif
 };
 #define N_BUILTIN_FAMILIES (int)(sizeof(BUILTIN_FAMILIES) / sizeof(BUILTIN_FAMILIES[0]))
 
@@ -187,10 +235,12 @@ void creme_register_required_builtins(VM *vm, char **families, int n_families) {
       }
     }
 
+#if CREME_WITH_STRING
     if (strcmp(name, "char") == 0 && !(vm->registered_family_mask & CREME_EXTRA_BIT_STRING_VIA_CHAR)) {
       creme_register_string_builtins(vm);
       vm->registered_family_mask |= CREME_EXTRA_BIT_STRING_VIA_CHAR;
     }
+#endif
     if (strcmp(name, "process-context") == 0 && !(vm->registered_family_mask & CREME_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT)) {
       creme_register_env_builtins(vm);
       vm->registered_family_mask |= CREME_EXTRA_BIT_ENV_VIA_PROCESS_CONTEXT;

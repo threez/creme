@@ -21,6 +21,10 @@
  * established: creme_abort longjmps past any C++-style RAII that doesn't
  * exist in C, so every error branch below explicitly frees whatever
  * OpenSSL resource it opened first. */
+#include "builtin_config.h"
+
+#if CREME_WITH_X509
+
 #include <gc.h>
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
@@ -532,3 +536,5 @@ void creme_register_x509_builtins(VM *vm) {
   creme_register_builtin(vm, "x509-cert-not-after", bi_x509_cert_not_after);
   creme_register_builtin(vm, "x509-verify-chain", bi_x509_verify_chain);
 }
+
+#endif /* CREME_WITH_X509 */

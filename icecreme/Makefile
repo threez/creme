@@ -49,9 +49,9 @@ SSL_LIBS := $(shell pkg-config --libs libssl 2>/dev/null || echo -lssl)
 # libffi -- backs (creme ffi)'s ffi-function/ffi-call (creme_ffi.c), the
 # generic dlopen/native-call bridge. dlopen/dlsym/dlclose themselves come
 # from libc directly on this project's FreeBSD dev environment, but -ldl
-# is still linked unconditionally (a no-op there, required on glibc Linux
-# systems older than the libc/libdl merge) rather than guarded, matching
-# how -lsqlite3 above is also linked unconditionally.
+# is a no-op there anyway, required on glibc Linux systems older than the
+# libc/libdl merge -- gated below alongside -lffi (CREME_WITH_FFI), since
+# creme_ffi.c is the only consumer of either.
 FFI_CFLAGS := $(shell pkg-config --cflags libffi 2>/dev/null)
 FFI_LIBS := $(shell pkg-config --libs libffi 2>/dev/null || echo -lffi)
 
@@ -81,9 +81,68 @@ YAML_LIBS := $(shell pkg-config --libs yaml-0.1 2>/dev/null || echo -lyaml)
 # header parsing (mux.c), which multiplexes every connection through a
 # single poll(2) loop (see mux.c's own header comment for the full
 # dispatch design, including its optional worker-VM pool).
+# ---- Optional native builtin families (icecreme/builtin_config.h) ---------
+# Each of these gates one family's .c file down to an empty translation
+# unit (that file's own `#if CREME_WITH_<NAME>` wrapper) and its
+# BUILTIN_FAMILIES table row (builtin_families.c) -- defaulting to 1
+# (included), matching every prior release's "everything always in"
+# behavior. Override on the command line or via an exported env var, e.g.
+# `make lib CREME_WITH_SQL=0 CREME_WITH_HTTP=0` for a trimmed libcreme.a
+# (see examples/libcream/Makefile for a full minimal-dependency build, and
+# icecreme/README.md's "Embedding" section for the complete family list).
+# Flipping these off for the default `all`/CLI target works too, but isn't
+# the primary use case -- the CLI is meant to stay full-featured; these
+# knobs exist mainly for `make lib` embedders who want a trimmed library.
+CREME_WITH_SQL ?= 1
+CREME_WITH_HTTP ?= 1
+CREME_WITH_CIPHER ?= 1
+CREME_WITH_PKEY ?= 1
+CREME_WITH_X509 ?= 1
+CREME_WITH_DIGEST ?= 1
+CREME_WITH_SECURE_RANDOM ?= 1
+CREME_WITH_ACTOR ?= 1
+CREME_WITH_FFI ?= 1
+CREME_WITH_YAML ?= 1
+CREME_WITH_MUX ?= 1
+CREME_WITH_CSV ?= 1
+CREME_WITH_TREELIST ?= 1
+CREME_WITH_JSON ?= 1
+CREME_WITH_BIGDECIMAL ?= 1
+CREME_WITH_TERM ?= 1
+CREME_WITH_PROCESS ?= 1
+CREME_WITH_STRING ?= 1
+
+FEATURE_DEFINES := \
+  -DCREME_WITH_SQL=$(CREME_WITH_SQL) -DCREME_WITH_HTTP=$(CREME_WITH_HTTP) \
+  -DCREME_WITH_CIPHER=$(CREME_WITH_CIPHER) -DCREME_WITH_PKEY=$(CREME_WITH_PKEY) \
+  -DCREME_WITH_X509=$(CREME_WITH_X509) -DCREME_WITH_DIGEST=$(CREME_WITH_DIGEST) \
+  -DCREME_WITH_SECURE_RANDOM=$(CREME_WITH_SECURE_RANDOM) -DCREME_WITH_ACTOR=$(CREME_WITH_ACTOR) \
+  -DCREME_WITH_FFI=$(CREME_WITH_FFI) -DCREME_WITH_YAML=$(CREME_WITH_YAML) \
+  -DCREME_WITH_MUX=$(CREME_WITH_MUX) -DCREME_WITH_CSV=$(CREME_WITH_CSV) \
+  -DCREME_WITH_TREELIST=$(CREME_WITH_TREELIST) -DCREME_WITH_JSON=$(CREME_WITH_JSON) \
+  -DCREME_WITH_BIGDECIMAL=$(CREME_WITH_BIGDECIMAL) -DCREME_WITH_TERM=$(CREME_WITH_TERM) \
+  -DCREME_WITH_PROCESS=$(CREME_WITH_PROCESS) -DCREME_WITH_STRING=$(CREME_WITH_STRING)
+
+# Link-time gating to match: -lcrypto stays linked if ANY openssl-touching
+# family is on; -lssl only if http (the sole TLS consumer) is on. `filter-
+# out 0` drops every disabled entry from the list -- if anything survives,
+# at least one relevant family is enabled. -lpthread/$(GC_LIBS)/-lgmp/
+# -lpcre2-8 stay unconditional (pthread is tied to GC_THREADS regardless of
+# actor/mux; pcre2 because `regex` is a hard, non-gateable dependency of
+# the bundled self-hosted compiler).
+CRYPTO_FAMILIES_ON := $(filter-out 0,$(CREME_WITH_HTTP) $(CREME_WITH_CIPHER) $(CREME_WITH_PKEY) \
+                                      $(CREME_WITH_X509) $(CREME_WITH_DIGEST) $(CREME_WITH_SECURE_RANDOM) \
+                                      $(CREME_WITH_ACTOR))
+CRYPTO_LIBS := $(if $(strip $(CRYPTO_FAMILIES_ON)),$(CRYPTO_LIBS))
+SSL_LIBS := $(if $(filter-out 0,$(CREME_WITH_HTTP)),$(SSL_LIBS))
+SQL_LDLIBS := $(if $(filter-out 0,$(CREME_WITH_SQL)),-lsqlite3)
+FFI_LDLIBS := $(if $(filter-out 0,$(CREME_WITH_FFI)),$(FFI_LIBS) -ldl)
+YAML_LDLIBS := $(if $(filter-out 0,$(CREME_WITH_YAML)),$(YAML_LIBS))
+
 CFLAGS ?= -std=c11 -O2 -g -fno-omit-frame-pointer -Wall -Wextra -Wno-missing-field-initializers \
           -Ivendor/verstable -Ivendor/sds -Ivendor/picohttpparser \
-          $(GC_CFLAGS) $(PCRE2_CFLAGS) $(GMP_CFLAGS) $(CRYPTO_CFLAGS) $(SSL_CFLAGS) $(FFI_CFLAGS) $(YAML_CFLAGS)
+          $(GC_CFLAGS) $(PCRE2_CFLAGS) $(GMP_CFLAGS) $(CRYPTO_CFLAGS) $(SSL_CFLAGS) $(FFI_CFLAGS) $(YAML_CFLAGS) \
+          $(FEATURE_DEFINES)
 # -rdynamic: exports the executable's own (non-imported) symbols into its
 # dynamic symbol table so dladdr(3) can resolve them on Linux/glibc — a no-op
 # on Darwin, where dladdr already sees the main binary's local symbol table.
@@ -93,7 +152,7 @@ LDFLAGS ?= -rdynamic
 # (part of the base system, not a package) — link it there only, so this
 # stays a no-op everywhere else.
 EXECINFO_LIBS := $(if $(filter FreeBSD,$(shell uname -s)),-lexecinfo)
-LDLIBS := -lm -lpthread -lsqlite3 -ldl $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LIBS) $(SSL_LIBS) $(FFI_LIBS) $(YAML_LIBS) $(EXECINFO_LIBS)
+LDLIBS := -lm -lpthread $(SQL_LDLIBS) $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LIBS) $(SSL_LIBS) $(FFI_LDLIBS) $(YAML_LDLIBS) $(EXECINFO_LIBS)
 
 SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c secure_random.c cipher.c pkey.c x509.c builtin_families.c \
        vendor/sds/sds.c vendor/picohttpparser/picohttpparser.c
@@ -158,12 +217,14 @@ $(FUZZBIN): $(FUZZ_OBJS) fuzz/fuzz_loader.c
 # ---- compiler+REPL bundle, for a host C program (see examples/libcream/) ---
 #
 # Same `filter-out main.c` shape as the fuzz target above, archived (ar rcs)
-# instead of linked into a binary -- one monolithic library, same full
-# dependency set as the CLI binary itself (no per-feature opt-out exists in
-# this build, so libcreme.a doesn't invent one either). -fPIC on its own
-# object suffix (.lib.o, distinct from plain .o/.san.o/.fuzz.o) costs
-# nothing today and leaves the door open to a future .so from the same
-# objects.
+# instead of linked into a binary -- one monolithic library, gated by the
+# same CREME_WITH_<NAME> family macros as the CLI build above (a caller
+# building just `lib` can pass a trimmed CREME_WITH_*=0 set without
+# touching `all`'s own object files at all, since .lib.o is its own
+# distinct object suffix -- see examples/libcream/Makefile for a concrete
+# minimal build). -fPIC on its own object suffix (.lib.o, distinct from
+# plain .o/.san.o/.fuzz.o) costs nothing today and leaves the door open to
+# a future .so from the same objects.
 #
 # embed.c/embedded_compiler_run.c are library-ONLY additions -- deliberately
 # not part of $(SRCS)/the CLI binary, which keeps its own existing

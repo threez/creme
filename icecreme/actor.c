@@ -42,6 +42,10 @@
  * addition -- just isn't worth the risk of reintroducing this crash
  * blindly.
  */
+#include "builtin_config.h"
+
+#if CREME_WITH_ACTOR
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <gc.h>
@@ -1800,3 +1804,5 @@ void creme_register_actor_builtins(VM *vm) {
   creme_register_builtin(vm, "remote-ref", bi_remote_ref);
   creme_register_builtin(vm, "stop-node!", bi_stop_node_bang);
 }
+
+#endif /* CREME_WITH_ACTOR */

@@ -14,6 +14,10 @@
  * inside a quoted cell) and the "none/rfc/all" writer quoting modes
  * mirror native's Builder::Row exactly.
  */
+#include "builtin_config.h"
+
+#if CREME_WITH_CSV
+
 #include <gc.h>
 #include <stdlib.h>
 #include <string.h>
@@ -434,3 +438,5 @@ void creme_register_csv_builtins(VM *vm) {
   creme_register_builtin(vm, "csv-writer-row!", bi_csv_writer_row_bang);
   creme_register_builtin(vm, "csv-writer?", bi_csv_writer_p);
 }
+
+#endif /* CREME_WITH_CSV */
