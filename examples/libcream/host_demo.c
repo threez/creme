@@ -5,37 +5,18 @@
  * toolchain involved at runtime at all. See ../../icecreme/README.md's
  * "Embedding" section for the full call-sequence writeup this mirrors. */
 #include <stdio.h>
-#include <string.h>
-
-#include <gc.h>
 
 #include <icecreme/creme.h>
 
 /* host-greet: (host-greet "world") => "Hello from C, world!" — a hand-
  * written BuiltinFn, exactly the shape every icecreme-internal `bi_*`
- * function already has (see e.g. creme_ffi.c's bi_ffi_open for the same
- * "validate arity/type, then build a fresh Value" idiom this mirrors). */
+ * function already has, just using embed.h's own creme_arg_cstr/
+ * creme_format_value helpers instead of hand-rolling the arity/type
+ * check and GC_MALLOC/memcpy/snprintf dance directly. */
 static Value host_greet(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) {
-    creme_abort("host-greet: expected 1 string argument");
-  }
-
-  /* Extract the argument as a NUL-terminated C string. */
-  int arg_len = args[0].aux;
-  char *arg = GC_MALLOC((size_t)arg_len + 1);
-  memcpy(arg, args[0].as.chars, (size_t)arg_len);
-  arg[arg_len] = '\0';
-
-  /* Build the fresh reply string as a real Scheme Value. Strings in
-   * icecreme are just a pointer+length pair (v_str, value.h) — no
-   * separate "Scheme string object" to construct, just GC-owned bytes. */
-  const char *prefix = "Hello from C, ";
-  const char *suffix = "!";
-  size_t reply_len = strlen(prefix) + (size_t)arg_len + strlen(suffix);
-  char *reply = GC_MALLOC(reply_len + 1);
-  snprintf(reply, reply_len + 1, "%s%s%s", prefix, arg, suffix);
-  return v_str(reply, (int)reply_len);
+  const char *name = creme_arg_cstr(args, nargs, 0, "host-greet");
+  return creme_format_value("Hello from C, %s!", name);
 }
 
 int main(void) {
@@ -59,7 +40,7 @@ int main(void) {
    * creme_run_scheme_file below actually starts executing the script
    * (order relative to the call itself doesn't matter beyond that). */
   creme_register_builtin(vm, "host-greet", host_greet);
-  creme_register_global(vm, "host-version", v_str("libcream host demo 0.1", 22));
+  creme_register_global(vm, "host-version", creme_cstr_value("libcream host demo 0.1"));
 
   /* Compiles-and-runs host_demo.scm directly, via the self-hosted compiler
    * bundled into libcreme.a at build time (icecreme/Makefile's embedded_

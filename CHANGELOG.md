@@ -45,10 +45,20 @@ both reaching their current shape) — not itemized individually here;
   change. Also adds `creme_register_all_builtins()`, for an embedder
   running scripts it doesn't want to (or can't) inspect ahead of time via
   `creme_peek_required_families`.
+- `embed.h` also gains a set of `static inline` value/argument helpers for
+  writing a native `BuiltinFn`'s own body — `creme_arg_int`/
+  `creme_arg_double`/`creme_arg_bool`/`creme_arg_cstr`/`creme_arg_vector`
+  (extract+validate argument N, aborting by name on arity/type mismatch),
+  `creme_cstr_value`/`creme_format_value` (build a fresh Scheme string,
+  no manual length-counting), and `creme_list_length`/
+  `creme_list_to_values`/`creme_list_from_values`/`creme_vector_from_values`
+  (convert a Scheme list/vector to/from a plain C array of `Value`s) — none
+  add anything to `libcreme.a` itself (pure `static inline`).
 - New example: `examples/libcream/` — a complete, minimal C host program
   registering its own native function (`host-greet`) and native value
   (`host-version`) as Scheme globals, then running a plain `.scm` script
-  that calls/reads both.
+  that calls/reads both; `host_greet` itself is 2 lines, using the new
+  `creme_arg_cstr`/`creme_format_value` helpers above.
 - See `icecreme/README.md`'s new "Embedding" section for the full minimal
   call sequence and the link-flag set a `libcreme.a` consumer needs to
   reproduce (static archives carry no transitive link flags).

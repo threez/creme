@@ -498,7 +498,7 @@ int main(void) {
                                             a specific known script needs */
 
   creme_register_builtin(vm, "my-native-fn", my_native_fn);
-  creme_register_global(vm, "my-constant", v_str("some value", 10));
+  creme_register_global(vm, "my-constant", creme_cstr_value("some value"));
 
   creme_run_scheme_file(vm, "script.scm");   /* compiles + runs directly,
                                                  via the compiler bundled
@@ -508,6 +508,18 @@ int main(void) {
   return 0;
 }
 ```
+
+`embed.h` also declares a set of `static inline` value/argument helpers for
+writing a native function's own body — `creme_arg_int`/`creme_arg_double`/
+`creme_arg_bool`/`creme_arg_cstr`/`creme_arg_vector` (extract+validate
+argument N, aborting by name on arity/type mismatch), `creme_cstr_value`/
+`creme_format_value` (build a fresh Scheme string from a C string/`printf`-
+style format, no manual length-counting), and `creme_list_length`/
+`creme_list_to_values`/`creme_list_from_values`/`creme_vector_from_values`
+(convert a Scheme list/vector to/from a plain C array of `Value`s). None of
+these add anything to `libcreme.a` itself (pure `static inline`, free to
+compile away) — see each one's own doc comment in `embed.h`, and
+`examples/libcream/host_demo.c`'s `host_greet` for a real (2-line) use.
 
 `creme_run_repl(vm)` drops into an interactive stdin/stdout REPL, by
 compiling-and-running `icecreme/repl.scm` (the 2-line `(creme repl)` shim)
