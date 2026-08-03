@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "csv.h"
+#include "embed.h"
 
 typedef struct {
   int (*next)(void *ctx);
@@ -253,10 +254,11 @@ static void csv_seq_to_array(Value v, Value **out, int *out_n) {
 
 static Value bi_csv_read(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("csv-read: expected a string");
+  int len;
+  const char *data = creme_arg_bytes(args, nargs, 0, "csv-read", &len);
   char sep = csv_char_arg(args, nargs, 1, ',');
   char quote = csv_char_arg(args, nargs, 2, '"');
-  BufSrc bs = {args[0].as.chars, args[0].aux, 0};
+  BufSrc bs = {data, len, 0};
   CharSrc src = {buf_next, buf_peek, &bs};
 
   int rows_cap = 8, rows_n = 0;
@@ -277,10 +279,11 @@ static Value bi_csv_read(VM *vm, Value *args, int nargs) {
 }
 
 static Value bi_csv_read_headers(VM *vm, Value *args, int nargs) {
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("csv-read-headers: expected a string");
+  int len;
+  const char *data = creme_arg_bytes(args, nargs, 0, "csv-read-headers", &len);
   char sep = csv_char_arg(args, nargs, 1, ',');
   char quote = csv_char_arg(args, nargs, 2, '"');
-  BufSrc bs = {args[0].as.chars, args[0].aux, 0};
+  BufSrc bs = {data, len, 0};
   CharSrc src = {buf_next, buf_peek, &bs};
 
   Value *headers;

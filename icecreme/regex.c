@@ -22,6 +22,7 @@
 #include <gc.h>
 #include <string.h>
 
+#include "embed.h"
 #include "regex.h"
 
 static Value bi_regexp(VM *vm, Value *args, int nargs) {
@@ -87,10 +88,7 @@ static int regex_match_once(VM *vm, pcre2_code *re, const char *subj, int subj_l
     if (s == PCRE2_UNSET) {
       group = v_bool(0);
     } else {
-      int len = (int)(e - s);
-      char *buf = GC_MALLOC((size_t)(len ? len : 1));
-      memcpy(buf, subj + (int)s, (size_t)len);
-      group = v_str(buf, len);
+      group = creme_bytes_value(subj + (int)s, (int)(e - s));
     }
     list = creme_cons(vm, group, list);
   }
@@ -220,16 +218,12 @@ static Value bi_regexp_split(VM *vm, Value *args, int nargs) {
     Value groups;
     if (!regex_match_once(vm, re, subj, len, pos, &ms, &me, &groups)) break;
     int piece_len = ms - last;
-    char *buf = GC_MALLOC((size_t)(piece_len ? piece_len : 1));
-    memcpy(buf, subj + last, (size_t)piece_len);
-    collected[n++] = v_str(buf, piece_len);
+    collected[n++] = creme_bytes_value(subj + last, piece_len);
     last = me;
     pos = me > ms ? me : me + 1;
   }
   int tail_len = len - last;
-  char *tail_buf = GC_MALLOC((size_t)(tail_len ? tail_len : 1));
-  memcpy(tail_buf, subj + last, (size_t)tail_len);
-  collected[n++] = v_str(tail_buf, tail_len);
+  collected[n++] = creme_bytes_value(subj + last, tail_len);
   for (int i = n - 1; i >= 0; i--) pieces = creme_cons(vm, collected[i], pieces);
   return pieces;
 }

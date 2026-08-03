@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "embed.h"
 #include "json.h"
 
 /* ---- growable output buffer (json-write) --------------------------------- */
@@ -316,11 +317,9 @@ static Value json_parse_value(JReader *r) {
 
 static Value bi_json_read(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("json-read: expected string, got a non-string value");
   JReader r;
-  r.s = args[0].as.chars;
+  r.s = creme_arg_bytes(args, nargs, 0, "json-read", &r.len);
   r.pos = 0;
-  r.len = args[0].aux;
   Value result = json_parse_value(&r);
   jr_skip_ws(&r);
   if (r.pos != r.len) creme_abort("json-read: invalid json: unexpected trailing content");

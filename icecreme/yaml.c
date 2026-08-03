@@ -44,6 +44,7 @@
 #include <string.h>
 #include <yaml.h>
 
+#include "embed.h"
 #include "yaml.h"
 
 /* ---- growable output buffer (yaml-write) --------------------------------- */
@@ -97,16 +98,6 @@ static void varr_push(VArr *a, Value v) {
     a->cap = newcap;
   }
   a->items[a->len++] = v;
-}
-
-/* GC-owned copy -- unlike json.c's v_str (which can point straight into
- * its own GBuf), a libyaml event's scalar.value buffer is only valid
- * until yaml_event_delete, so every scalar must be copied out before that. */
-static Value v_str_copy(const char *s, int len) {
-  char *buf = GC_MALLOC((size_t)len + 1);
-  memcpy(buf, s, (size_t)len);
-  buf[len] = '\0';
-  return v_str(buf, len);
 }
 
 /* ---- reader --------------------------------------------------------------- */
@@ -197,10 +188,14 @@ static int yaml_try_parse_float(const char *s, int len, Value *out) {
   return 1;
 }
 
+/* Every plain-string result below goes through creme_bytes_value (embed.h)
+ * rather than a zero-copy v_str, unlike json.c's own scalar handling --
+ * libyaml's event->data.scalar.value buffer is only valid until
+ * yaml_event_delete, so it must be copied out before then. */
 static Value yaml_resolve_scalar(yaml_event_t *event) {
   const char *s = (const char *)event->data.scalar.value;
   int len = (int)event->data.scalar.length;
-  if (event->data.scalar.style != YAML_PLAIN_SCALAR_STYLE) return v_str_copy(s, len);
+  if (event->data.scalar.style != YAML_PLAIN_SCALAR_STYLE) return creme_bytes_value(s, len);
 
   if (len == 0 || yaml_text_is(s, len, "~") || yaml_text_is(s, len, "null") || yaml_text_is(s, len, "Null") ||
       yaml_text_is(s, len, "NULL"))
@@ -217,7 +212,7 @@ static Value yaml_resolve_scalar(yaml_event_t *event) {
   if (yaml_try_parse_int(s, len, &iv)) return iv;
   Value fv;
   if (yaml_try_parse_float(s, len, &fv)) return fv;
-  return v_str_copy(s, len);
+  return creme_bytes_value(s, len);
 }
 
 static Value yaml_parse_value(yaml_parser_t *parser, yaml_event_t *event);
@@ -254,7 +249,7 @@ static Value yaml_parse_mapping(yaml_parser_t *parser) {
       break;
     }
     if (kev.type != YAML_SCALAR_EVENT) creme_abort("yaml-read: invalid yaml: only scalar mapping keys are supported");
-    Value key = v_str_copy((const char *)kev.data.scalar.value, (int)kev.data.scalar.length);
+    Value key = creme_bytes_value((const char *)kev.data.scalar.value, (int)kev.data.scalar.length);
     yaml_event_delete(&kev);
 
     yaml_event_t vev;
@@ -295,11 +290,12 @@ static Value yaml_parse_value(yaml_parser_t *parser, yaml_event_t *event) {
 
 static Value bi_yaml_read(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("yaml-read: expected string, got a non-string value");
+  int len;
+  const char *s = creme_arg_bytes(args, nargs, 0, "yaml-read", &len);
 
   yaml_parser_t parser;
   if (!yaml_parser_initialize(&parser)) creme_abort("yaml-read: failed to initialize yaml parser");
-  yaml_parser_set_input_string(&parser, (const unsigned char *)args[0].as.chars, (size_t)args[0].aux);
+  yaml_parser_set_input_string(&parser, (const unsigned char *)s, (size_t)len);
 
   yaml_event_t event;
   for (;;) {

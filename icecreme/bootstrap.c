@@ -24,6 +24,7 @@
 
 #include "bootstrap.h"
 #include "builtin_families.h"
+#include "embed.h"
 
 /* Set once by main.c before running the compiler driver (icecreme/compiler-
  * run.scm) in compiler mode -- the path it decided needs compiling, exposed
@@ -333,10 +334,8 @@ static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
  * file it (include ...)s) at all. */
 static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) creme_abort("read-whole-file: expected a path string");
-  char *path = GC_MALLOC((size_t)args[0].aux + 1);
-  memcpy(path, args[0].as.chars, (size_t)args[0].aux);
-  path[args[0].aux] = '\0';
+  if (nargs != 1) creme_abort("read-whole-file: expected a path string");
+  const char *path = creme_arg_cstr(args, nargs, 0, "read-whole-file");
 
   FILE *f = fopen(path, "rb");
   if (!f) creme_abort("read-whole-file: cannot open %s", path);
@@ -360,25 +359,23 @@ static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
  * matching src/creme/modules/creme/file.cr's own file-write contract. */
 static Value bi_file_write(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_STR || args[1].tag != T_STR) creme_abort("file-write: expected (path content)");
-  char *path = GC_MALLOC((size_t)args[0].aux + 1);
-  memcpy(path, args[0].as.chars, (size_t)args[0].aux);
-  path[args[0].aux] = '\0';
+  if (nargs != 2) creme_abort("file-write: expected (path content)");
+  const char *path = creme_arg_cstr(args, nargs, 0, "file-write");
+  int content_len;
+  const char *content = creme_arg_bytes(args, nargs, 1, "file-write", &content_len);
 
   FILE *f = fopen(path, "wb");
   if (!f) creme_abort("file-write: cannot open %s for writing", path);
-  size_t wrote = fwrite(args[1].as.chars, 1, (size_t)args[1].aux, f);
+  size_t wrote = fwrite(content, 1, (size_t)content_len, f);
   fclose(f);
-  if ((int)wrote != args[1].aux) creme_abort("file-write: truncated write of %s", path);
+  if ((int)wrote != content_len) creme_abort("file-write: truncated write of %s", path);
   return v_nil();
 }
 
 static Value bi_delete_file(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 1 || args[0].tag != T_STR) creme_abort("delete-file: expected a path string");
-  char *path = GC_MALLOC((size_t)args[0].aux + 1);
-  memcpy(path, args[0].as.chars, (size_t)args[0].aux);
-  path[args[0].aux] = '\0';
+  if (nargs != 1) creme_abort("delete-file: expected a path string");
+  const char *path = creme_arg_cstr(args, nargs, 0, "delete-file");
   if (remove(path) != 0) creme_abort("delete-file: cannot remove %s", path);
   return v_nil();
 }

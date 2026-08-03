@@ -32,6 +32,7 @@
 #include <openssl/x509v3.h>
 #include <string.h>
 
+#include "embed.h"
 #include "pkey.h"
 #include "x509.h"
 
@@ -226,7 +227,7 @@ static Value x509_name_alist(X509_NAME *name) {
     if (idx < 0) continue;
     int n = X509_NAME_get_text_by_NID(name, SUBJECT_NIDS[i].nid, (char *)buf, (int)sizeof(buf));
     if (n < 0) continue;
-    pairs[n_pairs++] = alist_pair(SUBJECT_NIDS[i].field, v_str(gc_strndup((const char *)buf, n), n));
+    pairs[n_pairs++] = alist_pair(SUBJECT_NIDS[i].field, creme_bytes_value((const char *)buf, n));
   }
   for (int i = n_pairs - 1; i >= 0; i--) result = cons2(pairs[i], result);
   return result;
@@ -394,10 +395,11 @@ static Value bi_x509_cert_to_pem(VM *vm, Value *args, int nargs) {
 
 static Value bi_pem_to_x509_cert(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs < 1 || args[0].tag != T_STR) creme_abort("pem->x509-cert: expected a string");
-  X509 *cert = x509_pem_to_cert(args[0].as.chars, args[0].aux, "pem->x509-cert");
+  int len;
+  const char *pem = creme_arg_bytes(args, nargs, 0, "pem->x509-cert", &len);
+  X509 *cert = x509_pem_to_cert(pem, len, "pem->x509-cert");
   X509_free(cert);
-  return x509_cert_box(args[0].as.chars, args[0].aux);
+  return x509_cert_box(pem, len);
 }
 
 /* ---- accessors ---------------------------------------------------------------- */

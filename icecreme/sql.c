@@ -7,23 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "embed.h"
 #include "sql.h"
 
 static sqlite3 *as_sql(Value v, const char *who) {
   if (v.tag != T_BOX || v.aux != BOX_KIND_SQL) creme_abort("%s: expected a sql connection", who);
   return (sqlite3 *)v.as.ptr;
-}
-
-/* For a C string literal (e.g. the alist keys below) — T_STR is mutable
- * (string-set!) as of Group C, so a Value pointing directly at a literal
- * in .rodata would segfault the moment Scheme code mutated it; every
- * literal handed to Scheme needs its own GC-owned copy (mirrors mux.c's
- * own v_litstr). */
-static Value v_litstr(const char *s) {
-  size_t len = strlen(s);
-  char *copy = GC_MALLOC(len ? len : 1);
-  memcpy(copy, s, len);
-  return v_str(copy, (int)len);
 }
 
 static void bind_param(sqlite3_stmt *stmt, int idx, Value v) {
@@ -61,9 +50,7 @@ static Value column_to_value(sqlite3_stmt *stmt, int col) {
   case SQLITE_TEXT: {
     const unsigned char *text = sqlite3_column_text(stmt, col);
     int len = sqlite3_column_bytes(stmt, col);
-    char *copy = GC_MALLOC((size_t)(len ? len : 1));
-    memcpy(copy, text, (size_t)len);
-    return v_str(copy, len);
+    return creme_bytes_value((const char *)text, len);
   }
   case SQLITE_NULL:
   default:
@@ -121,8 +108,8 @@ static Value bi_sql_execute(VM *vm, Value *args, int nargs) {
   int64_t rows_affected = sqlite3_changes(db);
   int64_t last_id = sqlite3_last_insert_rowid(db);
   Value alist = v_nil();
-  alist = creme_cons(vm, creme_cons(vm, v_litstr("last-insert-id"), v_int(last_id)), alist);
-  alist = creme_cons(vm, creme_cons(vm, v_litstr("rows-affected"), v_int(rows_affected)), alist);
+  alist = creme_cons(vm, creme_cons(vm, creme_cstr_value("last-insert-id"), v_int(last_id)), alist);
+  alist = creme_cons(vm, creme_cons(vm, creme_cstr_value("rows-affected"), v_int(rows_affected)), alist);
   return alist;
 }
 
@@ -141,10 +128,7 @@ static Value bi_sql_query(VM *vm, Value *args, int nargs) {
   Value *colnames = GC_MALLOC(sizeof(Value) * (size_t)(ncols ? ncols : 1));
   for (int i = 0; i < ncols; i++) {
     const char *name = sqlite3_column_name(stmt, i);
-    int len = (int)strlen(name);
-    char *copy = GC_MALLOC((size_t)(len ? len : 1));
-    memcpy(copy, name, (size_t)len);
-    colnames[i] = v_str(copy, len);
+    colnames[i] = creme_cstr_value(name);
   }
 
   Value *rows = NULL;
