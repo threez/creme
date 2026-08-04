@@ -60,7 +60,7 @@ def usage : Nil
                                  path itself — an ordinary arg like
                                  "--profile" appearing after the path
                                  already reaches the script untouched.
-    creme -S | --dump-bytecode [--strict] <file.scm>
+    creme -S | --dump-bytecode [--strict] [--static] <file.scm>
                                  Compile a script and print its bytecode
                                  disassembly (one dump per top-level form,
                                  including nested closures) instead of
@@ -70,9 +70,13 @@ def usage : Nil
                                  fuse) — pass --strict for the plain-R7RS
                                  behavior of requiring the script's own
                                  (import ...), e.g. to see exactly what an
-                                 unfused/not-yet-imported form compiles to
+                                 unfused/not-yet-imported form compiles to.
+                                 Pass --static to instead disassemble the
+                                 single whole-program chunk --emit-icecreme
+                                 would produce (library bodies inlined) —
+                                 the emitted-file view, without a temp file
     creme --disassemble <file.ice>
-                                 Disassemble an ALREADY-COMPILED ICE1 file
+                                 Disassemble an ALREADY-COMPILED ICE file
                                  (e.g. one written by --emit-icecreme, or
                                  compiled by the self-hosted (creme
                                  compiler compiler)'s own compile-source-
@@ -156,7 +160,14 @@ end
 # code that produces — rather than failing outright on `#lang` as unknown `#`
 # syntax. A plain (non-`#lang`) script is unaffected either way, since
 # forms_for falls through to the ordinary Reader for it.
-def dump_bytecode(path : String, strict : Bool = false) : Nil
+# `static: true` instead disassembles the SINGLE whole-program chunk that
+# `--emit-icecreme` produces (library bodies inlined, one combined Chunk) --
+# built in memory via IcecremeEmitter.build and disassembled directly, so it's
+# the `--emit-icecreme <f> out.ice` + `--disassemble out.ice` view without the
+# temp file. Unlike the per-form path below it does NOT run each form (build
+# already runs imports for their inlining side effects), and it's one dump, not
+# one-per-form.
+def dump_bytecode(path : String, strict : Bool = false, static : Bool = false, strip : Bool = false) : Nil
   interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: !strict)
   src = File.read(path)
   # Push the script's own directory, matching Creme.run_file, so a relative
@@ -165,19 +176,24 @@ def dump_bytecode(path : String, strict : Bool = false) : Nil
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
     forms = Creme.forms_for(interp, src, path)
-    forms.each_with_index do |form, i|
-      node = interp.analyze(form, interp.global)
-      chunk = Creme::BytecodeCompiler.compile_program([node])
-      puts "; ---- top-level form #{i} ----" if forms.size > 1
-      Creme::Disassembler.disassemble(chunk, "form #{i}")
-      Creme::VM.new(interp, interp.global).run(chunk)
+    if static
+      chunk, _ = Creme::IcecremeEmitter.build(interp, forms, interp.global, strip)
+      Creme::Disassembler.disassemble(chunk, File.basename(path))
+    else
+      forms.each_with_index do |form, i|
+        node = interp.analyze(form, interp.global)
+        chunk = Creme::BytecodeCompiler.compile_program([node])
+        puts "; ---- top-level form #{i} ----" if forms.size > 1
+        Creme::Disassembler.disassemble(chunk, "form #{i}")
+        Creme::VM.new(interp, interp.global).run(chunk)
+      end
     end
   ensure
     interp.pop_load_dir
   end
 end
 
-# Disassembles an ALREADY-COMPILED ICE1 file (e.g. one written by
+# Disassembles an ALREADY-COMPILED ICE file (e.g. one written by
 # `--emit-icecreme`, or by the self-hosted (creme compiler compiler)'s own
 # compile-source-to-bytes/chunk->bytes) — unlike dump_bytecode above,
 # which always compiles SOURCE fresh, this reads raw bytes straight off
@@ -240,7 +256,7 @@ end
 # Compiles `path` (same auto-import-base convention as dump_bytecode above,
 # so builtins fuse the same way a real run would) into a single Chunk and
 # serializes it to `out_path` via IcecremeEmitter/ChunkSerializer (the same
-# "ICE1" format the real Crystal VM already round-trips through) — for
+# "ICE" format the real Crystal VM already round-trips through) — for
 # `creme --emit-icecreme`, feeding the standalone C11 prototype VM in icecreme/ (see
 # icecreme/README.md for current opcode/value-model coverage). Pushes path's own
 # directory first, same as Creme.run_file — bench/creme.scm's own
@@ -248,30 +264,37 @@ end
 # lives, not the process's CWD, so this must match run_file's convention
 # rather than dump_bytecode's (which doesn't push one at all) for `creme
 # --emit-icecreme bench/creme.scm ...` to work when invoked from the repo root.
-def emit_icecreme(path : String, out_path : String) : Nil
+def emit_icecreme(path : String, out_path : String, strip : Bool = false) : Nil
   interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: true)
   interp.push_load_dir(File.dirname(File.expand_path(path)))
   begin
     src = File.read(path)
     forms = Creme.forms_for(interp, src, path)
-    bytes = Creme::IcecremeEmitter.emit(interp, forms, interp.global)
+    bytes = Creme::IcecremeEmitter.emit(interp, forms, interp.global, strip)
     File.write(out_path, bytes)
   ensure
     interp.pop_load_dir
   end
 end
 
-# Handles `creme --emit-icecreme <file.scm> <out.ice>` — split out of `main`
-# purely to keep that method's own top-level dispatch simple.
+# Handles `creme --emit-icecreme [--strip] <file.scm> <out.ice>` — split out of
+# `main` purely to keep that method's own top-level dispatch simple. `--strip`
+# drops never-called inlined-library globals (see IcecremeEmitter.build).
 def handle_emit_icecreme(args : Array(String)) : Nil
-  unless args[1]? && args[2]?
-    STDERR.puts "Usage: creme --emit-icecreme <file.scm> <out.ice>"
+  strip = false
+  i = 1
+  while args[i]? == "--strip"
+    strip = true
+    i += 1
+  end
+  unless args[i]? && args[i + 1]?
+    STDERR.puts "Usage: creme --emit-icecreme [--strip] <file.scm> <out.ice>"
     exit 1
   end
   begin
-    path = args[1]
-    out_path = args[2]
-    emit_icecreme(path, out_path)
+    path = args[i]
+    out_path = args[i + 1]
+    emit_icecreme(path, out_path, strip)
   rescue ex : Creme::SchemeError
     STDERR.puts format_error(ex)
     exit 1
@@ -334,27 +357,36 @@ def handle_profile_icecreme(args : Array(String)) : Nil
   run_via_icecreme(path, ["--profile"])
 end
 
-# Handles `creme -S | --dump-bytecode [--strict] <file.scm>` — split out of
-# `main` purely to keep that method's own top-level dispatch simple.
+# Handles `creme -S | --dump-bytecode [--strict] [--static] <file.scm>` — split
+# out of `main` purely to keep that method's own top-level dispatch simple.
+# `--strict`/`--static` may appear in either order before the path.
 def handle_dump_bytecode(args : Array(String)) : Nil
-  strict = args[1]? == "--strict"
-  path_index = strict ? 2 : 1
+  strict = false
+  static = false
+  strip = false
+  path_index = 1
+  while (flag = args[path_index]?) && (flag == "--strict" || flag == "--static" || flag == "--strip")
+    strict = true if flag == "--strict"
+    static = true if flag == "--static"
+    strip = true if flag == "--strip"
+    path_index += 1
+  end
   unless args[path_index]?
-    STDERR.puts "Usage: creme --dump-bytecode <file.scm>"
+    STDERR.puts "Usage: creme --dump-bytecode [--strict] [--static] [--strip] <file.scm>"
     exit 1
   end
   begin
-    # Drop the dump-bytecode flag itself (and --strict, if given) from
+    # Drop the dump-bytecode flag itself (and --strict/--static, if given) from
     # ARGV before compiling — (command-line)/(creme cli) (see
     # modules/creme/cli.sld) assume ARGV[0] is always the script's own
     # path, matching plain "creme SCRIPT [args...]"; leaving
-    # "-S"/"--dump-bytecode"/"--strict" in ARGV would shift that and make
-    # the script's own flag parsing see its path as a stray unrecognized
+    # "-S"/"--dump-bytecode"/"--strict"/"--static" in ARGV would shift that and
+    # make the script's own flag parsing see its path as a stray unrecognized
     # flag. `args` IS `ARGV` (see main's own call site), so this shift is
     # visible to both.
     path = args[path_index]
     path_index.times { ARGV.shift }
-    dump_bytecode(path, strict)
+    dump_bytecode(path, strict, static, strip)
   rescue ex : Creme::SchemeExit
     exit(ex.code)
   rescue ex : Creme::SchemeError
@@ -465,7 +497,7 @@ SELF_HOSTED_TOOLCHAIN_IMPORT = %((import (scheme lazy) (scheme eval) (scheme cxr
 # file-based library SELF_HOSTED_TOOLCHAIN_IMPORT above already loaded
 # NATIVELY (this whole toolchain import runs through Crystal's own real
 # import machinery, which the self-hosted compiler's own loader has no
-# way to know about) -- mirrors icecreme/compiler-run.scm's own identical
+# way to know about) -- mirrors icecreme/icecreme.scm's own identical
 # pre-seeding, needed for the identical reason (that file's own header
 # comment): once compiler.sld's own file-reading (file-read, via (creme
 # file)) genuinely works under self-hosted too (previously silently

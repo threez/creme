@@ -136,7 +136,7 @@ own OKP key type), not exposed through `(creme pkey)`; X.509 has no CRL
 |---|---|---|
 | `(creme raft)`/`(creme raft-scheme)`/`(creme raft-machine)` | Full Raft consensus (leader election, log replication, snapshotting, membership changes), two independent implementations (FFI-backed and pure-Scheme) | None in stdlib; would mean reaching for a gem like `raft-rb` (unmaintained) or rolling your own |
 | `(creme actor)`/`(creme actor-supervisor)` | Message-passing actors with OTP-style supervised restart-on-crash | None — Ruby's concurrency stdlib (`Thread`/`Fiber`/`Ractor`) is shared-memory/message-queue at a much lower level; nothing OTP-shaped ships by default |
-| `(creme bytecode)` | Assembler + serializer (ICE1 format) for this project's own register-VM bytecode | N/A — Ruby doesn't expose its own YARV bytecode format for scripts to assemble |
+| `(creme bytecode)` | Assembler + serializer (ICE format) for this project's own register-VM bytecode | N/A — Ruby doesn't expose its own YARV bytecode format for scripts to assemble |
 | `(creme ir)` | Generic S-expression code-generation building blocks (used by the self-hosted compiler) | No direct analog — closest is metaprogramming via `Kernel#eval`/`instance_eval`, a different mechanism entirely |
 | `(creme lr)` | SLR(1) parser-table generator exposed as a library, including conflict inspection (`debug-states`) | `Racc` is a *code generator* (compiles a `.y` grammar to a `.rb` file offline); `(creme lr)` is a runtime library callable directly from a script |
 | `(creme peg)` | PEG-style parser combinators | Not in stdlib; closest gems are `parslet`/`treetop`, both third-party |

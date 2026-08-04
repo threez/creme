@@ -4,6 +4,7 @@
 /.shards/
 *.dwarf
 crystal-run-*.tm.core
+*.core
 /competition/bench.html
 /competition/bench/prof.html
 /competition/lua/bench/monotonic.so
@@ -15,7 +16,9 @@ crystal-run-*.tm.core
 /icecreme/*.o
 /icecreme/vendor/
 /icecreme/repl.ice
-/icecreme/compiler-run.ice
+/icecreme/icecreme.ice
+/icecreme/icecreme-boot
+/icecreme/icecreme-boot.ice
 /icecreme/fuzz/corpus/
 /icecreme/crash-*
 /icecreme/oom-*
@@ -25,7 +28,8 @@ crystal-run-*.tm.core
 # source it bundles the compiler bytecode from, and the bin2c helper
 # binary itself -- see icecreme/Makefile's own comment.
 /icecreme/libcreme.a
-/icecreme/embedded_compiler_run.c
+/icecreme/embedded_icecreme.c
+/icecreme/embedded_icecreme_boot.c
 /icecreme/tools/bin2c
 
 # examples/libcream/'s own build output.

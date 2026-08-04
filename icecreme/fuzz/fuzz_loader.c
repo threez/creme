@@ -1,4 +1,4 @@
-/* libFuzzer harness for creme_load_from_bytes (loader.c) -- the ICE1
+/* libFuzzer harness for creme_load_from_bytes (loader.c) -- the ICE
  * bytecode deserializer, the concrete untrusted-input boundary an
  * embedder crosses whenever it loads a precompiled .ice/bytevector it
  * didn't itself just compile (see icecreme/README.md's embedding notes).
@@ -11,7 +11,7 @@
  * own compiler-rt, no separate package). No seed corpus is committed to
  * this repo -- point a run at an empty directory to start from scratch,
  * or seed it yourself first from any real .ice files you have locally
- * (e.g. `gmake -C icecreme all` produces icecreme/compiler-run.ice, or
+ * (e.g. `gmake -C icecreme all` produces icecreme/icecreme.ice, or
  * `bin/creme --emit-icecreme <script.scm> <out.ice>` on any script). Example:
  * `mkdir -p icecreme/fuzz/corpus && icecreme/fuzz-loader -max_total_time=300
  * icecreme/fuzz/corpus`. Add `-jobs=N`/`-workers=N` for a parallel run, or a

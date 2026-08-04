@@ -1,19 +1,19 @@
-/* icecreme — standalone prototype VM entry point. Loads an "ICE1" file (produced
- * by `creme --emit-icecreme <file.scm> <out.ice>`, see icecreme_emitter.cr) — a
- * whole script (plus its transitively-imported pure-Scheme library bodies)
- * compiled into ONE Chunk — and runs it. See icecreme/README.md for full scope.
+/* icecreme — entry point for the C11 bytecode VM. This is a deliberately thin
+ * launcher: it does the one-time C-only startup (GC/GMP/VM init, register the
+ * native builtins), then loads and runs ONE embedded chunk — the CLI program
+ * icecreme/icecreme.scm (compiled to icecreme.ice and baked in via the Makefile's
+ * bin2c rule). Everything a user sees — parsing the command line, the REPL,
+ * running a .scm source or a precompiled .ice, --emit-icecreme/--static,
+ * -S/--dump-bytecode, --disassemble, --version, --help — lives in that Scheme
+ * program (which bundles the self-hosted compiler and disassembler), reached
+ * here purely via (command-line). main.c itself understands only `--profile`,
+ * because that drives the native C profiler wrapping the whole run.
  *
- * Running one combined chunk is also what makes a compiled HTTP server
- * (e.g. competition/scheme/demo-todo/app.scm) run correctly as a genuinely
- * long-running process, with no special-casing needed here: mux.c's
- * mux-listen! runs its own accept loop right there on the calling thread
- * (see that file's own comment) and blocks until it stops (mux-close!, or
- * the process is killed) — so this run simply doesn't return until the
- * server does. Whatever top-level forms come after it in the source (in
- * app.scm's case, (read-line)/mux-close!/sql-close, originally written for
- * the interactive single-process interpreter) still run afterward as
- * ordinary best-effort cleanup once the server actually stops, since
- * they're all part of the same sequential chunk body. */
+ * Because the whole program is one chunk running on one VM, a compiled HTTP
+ * server (e.g. competition/scheme/demo-todo/app.scm) runs correctly as a
+ * genuinely long-running process with no special-casing: mux.c's mux-listen!
+ * runs its own accept loop on the calling thread and blocks until it stops, so
+ * the run simply doesn't return until the server does. See icecreme/README.md. */
 #include <gc.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -21,7 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bootstrap.h"
 #include "builtin_families.h"
 #include "profiler.h"
 #include "vm.h"
@@ -32,27 +31,11 @@
  * add a `--profile=<n>` form here if a bench ever needs a different rate. */
 #define CREME_PROFILE_DEFAULT_VM_INTERVAL 200
 
-/* Repo-root-relative, matching this project's existing convention for
- * locating icecreme itself (e.g. src/main.cr's run_via_cvm hardcodes
- * "icecreme/icecreme") -- assumes icecreme is invoked from the repo root, same
- * assumption every other icecreme/creme cross-reference in this project makes. */
-#define CREME_COMPILER_DRIVER_PATH "icecreme/compiler-run.ice"
-
-/* A plain .scm file can never coincidentally start with the 4 bytes
- * "ICE1" (Scheme source always starts with whitespace, `(`, or `;`), so
- * this is a safe, content-based way to tell "already-compiled ICE1
- * binary" apart from "raw Scheme source needing compiler mode" -- no
- * `--compile` flag or file-extension convention needed. A file that
- * can't even be opened returns 0 here too, letting the real error
- * surface later from whichever path actually tries to open it. */
-static int is_ice1_file(const char *path) {
-  FILE *f = fopen(path, "rb");
-  if (!f) return 0;
-  char magic[4];
-  size_t n = fread(magic, 1, 4, f);
-  fclose(f);
-  return n == 4 && memcmp(magic, "ICE1", 4) == 0;
-}
+/* The CLI program's (icecreme/icecreme.scm) ICE bytes, embedded into the binary
+ * at build time by icecreme/Makefile's bin2c rule (embedded_icecreme.c). This is
+ * the ONE chunk main() runs; it reads (command-line) and does everything else. */
+extern const unsigned char creme_embedded_icecreme_ice[];
+extern const size_t creme_embedded_icecreme_ice_len;
 
 /* Redirects GMP's own allocator (used by T_RATIONAL's mpq_t, value.h) to
  * Boehm GC -- without this, an mpq_t's internal limb buffers would be
@@ -94,33 +77,26 @@ static int creme_getenv_int(const char *name) {
 }
 
 int main(int argc, char **argv) {
+  /* Leading `--profile` (optionally followed by a `table` report-format token,
+   * accepted for symmetry with native `creme --profile table <file>`) is the
+   * one flag main.c handles itself -- it drives the native C profiler, which
+   * wraps the whole run below. Everything from the first remaining token onward
+   * is forwarded verbatim to icecreme.scm via (command-line): IT parses
+   * --emit-icecreme/--static/-S/--disassemble/--version/--help/`--`/stdin/run/
+   * REPL. That same forwarded slice is also the running script's own
+   * (command-line) tail, matching native's contract exactly ([PROGRAM_NAME] +
+   * ARGV, ARGV still including the script's own path as its first element --
+   * process_context.cr never strips it). */
   int profile = 0;
-  const char *path = NULL;
-  /* The target path and everything after it (contiguous in argv, since
-   * --profile can only appear before it) becomes the running script's
-   * own (command-line) tail -- see creme_set_command_line_args below --
-   * mirroring native's own (command-line) contract exactly: [PROGRAM_
-   * NAME] + ARGV, where Crystal's ARGV still includes the script's own
-   * path as its first element (process_context.cr/`command_line` never
-   * strips it). */
-  int script_argc = 0;
-  char **script_argv = NULL;
-  for (int i = 1; i < argc; i++) {
-    if (path) {
-      script_argc++;
-    } else if (strcmp(argv[i], "--profile") == 0) {
-      profile = 1;
-    } else {
-      path = argv[i];
-      script_argv = &argv[i];
-      script_argc = 1;
-    }
+  int i = 1;
+  if (i < argc && strcmp(argv[i], "--profile") == 0) {
+    profile = 1;
+    i++;
+    if (i < argc && strcmp(argv[i], "table") == 0) i++;
   }
-  if (!path) {
-    fprintf(stderr, "usage: %s [--profile] <file.ice> [script-args...]\n", argv[0]);
-    return 1;
-  }
-  creme_set_command_line_args(argv[0], script_argc, script_argv);
+  int fwd_argc = argc - i;
+  char **fwd_argv = (fwd_argc > 0) ? &argv[i] : NULL;
+  creme_set_command_line_args(argv[0], fwd_argc, fwd_argv);
 
   GC_INIT();
   /* Boehm's own env-var handling inside GC_INIT() already honors an
@@ -157,34 +133,19 @@ int main(int argc, char **argv) {
   }
   creme_set_current_vm(vm); /* lets creme_abort reach this VM's guard-handler stack */
 
-  /* Compiler mode: `path` isn't a compiled ICE1 binary at all -- it's the
-   * plain Scheme source icecreme should compile-and-run, entirely via the
-   * bundled self-hosted-compiler driver (see icecreme/compiler-run.scm's own
-   * header comment), never touching a live Crystal `creme` process. The
-   * driver learns the real target path via icecreme-target-path, reads and
-   * compiles it (expanding any `include`s itself), and runs the result. */
-  const char *load_path = path;
-  if (!is_ice1_file(path)) {
-    creme_set_target_path(path);
-    load_path = CREME_COMPILER_DRIVER_PATH;
-  }
-
-  /* Peek the required-families metadata BEFORE the real load: builtins must
-   * be registered before creme_load's resolve_globals pass runs (it needs
-   * creme_global_intern to see already-registered globals -- see
-   * resolve_globals's own doc comment in loader.c), but the family list
-   * itself only becomes known by parsing the file. creme_load re-reads (and,
-   * since NULL/NULL is passed below, discards) this same section again
-   * right after -- see creme_peek_required_families's doc comment in vm.h/
-   * loader.c for why this is a second, separate open rather than sharing a
-   * Reader across both calls. */
-  char **families = NULL;
-  int n_families = 0;
-  creme_peek_required_families(load_path, &families, &n_families);
-  creme_register_required_builtins(vm, families, n_families);
-
-  vm->source_file = load_path;
-  Chunk *chunk = creme_load(load_path, vm, NULL, NULL);
+  /* Register every builtin family up front: icecreme.scm may REPL/compile/emit/
+   * disassemble/run arbitrary code, so all of them must be available, and its
+   * own chunk's resolve_globals pass runs inside creme_load_from_bytes below,
+   * which needs them already present. "Everything on" is the simplest correct
+   * choice (same as examples/libcream/host_demo.c). The ~500KB icecreme.ice's
+   * top-level defines the whole self-hosted toolchain in a few milliseconds --
+   * fast enough that there is no separate "run a precompiled .ice without the
+   * compiler" path here; a precompiled .ice is just one of the things
+   * icecreme.scm loads-and-runs. */
+  creme_register_all_builtins(vm);
+  vm->source_file = "<icecreme>";
+  Chunk *chunk = creme_load_from_bytes(vm, creme_embedded_icecreme_ice,
+                                       creme_embedded_icecreme_ice_len, NULL, NULL);
 
   if (profile) {
     vm->profiler.enabled = 1;

@@ -29,12 +29,39 @@
 ;;   (flag id names help)                 -> a 'boolean flag, default #f
 ;;   (flag id names help type)             -> a typed flag, type-default value
 ;;   (flag id names help type default)     -> fully explicit
-;;   (make-cli description flags)          -> a cli spec, program auto-inferred
+;;   (positional id help)                  -> a required positional argument
+;;   (positional id help required?)        -> optional when required? is #f
+;;   (command id names help spec ...)      -> a subcommand grouping its own
+;;                                             flags/positionals; `names` selects
+;;                                             it, `id` (a symbol) is dispatched on
+;;   (make-cli description specs)          -> a cli spec, program auto-inferred
 ;;   (parse-cli cli args)                  -> parses an explicit args list
-;;   (cli description flags)               -> make-cli + parse-cli against
+;;   (cli description specs)               -> make-cli + parse-cli against
 ;;                                             the live process's own args
 ;;   (cli-usage cli)                        -> the generated usage string
 ;;   (cli-flag? opts id) / (cli-get opts id) -> read a parsed value by id
+;;   (cli-command opts)                    -> the selected subcommand's id, or #f
+;;
+;; `specs` is a mixed list of `flag`, `positional`, and `command` declarations.
+;; Flags are matched by name anywhere in the args; the remaining (non-`-`-prefixed)
+;; args fill the positionals in declaration order. A missing REQUIRED positional,
+;; or an extra arg past the last declared positional, raises — same as a bad flag.
+;;
+;; When a cli declares `command`s, parse-cli treats the FIRST arg as a subcommand
+;; selector: it parses the rest against that command's own flags/positionals and
+;; `cli-command` reports which was chosen. A leading arg matching no command (or
+;; no args) yields `cli-command` => #f and consumes nothing — the caller takes its
+;; own default action from the raw args. This is the way to relate flags to one
+;; another and describe a multi-mode CLI in a single parse-cli call, e.g.:
+;;
+;;   (define spec
+;;     (make-cli "my tool"
+;;       (list (command 'build "build" "Build it"
+;;                      (flag "release" "--release" "optimized")
+;;                      (positional "target" "what to build"))
+;;             (command 'clean "clean" "Remove build output"))))
+;;   (case (cli-command (parse-cli spec (cdr (command-line))))
+;;     ((build) ...) ((clean) ...) (else ...default...))
 ;;
 ;; `program` (used in the usage header) is inferred as the second element of
 ;; (command-line) — the script's own path, per how `creme <script>
@@ -48,8 +75,9 @@
 ;; ===========================================================================
 
 (define-library (creme cli)
-  (export flag make-cli parse-cli cli cli-usage cli-flag? cli-get)
-  (import (scheme base) (scheme write) (scheme process-context)
+  (export flag positional command
+          make-cli parse-cli cli cli-usage cli-command-lines cli-flag? cli-get cli-command)
+  (import (scheme base) (scheme cxr) (scheme write) (scheme process-context)
           (creme string))
   (begin
     (define-record-type <cli-flag>
@@ -61,12 +89,53 @@
       (default flag-default)
       (help flag-help))
 
+    (define-record-type <cli-positional>
+      (make-positional-raw id help required)
+      positional-spec?
+      (id positional-id)
+      (help positional-help)
+      (required positional-required))
+
+    ;; (positional id help [required?]) — a positional argument; id doubles as
+    ;; its key (cli-get) and its <name> in the usage line. Required by default.
+    (define positional
+      (case-lambda
+        ((id help) (make-positional-raw id help #t))
+        ((id help required?) (make-positional-raw id help required?))))
+
+    (define-record-type <cli-command>
+      (make-command-raw id names help flags positionals)
+      command-spec?
+      (id command-id)
+      (names command-names)
+      (help command-help)
+      (flags command-flags)
+      (positionals command-positionals))
+
+    ;; (command id names help spec ...) — a subcommand selected when the FIRST
+    ;; argument equals any of `names` (a string or list of strings). `id` (a
+    ;; symbol) is what cli-command reports for dispatch; `spec ...` are this
+    ;; command's own flags and positionals, parsed against the args after the
+    ;; selecting token. Group related flags this way rather than spreading them
+    ;; across several parse-cli calls.
+    (define (command id names help . specs)
+      (let loop ((specs specs) (flags '()) (poss '()))
+        (cond
+          ((null? specs)
+           (make-command-raw id (if (pair? names) names (list names)) help
+                             (reverse flags) (reverse poss)))
+          ((flag-spec? (car specs)) (loop (cdr specs) (cons (car specs) flags) poss))
+          ((positional-spec? (car specs)) (loop (cdr specs) flags (cons (car specs) poss)))
+          (else (error "cli: bad command spec" (car specs))))))
+
     (define-record-type <cli>
-      (make-cli-raw program description flags)
+      (make-cli-raw program description flags positionals commands)
       cli?
       (program cli-program)
       (description cli-description)
-      (flags cli-flags))
+      (flags cli-flags)
+      (positionals cli-positionals)
+      (commands cli-commands))
 
     (define (default-for-type type)
       (case type
@@ -100,14 +169,42 @@
               ((pair? cl) (car cl))
               (else "script"))))
 
-    (define (make-cli description flags)
-      (make-cli-raw (inferred-program) description flags))
+    ;; Splits a mixed spec list into its flag, positional, and command
+    ;; declarations, preserving declaration order within each (positionals are
+    ;; filled in that order). Avoids depending on a `filter`/`partition` import.
+    (define (partition-specs specs)
+      (let loop ((specs specs) (flags '()) (poss '()) (cmds '()))
+        (cond
+          ((null? specs) (list (reverse flags) (reverse poss) (reverse cmds)))
+          ((flag-spec? (car specs)) (loop (cdr specs) (cons (car specs) flags) poss cmds))
+          ((positional-spec? (car specs)) (loop (cdr specs) flags (cons (car specs) poss) cmds))
+          ((command-spec? (car specs)) (loop (cdr specs) flags poss (cons (car specs) cmds)))
+          (else (error "cli: not a flag/positional/command spec" (car specs))))))
 
-    (define (find-flag cli name)
-      (let loop ((fs (cli-flags cli)))
+    (define (build-cli program description specs)
+      (let ((parts (partition-specs specs)))
+        (make-cli-raw program description (car parts) (cadr parts) (caddr parts))))
+
+    ;; (make-cli description specs) infers the program name from (command-line);
+    ;; (make-cli program description specs) sets it explicitly -- use the latter
+    ;; for a standalone binary whose command-line's second element is an argument,
+    ;; not a script path (so usage reads "<program> <command>", not the arg).
+    (define make-cli
+      (case-lambda
+        ((description specs) (build-cli (inferred-program) description specs))
+        ((program description specs) (build-cli program description specs))))
+
+    (define (find-flag-in flags name)
+      (let loop ((fs flags))
         (cond ((null? fs) #f)
               ((member name (flag-names (car fs))) (car fs))
               (else (loop (cdr fs))))))
+
+    (define (find-command cli tok)
+      (let loop ((cs (cli-commands cli)))
+        (cond ((null? cs) #f)
+              ((member tok (command-names (car cs))) (car cs))
+              (else (loop (cdr cs))))))
 
     (define (coerce value type who)
       (case type
@@ -124,30 +221,76 @@
             (cons (substring arg 0 i) (substring arg (+ i 1) (string-length arg)))
             (cons arg #f))))
 
-    ;; (parse-cli cli args) -> a string-keyed alist, one entry per declared
-    ;; flag (its id -> the parsed value, or its default if never given).
-    (define (parse-cli cli args)
+    (define (looks-like-flag? name)
+      (and (> (string-length name) 1) (char=? (string-ref name 0) #\-)))
+
+    ;; Core parse: `args` against an explicit flag+positional set. `usage` is a
+    ;; thunk producing the help text shown for -h/--help. Flags are matched by
+    ;; name anywhere; the remaining non-flag args fill `positionals` in order. A
+    ;; leftover arg past the last positional, an unknown flag, or a missing
+    ;; required positional raises. Returns a string-keyed alist.
+    (define (parse-specs flags positionals usage args)
       (let loop ((args args)
-                 (result (map (lambda (f) (cons (flag-id f) (flag-default f))) (cli-flags cli))))
+                 (pos-specs positionals)
+                 (result (append
+                          (map (lambda (f) (cons (flag-id f) (flag-default f))) flags)
+                          (map (lambda (p) (cons (positional-id p) #f)) positionals))))
         (if (null? args)
-            result
+            (begin
+              (for-each
+               (lambda (p)
+                 (if (and (positional-required p)
+                          (not (cdr (assoc (positional-id p) result string=?))))
+                     (error "cli: missing required argument" (positional-id p))))
+               positionals)
+              result)
             (let* ((split (split-eq (car args)))
                    (name (car split))
-                   (inline-value (cdr split)))
-              (if (or (string=? name "-h") (string=? name "--help"))
-                  (begin (display (cli-usage cli)) (newline) (exit 0))
-                  (let ((f (find-flag cli name)))
-                    (if (not f)
-                        (error "cli: unknown flag" name)
-                        (if (eq? (flag-type f) 'boolean)
-                            (loop (cdr args) (set-value result (flag-id f) #t))
-                            (let* ((rest (cdr args))
-                                   (raw (or inline-value
-                                            (if (null? rest)
-                                                (error "cli: missing value for" name)
-                                                (car rest))))
-                                   (rest2 (if (or inline-value (null? rest)) rest (cdr rest))))
-                              (loop rest2 (set-value result (flag-id f) (coerce raw (flag-type f) name))))))))))))
+                   (inline-value (cdr split))
+                   (f (find-flag-in flags name)))
+              (cond
+                ((or (string=? name "-h") (string=? name "--help"))
+                 (display (usage)) (newline) (exit 0))
+                (f
+                 (if (eq? (flag-type f) 'boolean)
+                     (loop (cdr args) pos-specs (set-value result (flag-id f) #t))
+                     (let* ((rest (cdr args))
+                            (raw (or inline-value
+                                     (if (null? rest)
+                                         (error "cli: missing value for" name)
+                                         (car rest))))
+                            (rest2 (if (or inline-value (null? rest)) rest (cdr rest))))
+                       (loop rest2 pos-specs (set-value result (flag-id f) (coerce raw (flag-type f) name))))))
+                ((looks-like-flag? name) (error "cli: unknown flag" name))
+                ((pair? pos-specs)
+                 (loop (cdr args) (cdr pos-specs)
+                       (set-value result (positional-id (car pos-specs)) (car args))))
+                (else (error "cli: unexpected argument" (car args))))))))
+
+    ;; (parse-cli cli args) -> a string-keyed alist.
+    ;;   * Flat cli (only flags/positionals): the parsed values directly.
+    ;;   * cli WITH commands: the FIRST arg selects a command; the result carries
+    ;;     ("*command*" . id) plus that command's own parsed flags/positionals.
+    ;;     A leading arg matching no command — or no args at all — yields
+    ;;     ("*command*" . #f) and consumes nothing, leaving the caller to take
+    ;;     its default action from the raw args (see cli-command).
+    (define (parse-cli cli args)
+      (if (null? (cli-commands cli))
+          (parse-specs (cli-flags cli) (cli-positionals cli)
+                       (lambda () (cli-usage cli)) args)
+          (if (null? args)
+              (list (cons "*command*" #f))
+              (let ((c (find-command cli (car args))))
+                (if c
+                    (cons (cons "*command*" (command-id c))
+                          (parse-specs (command-flags c) (command-positionals c)
+                                       (lambda () (command-usage cli c)) (cdr args)))
+                    (list (cons "*command*" #f)))))))
+
+    ;; The selected command's id (a symbol), or #f when the cli has no commands
+    ;; or the leading arg matched none.
+    (define (cli-command opts)
+      (let ((e (assoc "*command*" opts string=?))) (and e (cdr e))))
 
     (define (set-value alist id value)
       (map (lambda (entry) (if (string=? (car entry) id) (cons id value) entry)) alist))
@@ -168,27 +311,93 @@
     (define (flag-usage-line f)
       (string-append "  " (string-pad-right (string-join (flag-names f) ", ") 22 " ")
                       (flag-help f)
+                      ;; Show a "(default: ...)" note only for a typed flag whose
+                      ;; default is a real, non-type-default value. A #f default on
+                      ;; a typed flag means "unset" -- no note (and never coerce #f
+                      ;; through number->string).
                       (if (and (not (eq? (flag-type f) 'boolean))
+                               (flag-default f)
                                (not (equal? (flag-default f) (default-for-type (flag-type f)))))
                           (string-append " (default: " (to-display-string (flag-default f)) ")")
                           "")
                       "\n"))
 
     (define (to-display-string v)
-      (if (string? v) v (number->string v)))
+      (cond ((string? v) v)
+            ((number? v) (number->string v))
+            (else (if v "true" "false"))))
 
     ;; (cli-usage cli) -> the generated usage string (program + description,
     ;; a "Usage: ..." line, then one line per declared flag plus -h/--help).
-    (define (cli-usage cli)
+    (define (positional-usage-line p)
+      (string-append "  " (string-pad-right (positional-id p) 22 " ")
+                     (positional-help p)
+                     (if (positional-required p) "" " (optional)") "\n"))
+
+    (define (positionals-suffix positionals)
+      (apply string-append
+             (map (lambda (p) (string-append " <" (positional-id p) ">")) positionals)))
+
+    ;; The "Arguments:" + "Options:" body shared by a flat cli's usage and a
+    ;; single command's usage.
+    (define (specs-usage positionals flags)
       (string-append
-       (cli-program cli) " - " (cli-description cli) "\n\n"
-       "Usage: " (cli-program cli) " [options]\n\n"
+       (if (null? positionals)
+           ""
+           (string-append
+            "Arguments:\n"
+            (apply string-append (map positional-usage-line positionals))
+            "\n"))
        "Options:\n"
-       (apply string-append (map flag-usage-line (cli-flags cli)))
+       (apply string-append (map flag-usage-line flags))
        "  " (string-pad-right "-h, --help" 22 " ") "Show this help message\n"))
 
-    ;; A boolean flag's value (or any flag's truthiness) by id.
-    (define (cli-flag? opts id) (cdr (assoc id opts string=?)))
+    (define (command-usage-line c)
+      (string-append "  " (string-pad-right (string-join (command-names c) ", ") 22 " ")
+                     (command-help c) "\n"))
 
-    ;; Any flag's parsed value by id.
-    (define (cli-get opts id) (cdr (assoc id opts string=?)))))
+    ;; The formatted one-line-per-command listing (each command's names + help),
+    ;; with no surrounding header -- for a host that embeds the command list in
+    ;; its own richer help text (cli-usage does the standard full framing).
+    (define (cli-command-lines cli)
+      (apply string-append (map command-usage-line (cli-commands cli))))
+
+    ;; Usage for a single subcommand (its own flags/positionals). `prog` is the
+    ;; "<program> <command>" invocation, collapsed to just the command name when
+    ;; the inferred program IS the command token (e.g. a VM whose command-line's
+    ;; second element is the subcommand itself, not a script path).
+    (define (command-usage cli c)
+      (let* ((cname (car (command-names c)))
+             (prog (if (string=? (cli-program cli) cname)
+                       cname
+                       (string-append (cli-program cli) " " cname))))
+        (string-append
+         prog " - " (command-help c) "\n\n"
+         "Usage: " prog " [options]"
+         (positionals-suffix (command-positionals c)) "\n\n"
+         (specs-usage (command-positionals c) (command-flags c)))))
+
+    ;; (cli-usage cli) -> the generated usage string: a command listing when the
+    ;; cli has subcommands, otherwise the flat program + flags/positionals usage.
+    (define (cli-usage cli)
+      (if (pair? (cli-commands cli))
+          (string-append
+           (cli-program cli) " - " (cli-description cli) "\n\n"
+           "Usage: " (cli-program cli) " <command> [options]\n\n"
+           "Commands:\n"
+           (apply string-append (map command-usage-line (cli-commands cli)))
+           "  " (string-pad-right "-h, --help" 22 " ") "Show this help message\n")
+          (string-append
+           (cli-program cli) " - " (cli-description cli) "\n\n"
+           "Usage: " (cli-program cli) " [options]"
+           (positionals-suffix (cli-positionals cli)) "\n\n"
+           (specs-usage (cli-positionals cli) (cli-flags cli)))))
+
+    ;; A boolean flag's value (or any flag's truthiness) by id; #f if the id
+    ;; isn't present (e.g. it belongs to a command that wasn't selected).
+    (define (cli-flag? opts id)
+      (let ((e (assoc id opts string=?))) (and e (cdr e))))
+
+    ;; Any flag's/positional's parsed value by id; #f if the id isn't present.
+    (define (cli-get opts id)
+      (let ((e (assoc id opts string=?))) (and e (cdr e))))))

@@ -246,7 +246,25 @@ static Value bi_hash_table_delete(VM *vm, Value *args, int nargs) {
   return v_nil();
 }
 
+/* (eq-hash obj) -- a stable integer that distinguishes objects by IDENTITY
+ * (eq?), for use as a hash-table key when structural (equal?) hashing is wrong.
+ * The ordinary make-hash-table hashes a pair/vector by its CONTENTS (see
+ * builtins.c's creme_hash_value_rec), so two distinct-but-structurally-equal
+ * forms would collide; keying a plain hash table on (eq-hash form) instead
+ * distinguishes them. Reinterprets the value's own payload word as an integer:
+ * for a heap object (pair, vector, string, box, ...) that's its address --
+ * stable because Boehm GC never moves objects -- and for an immediate
+ * (int/char/bool/nil) it's the value itself, so eq? objects share a key and
+ * non-eq? objects (of the same tag) don't. Added for the self-hosted compiler's
+ * per-form source-position table (modules/creme/compiler/reader.sld). */
+static Value bi_eq_hash(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_exact_args(nargs, 1, "eq-hash");
+  return v_int(args[0].as.i);
+}
+
 void creme_register_hashtable_builtins(VM *vm) {
+  creme_register_builtin(vm, "eq-hash", bi_eq_hash);
   creme_register_builtin(vm, "make-hash-table", bi_make_hash_table);
   creme_register_builtin(vm, "hash-table?", bi_hash_table_p);
   creme_register_builtin(vm, "hash-table-set!", bi_hash_table_set);

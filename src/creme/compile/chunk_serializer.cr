@@ -1,5 +1,5 @@
 # ===========================================================================
-# ChunkSerializer: dumps a compiled Chunk to the "ICE1" binary format that
+# ChunkSerializer: dumps a compiled Chunk to the "ICE" binary format that
 # ChunkDeserializer reads back.
 # ===========================================================================
 #
@@ -17,18 +17,23 @@
 # bytevector operations, needing no Crystal-side serializer at all.
 module Creme
   module ChunkSerializer
-    MAGIC = "ICE1"
-    # A single format-version byte, written immediately after MAGIC.
-    # Bump this (in lockstep with modules/creme/bytecode.sld's own
-    # writer, and icecreme/loader.c's/chunk_deserializer.cr's own readers)
-    # whenever the on-disk chunk layout itself changes in a way an
-    # older reader couldn't safely parse -- so a stale precompiled
-    # .ice (or a load-chunk-bytes blob built by a different creme/icecreme
-    # release) fails with a clean, actionable "re-emit this" error
-    # instead of a reader silently misinterpreting bytes it wasn't
-    # written for. See CHANGELOG.md/icecreme/STABILITY.md for the
-    # compatibility policy this exists to support.
-    FORMAT_VERSION = 1_u8
+    # The on-disk format version. It is NOT stored as a separate byte:
+    # the 4-byte magic IS "ICE" + one ASCII version digit ('0' + version),
+    # e.g. version 1 = "ICE1", and a reader learns the version straight from
+    # the 4th magic byte (byte3 - '0'). Bump this (in
+    # lockstep with modules/creme/bytecode.sld's own writer, and
+    # icecreme/loader.c's/chunk_deserializer.cr's own readers) whenever the
+    # on-disk chunk layout itself changes in a way an older reader couldn't
+    # safely parse -- so a stale precompiled .ice (or a load-chunk-bytes
+    # blob built by a different creme/icecreme release) fails with a clean,
+    # actionable "re-emit this" error instead of a reader silently
+    # misinterpreting bytes it wasn't written for. See
+    # CHANGELOG.md/icecreme/STABILITY.md for the compatibility policy this
+    # exists to support.
+    FORMAT_VERSION = 1
+    MAGIC_PREFIX   = "ICE"
+    # 4-byte magic string: "ICE" + the ASCII digit for FORMAT_VERSION.
+    MAGIC = "#{MAGIC_PREFIX}#{('0'.ord + FORMAT_VERSION).chr}"
 
     TAG_INT = 0_u8; TAG_FLOAT = 1_u8; TAG_RATIONAL = 2_u8; TAG_COMPLEX = 3_u8
     TAG_SYM     = 4_u8; TAG_STR = 5_u8; TAG_BOOL = 6_u8; TAG_NIL  = 7_u8
@@ -54,13 +59,50 @@ module Creme
     QQ_CONST = 0_u8; QQ_HOLE = 1_u8; QQ_SPLICE = 2_u8
     QQ_LIST   = 3_u8; QQ_VECTOR = 4_u8
 
+    # Interns every distinct string/symbol the chunk tree references into a
+    # single global pool written once near the file header; every inline
+    # string then becomes a small u24 index into it (see this file's own
+    # header and the plan). `intern` assigns a fresh index on first sight
+    # (mirroring DatumShareState's assign-on-first-sight idiom); `id` looks
+    # up an already-interned string during the write pass (a KeyError here
+    # would mean the collect and write walks disagree on which strings the
+    # chunk references -- a serializer bug, not bad input).
+    private class StringInterner
+      getter strings = [] of String
+      @index = {} of String => Int32
+
+      def intern(s : String) : Int32
+        idx = @index[s]?
+        return idx if idx
+        i = @strings.size
+        @strings << s
+        @index[s] = i
+        i
+      end
+
+      def id(s : String) : Int32
+        @index[s]
+      end
+    end
+
     def self.serialize(chunk : Chunk, required_families : Array(String) = [] of String) : Bytes
+      # Pass 1: collect every string/symbol into the pool, in first-seen order.
+      pool = StringInterner.new
+      required_families.each { |name| pool.intern(name) }
+      collect_chunk_strings(chunk, pool)
+      if pool.strings.size > 0xFF_FFFF
+        raise "chunk_serializer: string pool too large (#{pool.strings.size} > #{0xFF_FFFF}) for a u24 index"
+      end
+
+      # Pass 2: write the pool, then the chunk with u24 pool indices in place
+      # of every inline string.
       io = IO::Memory.new
       io.write(MAGIC.to_slice)
-      io.write_byte(FORMAT_VERSION)
+      write_i32(io, pool.strings.size.to_i32)
+      pool.strings.each { |s| write_pool_string(io, s) }
       write_i32(io, required_families.size.to_i32)
-      required_families.each { |name| write_string(io, name) }
-      write_chunk(io, chunk)
+      required_families.each { |name| write_u24(io, pool.id(name)) }
+      write_chunk(io, chunk, pool)
       io.to_slice
     end
 
@@ -72,7 +114,29 @@ module Creme
       io.write_bytes(v, IO::ByteFormat::LittleEndian)
     end
 
-    private def self.write_string(io : IO, s : String) : Nil
+    # Little-endian unsigned 24-/16-bit writes for pool indices and the
+    # narrow position fields (file-index/line as u24, col as u16).
+    private def self.write_u24(io : IO, v : Int32) : Nil
+      io.write_byte((v & 0xFF).to_u8)
+      io.write_byte(((v >> 8) & 0xFF).to_u8)
+      io.write_byte(((v >> 16) & 0xFF).to_u8)
+    end
+
+    private def self.write_u16(io : IO, v : Int32) : Nil
+      io.write_byte((v & 0xFF).to_u8)
+      io.write_byte(((v >> 8) & 0xFF).to_u8)
+    end
+
+    private def self.clamp_u24(v : Int32) : Int32
+      v < 0 ? 0 : (v > 0xFF_FFFF ? 0xFF_FFFF : v)
+    end
+
+    private def self.clamp_u16(v : Int32) : Int32
+      v < 0 ? 0 : (v > 0xFFFF ? 0xFFFF : v)
+    end
+
+    # A pool entry itself: raw length-prefixed bytes (written once).
+    private def self.write_pool_string(io : IO, s : String) : Nil
       bytes = s.to_slice
       write_i32(io, bytes.size.to_i32)
       io.write(bytes)
@@ -94,7 +158,61 @@ module Creme
       path
     end
 
-    private def self.write_chunk(io : IO, chunk : Chunk) : Nil
+    # Pass 1 of serialization: walk the whole chunk tree exactly as
+    # write_chunk does, interning every string/symbol it will later write as
+    # a pool index. Kept structurally parallel to write_chunk below so the
+    # two never disagree about which strings the chunk references.
+    private def self.collect_chunk_strings(chunk : Chunk, pool : StringInterner) : Nil
+      chunk.instructions.each_with_index do |_, i|
+        pos = chunk.positions[i]?
+        pool.intern(relativize_path(pos.file)) if pos
+      end
+      chunk.consts.each { |v| collect_datum_strings(v, pool, Set(UInt64).new) }
+      chunk.protos.each { |proto| collect_chunk_strings(proto, pool) }
+      chunk.upvalues.each { |upval| pool.intern(upval.name) }
+      pool.intern(chunk.name)
+      chunk.qq_templates.each { |template| collect_qq_template_strings(template, pool) }
+      chunk.case_dispatch_tables.each do |table|
+        table.targets.each_key do |key|
+          pool.intern(key.sval) if key.tag == CaseDispatchKey::TAG_SYM
+        end
+      end
+    end
+
+    # Cycle-guarded (via a per-top-level-datum object_id set) walk collecting
+    # the strings inside a const datum -- symbols, strings, and builtin
+    # names, recursing through pairs/vectors/complex just like write_datum_rec.
+    private def self.collect_datum_strings(v : SchemeValue, pool : StringInterner, seen : Set(UInt64)) : Nil
+      case v
+      when SchemeSym  then pool.intern(v.name)
+      when SchemeStr  then pool.intern(v.value)
+      when Builtin    then pool.intern(v.name)
+      when SchemeComplex
+        collect_datum_strings(v.real, pool, seen)
+        collect_datum_strings(v.imag, pool, seen)
+      when Cons
+        return unless seen.add?(v.object_id)
+        collect_datum_strings(v.car, pool, seen)
+        collect_datum_strings(v.cdr, pool, seen)
+      when SchemeVector
+        return unless seen.add?(v.object_id)
+        v.value.each { |item| collect_datum_strings(item, pool, seen) }
+      end
+    end
+
+    private def self.collect_qq_template_strings(t : QQTemplate, pool : StringInterner) : Nil
+      case t
+      when QQConst
+        collect_datum_strings(t.value, pool, Set(UInt64).new)
+      when QQList
+        t.items.each { |item| collect_qq_template_strings(item, pool) }
+        collect_qq_template_strings(t.tail, pool)
+      when QQVector
+        t.items.each { |item| collect_qq_template_strings(item, pool) }
+      end
+    end
+
+    private def self.write_chunk(io : IO, chunk : Chunk, pool : StringInterner) : Nil
       write_i32(io, chunk.instructions.size.to_i32)
       chunk.instructions.each_with_index do |ins, i|
         write_i32(io, ins.op.to_i32)
@@ -105,40 +223,40 @@ module Creme
         pos = chunk.positions[i]?
         if pos
           io.write_byte(1_u8)
-          write_string(io, relativize_path(pos.file))
-          write_i32(io, pos.line)
-          write_i32(io, pos.col)
+          write_u24(io, pool.id(relativize_path(pos.file)))
+          write_u24(io, clamp_u24(pos.line))
+          write_u16(io, clamp_u16(pos.col))
         else
           io.write_byte(0_u8)
         end
       end
 
       write_i32(io, chunk.consts.size.to_i32)
-      chunk.consts.each { |v| write_datum(io, v) }
+      chunk.consts.each { |v| write_datum(io, v, pool) }
 
       write_i32(io, chunk.protos.size.to_i32)
-      chunk.protos.each { |proto| write_chunk(io, proto) }
+      chunk.protos.each { |proto| write_chunk(io, proto, pool) }
 
       write_i32(io, chunk.upvalues.size.to_i32)
       chunk.upvalues.each do |upval|
         io.write_byte(upval.from_parent_local? ? 1_u8 : 0_u8)
         write_i32(io, upval.index)
-        write_string(io, upval.name)
+        write_u24(io, pool.id(upval.name))
       end
 
       write_i32(io, chunk.param_count)
       io.write_byte(chunk.has_rest? ? 1_u8 : 0_u8)
       write_i32(io, chunk.num_registers)
-      write_string(io, chunk.name)
+      write_u24(io, pool.id(chunk.name))
 
       write_i32(io, chunk.qq_templates.size.to_i32)
-      chunk.qq_templates.each { |template| write_qq_template(io, template) }
+      chunk.qq_templates.each { |template| write_qq_template(io, template, pool) }
 
       write_i32(io, chunk.case_dispatch_tables.size.to_i32)
-      chunk.case_dispatch_tables.each { |table| write_case_dispatch_table(io, table) }
+      chunk.case_dispatch_tables.each { |table| write_case_dispatch_table(io, table, pool) }
     end
 
-    private def self.write_case_dispatch_table(io : IO, t : CaseDispatchTable) : Nil
+    private def self.write_case_dispatch_table(io : IO, t : CaseDispatchTable, pool : StringInterner) : Nil
       write_i32(io, t.default)
       write_i32(io, t.targets.size.to_i32)
       t.targets.each do |key, target|
@@ -151,7 +269,7 @@ module Creme
           write_i64(io, key.ival)
         when CaseDispatchKey::TAG_SYM
           io.write_byte(CDK_SYM)
-          write_string(io, key.sval)
+          write_u24(io, pool.id(key.sval))
         when CaseDispatchKey::TAG_BOOL
           io.write_byte(CDK_BOOL)
           write_i64(io, key.ival)
@@ -164,11 +282,11 @@ module Creme
       end
     end
 
-    private def self.write_qq_template(io : IO, t : QQTemplate) : Nil
+    private def self.write_qq_template(io : IO, t : QQTemplate, pool : StringInterner) : Nil
       case t
       when QQConst
         io.write_byte(QQ_CONST)
-        write_datum(io, t.value)
+        write_datum(io, t.value, pool)
       when QQHole
         io.write_byte(QQ_HOLE)
       when QQSpliceItem
@@ -176,12 +294,12 @@ module Creme
       when QQList
         io.write_byte(QQ_LIST)
         write_i32(io, t.items.size.to_i32)
-        t.items.each { |item| write_qq_template(io, item) }
-        write_qq_template(io, t.tail)
+        t.items.each { |item| write_qq_template(io, item, pool) }
+        write_qq_template(io, t.tail, pool)
       when QQVector
         io.write_byte(QQ_VECTOR)
         write_i32(io, t.items.size.to_i32)
-        t.items.each { |item| write_qq_template(io, item) }
+        t.items.each { |item| write_qq_template(io, item, pool) }
       else
         raise "chunk_serializer: unsupported QQTemplate node #{t.class}"
       end
@@ -238,14 +356,14 @@ module Creme
     # re-serialized contents at all) every time after -- see
     # TAG_LABEL_DEF/TAG_LABEL_REF's own doc comment above for the wire
     # shape, and icecreme/loader.c's read_datum for the matching reader side.
-    private def self.write_datum(io : IO, v : SchemeValue) : Nil
+    private def self.write_datum(io : IO, v : SchemeValue, pool : StringInterner) : Nil
       counts = {} of UInt64 => Int32
       count_datum_visits(v, counts)
-      write_datum_rec(io, v, DatumShareState.new(counts))
+      write_datum_rec(io, v, DatumShareState.new(counts), pool)
     end
 
     # ameba:disable Metrics/CyclomaticComplexity
-    private def self.write_datum_rec(io : IO, v : SchemeValue, state : DatumShareState) : Nil
+    private def self.write_datum_rec(io : IO, v : SchemeValue, state : DatumShareState, pool : StringInterner) : Nil
       if (v.is_a?(Cons) || v.is_a?(SchemeVector)) && state.counts[v.object_id] >= 2
         id = v.object_id
         if state.written[id]?
@@ -274,14 +392,14 @@ module Creme
         write_i64(io, v.denominator)
       when SchemeComplex
         io.write_byte(TAG_COMPLEX)
-        write_datum_rec(io, v.real, state)
-        write_datum_rec(io, v.imag, state)
+        write_datum_rec(io, v.real, state, pool)
+        write_datum_rec(io, v.imag, state, pool)
       when SchemeSym
         io.write_byte(TAG_SYM)
-        write_string(io, v.name)
+        write_u24(io, pool.id(v.name))
       when SchemeStr
         io.write_byte(TAG_STR)
-        write_string(io, v.value)
+        write_u24(io, pool.id(v.value))
       when SchemeBool
         io.write_byte(TAG_BOOL)
         io.write_byte(v.value? ? 1_u8 : 0_u8)
@@ -292,19 +410,19 @@ module Creme
         write_i64(io, v.value.ord.to_i64)
       when Cons
         io.write_byte(TAG_PAIR)
-        write_datum_rec(io, v.car, state)
-        write_datum_rec(io, v.cdr, state)
+        write_datum_rec(io, v.car, state, pool)
+        write_datum_rec(io, v.cdr, state, pool)
       when SchemeVector
         io.write_byte(TAG_VECTOR)
         write_i32(io, v.value.size.to_i32)
-        v.value.each { |item| write_datum_rec(io, item, state) }
+        v.value.each { |item| write_datum_rec(io, item, state, pool) }
       when SchemeBlob
         io.write_byte(TAG_BLOB)
         write_i32(io, v.value.size.to_i32)
         io.write(v.value)
       when Builtin
         io.write_byte(TAG_BUILTIN)
-        write_string(io, v.name)
+        write_u24(io, pool.id(v.name))
       else
         raise "chunk_serializer: unsupported constant/datum type #{v.class}"
       end

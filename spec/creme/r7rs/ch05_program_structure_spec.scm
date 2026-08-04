@@ -101,7 +101,7 @@
   ;; bare reference to it) compiles to a fused Add opcode, baked in at
   ;; compile time independent of any environment -- so excluding `+`
   ;; from an environment couldn't stop `(+ 1 2)` from working there.
-  ;; Fixed: `eval` (icecreme/compiler-run.scm) now checks, via the new
+  ;; Fixed: `eval` (icecreme/icecreme.scm) now checks, via the new
   ;; `environment-bound?` builtin, which fusable primitive names the
   ;; target environment actually lacks, and temporarily tells the
   ;; compiler's own fusion gate (compiler.sld's `mark-redefined!`/

@@ -1,18 +1,25 @@
 ;; ===========================================================================
-;; icecreme's "compiler mode" driver -- compiles and runs a plain .scm file
-;; directly under icecreme, with no live Crystal `creme` process involved.
+;; icecreme's CLI dispatcher (a.k.a. "compiler mode" driver) -- compiles and
+;; runs plain .scm source directly under icecreme, with no live Crystal `creme`
+;; process involved, AND implements icecreme's command-line surface (run / REPL /
+;; --emit-icecreme / -S|--dump-bytecode / --disassemble / stdin / --version /
+;; --help) here in shared Scheme rather than in C. main.c is a thin launcher:
+;; it forwards its argv to this chunk (via (command-line)) and runs it; the
+;; dispatch below decides what to do. See main.c's own header comment.
 ;; ===========================================================================
 ;;
-;; Precompiled once (bundling the self-hosted compiler, exactly like
-;; icecreme/repl.scm does), then used automatically by main.c whenever icecreme is
-;; pointed at a file that ISN'T already an ICE1 binary (main.c peeks the
-;; first 4 bytes -- a plain .scm file can never coincidentally start with
-;; "ICE1"): main.c stashes the real target path (icecreme-target-path) and
-;; loads+runs THIS chunk instead, which reads/compiles/runs the real
-;; target itself.
+;; Precompiled once (bundling the self-hosted compiler), then loaded+run by
+;; main.c from bytes embedded in the binary (embedded_icecreme.c) for every
+;; invocation except a bare, already-compiled ICE file (which main.c runs
+;; directly, no compiler needed). Two entry conventions, checked at the very
+;; bottom of this file:
+;;   * embedding (embed.c's creme_run_scheme_file): icecreme-target-path is set
+;;     to a specific file to compile+run -- no CLI parsing.
+;;   * CLI (main.c): icecreme-target-path is #f; parse (command-line) and
+;;     dispatch on the flags.
 ;;
 ;; Build once, then run any script directly:
-;;   ./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice
+;;   ./bin/creme --emit-icecreme icecreme/icecreme.scm icecreme/icecreme.ice
 ;;   ./icecreme/icecreme competition/scheme/bench/creme.scm
 ;;
 ;; `include`/`include-ci`: the self-hosted compiler itself deliberately
@@ -25,13 +32,14 @@
 ;; `(include "path" ...)`'s own parsed forms (resolved relative to the
 ;; INCLUDING file's own directory, so a nested include resolves against
 ;; wherever ITS OWN file lives), then compile the flattened list.
-(import (scheme base) (scheme write) (scheme lazy)
+(import (scheme base) (scheme write) (scheme lazy) (scheme process-context)
         (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
-        (creme compiler reader) (creme compiler compiler) (creme hash-table))
+        (creme compiler reader) (creme compiler compiler) (creme hash-table)
+        (creme disassemble) (creme cli) (creme bytes) (creme path) (creme version))
 
 ;; This file's own imports above are resolved NATIVELY (Crystal's own
 ;; import machinery, since this whole file is compiled with --emit-icecreme --
-;; i.e. by the NATIVE compiler) and baked into compiler-run.ice at BUILD
+;; i.e. by the NATIVE compiler) and baked into icecreme.ice at BUILD
 ;; time. But (creme compiler compiler)'s own self-hosted library loader
 ;; (ensure-libraries-loaded!, ultimately reached via compile-import! any
 ;; time compile-program hits a target script's own (import ...) form)
@@ -60,6 +68,12 @@
 (mark-self-hosted-library-loaded! '(creme bytecode))
 (mark-self-hosted-library-loaded! '(creme compiler reader))
 (mark-self-hosted-library-loaded! '(creme compiler compiler))
+(mark-self-hosted-library-loaded! '(creme disassemble))
+(mark-self-hosted-library-loaded! '(creme cli))
+(mark-self-hosted-library-loaded! '(creme string))
+(mark-self-hosted-library-loaded! '(creme bytes))
+(mark-self-hosted-library-loaded! '(creme path))
+(mark-self-hosted-library-loaded! '(creme version))
 
 ;; icecreme has no independent second evaluator to back a real `eval` --
 ;; unlike native Crystal's own (scheme eval), which really does run
@@ -217,15 +231,9 @@
           (hash-table-set! read-forms-cache port (cdr forms))
           (car forms)))))
 
-(define (dirname path)
-  (let loop ((i (- (string-length path) 1)))
-    (cond
-      ((< i 0) "")
-      ((char=? (string-ref path i) #\/) (substring path 0 i))
-      (else (loop (- i 1))))))
-
-(define (path-join dir name)
-  (if (string=? dir "") name (string-append dir "/" name)))
+;; dirname / path-join come from (creme path); string->bytes / bytes->string
+;; from (creme bytes); ice-bytes? from (creme bytecode); runtime-version-string
+;; from (creme introspection) -- all imported above, formerly defined inline here.
 
 (define (expand-includes forms dir)
   (apply append
@@ -265,7 +273,169 @@
       (set! current-load-dir saved-dir)
       result)))
 
-(define target (icecreme-target-path))
-(set! current-load-dir (dirname target))
-(define forms (expand-includes (read-program (read-whole-file target)) current-load-dir))
-(load-chunk-bytes (chunk->bytes (compile-program forms target) (required-native-families-list)))
+;; ---- shared helpers used by several dispatch cases below -----------------
+
+;; Compile an already-include-expanded list of forms and run it, registering
+;; whatever native builtin families the compiled chunk needs -- the exact line
+;; the run/`--`/stdin/embedding paths all share.
+(define (run-forms forms name)
+  (load-chunk-bytes (chunk->bytes (compile-program forms name) (required-native-families-list))))
+
+;; Read a .scm source file, expand its includes relative to its own directory,
+;; and run it. (set! current-load-dir ...) so a relative (include ...) inside
+;; resolves against where the script lives, matching `load` above.
+(define (run-source-file path)
+  (set! current-load-dir (dirname path))
+  (run-forms (expand-includes (read-program (read-whole-file path)) current-load-dir) path))
+
+;; Run a file given only its path: an already-compiled ICE chunk is loaded and
+;; run directly (main.c handles the bare `icecreme foo.ice` case before ever
+;; reaching here, but `-- foo.ice` and the plain default path both funnel
+;; through this, so handle both); anything else is treated as .scm source.
+(define (run-file path)
+  (let ((s (read-whole-file path)))
+    (if (ice-bytes? s)
+        (load-chunk-bytes (string->bytes s))
+        (begin (set! current-load-dir (dirname path))
+               (run-forms (expand-includes (read-program s) current-load-dir) path)))))
+
+(define (read-all-stdin)
+  (let loop ((acc '()))
+    (let ((c (read-char)))
+      (if (eof-object? c)
+          (list->string (reverse acc))
+          (loop (cons c acc))))))
+
+;; ---- flag handlers -------------------------------------------------------
+
+;; Named start-repl (not run-repl) to avoid colliding with (creme repl)'s own
+;; run-repl global in icecreme's flat namespace. Compiled+run fresh (rather than
+;; importing (creme repl) into this driver) so the driver stays lean -- the REPL
+;; and its transitive deps aren't baked into icecreme.ice, only pulled in
+;; when actually starting a REPL.
+(define (start-repl)
+  (run-forms (read-program "(import (scheme process-context) (creme repl)) (run-repl)") "<repl>"))
+
+(define (run-stdin)
+  (run-forms (expand-includes (read-program (read-all-stdin)) "") "<stdin>"))
+
+;; static? -> a self-contained chunk (imported .sld library bodies inlined,
+;; runs with no modules/ tree present), via compile-program-static; otherwise
+;; the ordinary (smaller, toolchain-dependent) chunk.
+;; strip? (only meaningful with static?) is threaded into compile-program-static,
+;; which drops never-called inlined-library globals -- see its own doc comment.
+(define (emit-icecreme in-path out-path static? strip?)
+  (set! current-load-dir (dirname in-path))
+  (let* ((forms (expand-includes (read-program (read-whole-file in-path)) current-load-dir))
+         (chunk (if static?
+                    (compile-program-static forms in-path strip?)
+                    (compile-program forms in-path)))
+         (bytes (chunk->bytes chunk (required-native-families-list))))
+    (file-write out-path (bytes->string bytes))))
+
+;; -S / --dump-bytecode: one disassembly dump per top-level form, mirroring
+;; native `creme -S`. `--strict` is accepted for CLI symmetry; under icecreme
+;; imports always come from the script's own (import ...) forms, so it doesn't
+;; alter output today (documented in --help).
+;;
+;; `static?` instead disassembles the SINGLE whole-program chunk --emit-icecreme
+;; --static produces (imported .sld library bodies inlined via
+;; compile-program-static), directly -- the emitted-file view without writing an
+;; .ice and reading it back. One dump, not one-per-form.
+(define (dump-bytecode path strict? static? strip?)
+  (set! current-load-dir (dirname path))
+  (let ((forms (expand-includes (read-program (read-whole-file path)) current-load-dir)))
+    (if static?
+        (disassemble-chunk (compile-program-static forms path strip?) path)
+        (let ((multi (> (length forms) 1)))
+          (let loop ((fs forms) (i 0))
+            (when (pair? fs)
+              (let ((label (string-append "form " (number->string i))))
+                (when multi (display "; ---- top-level ") (display label) (display " ----") (newline))
+                (disassemble-chunk (compile-program (list (car fs)) label) label))
+              (loop (cdr fs) (+ i 1))))))))
+
+(define (disassemble-file path)
+  (disassemble-bytes (string->bytes (read-whole-file path)) path))
+
+(define (print-version)
+  (display (runtime-version-string))
+  (newline))
+
+;; The invocation forms that AREN'T subcommands -- the default-action cases the
+;; DSL doesn't model (REPL / run a file / stdin / `--`), plus --profile, which
+;; main.c handles before dispatch ever runs -- stay hand-written. The command
+;; list itself comes straight from icecreme-cli (cli-command-lines), so each
+;; command and its one-line description live in exactly one place. Per-command
+;; flag detail is one `icecreme <command> -h` away (the DSL generates it).
+;; Defined after icecreme-cli below; only ever CALLED at dispatch time, so the
+;; forward reference to that global is already bound by then.
+(define (print-help)
+  (for-each
+    (lambda (line) (display line) (newline))
+    '("icecreme -- the creme bytecode VM"
+      ""
+      "Usage:"
+      "  icecreme                            Start the interactive REPL"
+      "  icecreme <file.scm> [args...]       Compile and run a Scheme source file"
+      "  icecreme <file.ice> [args...]       Run an already-compiled ICE file"
+      "  icecreme - | -- <file> [args...]    Read from stdin, or force a path arg"
+      "  icecreme --profile [table] <file>   Run wrapped in the native profiler"
+      "  icecreme <command> [options]        Run one of the commands below"
+      ""
+      "Commands:"))
+  (display (cli-command-lines icecreme-cli))
+  (newline)
+  (display "Run `icecreme <command> -h` for a command's own options.")
+  (newline))
+
+;; ---- entry: embedding path vs. CLI dispatch ------------------------------
+
+;; The whole command-line surface, described declaratively in one place: each
+;; mode is a subcommand grouping its own related flags/positionals. parse-cli
+;; selects the subcommand from the first argument; the "default action" (no
+;; subcommand token -- run a file, stdin, or the REPL) is handled from the raw
+;; args in the `else` branch, the one thing not expressible as a fixed command.
+(define icecreme-cli
+  (make-cli "icecreme" "the creme bytecode VM"
+    (list
+     (command 'emit "--emit-icecreme" "Compile a Scheme source file to ICE bytecode"
+              (flag "static" "--static" "Inline imported .sld library bodies (self-contained)")
+              (flag "strip" "--strip" "Drop never-called inlined library functions (with --static)")
+              (positional "in.scm" "Scheme source file to compile")
+              (positional "out.ice" "output bytecode file"))
+     (command 'dump (list "-S" "--dump-bytecode") "Print a source file's bytecode disassembly"
+              (flag "strict" "--strict" "Require the script's own imports (no auto base)")
+              (flag "static" "--static" "Dump the single combined --static chunk")
+              (flag "strip" "--strip" "Drop never-called inlined functions (with --static)")
+              (positional "file.scm" "Scheme source file to disassemble"))
+     (command 'disassemble "--disassemble" "Disassemble an already-compiled ICE file"
+              (positional "file.ice" "compiled bytecode file"))
+     (command 'version "--version" "Print version and exit")
+     (command 'help (list "--help" "-h") "Show this help"))))
+
+(define (dispatch args)
+  (let ((opts (parse-cli icecreme-cli args)))
+    (case (cli-command opts)
+      ((emit) (emit-icecreme (cli-get opts "in.scm") (cli-get opts "out.ice")
+                             (cli-flag? opts "static") (cli-flag? opts "strip")))
+      ((dump) (dump-bytecode (cli-get opts "file.scm") (cli-flag? opts "strict")
+                             (cli-flag? opts "static") (cli-flag? opts "strip")))
+      ((disassemble) (disassemble-file (cli-get opts "file.ice")))
+      ((version) (print-version))
+      ((help) (print-help))
+      (else
+       (cond
+         ((null? args) (start-repl))
+         ((string=? (car args) "-") (run-stdin))
+         ((string=? (car args) "--") (run-file (cadr args)))
+         (else (run-file (car args))))))))
+
+;; icecreme-target-path is set (a string) only on the embedding path
+;; (embed.c's creme_run_scheme_file, which just wants a specific file
+;; compiled+run); it's #f on the CLI path, where main.c forwards its argv via
+;; (command-line) and we dispatch on the flags.
+(let ((tp (icecreme-target-path)))
+  (if (string? tp)
+      (run-source-file tp)
+      (dispatch (cdr (command-line)))))

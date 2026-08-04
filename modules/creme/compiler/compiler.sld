@@ -1,6 +1,6 @@
 ;; ===========================================================================
 ;; (creme compiler compiler): a self-hosted, one-pass Scheme->bytecode
-;; compiler, targeting (creme bytecode)'s Chunk assembler/ICE1 serializer
+;; compiler, targeting (creme bytecode)'s Chunk assembler/ICE serializer
 ;; so its output can be run via (creme bootstrap)'s `load-chunk-bytes` on
 ;; the real Crystal VM -- the verification loop this whole bootstrap
 ;; effort is built around (see
@@ -13,7 +13,7 @@
 ;; resolution) and one compile-*! per special form -- while (creme
 ;; bytecode) owns everything about actually BUILDING/EMITTING/
 ;; serializing a Chunk (op-name lookup, jump patching, the const/proto/
-;; upvalue pools, ICE1 bytes). Every chunk-*!/op-ordinal call below comes
+;; upvalue pools, ICE bytes). Every chunk-*!/op-ordinal call below comes
 ;; from that library; this file never touches instruction/const-pool
 ;; internals directly. (creme compiler reader) supplies read-program,
 ;; used by compile-source-to-bytes.
@@ -89,13 +89,13 @@
 ;; ===========================================================================
 
 (define-library (creme compiler compiler)
-  (export compile-source-to-bytes compile-program ensure-libraries-loaded! defmacro-expand-form
+  (export compile-source-to-bytes compile-program compile-program-static ensure-libraries-loaded! defmacro-expand-form
           define-syntax-expand-form mark-self-hosted-library-loaded! import!-apply-aliases!
           required-native-families-list mark-redefined! unmark-redefined! fusable-prim-names
           import-set-resolved-bindings)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (scheme eval)
           (creme bytecode) (creme bootstrap) (creme introspection) (creme compiler reader)
-          (creme file))
+          (creme file) (creme path))
   (begin
 
     ;; ---------------------------------------------------------------------
@@ -314,11 +314,38 @@
     ;; only actually CALLING through to it raises "unbound variable", at
     ;; the R7RS-mandated moment -- not a moment earlier. See current-
     ;; library-visible-names' own doc comment for the full mechanism.
+    ;;
+    ;; EXCEPT a name that is ALREADY genuinely globally bound at compile time
+    ;; (a native builtin, or an export of a library already loaded) is left
+    ;; unmangled: mangling exists to DEFER an unbound-name error to call time,
+    ;; but such a name isn't unbound at all, so the reference should just reach
+    ;; it -- exactly what native does with its own flat @global table. This is
+    ;; what lets a library legitimately use a raw native builtin it can't import
+    ;; from any library (e.g. (creme compiler compiler)'s own use of the
+    ;; icecreme-only `read-whole-file`, which no .sld re-exports) -- without it,
+    ;; that reference gets mangled to an unbound name and the compiler can't
+    ;; load .sld files when compiling ITSELF (icecreme --emit-icecreme --static
+    ;; icecreme.scm), the exact miscompilation this closes.
+    ;; icecreme-native builtins that the self-hosted compiler's OWN libraries
+    ;; (compiler.sld/reader.sld/bytecode.sld/...) legitimately reference as free
+    ;; variables but cannot `import` from any .sld -- they're raw C builtins with
+    ;; no importable library wrapper (read-whole-file is icecreme-only by design;
+    ;; see try-read-whole-file's own comment). Such a name must NOT be mangled,
+    ;; or the compiler couldn't read .sld files when compiling ITSELF (icecreme
+    ;; --emit-icecreme --static icecreme.scm). Deliberately NARROW: it does NOT
+    ;; include ordinary base primitives (`+`, `car`, ...), which a library is
+    ;; still required to import -- preserving the R7RS "a library sees only what
+    ;; it imports" hygiene the mangling exists for (a library doing `(import)`
+    ;; then using `+` still gets an unbound-variable error, as it must).
+    (define compiler-unmangled-native-names
+      '(read-whole-file file-read file-write delete-file filter))
+
     (define (global-ref-name fc name)
       (if (and current-library-visible-names
                (not (fcomp-lookup-local fc name))
                (not (fcomp-resolve-upvalue! fc name))
-               (not (memq name current-library-visible-names)))
+               (not (memq name current-library-visible-names))
+               (not (memq name compiler-unmangled-native-names)))
           (string-append current-library-mangle-prefix ":" (symbol->string name))
           name))
 
@@ -513,8 +540,45 @@
     ;; (guard (e (#t #f)) ...), leaving the WHOLE library's exports
     ;; (spec-describe!/spec-it!/etc) undefined with no visible error until
     ;; a much later, more confusing "unbound variable: spec-describe!".
+    ;; Non-#f only during compile-program-static's phase-1 library inlining
+    ;; (below) -- an <fcomp> whose chunk every self-host-loaded library body
+    ;; should be compiled INTO (statement position, no trailing Return) instead
+    ;; of compiled-and-run as its own separate chunk. This is the single seam
+    ;; that turns the ordinary runtime loader (ensure-library-loaded! ->
+    ;; process-library-clause! -> run-compiled-forms!) into a static emitter:
+    ;; all of that machinery's ordering, dedup, and per-library mangling scoping
+    ;; is reused unchanged; only the terminal "what to do with a compiled body"
+    ;; step is redirected here.
+    (define current-static-emit-fc #f)
+
+    ;; Non-#f only while compile-program-static compiles the PROGRAM's own forms
+    ;; (phase 2), after its imported libraries have been inlined. It tells
+    ;; compile-import! (below) to NOT emit the ordinary runtime ensure-libraries-
+    ;; loaded!/import! calls: those libraries are already defined inline in this
+    ;; same chunk, so invoking the loader at run time would be redundant at best
+    ;; and, with no modules/ tree present, would fail outright (the loader
+    ;; errors on a library whose .sld it can't find). The result is a chunk that
+    ;; -- like a native --emit-icecreme one -- carries no runtime import
+    ;; machinery and runs standalone anywhere. Prefix/rename ALIAS defines are
+    ;; still emitted (they only reference the now-inlined originals).
+    (define current-static-app-phase #f)
+
+    ;; Compile each form as a discarded statement into fc's existing chunk
+    ;; (non-tail, register reclaimed after each), the inlining counterpart of
+    ;; compile-program's compile-body! -- but without the final form's tail
+    ;; Return, since inlined library bodies are never the whole program's tail.
+    (define (compile-statements-into! fc forms)
+      (for-each
+        (lambda (form)
+          (let ((mark (fcomp-next-reg fc)))
+            (compile-expr! fc form (fcomp-alloc-reg! fc) #f)
+            (fcomp-reclaim-to! fc mark)))
+        forms))
+
     (define (run-compiled-forms! forms)
-      (load-chunk-bytes (chunk->bytes (compile-program forms) (required-native-families-list))))
+      (if current-static-emit-fc
+          (compile-statements-into! current-static-emit-fc forms)
+          (load-chunk-bytes (chunk->bytes (compile-program forms) (required-native-families-list)))))
 
     ;; define-syntax's own "value" is unspecified, same convention as
     ;; define/set!: nothing reads a non-tail define-syntax's dest.
@@ -706,6 +770,16 @@
         (set! macro-table saved)))
 
     (define (compile-expr! fc expr dest tail?)
+      ;; Stamp the source position of the form now being compiled onto every
+      ;; instruction it emits: set the shared emit-pos (bytecode.sld) from the
+      ;; reader's per-form table (form-source-position, by identity) whenever
+      ;; this form is one the reader saw. A macro-synthesized form isn't in the
+      ;; table (returns #f), so it simply inherits the enclosing form's position
+      ;; -- the same "expansion is attributed to its use site" behavior native
+      ;; has. `file` comes from current-compiling-file (compile-program's arg).
+      (if (pair? expr)
+          (let ((fp (form-source-position expr)))
+            (if fp (set-emit-pos! current-compiling-file (car fp) (cdr fp)))))
       (cond
         ((symbol? expr) (compile-var-ref! fc expr dest tail?))
         ((or (number? expr) (string? expr) (char? expr) (boolean? expr) (vector? expr) (bytevector? expr))
@@ -814,12 +888,12 @@
     ;; the named file's own top-level forms in place, same as a nested
     ;; `begin`'s own contents) -- this is what gives `include` genuine
     ;; R7RS body-position support (usable inside a `let`/`lambda` body,
-    ;; not just at a file's own top level, which icecreme/compiler-run.scm's
+    ;; not just at a file's own top level, which icecreme/icecreme.scm's
     ;; separate expand-includes already handled): flatten-begins runs
     ;; for every scope-introducing body (compile-scoped-body!'s own
     ;; hoist-internal-defines call), unlike compile-program's direct
     ;; compile-body! call for the outermost program (which icecreme/
-    ;; compiler-run.scm's own pre-pass already covers). See
+    ;; icecreme.scm's own pre-pass already covers). See
     ;; current-compiling-file/expand-include-form (below dirname/
     ;; path-join/ascii-foldcase-string's own definitions further down
     ;; this file, fine as forward references -- nothing calls either
@@ -1235,7 +1309,7 @@
     ;; constructor for yet (chunk-add-case-dispatch-table!/case-dispatch-
     ;; tables, which would need wiring through (creme bytecode)'s own
     ;; chunk record AND chunk_serializer.cr/chunk_deserializer.cr/icecreme's
-    ;; ICE1 (de)serialization, not just this compiler) -- a real,
+    ;; ICE (de)serialization, not just this compiler) -- a real,
     ;; deliberately out-of-scope-for-now gap. Behavior is identical either
     ;; way: CaseDispatch is a pure O(1)-vs-O(n) perf optimization over
     ;; CaseMatch (see hashable_case?'s own gating), and this compiler's
@@ -1310,7 +1384,7 @@
     ;; (bytecode_compiler.cr's compile_quasiquote): its own doc comment
     ;; says its QQTemplate tree is "never serialized into the const pool
     ;; since only VM#build_qq's Crystal code ever reads it" -- i.e. it's a
-    ;; same-process-only optimization with NO ICE1 wire representation at
+    ;; same-process-only optimization with NO ICE wire representation at
     ;; all. A chunk built by THIS compiler exists specifically to be
     ;; serialized and reloaded standalone (load-chunk-bytes/icecreme), so
     ;; emitting Op::Quasiquote here wouldn't just need extra format work
@@ -1903,7 +1977,7 @@
     ;; The inverse of mark-redefined! -- removes every occurrence of name
     ;; (mark-redefined! doesn't dedupe, so more than one may be present).
     ;; Exported (alongside mark-redefined! and fusable-prim-names below)
-    ;; so `eval` (icecreme/compiler-run.scm) can temporarily disable fusion for
+    ;; so `eval` (icecreme/icecreme.scm) can temporarily disable fusion for
     ;; exactly the fusable names a target `environment` excludes via its
     ;; own only/except import-set, for the duration of one compile, then
     ;; restore afterward -- see that function's own doc comment for why
@@ -2957,7 +3031,7 @@
     ;; only, never under `--self-hosted`.
     ;;
     ;; mark-self-hosted-library-loaded! is EXPORTED (unlike the other two
-    ;; names here) specifically so icecreme/compiler-run.scm can pre-seed this
+    ;; names here) specifically so icecreme/icecreme.scm can pre-seed this
     ;; state for every file-based library IT ITSELF already bundles
     ;; natively (via --emit-icecreme, which never touches this tracking at
     ;; all -- it's Crystal's own import machinery, not this self-hosted
@@ -2987,7 +3061,7 @@
     ;; disk -- i.e. a native/builtin one, see that function's own doc
     ;; comment) is a real, native builtin family the compiled program
     ;; transitively depends on, and is recorded here (deduped) so
-    ;; compile-source-to-bytes/compiler-run.scm can pass a REAL required-
+    ;; compile-source-to-bytes/icecreme.scm can pass a REAL required-
     ;; families list into chunk->bytes instead of an empty/hardcoded one --
     ;; letting icecreme's own import-gated native builtin registration (main.c)
     ;; work correctly even for a program compiled entirely by THIS
@@ -3055,7 +3129,7 @@
     ;; needs beyond what a plain top-level `(import ...)` already brings
     ;; in via native import!/ensure-libraries-loaded!), this is a
     ;; complete, from-scratch resolution used by `environment`
-    ;; (icecreme/compiler-run.scm) to populate a genuinely fresh, otherwise-
+    ;; (icecreme/icecreme.scm) to populate a genuinely fresh, otherwise-
     ;; empty environment -- there is no ambient "already imported"
     ;; baseline to lean on there, so only/except need REAL filtering
     ;; here (not the no-op passthrough import-set-alias-defines's own
@@ -3191,24 +3265,11 @@
             (string-append acc ".sld")
             (loop (cdr parts) (string-append acc "/" (symbol->string (car parts)))))))
 
-    ;; dirname/path-join -- mirrors icecreme/compiler-run.scm's own pair
-    ;; exactly (that file's own copy resolves the TARGET SCRIPT's own
-    ;; top-level `include` forms; this one resolves an `include`/
-    ;; `include-ci` declaration nested inside a separately-loaded
-    ;; library's own body, see ensure-library-loaded! below -- kept as a
-    ;; small separate copy here rather than shared, since the two run in
-    ;; different contexts (this compiler vs. that file's own driver) and
-    ;; the logic is a few lines either way).
-    (define (dirname path)
-      (let loop ((i (- (string-length path) 1)))
-        (cond
-          ((< i 0) "")
-          ((char=? (string-ref path i) #\/) (substring path 0 i))
-          (else (loop (- i 1))))))
-
-    (define (path-join dir name)
-      (if (string=? dir "") name (string-append dir "/" name)))
-
+    ;; dirname/path-join now come from (creme path) (imported above) -- used
+    ;; here to resolve an `include`/`include-ci` declaration nested inside a
+    ;; separately-loaded library's own body (see ensure-library-loaded! below).
+    ;; (creme path) has no `include` clauses of its own, so it loads before this
+    ;; compiler ever needs `dirname`, avoiding any bootstrap cycle.
     (define (library-dirname name) (dirname (library-name->path name)))
 
     ;; include-ci's own `#!fold-case` contract -- ASCII-only ("(scheme
@@ -3471,17 +3532,28 @@
                                  ((memq (car ns) visible) (loop (cdr ns)))
                                  (else (cons (car ns) (loop (cdr ns)))))))
                            (saved-visible current-library-visible-names)
-                           (saved-prefix current-library-mangle-prefix))
+                           (saved-prefix current-library-mangle-prefix)
+                           (saved-file current-compiling-file))
                       (dynamic-wind
                         (lambda ()
                           (set! current-library-visible-names visible)
                           (set! current-library-mangle-prefix (library-name->path name))
+                          ;; So instructions compiled from THIS library's body
+                          ;; get a source position naming the LIBRARY's own file
+                          ;; (compile-expr!'s hook reads current-compiling-file),
+                          ;; not whatever outer target pulled it in -- e.g. a
+                          ;; --static build inlining (creme compiler compiler)
+                          ;; must attribute that code to compiler.sld, matching
+                          ;; native's IcecremeEmitter (and it's the right base
+                          ;; for a body-level include's relative path too).
+                          (set! current-compiling-file (library-name->path name))
                           (for-each mark-redefined! excluded-fusable))
                         (lambda ()
                           (for-each (lambda (clause) (process-library-clause! name clause)) clauses))
                         (lambda ()
                           (set! current-library-visible-names saved-visible)
                           (set! current-library-mangle-prefix saved-prefix)
+                          (set! current-compiling-file saved-file)
                           (for-each unmark-redefined! excluded-fusable))))))
                 (if (unknown-native-library-name? name)
                     (error "import: unknown library" name)
@@ -3534,7 +3606,7 @@
     ;; Reuses alias-defines-for-specs' pure computation of the `(define
     ;; new old)` forms needed, then genuinely executes each one via `eval`
     ;; (this library's own top-level (import (scheme eval)) makes that
-    ;; resolve; under icecreme, whatever global `eval` compiler-run.scm itself
+    ;; resolve; under icecreme, whatever global `eval` icecreme.scm itself
     ;; defines) -- safe to do here specifically because bi_import_bang is
     ;; ONLY ever reached for a bare runtime call, never for the special-
     ;; form path below (compile-import! never emits a call to THIS
@@ -3588,9 +3660,17 @@
             (compile-expr! fc
               (cons 'begin
                     (append
-                      (list
-                        (list 'ensure-libraries-loaded! (list 'quote (cdr expr)))
-                        (list 'import! (list 'quote (cdr expr))))
+                      ;; The runtime ensure-libraries-loaded!/import! pair is
+                      ;; suppressed in a --static build (current-static-app-phase):
+                      ;; the imported libraries are already inlined into this same
+                      ;; chunk, so re-invoking the loader at run time is redundant
+                      ;; and would fail with no modules/ present. Alias defines
+                      ;; below are still emitted either way.
+                      (if current-static-app-phase
+                          '()
+                          (list
+                            (list 'ensure-libraries-loaded! (list 'quote (cdr expr)))
+                            (list 'import! (list 'quote (cdr expr)))))
                       (alias-defines-for-specs (cdr expr))))
               dest tail?))))
 
@@ -3746,8 +3826,78 @@
         (set! current-compiling-file saved)
         ch))
 
+    ;; Like compile-program, but produces a SELF-CONTAINED chunk: every
+    ;; transitively-imported file-based (.sld) library's own body is compiled
+    ;; INTO the same chunk, ahead of the program's own forms, so the result
+    ;; runs with no modules/ tree present at all (icecreme --emit-icecreme
+    ;; --static) -- the self-hosted counterpart of native's IcecremeEmitter.
+    ;;
+    ;; Phase 1 drives the ordinary loader (ensure-libraries-loaded!) with its
+    ;; body-compilation redirected into this chunk via current-static-emit-fc,
+    ;; reusing every bit of its transitive-order/dedup (mark-self-hosted-
+    ;; library-loaded!)/per-library name-mangling scoping unchanged -- so an
+    ;; inlined body's bytecode is identical to what the runtime loader would
+    ;; have produced, just placed inline instead of run as a separate chunk.
+    ;; Phase 2 then compiles the program's own forms after them, with
+    ;; current-static-app-phase set so their (import ...) forms emit NO runtime
+    ;; ensure-libraries-loaded!/import! calls at all -- the libraries are already
+    ;; inline, so the resulting chunk carries no import machinery and runs
+    ;; standalone anywhere (the same shape a native --emit-icecreme chunk has).
+    ;;
+    ;; A library with no .sld file (a Crystal/icecreme-native family like
+    ;; (creme mux), or one already pre-marked loaded by the compiler-mode
+    ;; driver -- (creme bytecode)/(creme compiler ...)) is NOT inlined: the
+    ;; loader skips it exactly as it always does, and icecreme provides its
+    ;; surface as native builtins, so a --static chunk importing only such
+    ;; libraries plus ordinary .sld ones still runs standalone.
+    ;; Optional args: (file [strip?]). `strip?` true runs (creme bytecode)'s
+    ;; strip-dead-globals! over the finished combined chunk -- called here,
+    ;; library-internally, rather than from the app so `--emit-icecreme --strip`
+    ;; needn't reference that export from icecreme.scm itself.
+    (define (compile-program-static forms . opts)
+      (let* ((file (if (pair? opts) (car opts) #f))
+             (strip? (and (pair? opts) (pair? (cdr opts)) (cadr opts)))
+             (saved-file current-compiling-file)
+             (saved-emit current-static-emit-fc)
+             (saved-app current-static-app-phase)
+             (saved-loaded self-hosted-loaded-libraries)
+             (ch (make-chunk "program"))
+             (fc (make-fcomp ch #f)))
+        (if file (set! current-compiling-file file))
+        ;; Phase 1: inline transitively-imported .sld library bodies into ch,
+        ;; starting from a FRESH loaded-set so EVERY such library is inlined
+        ;; regardless of what the RUNNING toolchain (this process) already has
+        ;; marked loaded. Without this, a --static build run under icecreme
+        ;; itself would skip exactly the libraries icecreme.scm pre-seeds
+        ;; (peg/bytecode/compiler/disassemble) -- so icecreme couldn't compile
+        ;; ITSELF to a working self-contained chunk, and any program importing
+        ;; one of those would emit an incomplete chunk. Phase 1 only COMPILES
+        ;; bodies into ch, never RUNS them, so resetting this bookkeeping can't
+        ;; disturb the running process's own globals.
+        (dynamic-wind
+          (lambda ()
+            (set! current-static-emit-fc fc)
+            (set! self-hosted-loaded-libraries '()))
+          (lambda ()
+            (for-each
+              (lambda (form)
+                (if (and (pair? form) (eq? (car form) 'import))
+                    (ensure-libraries-loaded! (cdr form))))
+              forms))
+          (lambda ()
+            (set! current-static-emit-fc saved-emit)
+            (set! self-hosted-loaded-libraries saved-loaded)))
+        ;; Phase 2: compile the program's own forms, emitting no runtime import
+        ;; calls (current-static-app-phase) -- see compile-import!.
+        (dynamic-wind
+          (lambda () (set! current-static-app-phase #t))
+          (lambda () (compile-body! fc forms (fcomp-alloc-reg! fc) #t))
+          (lambda () (set! current-static-app-phase saved-app)))
+        (set! current-compiling-file saved-file)
+        (if strip? (strip-dead-globals! ch) ch)))
+
     ;; Public entry point: compiles every top-level form in `source` (via
-    ;; (creme compiler reader)'s read-program) into ICE1 bytes -- a
+    ;; (creme compiler reader)'s read-program) into ICE bytes -- a
     ;; bytevector ready for (creme bootstrap)'s load-chunk-bytes. Optional
     ;; 2nd argument: see compile-program's own doc comment.
     (define (compile-source-to-bytes source . file)

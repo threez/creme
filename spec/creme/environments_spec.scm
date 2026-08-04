@@ -7,7 +7,7 @@
 ;;
 ;; interaction-environment/scheme-report-environment/null-environment and
 ;; eval's optional 2nd (environment specifier) argument USED to be a
-;; deliberate icecreme gap -- icecreme/compiler-run.scm's own versions of these were
+;; deliberate icecreme gap -- icecreme/icecreme.scm's own versions of these were
 ;; non-isolating stubs, since icecreme has exactly ONE flat global table. Now
 ;; fixed for real (a genuinely separate child VM per environment -- see
 ;; icecreme/README.md's own "environment/eval" section and icecreme/vm.c's

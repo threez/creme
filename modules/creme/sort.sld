@@ -40,14 +40,8 @@
 
 (define-library (creme sort)
   (export list-sort sort-by)
-  (import (scheme base))
+  (import (scheme base) (only (creme extra) take drop))
   (begin
-    (define (take-n lst n)
-      (if (or (= n 0) (null? lst)) '() (cons (car lst) (take-n (cdr lst) (- n 1)))))
-
-    (define (drop-n lst n)
-      (if (or (= n 0) (null? lst)) lst (drop-n (cdr lst) (- n 1))))
-
     ;; Merges two already-sorted (by less?) lists into one sorted list.
     ;; Picks from `a` on a tie (not less? in either direction) so an
     ;; earlier-in-the-original-list element stays earlier -- this is what
@@ -64,8 +58,8 @@
       (if (or (null? lst) (null? (cdr lst)))
           lst
           (let* ((half (quotient (length lst) 2))
-                 (left (take-n lst half))
-                 (right (drop-n lst half)))
+                 (left (take lst half))
+                 (right (drop lst half)))
             (merge-sorted less? (list-sort less? left) (list-sort less? right)))))
 
     ;; (sort-by key-fn less? lst) -> see this file's own header comment.

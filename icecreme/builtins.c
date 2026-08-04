@@ -495,7 +495,7 @@ static Value bi_current_second(VM *vm, Value *args, int nargs) {
 /* (creme math)'s flonum->bits/bits->flonum -- an exact IEEE754 bit-level
  * reinterpret (not a numeric conversion), memcpy'd rather than a union/
  * pointer cast to stay strict-aliasing-safe. Needed by (creme bytecode)'s
- * own write-float64! (ICE1 chunk serialization), so ANY chunk containing
+ * own write-float64! (ICE chunk serialization), so ANY chunk containing
  * a float constant needs this -- not a test-specific gap, a foundational
  * one that surfaced the first time a spec/creme test file with a float
  * literal ran under icecreme's compiler mode. */
@@ -1657,7 +1657,7 @@ static Value bi_read_string(VM *vm, Value *args, int nargs) {
  * (scheme read)'s `read` -- a real R7RS datum parser, absent from this
  * prototype until now. icecreme's ahead-of-time --emit-icecreme mode has no other
  * way to get one: unlike "compiler mode" (raw .scm source through
- * icecreme/compiler-run.ice), which defines read/eval/open-input-string-as-
+ * icecreme/icecreme.ice), which defines read/eval/open-input-string-as-
  * datum-reader in Scheme by reusing the self-hosted reader/compiler
  * already loaded there (see icecreme/README.md's "Native builtins" section),
  * an ahead-of-time-compiled chunk has no resident compiler/reader at all
@@ -2617,7 +2617,7 @@ static Value bi_inexact_p(VM *vm, Value *args, int nargs) { (void)vm; creme_chec
 static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "exact-integer?"); return v_bool(args[0].tag == T_INT); }
 /* rational? is exact (int/rational) OR a finite float -- mirrors
  * rational? (predicates.cr) exactly. Needed by modules/creme/bytecode.
- * sld's own write-datum! (ICE1 chunk serialization) to detect a rational
+ * sld's own write-datum! (ICE chunk serialization) to detect a rational
  * constant, so this isn't just a nicety -- without it, compiling any
  * chunk containing a rational constant aborts with "unbound variable:
  * rational?" under icecreme specifically (the self-hosted compiler's own
@@ -3960,7 +3960,7 @@ static Value bi_raise(VM *vm, Value *args, int nargs) {
  * and keep going" handler, unlike raise. If no handler is installed,
  * falls back to the SAME guard/top-level path raise itself uses
  * (matches native's own raise_continuable exactly -- NOT a distinct
- * "no handler installed" error the way the old icecreme/compiler-run.scm
+ * "no handler installed" error the way the old icecreme/icecreme.scm
  * Scheme-level shim used to raise instead). */
 static Value bi_raise_continuable(VM *vm, Value *args, int nargs) {
   creme_check_exact_args(nargs, 1, "raise-continuable");
@@ -3976,7 +3976,7 @@ static Value bi_raise_continuable(VM *vm, Value *args, int nargs) {
 /* with-exception-handler: installs `handler` as the current exception
  * handler for the dynamic extent of `thunk` -- backed by a genuine
  * VM-wide handler stack (vm->exc_handlers) now, not a Scheme-level
- * mutable list (icecreme/compiler-run.scm used to be the ONLY place this
+ * mutable list (icecreme/icecreme.scm used to be the ONLY place this
  * existed, so a precompiled --emit-icecreme program could never use it at
  * all -- see that file's own updated comment). Reuses the SAME
  * unwind_stack mechanism dynamic-wind/parameterize already use (vm.h's

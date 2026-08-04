@@ -234,7 +234,7 @@ describe "main.cr (CLI)" do
     err.should contain("no such file")
   end
 
-  it "--disassemble exits non-zero and prints an error for a non-ICE1 file" do
+  it "--disassemble exits non-zero and prints an error for a non-ICE file" do
     file = File.tempfile("main_spec_disasm_bad", ".ice") do |io|
       io.print("not a real chunk")
     end

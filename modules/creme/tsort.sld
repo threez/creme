@@ -46,7 +46,7 @@
 
 (define-library (creme tsort)
   (export tsort tsort? tsort-strongly-connected-components)
-  (import (scheme base) (creme hash-table))
+  (import (scheme base) (creme hash-table) (only (creme extra) filter))
   (begin
     ;; (tsort-priv-nodes graph) -> every node mentioned anywhere in graph
     ;; (as a key or as someone's dependency), de-duplicated, in first-seen
@@ -99,11 +99,6 @@
                          (= 0 (hash-table-ref indegree d)))
                        (hash-table-ref dependents n))))
                 (loop (append rest freed) (cons n result)))))))
-
-    (define (filter pred lst)
-      (cond ((null? lst) '())
-            ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
-            (else (filter pred (cdr lst)))))
 
     (define (tsort graph)
       (call-with-values

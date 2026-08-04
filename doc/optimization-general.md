@@ -27,7 +27,7 @@ exists, whether or not it ever used one.
 Both runtimes now gate registration on what's actually imported:
 - **icecreme**: `builtins.c`'s single monolithic registration function was
   split into one function per library family. The compiled bytecode
-  format (ICE1) gained a "required families" metadata section, and
+  format (ICE) gained a "required families" metadata section, and
   `icecreme/main.c` only calls the registration functions for families a given
   program's compiled chunk actually needs. The self-hosted compiler
   tracks and emits the same metadata when it compiles a program on the

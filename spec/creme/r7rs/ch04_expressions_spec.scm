@@ -33,7 +33,7 @@
 ;;   current-compiling-file's own directory -- a mutable variable set
 ;;   (with save/restore for reentrant compiles) by compile-program's new
 ;;   optional 2nd argument, threaded through from src/main.cr's
-;;   run_self_hosted and icecreme/compiler-run.scm alike. So both cases now
+;;   run_self_hosted and icecreme/icecreme.scm alike. So both cases now
 ;;   run unconditionally under all three backends.
 ;; - Three `icecreme/builtins.c` gaps this file's direct R7RS coverage used to
 ;;   surface here (each was split into its own `it-unless (equal?

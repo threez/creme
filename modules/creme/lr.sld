@@ -96,7 +96,7 @@
 
 (define-library (creme lr)
   (export make-rule make-grammar build-parser lr-parse debug-states)
-  (import (scheme base) (scheme cxr) (creme hash-table) (creme sort))
+  (import (scheme base) (scheme cxr) (creme hash-table) (creme sort) (only (creme extra) take drop))
   (begin
     ;; ------------------------------------------------------------------
     ;; small local helpers (deliberately not (creme extra) -- this stays a
@@ -127,8 +127,6 @@
     (define (set-union a b)
       (if (null? b) a (set-union (if (memq (car b) a) a (cons (car b) a)) (cdr b))))
 
-    (define (take-n lst n) (if (or (= n 0) (null? lst)) '() (cons (car lst) (take-n (cdr lst) (- n 1)))))
-    (define (drop-n lst n) (if (or (= n 0) (null? lst)) lst (drop-n (cdr lst) (- n 1))))
 
     ;; ------------------------------------------------------------------
     ;; grammar representation
@@ -439,9 +437,9 @@
             ((eq? (car action) 'reduce)
              (let* ((rule (vector-ref (table-rules pt) (cadr action)))
                     (n (length (rule-rhs rule)))
-                    (popped (take-n stack n))
+                    (popped (take stack n))
                     (arg-values (reverse (map cdr popped)))
-                    (rest-stack (drop-n stack n))
+                    (rest-stack (drop stack n))
                     (goto-entry (table-lookup pt (car (car rest-stack)) (rule-lhs rule)))
                     (result (apply (rule-action rule) arg-values)))
                (loop (cons (cons (cadr goto-entry) result) rest-stack) remaining)))

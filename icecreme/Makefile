@@ -154,7 +154,14 @@ LDFLAGS ?= -rdynamic
 EXECINFO_LIBS := $(if $(filter FreeBSD,$(shell uname -s)),-lexecinfo)
 LDLIBS := -lm -lpthread $(SQL_LDLIBS) $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LIBS) $(SSL_LIBS) $(FFI_LDLIBS) $(YAML_LDLIBS) $(EXECINFO_LIBS)
 
-SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c secure_random.c cipher.c pkey.c x509.c builtin_families.c \
+# embedded_icecreme.c (bin2c of icecreme.ice, generated below) is in
+# the CLI's own SRCS now, not just the library's: main.c's no-args REPL mode
+# loads the compiler-mode driver from these embedded bytes rather than reading
+# icecreme/icecreme.ice off disk (the file-based compiler mode below still
+# reads it from disk, unchanged). This makes `make all` depend on regenerating
+# icecreme.ice via ./bin/creme, same build-time dependency the `lib` target
+# already had.
+SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c secure_random.c cipher.c pkey.c x509.c builtin_families.c embedded_icecreme.c \
        vendor/sds/sds.c vendor/picohttpparser/picohttpparser.c
 OBJS = $(SRCS:.c=.o)
 BIN = icecreme
@@ -191,7 +198,7 @@ $(SANBIN): $(SANITIZE_OBJS)
 	$(CC) $(CFLAGS) $(SANITIZE_FLAGS) -c -o $@ $<
 
 # libFuzzer harness (fuzz/fuzz_loader.c) targeting creme_load_from_bytes --
-# the ICE1 bytecode deserializer, the one place icecreme treats a byte blob as
+# the ICE bytecode deserializer, the one place icecreme treats a byte blob as
 # trusted input (see that file's own header comment). Needs clang
 # specifically (libFuzzer ships as part of clang's compiler-rt, not a
 # separate package, and isn't available through plain gcc/$(CC)) -- a
@@ -226,7 +233,7 @@ $(FUZZBIN): $(FUZZ_OBJS) fuzz/fuzz_loader.c
 # plain .o/.san.o/.fuzz.o) costs nothing today and leaves the door open to
 # a future .so from the same objects.
 #
-# embed.c/embedded_compiler_run.c are library-ONLY additions -- deliberately
+# embed.c/embedded_icecreme.c are library-ONLY additions -- deliberately
 # not part of $(SRCS)/the CLI binary, which keeps its own existing
 # file-based compiler-mode (main.c's CREME_COMPILER_DRIVER_PATH) completely
 # unchanged. Only the self-hosted-compiler driver gets bundled as embedded
@@ -237,16 +244,56 @@ $(FUZZBIN): $(FUZZ_OBJS) fuzz/fuzz_loader.c
 tools/bin2c: tools/bin2c.c
 	$(CC) -O2 -o $@ $<
 
-# Regenerated whenever compiler-run.scm changes, via a live bin/creme
-# --emit-icecreme (the project's own Crystal compiler) -- same rule shape
-# competition/Makefile already uses for compiler-run.ice.
-compiler-run.ice: compiler-run.scm
-	cd .. && ./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice
+# ---- Self-hosting bootstrap -------------------------------------------------
+# The whole icecreme.scm CLI program (self-hosted compiler + disassembler +
+# dispatcher) is compiled to one ICE chunk and bin2c'd into the binary. That
+# compilation is done BY ICECREME ITSELF -- the shipped compiler image is
+# self-hosted, not produced by the native Crystal bin/creme. Because building
+# the binary needs the chunk and self-compiling the chunk needs a binary, the
+# cycle is broken with a throwaway bootstrap binary:
+#
+#   stage 0  icecreme-boot : an intermediate binary whose embedded chunk WAS
+#                            compiled by bin/creme (the one remaining use of the
+#                            native compiler, only to bootstrap).
+#   stage 1  icecreme      : the real binary, whose embedded chunk icecreme-boot
+#                            --emit-icecreme --static-compiled from the SAME
+#                            icecreme.scm. `--static` inlines every imported .sld
+#                            so the image is self-contained (what native's
+#                            IcecremeEmitter does too).
+#
+# Soundness rests on the byte-for-byte fixpoint -- icecreme compiling itself
+# yields an identical chunk (spec/creme/compiler_self_host_spec.scm). Both the
+# boot and final chunks depend on icecreme.scm AND every .sld the self-hosted
+# compiler bundles (recursively under modules/creme/), so a change to e.g.
+# compiler.sld/bytecode.sld regenerates them and the binary -- never a stale
+# image. `make bootstrap-clean` (below) drops just the stage-0 artifacts to
+# force a fresh native bootstrap if the self-compile ever diverges.
+ICECREME_COMPILER_SLDS := $(shell find ../modules/creme -name '*.sld')
 
-embedded_compiler_run.c: compiler-run.ice tools/bin2c
-	tools/bin2c compiler-run.ice creme_embedded_compiler_run_ice > $@
+# stage 0: bin/creme compiles the chunk, bin2c'd (under the SAME symbol) into a
+# bootstrap binary. This binary is never shipped -- only used to self-compile.
+icecreme-boot.ice: icecreme.scm $(ICECREME_COMPILER_SLDS)
+	cd .. && ./bin/creme --emit-icecreme icecreme/icecreme.scm icecreme/icecreme-boot.ice
 
-LIBCREME_SRCS := $(filter-out main.c,$(SRCS)) embed.c embedded_compiler_run.c
+embedded_icecreme_boot.c: icecreme-boot.ice tools/bin2c
+	tools/bin2c icecreme-boot.ice creme_embedded_icecreme_ice > $@
+
+BOOT_OBJS := $(filter-out embedded_icecreme.o,$(OBJS)) embedded_icecreme_boot.o
+icecreme-boot: $(BOOT_OBJS)
+	$(CC) $(CFLAGS) -o $@ $(BOOT_OBJS) $(LDFLAGS) $(LDLIBS)
+
+# stage 1: the bootstrap binary self-compiles the shipped chunk (--static, so
+# self-contained). This is what makes the build self-hosting.
+icecreme.ice: icecreme.scm $(ICECREME_COMPILER_SLDS) icecreme-boot
+	cd .. && ./icecreme/icecreme-boot --emit-icecreme --static icecreme/icecreme.scm icecreme/icecreme.ice
+
+embedded_icecreme.c: icecreme.ice tools/bin2c
+	tools/bin2c icecreme.ice creme_embedded_icecreme_ice > $@
+
+# embedded_icecreme.c already comes in via $(SRCS) now (see its comment
+# above), so it's not repeated here -- only embed.c stays a library-only
+# addition (main.c never calls its creme_run_scheme_file/creme_run_repl API).
+LIBCREME_SRCS := $(filter-out main.c,$(SRCS)) embed.c
 LIBCREME_OBJS := $(LIBCREME_SRCS:.c=.lib.o)
 
 .PHONY: lib
@@ -258,7 +305,16 @@ libcreme.a: $(LIBCREME_OBJS)
 %.lib.o: %.c *.h
 	$(CC) $(CFLAGS) -fPIC -c -o $@ $<
 
+# Drops ONLY the stage-0 bootstrap artifacts (see the self-hosting section
+# above), forcing the next build to re-bootstrap the embedded chunk from a fresh
+# bin/creme --emit-icecreme. Use this if a self-compile ever diverges from the
+# native bootstrap (a real compiler bug the OLD binary can't compile past).
+.PHONY: bootstrap-clean
+bootstrap-clean:
+	rm -f icecreme-boot icecreme-boot.ice embedded_icecreme_boot.c embedded_icecreme_boot.o
+
 clean:
 	rm -f $(OBJS) $(SANITIZE_OBJS) $(FUZZ_OBJS) $(LIBCREME_OBJS) $(BIN) $(SANBIN) $(FUZZBIN) libcreme.a
-	rm -f tools/bin2c embedded_compiler_run.c
+	rm -f tools/bin2c embedded_icecreme.c
+	rm -f icecreme-boot icecreme-boot.ice embedded_icecreme_boot.c embedded_icecreme_boot.o icecreme.ice
 	rm -rf fuzz/corpus

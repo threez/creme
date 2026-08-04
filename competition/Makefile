@@ -77,20 +77,12 @@ creme:
 icecreme:
 	gmake -C $(ROOT)/icecreme
 
-# icecreme's own self-hosted-compiler image (icecreme/compiler-run.ice), needed by
-# every icecreme/icecreme invocation that compiles a plain .scm file directly (icecreme's
-# "compiler mode" -- see icecreme/compiler-run.scm's own header comment).
-# Depends on bin/creme (native --emit-icecreme builds it) plus every .sld file
-# the self-hosted compiler itself bundles (reader.sld/compiler.sld and
-# everything (creme compiler compiler) transitively imports, all under
-# modules/creme/, recursively -- a plain recursive find covers both the
-# top-level .sld files and modules/creme/compiler/'s own nested ones in
-# one pass), so this rebuilds whenever the self-hosted compiler's OWN
-# source changes, not just when compiler-run.scm's short driver body does.
-COMPILER_SLDS != find $(ROOT)/modules/creme -name '*.sld' | tr '\n' ' '
-
-$(ROOT)/icecreme/compiler-run.ice: creme $(ROOT)/icecreme/compiler-run.scm $(COMPILER_SLDS)
-	cd $(ROOT) && ./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice
+# icecreme's self-hosted-compiler image (icecreme.scm) is compiled to
+# icecreme.ice and bin2c'd straight INTO the icecreme binary by icecreme/Makefile,
+# which rebuilds it whenever icecreme.scm OR any compiler .sld it bundles
+# changes. So the `icecreme` target above (gmake -C icecreme) already yields a
+# binary carrying a fresh embedded image -- icecreme no longer reads any .ice off
+# disk at run time, so there is no separate on-disk image to build or depend on.
 
 # ---- bench suite: native-code comparison floors -----------------------------
 
@@ -118,7 +110,7 @@ bench-binaries: $(ROOT)/bin/bench_cr $(ROOT)/bin/bench_go lua/bench/monotonic.so
 
 # scheme.cr / bin/creme and icecreme / creme (C11 prototype VM) run
 # scheme/demo-todo/app.scm directly -- no separate build artifact of their
-# own beyond `creme`/`icecreme`/compiler-run.ice above.
+# own beyond `creme`/`icecreme` above.
 
 CRYSTAL_TODO_SRCS != find crystal/demo-todo/src -name '*.cr' | tr '\n' ' '
 
@@ -149,7 +141,7 @@ c/demo-todo/bin/app:
 # here -- both run their app.rb/app.rkt source directly (bundler/raco
 # resolve dependencies at run time, same as scheme.cr's own bin/creme +
 # app.scm), so there's nothing for this Makefile to build for either.
-todo-app-binaries: creme icecreme $(ROOT)/icecreme/compiler-run.ice \
+todo-app-binaries: creme icecreme \
                     crystal/demo-todo/bin/app go/demo-todo/bin/app \
                     node/demo-todo/node_modules c/demo-todo/bin/app
 

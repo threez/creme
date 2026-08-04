@@ -76,7 +76,7 @@ that, not just a display trick here.)
 `make` first builds `../../icecreme/libcreme.a` if it doesn't already exist
 (`$(MAKE) -C ../../icecreme lib`), which in turn needs `bin/creme` already
 built (`shards build --release --no-debug` from the repo root) — the
-library's bundled self-hosted compiler/REPL bytecode (`compiler-run.ice`/
+library's bundled self-hosted compiler/REPL bytecode (`icecreme.ice`/
 `repl.ice`) is produced by running the real Crystal `creme` binary once at
 library-build time, then baked directly into `libcreme.a`; nothing at
 `host_demo`'s own runtime touches Crystal at all.
@@ -113,5 +113,5 @@ Try editing `host_demo.scm` (e.g. add another item to `host-orders`,
 change a price in `host_demo.c`'s own catalog and rebuild) and re-running
 `./examples/libcream/host_demo` (from the repo root) — `creme_run_scheme_
 file` recompiles the script fresh on every run via the bundled compiler,
-it isn't baked in once at library-build time the way `compiler-run.ice`/
+it isn't baked in once at library-build time the way `icecreme.ice`/
 `repl.ice` themselves are.

@@ -64,8 +64,8 @@
 ;; import of (creme regex) would make that check meaningless. The FIRST
 ;; case's own initial check fails regardless under BOTH --self-hosted
 ;; and icecreme/icecreme: each has its own bootstrap toolchain (SELF_HOSTED_
-;; TOOLCHAIN_IMPORT in src/main.cr for --self-hosted; icecreme/compiler-run.
-;; scm's own top-level import clause for icecreme) that already transitively
+;; TOOLCHAIN_IMPORT in src/main.cr for --self-hosted; icecreme/icecreme.scm's
+;; own top-level import clause for icecreme) that already transitively
 ;; imports (creme regex) for the compiler's own use, so regexp-matches?
 ;; is bound before this script even starts -- an environment difference
 ;; between how each of these bootstraps itself, not a compiler bug.

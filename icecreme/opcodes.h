@@ -2,7 +2,7 @@
  * (src/creme/compile/opcode.cr), in that enum's exact declaration order.
  * This file used to keep its own compacted 84-entry numbering in lockstep
  * by hand with a separate Crystal-side table (CVMSerializer::OP_IDS); that
- * table and the "CVM2" format it wrote are gone — icecreme now reads "ICE1"
+ * table and the "CVM2" format it wrote are gone — icecreme now reads "ICE"
  * directly (see loader.c), the same format the real Crystal VM's
  * ChunkSerializer/ChunkDeserializer already round-trip. If Creme::Op is
  * ever reordered/extended, this enum must be updated to match — there is
@@ -256,7 +256,7 @@ enum {
  * not here — kept out of this header so it isn't duplicated (and flagged as
  * unused) in every other TU that just needs the enum. */
 
-/* On-disk const-pool type tags — mirrors ChunkSerializer::TAG_* (ICE1),
+/* On-disk const-pool type tags — mirrors ChunkSerializer::TAG_* (ICE),
  * NOT the old CVM2-only CTAG_* numbering (different order, and CVM2 had
  * no RATIONAL/COMPLEX/BLOB/BUILTIN tags at all). */
 enum {

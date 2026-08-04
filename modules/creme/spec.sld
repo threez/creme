@@ -82,7 +82,7 @@
 ;;
 ;; `describe`/`it` also work fine reentrant under `icecreme/icecreme` (icecreme's own
 ;; standalone C11 VM, running the self-hosted compiler directly -- see
-;; icecreme/compiler-run.scm): a spec file's own `(import (creme spec))`
+;; icecreme/icecreme.scm): a spec file's own `(import (creme spec))`
 ;; triggers the self-hosted compiler's own library loader (ensure-
 ;; libraries-loaded!, compiler.sld) to read+reentrant-compile THIS
 ;; library's source, registering describe/it into that SAME compile
@@ -105,7 +105,8 @@
           should-equal? should-eqv? should-be-true? should-be-false? should-raise?
           spec-describe! spec-it! spec-pending! spec-summary! spec-record-external-result!
           render-spec-tree! spec-data-marker spec-vm spec-compiler)
-  (import (scheme base) (scheme cxr) (scheme write) (scheme process-context) (creme introspection) (creme term))
+  (import (scheme base) (scheme cxr) (scheme write) (scheme process-context) (creme introspection) (creme term)
+          (only (creme extra) write-to-string))
   (begin
     ;; ANSI color, only when it'll actually help: STDOUT must be a real
     ;; terminal (stdout-tty?, (creme term) -- native Crystal's
@@ -147,10 +148,6 @@
 
     (define (spec-fail! message) (raise (make-spec-failure message)))
 
-    (define (write-to-string v)
-      (let ((port (open-output-string)))
-        (write v port)
-        (get-output-string port)))
 
     (define (spec-condition-message e)
       (cond

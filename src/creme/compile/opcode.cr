@@ -414,7 +414,7 @@ module Creme
     # way this call would have worked without the optimization at all).
     TestGlobalIdentity
     # Runtime-only, from here down: NEVER emitted by BytecodeCompiler, and
-    # (unlike every op above) not part of the on-disk ICE1 format at all —
+    # (unlike every op above) not part of the on-disk ICE format at all —
     # nothing outside this same running VM ever needs to interpret one of
     # these ordinals, so appending them after every real op is safe
     # regardless of ordinal value. Op::CallGlobal's own arm (VM#exec_call_global)

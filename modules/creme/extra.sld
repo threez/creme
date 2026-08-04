@@ -44,7 +44,7 @@
     any append-map cons* count delete delete!
     every exact->inexact filter filter-map float? foldl foldr
     inexact->exact iota last-pair map-indexed partition print println
-    reduce times)
+    reduce take drop times write-to-string)
   (import (scheme base) (scheme write))
   (begin
     ;; (times n body ...) — run body n times, purely for its side effects
@@ -72,6 +72,22 @@
       (if (null? lst)
           init
           (f (car lst) (foldr f init (cdr lst)))))
+
+    ;; (take lst n) / (drop lst n) — SRFI-1: the first n elements, and the
+    ;; suffix after them. Clamp at the list end (never error on a short list)
+    ;; and treat n<=0 as "none"/"all" respectively.
+    (define (take lst n)
+      (if (or (<= n 0) (null? lst)) '() (cons (car lst) (take (cdr lst) (- n 1)))))
+
+    (define (drop lst n)
+      (if (or (<= n 0) (null? lst)) lst (drop (cdr lst) (- n 1))))
+
+    ;; (write-to-string v) — v's `write` (machine-readable) external
+    ;; representation as a string, via an output-string port.
+    (define (write-to-string v)
+      (let ((p (open-output-string)))
+        (write v p)
+        (get-output-string p)))
 
     ;; (iota count [start [step]]) — SRFI-1: a list of count numbers
     ;; starting at start (default 0), stepping by step (default 1).

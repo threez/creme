@@ -59,11 +59,11 @@ bin/creme: $(CREME_SRCS) shard.yml shard.lock $(NEON_OBJ) $(FFI_SHIM_OBJ)
 creme-spec:
 	./bin/creme spec/creme/main_spec.scm
 
-# Run-only: assumes bin/creme and icecreme/icecreme are already built (`make -C
-# icecreme`). Rebuilds icecreme/compiler-run.ice fresh (the precompiled self-
-# hosted-compiler image icecreme's own "compiler mode" needs -- see icecreme/
-# compiler-run.scm's own header comment) since a stale one would silently
-# run against old compiler/builtin behavior, then runs spec/creme/
+# Rebuilds the icecreme binary first (`gmake -C icecreme`) so its EMBEDDED
+# self-hosted-compiler image (icecreme.scm, baked in via bin2c -- icecreme no
+# longer reads it off disk at run time) reflects the current compiler/builtin
+# source; a stale binary would silently run each spec against old behavior. Then
+# runs spec/creme/
 # main_spec.scm --icecreme, which spawns `./icecreme/icecreme <file>` (icecreme reentrant-
 # compiling+running each file with the SELF-HOSTED compiler, entirely
 # inside icecreme, no native Crystal process involved at run time -- NOT `./
@@ -91,7 +91,7 @@ creme-spec:
 # failed against the affected file's own documented list before assuming
 # something broke.
 creme-spec-icecreme:
-	./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice
+	gmake -C icecreme
 	./bin/creme spec/creme/main_spec.scm --icecreme
 
 # Every artifact competition/bench.scm's two suites need (bin/creme and

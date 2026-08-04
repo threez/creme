@@ -11,7 +11,7 @@ private def run(src : String) : Creme::SchemeValue
 end
 
 # Compiles `source` the same way Creme.run_source would, serializes the
-# resulting Chunk to "ICE1" bytes via ChunkSerializer, and hands those bytes
+# resulting Chunk to "ICE" bytes via ChunkSerializer, and hands those bytes
 # back as a SchemeBlob argument for `(load-chunk-bytes ...)` to consume —
 # exercising the exact round-trip a self-hosted, Scheme-written compiler will
 # eventually produce on its own.

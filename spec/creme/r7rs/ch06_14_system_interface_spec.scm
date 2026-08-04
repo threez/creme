@@ -17,7 +17,7 @@
 ;; `load`/`command-line`/`get-environment-variables` USED to each be a
 ;; genuine icecreme gap here, every one gated behind
 ;; `it-unless (equal? (spec-vm) "icecreme")`. All three are now fixed --
-;; `load` is a real icecreme/compiler-run.scm-defined procedure now (the same
+;; `load` is a real icecreme/icecreme.scm-defined procedure now (the same
 ;; compile-mode-only pattern `eval`/`read`/`open-input-string` already
 ;; used, see that file's own comment), and `(scheme process-context)` is
 ;; a full port (icecreme/builtins.c's creme_register_process_context_builtins

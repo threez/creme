@@ -29,7 +29,7 @@
 ;; reusing the same unwind-stack mechanism parameterize already used;
 ;; dynamic-wind generalizes that same mechanism; with-exception-handler/
 ;; raise-continuable are pure Scheme atop dynamic-wind, defined in
-;; icecreme/compiler-run.scm -- see each one's own comment for the full story).
+;; icecreme/icecreme.scm -- see each one's own comment for the full story).
 ;; ===========================================================================
 
 ;; See compiler_spec.scm's own comment on why the full toolchain import

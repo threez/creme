@@ -3,4 +3,4 @@
   (import (creme builtin hash-table))
   (export hash-table->alist hash-table-contains? hash-table-delete!
           hash-table-keys hash-table-ref hash-table-set! hash-table-values
-          hash-table? make-hash-table))
+          hash-table? make-hash-table eq-hash))

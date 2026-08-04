@@ -64,7 +64,7 @@
 ;; ===========================================================================
 
 (define-library (creme highlight)
-  (export highlight-line paren-balance)
+  (export highlight-line paren-balance colorize)
   (import (scheme base) (creme scheme-lexer))
   (begin
 

@@ -287,7 +287,7 @@ void creme_setup_frame0(VM *vm) {
  * compiler directly, so an empty table already IS "no procedures, only
  * syntax" with no extra bookkeeping needed) and for `environment`'s own
  * import-sets, which populate this VM's globals themselves afterward
- * (see icecreme/compiler-run.scm's own `environment`) via
+ * (see icecreme/icecreme.scm's own `environment`) via
  * environment-copy-global! (bootstrap.c) -- copying each requested
  * name's CURRENT value from the calling VM, not re-importing/
  * re-compiling anything. */

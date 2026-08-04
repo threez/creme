@@ -308,7 +308,7 @@ struct VM {
   /* with-exception-handler's installed-handler stack (builtins.c's
    * bi_with_exception_handler/bi_raise_continuable/bi_raise) -- a
    * genuine icecreme-native builtin now, not just a Scheme-level shim in
-   * icecreme/compiler-run.scm (see that file's own comment on why it used to
+   * icecreme/icecreme.scm (see that file's own comment on why it used to
    * live there only, and why that meant precompiled --emit-icecreme programs
    * couldn't use with-exception-handler at all). */
   Value exc_handlers[CREME_EXC_HANDLERS_CAP];
@@ -348,7 +348,7 @@ struct VM {
   const char *source_file; /* fallback for --profile's file:line report when an
                              * instruction has no per-instruction file of its
                              * own (has_pos unset) — set by main.c from the
-                             * loaded .ice path itself, since ICE1 (unlike
+                             * loaded .ice path itself, since ICE (unlike
                              * the old CVM2 header) carries no separate
                              * original-source-file field. */
   /* current-output-port/current-input-port's own backing Parameter
@@ -426,7 +426,7 @@ struct VM {
 /* loader.c
  *
  * `required_families_out`/`required_families_count_out`: if non-NULL, filled
- * in with the ICE1 "required families" metadata section (an array of
+ * in with the ICE "required families" metadata section (an array of
  * GC_MALLOC'd, NUL-terminated C strings, and its count) that now sits
  * between the magic and the chunk body -- see chunk_serializer.cr's
  * `serialize`. Pass NULL for both if the caller doesn't need the list; the

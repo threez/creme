@@ -5,7 +5,7 @@ front end (Lexer → Reader → `analyze` → `BytecodeCompiler`) is unchanged a
 still owns compilation. `creme --emit-icecreme <file.scm> <out.ice>` compiles the
 whole script (plus its transitively-imported pure-Scheme library bodies)
 into one combined `Chunk` and serializes it (see
-`src/creme/compile/creme_emitter.cr`) as "ICE1" — the SAME format
+`src/creme/compile/creme_emitter.cr`) as "ICE" — the SAME format
 `src/creme/compile/chunk_serializer.cr`/`chunk_deserializer.cr` round-trip
 on the Crystal side, and the format `(creme bootstrap)`'s `load-chunk-bytes`
 already reads. This directory is a from-scratch C11 VM that loads and
@@ -30,7 +30,7 @@ is "a second backend implementing the language's control-flow surface
 faithfully," not "a benchmark-only prototype."
 
 **Stability**: see `STABILITY.md` for what's guaranteed to keep working
-across a release (the ICE1 bytecode format's version-checked read
+across a release (the ICE bytecode format's version-checked read
 compatibility, the base builtin set, the CLI contract) versus what's
 still explicitly in flux (internal struct layout, no stable C ABI yet).
 
@@ -67,15 +67,55 @@ curl -H "Accept: application/json" http://127.0.0.1:4599/   # JSON API
 curl -X POST -d "title=Buy milk" http://127.0.0.1:4599/todos
 ```
 
+## Command-line interface
+
+Beyond running a compiled `<file.ice>`, `icecreme` has its own CLI, implemented
+in shared Scheme (the CLI dispatcher `icecreme/icecreme.scm`, which `main.c`
+forwards its argv to) rather than in C, so it reuses the same self-hosted
+compiler already embedded in the binary. Run from the repo root (the compiler
+resolves imported libraries against `modules/`).
+
+| Invocation | What it does |
+|---|---|
+| `icecreme` | Start the interactive REPL (see below) |
+| `icecreme <file.scm> [args…]` | Compile and run a Scheme source file |
+| `icecreme <file.ice> [args…]` | Run an already-compiled ICE file |
+| `icecreme -- <file> [args…]` | Force `<file>` to be a path even if it looks like a flag |
+| `icecreme -` | Read a program from **stdin** and run it |
+| `icecreme --emit-icecreme <in.scm> <out.ice>` | Compile `<in.scm>` to ICE bytecode (run later with `icecreme <out.ice>`) |
+| `icecreme --emit-icecreme --static <in.scm> <out.ice>` | Same, but **inline** every imported `.sld` library body — a fully self-contained file that runs with **no `modules/` tree present** (the self-hosted counterpart of native `creme --emit-icecreme`) |
+| `icecreme -S \| --dump-bytecode [--strict] <file.scm>` | Compile and print a bytecode disassembly, one dump per top-level form |
+| `icecreme --disassemble <file.ice>` | Disassemble an already-compiled ICE file (native- or icecreme-emitted) |
+| `icecreme --profile [table] <file>` | Run wrapped in the native profiler (see "Profiling") |
+| `icecreme --version` | Print the version/runtime line and exit |
+| `icecreme --help` \| `-h` | Show usage |
+
+`--emit-icecreme` without `--static` uses the self-hosted compiler's ordinary
+output: it's smaller, but a script importing pure-Scheme (`.sld`) libraries
+relies on those libraries being loadable from `modules/` at run time (icecreme
+loads them on the fly). Use `--static` when the `.ice` must stand alone. A
+library with no `.sld` file (a native family like `(creme mux)`) is backed by C
+builtins either way and never needs inlining.
+
 ## REPL
 
-`icecreme/repl.scm` is now a two-line shim (`(import (creme repl)) (run-repl)`)
-over `modules/creme/repl.sld`, the same shared REPL loop the native
-Crystal interpreter and `--self-hosted` mode also delegate to. Run it as
-plain Scheme SOURCE, directly, via `./icecreme/icecreme`:
+Run `icecreme` with no file argument and it drops straight into the REPL:
 
 ```sh
-./icecreme/icecreme icecreme/repl.scm   # interactive (or piped) REPL, no precompile step
+./icecreme/icecreme                     # interactive (or piped) REPL
+```
+
+The REPL loop itself is the shared `(creme repl)` (`modules/creme/repl.sld`),
+the same one the native Crystal interpreter and `--self-hosted` mode delegate
+to. Its two-line entry (`(import (creme repl)) (run-repl)`) is baked into the
+`icecreme` binary and run through the embedded compiler-mode driver, so no
+`icecreme/repl.scm` or `icecreme/icecreme.ice` file is read from disk (the
+`modules/` `.sld` tree still is — the compiler needs it; run from the repo
+root). `icecreme/repl.scm` remains as the canonical, explicit form and still
+works exactly the same:
+
+```sh
+./icecreme/icecreme icecreme/repl.scm   # equivalent, explicit REPL source
 ```
 
 This must NOT be precompiled ahead of time via `--emit-icecreme` into a
@@ -83,7 +123,7 @@ standalone `.ice` — `(creme repl)` relies on the portable `(scheme
 read)`/`(scheme eval)`/`(interaction-environment)`, and icecreme has no native
 C builtins for those. The only place they're backed at all is "Compiler
 mode" below: when `icecreme/icecreme` is pointed at raw `.scm` source, it loads the
-bundled self-hosted compiler (`icecreme/compiler-run.ice`) first, and that
+bundled self-hosted compiler (`icecreme/icecreme.ice`) first, and that
 compiler defines `read`/`eval`/`interaction-environment` itself as part of
 its own toolchain setup before compiling-and-running the target script.
 An ahead-of-time `--emit-icecreme` build of `repl.scm` skips that bridge
@@ -96,7 +136,7 @@ This works because two things were already true before this file existed:
 table, so repeated chunk loads against the same `VM*` already share
 bindings for free (`(define x 5)` on one line, `(display x)` on the
 next); and the self-hosted compiler's `compile-source-to-bytes` already
-produces exactly the ICE1 bytes icecreme reads natively. The one missing piece
+produces exactly the ICE bytes icecreme reads natively. The one missing piece
 was a way to load-and-run a freshly-computed bytevector of those bytes
 *from within an already-running icecreme program* — `icecreme/bootstrap.c`'s
 `load-chunk-bytes` (mirroring `(creme bootstrap)`'s Crystal-side builtin
@@ -176,34 +216,47 @@ needed for the core deliverable.
 ## Compiler mode
 
 This is what the REPL above actually runs on: point `icecreme` at a plain
-`.scm` file and it compiles and runs it directly — the target script
-never touches the Crystal `creme` binary, only a small bundled "compiler
-driver" image (built once, still needed Crystal to produce):
+`.scm` file and it compiles and runs it directly — the target script never
+touches the Crystal `creme` binary; the whole self-hosted compiler is baked
+into `icecreme` itself.
+
+The build is **self-hosting**: the embedded `icecreme.ice` (the compiler image)
+is produced BY ICECREME, not by the native Crystal `bin/creme`. Because
+building the binary needs that chunk and self-compiling the chunk needs a
+binary, `icecreme/Makefile` bootstraps in two stages — `bin/creme` compiles a
+throwaway `icecreme-boot` binary, which then `--emit-icecreme --static`-compiles
+the shipped chunk (see the Makefile's "Self-hosting bootstrap" section). A
+byte-for-byte fixpoint (icecreme compiling itself yields an identical chunk,
+`spec/creme/compiler_self_host_spec.scm`) is what makes this sound; `make
+bootstrap-clean` forces a fresh native bootstrap if a self-compile ever
+diverges. So a plain build just works:
 
 ```sh
-./bin/creme --emit-icecreme icecreme/compiler-run.scm icecreme/compiler-run.ice   # one-time build
-./icecreme/icecreme competition/scheme/bench/creme.scm                                            # compiles + runs directly
+cd icecreme && gmake            # bin/creme bootstraps icecreme-boot, which self-compiles icecreme.ice
+./icecreme/icecreme competition/scheme/bench/creme.scm   # compiles + runs directly
 ```
 
-`icecreme/main.c` decides which mode to use by peeking a given file's first 4
-bytes: `"ICE1"` means an already-compiled binary (today's behavior,
-completely unchanged — `./icecreme/icecreme competition/scheme/bench/creme.ice` still works exactly
-as before), anything else means plain Scheme source needing compiler
-mode. This is content-based, not extension-based — a `.scm` file's first
-bytes (whitespace/`(`/`;`) can never coincidentally read as `"ICE1"` — so
-no separate `--compile` flag is needed. In compiler mode, `main.c` stashes
-the real target path (a new `icecreme-target-path` builtin exposes it) and
-loads+runs `icecreme/compiler-run.ice` instead; that chunk's own driver code
-(`icecreme/compiler-run.scm`) reads the real target (a new `read-whole-file`
-builtin — icecreme's only other read capability, `read-line`, is hardwired to
-stdin), compiles it, and `load-chunk-bytes`s the result — the same
-mechanism the REPL already uses, just non-interactive and reading from a
-file instead of stdin.
+`icecreme/main.c` is a thin launcher: it does the one-time C startup
+(GC/GMP/VM init, register the native builtins), then loads and runs ONE
+embedded chunk — `icecreme/icecreme.scm`, compiled to `icecreme.ice` and baked
+in at build time. That Scheme program is the entire CLI: it reads
+`(command-line)` and decides what to do, including this compiler mode. For a
+file target it peeks the first 4 bytes — `"ICE"` means an already-compiled
+binary (`load-chunk-bytes`s it directly; `./icecreme/icecreme competition/scheme/bench/creme.ice`
+still works exactly as before), anything else means plain Scheme source it
+reads (a `read-whole-file` builtin — icecreme's only other read capability,
+`read-line`, is hardwired to stdin), compiles, and `load-chunk-bytes`s. This
+is content-based, not extension-based — a `.scm` file's first bytes
+(whitespace/`(`/`;`) can never coincidentally read as `"ICE"`. (`main.c`
+understands one flag of its own, `--profile`, since that drives the native C
+profiler; everything else is parsed in `icecreme.scm`. The library-embedding
+entry `embed.c`'s `creme_run_scheme_file` still sets `icecreme-target-path` to
+hand `icecreme.scm` a specific file to compile-and-run instead.)
 
 **`include`/`include-ci`**: the self-hosted compiler itself deliberately
 doesn't support these (`reader.sld`'s own header comment — real support
 needs a path-resolution design this project hasn't needed yet). Rather
-than take that on, `icecreme/compiler-run.scm` expands them itself, entirely
+than take that on, `icecreme/icecreme.scm` expands them itself, entirely
 from already-exported toolchain primitives (`read-program`/
 `compile-program`/`chunk->bytes` — no changes to `reader.sld`/
 `compiler.sld`/`bytecode.sld`): parse the target into forms, recursively
@@ -234,7 +287,7 @@ spec.sld`) and its `spec/creme/*_spec.scm` files can run directly under
 `icecreme`:
 
 ```sh
-make creme-spec-icecreme    # rebuilds compiler-run.ice, then runs every spec file
+make creme-spec-icecreme    # rebuilds icecreme.ice, then runs every spec file
 ./icecreme/icecreme spec/creme/vm_spec.scm    # or one file at a time
 ```
 
@@ -246,7 +299,7 @@ float formatting — see "Native builtins" below):
 - A target script that imports the compiler toolchain itself (`(creme
   compiler compiler)`/`(creme bytecode)`/etc. — exactly what every
   `spec/creme` file does, transitively, via `(creme compiler spec-
-  helper)`) used to corrupt in-progress compilation: `compiler-run.scm`
+  helper)`) used to corrupt in-progress compilation: `icecreme.scm`
   already bundles those libraries natively at BUILD time, but the self-
   hosted compiler's own library loader (`ensure-libraries-loaded!`,
   `compiler.sld`) had no way to know that, so it re-read and re-ran their
@@ -254,11 +307,11 @@ float formatting — see "Native builtins" below):
   <chunk> ...)`/`<fcomp> ...)` and corrupting any chunk/fcomp object the
   outer, still-compiling target script already held from the original
   generation ("record accessor: expected a `<chunk>` record"). Fixed by
-  exporting `mark-self-hosted-library-loaded!` and having `compiler-run.
-  scm` pre-seed it for every library it itself already imports natively.
+  exporting `mark-self-hosted-library-loaded!` and having `icecreme.scm`
+  pre-seed it for every library it itself already imports natively.
 - `eval`/`open-input-string`/`read`/`eof-object` don't exist as icecreme-
-  native C builtins at all (see "Native builtins" above) — `compiler-
-  run.scm` defines all four itself, in Scheme, reusing the self-hosted
+  native C builtins at all (see "Native builtins" above) — `icecreme.scm`
+  defines all four itself, in Scheme, reusing the self-hosted
   reader/compiler already loaded there (`eval` compiles+runs one form via
   `compile-program`/`load-chunk-bytes`; `open-input-string` parses a
   whole string upfront via `read-program`, and `read` pops one form off
@@ -290,7 +343,7 @@ passing under `icecreme`:
 - `with-exception-handler`/`raise-continuable`/`raise` are genuine
   icecreme-native C builtins now (`icecreme/builtins.c`), backed by a real
   VM-wide handler stack (`vm->exc_handlers`, `vm.h`) — they used to be
-  plain Scheme, defined only in `icecreme/compiler-run.scm` atop
+  plain Scheme, defined only in `icecreme/icecreme.scm` atop
   `dynamic-wind` (a mutable handler-stack list), which meant they only
   ever worked when a script ran through icecreme's own "compiler mode"
   (below); a precompiled `--emit-icecreme` program calling
@@ -314,7 +367,7 @@ passing under `icecreme`:
   current handler first (same pop/call/push-back as `raise-continuable`)
   and only falls through to the `guard`/top-level unwind if that handler
   returns normally (which has nowhere for its value to go on a
-  non-continuable raise). `icecreme/compiler-run.scm` no longer redefines any
+  non-continuable raise). `icecreme/icecreme.scm` no longer redefines any
   of these — doing so would just shadow the new C builtins via its own
   top-level `define` (icecreme's flat global table lets a later `define`
   overwrite an earlier binding by name), silently reverting compiler-mode
@@ -379,7 +432,7 @@ place) gained an `include`/`include-ci` case calling a new
 `expand-include-form`, which resolves the included path against
 `current-compiling-file` (a new mutable var, save/restored around
 `compile-program`'s now-optional 2nd argument — the file path being
-compiled, threaded through from both `icecreme/compiler-run.scm` and
+compiled, threaded through from both `icecreme/icecreme.scm` and
 `src/main.cr`'s native `--self-hosted` entry points) so nested includes
 resolve relative to wherever their own file lives, exactly mirroring the
 existing top-level/library-declaration include logic. This needed real
@@ -714,7 +767,7 @@ isn't passed (guarded by a single `if (vm->profiler.enabled)` check per
 instruction, and the `SIGPROF` timer is only installed for the duration of
 a profiled run).
 
-**Format note**: icecreme reads "ICE1" (magic `"ICE1"`), the same format the real
+**Format note**: icecreme reads "ICE" (magic `"ICE"`), the same format the real
 Crystal VM's `ChunkSerializer`/`ChunkDeserializer` round-trip — there is no
 separate icecreme-specific format/opcode-numbering to keep in sync anymore. A
 `.ice` file from before this change (the old "CVM2" format) won't load;
@@ -843,7 +896,7 @@ across these files:
 
 | File | Backs | Count | Notable names |
 |---|---|---|---|
-| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`, all of `(creme math)`/`(creme introspection)`/`(creme time)` | 190+ | predicates, `car`/`cdr`/`set-car!`/`set-cdr!`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `set-environment-variable!` (`(creme env)`'s own mutator, not just R7RS's read-only `get-environment-variable` — needed so an icecreme-run process can pass a flag down to a subprocess it spawns via `process-run`, which inherits environ automatically), `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own ICE1 float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below), `open-input-file`/`open-output-file`/`open-binary-input-file`/`open-binary-output-file`/`call-with-input-file`/`call-with-output-file`/`with-input-from-file`/`with-output-to-file`/`file-exists?` (`(scheme file)`'s R7RS port surface, plus `(creme file)`'s own `file-append`/`file-lines`/`file-size`/`current-directory` — see this section's own note further down on the two `with-*` builtins specifically) |
+| `builtins.c` | most of `(scheme base)`/`(scheme cxr)`/`(scheme complex)`, a little of `(scheme char)`/`(scheme write)`/`(scheme process-context)`/`(scheme lazy)`, all of `(creme math)`/`(creme introspection)`/`(creme time)` | 190+ | predicates, `car`/`cdr`/`set-car!`/`set-cdr!`/the full `caar`..`cddddr` family/`cons`/list ops, `map`/`for-each`/`filter`/`apply`, `string-append`/`substring`/`string-copy`/`string->number` (now with an optional radix arg, needed by `#b`/`#o`/`#x`-prefixed literals)/etc., `vector`/`vector->list`, `vector-ref`/`-set!`/`-length`, `string-ref`/`-set!`, `make-bytevector`/`bytevector`/`bytevector-length`/`bytevector?`/`-u8-ref`/`-u8-set!`, `force`/`promise?`, `error`, `raise`, `error-object?`/`-message`/`-irritants`, `make-parameter`, `read-line`, `read-whole-file`, `get-environment-variable`, `set-environment-variable!` (`(creme env)`'s own mutator, not just R7RS's read-only `get-environment-variable` — needed so an icecreme-run process can pass a flag down to a subprocess it spawns via `process-run`, which inherits environ automatically), `+`/`-`/`*`/`/`/`<`/`>`/`<=`/`>=`/`=` (now genuinely promoting through int/rational/float/complex — see "numeric tower" below), `quotient`/`remainder`/`modulo`, `string-for-each`, `char-downcase`/`-upcase`, `char<?`/`>?`/`<=?`/`>=?`, `write` (a real quoted/escaped external representation — `display`'s own `print_value` extended, not a second printer; `+inf.0`/`-inf.0`/`+nan.0` handled specially there too, needed once anything re-serializes a float this VM itself produced), `write-char`, `exit`, `gensym`, `flonum->bits`/`bits->flonum` (an exact IEEE754 bit-level reinterpret — needed by `(creme bytecode)`'s own ICE float-constant serialization, so any chunk with a float literal needed this), `dynamic-wind`, `call/cc`/`call-with-current-continuation` (escape-only — see "Compiler mode" above), `rational?`/`numerator`/`denominator` (int/rational only), `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle` (`(scheme complex)`'s complete surface — see "numeric tower" below), `open-input-file`/`open-output-file`/`open-binary-input-file`/`open-binary-output-file`/`call-with-input-file`/`call-with-output-file`/`with-input-from-file`/`with-output-to-file`/`file-exists?` (`(scheme file)`'s R7RS port surface, plus `(creme file)`'s own `file-append`/`file-lines`/`file-size`/`current-directory` — see this section's own note further down on the two `with-*` builtins specifically) |
 | `mux.c` | `(creme mux)` | 13 | `mux-router`, `mux-get!`/`post!`/etc., `mux-listen!`, `mux-close!` — real HTTP via poll(2) + picohttpparser; `mux-listen!`'s "pool" option picks inline dispatch (`#f`, the default) or a growable SO_REUSEPORT worker pool (`#t`/an integer max) with no cross-thread handoff |
 | `sql.c` | `(creme sql)` | 6 | `sql-open`, `sql-execute`, `sql-query`, `sql-scalar` — real SQLite via the C API |
 | `hashtable.c` | `(creme hash-table)` (full — every name the `.sld` re-exports) | 9 | `make-hash-table`, `hash-table-set!`/`ref`/`contains?`/`delete!`/`keys`/`values`/`->alist` — `hash-table-ref`'s own default arg may be a plain value OR a thunk (only applied if it's actually callable), matching native's own contract |
@@ -1223,7 +1276,7 @@ are handled by the compiler directly, independent of environment), and
 `load-chunk-bytes-into` (loads+runs compiled bytecode against a GIVEN
 environment's table instead of always the currently-running one — what
 makes `eval`'s 2-arg form actually target the right place).
-`icecreme/compiler-run.scm` builds on these:
+`icecreme/icecreme.scm` builds on these:
 
 - `(environment import-set ...)`: a fresh, empty environment populated
   by copying exactly each import-set's own resolved bindings —
@@ -1273,7 +1326,7 @@ environment used to leave `(eval '+ env)` correctly failing while
 opcode never checked which environment it was running in. Fixed without
 giving up fusion generally: a new `environment-bound?` builtin
 (`icecreme/bootstrap.c`, mirrors `environment-copy-global!`'s own bound check)
-lets `eval` (`icecreme/compiler-run.scm`) ask, for the specific target
+lets `eval` (`icecreme/icecreme.scm`) ask, for the specific target
 environment, which of `compiler.sld`'s `fusable-prim-names` it actually
 lacks; `eval` then calls the newly-exported `mark-redefined!` for each
 such name — the SAME mechanism `compiler.sld` already uses to stop
@@ -1519,11 +1572,11 @@ different path.
 ## Files
 
 - `opcodes.h` — on-disk opcode/const-tag ids: `Creme::Op`'s own enum
-  ordinals (`src/creme/compile/opcode.cr`) and ICE1's `TAG_*`/`CDK_*`/`QQ_*`
+  ordinals (`src/creme/compile/opcode.cr`) and ICE's `TAG_*`/`CDK_*`/`QQ_*`
   constants (`chunk_serializer.cr`), not a separate icecreme-specific numbering.
 - `value.h` — the tagged `Value` struct and heap object types.
 - `vm.h` — `Chunk`/`Frame`/`Closure`/`Upvalue`/`VM` struct definitions.
-- `loader.c` — deserializes an ICE1 file OR in-memory byte buffer (one
+- `loader.c` — deserializes an ICE file OR in-memory byte buffer (one
   combined `Chunk`, no multi-chunk envelope), then resolves global names.
 - `vm.c` — the dispatch loop, call/upvalue machinery, global table,
   guard/parameterize unwind machinery (`creme_abort`/`creme_raise_condition`).
@@ -1541,8 +1594,8 @@ different path.
 - `repl.scm` — the REPL driver script; a thin shim over `(creme repl)`
   (`modules/creme/repl.sld`), run directly as source (`./icecreme/icecreme
   icecreme/repl.scm`, see "REPL" above) — never precompiled via `--emit-icecreme`.
-- `compiler-run.scm` — the compiler-mode driver script (see "Compiler
-  mode" above), precompiled into `compiler-run.ice`.
+- `icecreme.scm` — the compiler-mode driver script (see "Compiler
+  mode" above), precompiled into `icecreme.ice`.
 - `profiler.c`/`profiler.h` — the `--profile` samplers, see "Profiling" above.
 - `builtin_families.c`/`builtin_families.h` — the required-families→
   register-function table and `creme_register_required_builtins`/
@@ -1556,6 +1609,6 @@ different path.
 - `creme.h` — the public umbrella header a `libcreme.a` consumer includes.
 - `tools/bin2c.c` — tiny build-time helper turning a compiled `.ice` file
   into a `.c` source defining a `const unsigned char[]`/length pair; used
-  to bundle `compiler-run.ice` into `embed.c`'s embedded byte array at
+  to bundle `icecreme.ice` into `embed.c`'s embedded byte array at
   library-build time.
 - `main.c` — entry point: load and run the one combined chunk.

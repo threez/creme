@@ -198,7 +198,7 @@ both reaching their current shape) — not itemized individually here;
   build `cvm-sanitize` → `icecreme-sanitize`), and the CLI flags on `bin/creme`
   that drive it (`--emit-cvm` → `--emit-icecreme`, `--cvm` → `--icecreme`).
 - The compiled-bytecode file extension changes `.cvmc` → `.ice`, and its
-  on-disk magic header changes `SCB1` → `ICE1` (a build artifact regenerated
+  on-disk magic header changes `SCB1` → `ICE` (a build artifact regenerated
   by `make`, not persisted user data, so no old-format compatibility is
   needed).
 - The two documented, publicly-read environment variables rename to match:

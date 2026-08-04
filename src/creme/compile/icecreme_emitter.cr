@@ -1,7 +1,7 @@
 # ===========================================================================
 # IcecremeEmitter: compiles a whole script (plus its transitively-imported
 # pure-Scheme library bodies) down to a SINGLE Chunk and serializes it via
-# the SAME "ICE1" format (ChunkSerializer) the real Crystal VM already
+# the SAME "ICE" format (ChunkSerializer) the real Crystal VM already
 # round-trips through — no separate/narrower icecreme-specific format anymore.
 # ===========================================================================
 #
@@ -10,13 +10,13 @@
 # constant-tag numbering, and compiled each top-level form into its OWN
 # Chunk, wrapped in an explicit `source_file` + chunk-count header so
 # icecreme/main.c could load and run each in sequence sharing one VM/global
-# table. ICE1 has no such multi-chunk envelope — ChunkSerializer.serialize
+# table. ICE has no such multi-chunk envelope — ChunkSerializer.serialize
 # writes exactly one Chunk — so instead of inventing a new envelope, this
 # emitter compiles EVERYTHING (library bodies, then the script's own forms)
 # into one combined Chunk via BytecodeCompiler.compile_program, which
 # already treats an Array(Node) as one sequential body (same mechanism
 # `(begin ...)` itself compiles to). The result is a plain single-chunk
-# ICE1 file, identical in shape to what `(creme bootstrap)`'s
+# ICE file, identical in shape to what `(creme bootstrap)`'s
 # load-chunk-bytes already reads.
 #
 # Import handling mirrors the old CVMSerializer.emit exactly: each `(import
@@ -38,7 +38,21 @@
 # native builtins instead (see icecreme/mux.c et al.), exactly as before.
 module Creme
   module IcecremeEmitter
-    def self.emit(interp : Interpreter, forms : Array(SchemeValue), env : Env) : Bytes
+    # Serializes a whole program to ICE bytes -- the `--emit-icecreme` path.
+    # `strip: true` drops never-called inlined-library globals (see build).
+    def self.emit(interp : Interpreter, forms : Array(SchemeValue), env : Env, strip : Bool = false) : Bytes
+      chunk, required_families = build(interp, forms, env, strip)
+      ChunkSerializer.serialize(chunk, required_families: required_families)
+    end
+
+    # Compiles a whole program (transitively-imported pure-Scheme library
+    # bodies inlined first, then the script's own forms) into the SINGLE
+    # combined Chunk `emit` above serializes -- returned here without
+    # serializing so callers that only want to inspect it (e.g. `creme -S
+    # --static`, which disassembles this exact chunk in memory rather than
+    # writing an .ice and reading it back) can skip the wire round-trip.
+    # Also returns the required native-builtin family names (see `emit`).
+    def self.build(interp : Interpreter, forms : Array(SchemeValue), env : Env, strip : Bool = false) : {Chunk, Array(String)}
       target_env = env
       interp.emitting_for_icecreme = true
       begin
@@ -114,10 +128,177 @@ module Creme
           .map { |name| name[2] }
           .uniq!
 
-        chunk = BytecodeCompiler.compile_program(library_nodes + app_nodes)
-        ChunkSerializer.serialize(chunk, required_families: required_families)
+        kept_library_nodes = strip ? strip_dead_globals(library_nodes, app_nodes) : library_nodes
+        chunk = BytecodeCompiler.compile_program(kept_library_nodes + app_nodes)
+        {chunk, required_families}
       ensure
         interp.emitting_for_icecreme = false
+      end
+    end
+
+    # Dead-global elimination (opt-in `--strip`): drops every inlined-library
+    # top-level `(define name <lambda/value>)` whose global `name` is never
+    # reachable from the app's own forms. Conservative and SOUND because it runs
+    # on ANALYZED nodes (macros already expanded, so a global used only inside a
+    # macro expansion is a real GlobalRefNode here), and because:
+    #   * only plain DefineNodes are candidates -- define-syntax/defmacro/
+    #     define-record-type are HelperFormNodes, always kept, and every symbol
+    #     in their raw form is treated as a live reference;
+    #   * the app's forms (and any non-define library form) are always kept and
+    #     seed the live set;
+    #   * over-approximation only ever KEEPS more (VarRefNode/SetBangNode/
+    #     PrimCallNode names are all counted as references).
+    # Assumes a closed world: a global reached only via eval/`environment`/a
+    # computed `(string->symbol ...)` lookup would be wrongly dropped -- hence
+    # opt-in. Any internal failure falls back to no stripping (never unsound).
+    private def self.strip_dead_globals(library_nodes : Array(Node), app_nodes : Array(Node)) : Array(Node)
+      # Candidate globals: plain top-level library defines, name -> the globals
+      # its body references.
+      refs_by_name = {} of String => Set(String)
+      library_nodes.each do |node|
+        next unless node.is_a?(DefineNode)
+        refs = refs_by_name[node.name] ||= Set(String).new
+        collect_global_refs(node.value, refs)
+      end
+
+      # Roots: everything the app code references, plus everything referenced by
+      # any non-candidate library form (macros/record-types/side-effecting forms).
+      live = Set(String).new
+      app_nodes.each { |node| collect_global_refs(node, live) }
+      library_nodes.each do |node|
+        collect_global_refs(node, live) unless node.is_a?(DefineNode)
+      end
+
+      # Transitive closure over candidate references.
+      worklist = live.to_a
+      until worklist.empty?
+        name = worklist.pop
+        refs = refs_by_name[name]?
+        next unless refs
+        refs.each do |ref|
+          worklist << ref if live.add?(ref)
+        end
+      end
+
+      library_nodes.select { |node| !node.is_a?(DefineNode) || live.includes?(node.name) }
+    rescue ex
+      STDERR.puts "creme --strip: internal error (#{ex.message}); emitting without stripping"
+      library_nodes
+    end
+
+    # Collects every global NAME `node`'s subtree could reference, into `into`.
+    # Totally enumerates the AST (see ast.cr) -- an unhandled node type raises,
+    # caught by strip_dead_globals's fallback, so a future node kind can never
+    # silently hide a live reference and produce an unsound strip. Local refs and
+    # binder names are deliberately skipped; global-ish name-carrying nodes
+    # (GlobalRef/VarRef/SetBang/PrimCall) are collected conservatively.
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def self.collect_global_refs(node : Node, into : Set(String)) : Nil
+      case node
+      when GlobalRefNode then into << node.name
+      when VarRefNode    then into << node.name
+      when LocalRefNode, LiteralNode, ThrowNode
+        # leaves that reference no global
+      when SetBangNode
+        into << node.name
+        collect_global_refs(node.value, into)
+      when PrimCallNode
+        into << node.name
+        node.args.each { |a| collect_global_refs(a, into) }
+      when DefineNode
+        # a nested define binds a LOCAL -- skip the binder name, walk the value
+        collect_global_refs(node.value, into)
+      when IfNode
+        collect_global_refs(node.test, into)
+        collect_global_refs(node.conseq, into)
+        node.alt.try { |a| collect_global_refs(a, into) }
+      when BeginNode  then node.body.each { |n| collect_global_refs(n, into) }
+      when LambdaNode then node.body_nodes.each { |n| collect_global_refs(n, into) }
+      when CaseLambdaNode
+        node.clauses.each { |c| c.body_nodes.each { |n| collect_global_refs(n, into) } }
+      when LetNode, LetStarNode, LetrecNode
+        node.inits.each { |n| collect_global_refs(n, into) }
+        node.body.each { |n| collect_global_refs(n, into) }
+      when NamedLetNode
+        node.inits.each { |n| collect_global_refs(n, into) }
+        node.body.each { |n| collect_global_refs(n, into) }
+      when WhenNode
+        collect_global_refs(node.test, into)
+        node.body.each { |n| collect_global_refs(n, into) }
+      when AndNode then node.exprs.each { |n| collect_global_refs(n, into) }
+      when OrNode  then node.exprs.each { |n| collect_global_refs(n, into) }
+      when CondNode
+        node.clauses.each do |cl|
+          cl.test.try { |t| collect_global_refs(t, into) }
+          cl.arrow.try { |a| collect_global_refs(a, into) }
+          cl.body.each { |n| collect_global_refs(n, into) }
+        end
+      when CaseNode
+        collect_global_refs(node.key, into)
+        node.clauses.each do |cl|
+          cl.arrow.try { |a| collect_global_refs(a, into) }
+          cl.body.each { |n| collect_global_refs(n, into) }
+        end
+      when DoNode
+        node.inits.each { |n| collect_global_refs(n, into) }
+        node.steps.each { |n| n.try { |s| collect_global_refs(s, into) } }
+        collect_global_refs(node.test, into)
+        node.results.each { |n| collect_global_refs(n, into) }
+        node.commands.each { |n| collect_global_refs(n, into) }
+      when DefineValuesNode then collect_global_refs(node.producer, into)
+      when LetValuesNode
+        node.binders.each { |b| collect_global_refs(b.producer, into) }
+        node.body.each { |n| collect_global_refs(n, into) }
+      when QuasiquoteNode then collect_qq_global_refs(node.template, into)
+      when DelayNode      then collect_global_refs(node.thunk, into)
+      when GuardNode
+        node.clauses.each do |cl|
+          cl.test.try { |t| collect_global_refs(t, into) }
+          cl.arrow.try { |a| collect_global_refs(a, into) }
+          cl.body.each { |n| collect_global_refs(n, into) }
+        end
+        node.body.each { |n| collect_global_refs(n, into) }
+      when ParameterizeNode
+        node.bindings.each do |b|
+          collect_global_refs(b.param, into)
+          collect_global_refs(b.value, into)
+        end
+        node.body.each { |n| collect_global_refs(n, into) }
+      when AppNode
+        collect_global_refs(node.callee, into)
+        node.args.each { |a| collect_global_refs(a, into) }
+      when HelperFormNode
+        # define-syntax/defmacro/define-record-type/import: raw, un-analyzed
+        # s-exprs. Their expansion's references aren't visible as nodes, so
+        # conservatively treat every symbol appearing in the form as live.
+        collect_symbols(node.form, into)
+      else
+        raise "collect_global_refs: unhandled node #{node.class}"
+      end
+    end
+
+    private def self.collect_qq_global_refs(t : QQTemplate, into : Set(String)) : Nil
+      case t
+      when QQHole       then collect_global_refs(t.node, into)
+      when QQSpliceItem then collect_global_refs(t.node, into)
+      when QQList
+        t.items.each { |i| collect_qq_global_refs(i, into) }
+        collect_qq_global_refs(t.tail, into)
+      when QQVector then t.items.each { |i| collect_qq_global_refs(i, into) }
+      when QQConst
+        # a literal fragment (SchemeValue) -- symbols in it are quoted data,
+        # not references, so nothing to collect.
+      end
+    end
+
+    private def self.collect_symbols(v : SchemeValue, into : Set(String)) : Nil
+      case v
+      when SchemeSym then into << v.name
+      when Cons
+        collect_symbols(v.car, into)
+        collect_symbols(v.cdr, into)
+      when SchemeVector
+        v.value.each { |item| collect_symbols(item, into) }
       end
     end
 

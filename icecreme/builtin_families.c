@@ -43,7 +43,7 @@
 #include "treelist.h"
 #include "vm.h"
 
-/* Maps an ICE1 "required families" name (the third element of a
+/* Maps an ICE "required families" name (the third element of a
  * ["creme","builtin",X] library name, per icecreme_emitter.cr's `required_families`
  * computation) to the register_fn icecreme's builtins.c split it into --
  * see builtins.c's/vm.h's per-family creme_register_*_builtins split and the
@@ -142,19 +142,19 @@ static const struct {
  * bi_load_chunk_bytes, for exactly the case this task exists to fix --
  * icecreme's own "compiler mode" (see main.c's header comment on
  * CREME_COMPILER_DRIVER_PATH) registers builtins ONCE, here, based on the
- * PRECOMPILED compiler-run.ice's own required-families metadata --
- * before compiler-run.scm has even read, let alone compiled, the REAL
- * target script main() actually pointed icecreme at. compiler-run.ice's own
+ * PRECOMPILED icecreme.ice's own required-families metadata --
+ * before icecreme.scm has even read, let alone compiled, the REAL
+ * target script main() actually pointed icecreme at. icecreme.ice's own
  * imports never include any of BUILTIN_FAMILIES (it needs none of them
  * itself), so relying on this call ALONE would leave every other family
  * permanently unregistered for compiler-mode runs regardless of what the
  * real target actually imports. bi_load_chunk_bytes closes that gap: the
  * self-hosted compiler now tracks the real target's own transitively-
  * required native families (modules/creme/compiler/compiler.sld's
- * required-native-families-list) and bakes them into the ICE1 bytes it
+ * required-native-families-list) and bakes them into the ICE bytes it
  * hands to load-chunk-bytes, which calls this same function again with
  * THAT real list right before running the loaded chunk. Calling this
- * twice (once here with compiler-run.ice's own near-empty list, once
+ * twice (once here with icecreme.ice's own near-empty list, once
  * from bootstrap.c with the real target's list) is safe -- see
  * vm->registered_family_mask/base_write_registered's own doc comment
  * (vm.h) for why this function is idempotent PER FAMILY PER VM (skips a

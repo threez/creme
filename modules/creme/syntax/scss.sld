@@ -63,7 +63,7 @@
 
 (define-library (creme syntax scss)
   (export read-program scss->string)
-  (import (scheme base) (scheme char) (creme string) (creme css) (creme scanner) (creme peg))
+  (import (scheme base) (scheme char) (creme string) (creme css) (creme scanner) (creme peg) (only (creme extra) filter))
   (begin
     ;; ---- variable table -----------------------------------------------
     ;; A fresh alist per read-program call (no cross-call state) — SCSS
@@ -97,10 +97,6 @@
 
     ;; A SRFI-1-style filter, kept local same as (creme css)'s own (see
     ;; its header comment) to keep this module's imports minimal.
-    (define (filter pred lst)
-      (cond ((null? lst) '())
-            ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
-            (else (filter pred (cdr lst)))))
 
     ;; ---- grammar (creme peg) ---------------------------------------------
     ;;

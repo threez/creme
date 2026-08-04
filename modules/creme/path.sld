@@ -55,9 +55,26 @@
 ;; ===========================================================================
 
 (define-library (creme path)
-  (export path rel-path path-build path-segment->string)
+  (export path rel-path path-build path-segment->string
+          dirname path-join)
   (import (scheme base) (creme string) (creme format))
   (begin
+    ;; Plain 2-string filesystem-path helpers (distinct from (creme pathname)'s
+    ;; POSIX/record-based decomposition): `dirname` returns everything up to the
+    ;; last "/" ("" when there is none -- NOT "." like POSIX dirname), and
+    ;; `path-join` joins a dir and a name with "/" (name alone when dir is "").
+    ;; Shared by icecreme's own driver and the self-hosted compiler's own
+    ;; include-relative resolution -- both previously kept private copies.
+    (define (dirname path)
+      (let loop ((i (- (string-length path) 1)))
+        (cond
+          ((< i 0) "")
+          ((char=? (string-ref path i) #\/) (substring path 0 i))
+          (else (loop (- i 1))))))
+
+    (define (path-join dir name)
+      (if (string=? dir "") name (string-append dir "/" name)))
+
     ;; (path-segment->string seg) -> seg stringified: a symbol via
     ;; symbol->string, a string as-is, a number via number->string. Only
     ;; used at macro-expansion time, on a segment already known to be a

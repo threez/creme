@@ -56,7 +56,7 @@
 ;          creme.scm itself through its own self-hosted (creme compiler
 ;          compiler) -- a genuinely independent compile of the same
 ;          source, not the bytecode creme's own column runs (build once:
-;          make -C icecreme; this script regenerates icecreme/compiler-run.ice, the
+;          make -C icecreme; this script regenerates icecreme/icecreme.ice, the
 ;          precompiled self-hosted-compiler image icecreme's compiler mode
 ;          depends on, on every run -- see ensure-icecreme-compiler-image!
 ;          below, cheap enough (~0.15s) not to bother with a staleness
@@ -253,15 +253,15 @@
          (lua-output (process-run-safe lua-cmd (list "competition/lua/bench/bench.lua")))
          (luajit-output (process-run-safe "luajit" (list "competition/lua/bench/bench.lua"))))
 
-    ; Regenerates icecreme/compiler-run.ice (the precompiled self-hosted-compiler
-    ; image icecreme's own compiler mode depends on to run a plain .scm file
-    ; directly, see icecreme/compiler-run.scm) unconditionally every run rather
-    ; than tracking a staleness check across every .sld it bundles
-    ; (reader.sld, bytecode.sld, compiler.sld, ...) -- ~0.15s, cheap enough
-    ; not to bother. Best-effort like every other variant here: if bin/creme
-    ; or icecreme/icecreme aren't built yet, this (and then icecreme-output below) just
-    ; falls back to n/a.
-    (process-run-safe "bin/creme" (list "--emit-icecreme" "icecreme/compiler-run.scm" "icecreme/compiler-run.ice"))
+    ; Rebuilds the icecreme binary (gmake -C icecreme) so its EMBEDDED
+    ; self-hosted-compiler image (icecreme.scm, baked in via bin2c -- icecreme no
+    ; longer reads any .ice off disk) reflects the current compiler source before
+    ; the bench runs. icecreme/Makefile's own prerequisites (icecreme.scm plus
+    ; every .sld the compiler bundles) make this a near-no-op when nothing
+    ; changed, and regenerate the embedded image when it did. Best-effort like
+    ; every other variant here: if gmake/bin/creme aren't available, this (and
+    ; then icecreme-output below) just falls back to n/a.
+    (process-run-safe "gmake" (list "-C" "icecreme"))
     (let ((icecreme-output (process-run-safe "icecreme/icecreme" (list "competition/scheme/bench/creme.scm"))))
 
       ; ---- parse "<label> = <result>  (<elapsed>s)" / "total = <elapsed>s" ---
@@ -759,9 +759,9 @@
 
   (step! (string-append "icecreme / creme (C11 prototype VM) -- starting on port " icecreme-port))
   ;; Run-only: assumes competition/Makefile already built icecreme/icecreme and
-  ;; regenerated icecreme/compiler-run.ice (the precompiled self-hosted-
-  ;; compiler image icecreme's compiler mode needs -- see icecreme/compiler-run.
-  ;; scm's own header comment) -- see the Crystal section's own comment
+  ;; regenerated icecreme/icecreme.ice (the precompiled self-hosted-
+  ;; compiler image icecreme's compiler mode needs -- see icecreme/icecreme.scm's
+  ;; own header comment) -- see the Crystal section's own comment
   ;; above for why this no longer builds/checks either itself.
   (track! (process-spawn "./icecreme/icecreme" (list "competition/scheme/demo-todo/app.scm")
                          'env (list (cons "PORT" icecreme-port))

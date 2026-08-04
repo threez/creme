@@ -58,8 +58,8 @@ void creme_run_repl(VM *vm);
 /* Compiles and runs a plain `.scm` source file directly — no Crystal
  * `creme --emit-icecreme` step, no `.ice` file for the host to ship. Uses
  * the library's own bundled, precompiled self-hosted-compiler driver
- * (embedded at build time — see embedded_compiler_run.c, generated from
- * icecreme/compiler-run.scm) exactly the way icecreme's own CLI "compiler
+ * (embedded at build time — see embedded_icecreme.c, generated from
+ * icecreme/icecreme.scm) exactly the way icecreme's own CLI "compiler
  * mode" already does for a file-based driver (main.c) — creme_set_target_
  * path(scm_path), then load-and-run the driver's own chunk, which reads,
  * compiles, and runs the real target internally (recomputing and

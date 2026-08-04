@@ -92,7 +92,7 @@
 
 (define-library (creme syntax slim)
   (export read-program slim->tree slim-render slim->string slim-render-with slim->string-with)
-  (import (scheme base) (scheme char) (scheme cxr) (scheme read) (scheme eval) (creme string) (creme html) (creme scanner) (creme peg))
+  (import (scheme base) (scheme char) (scheme cxr) (scheme read) (scheme eval) (creme string) (creme html) (creme scanner) (creme peg) (only (creme extra) filter))
   (begin
     (define (strip-cr line)
       (let ((n (string-length line)))
@@ -140,10 +140,6 @@
 
     ;; A SRFI-1-style filter, kept local same as (creme syntax scss)'s
     ;; own (see (creme css)'s header comment for the shared rationale).
-    (define (filter pred lst)
-      (cond ((null? lst) '())
-            ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
-            (else (filter pred (cdr lst)))))
 
     (define ident (peg-while ident-char?))
     ;; A NON-empty run of ident chars -- unlike `ident` above, this can

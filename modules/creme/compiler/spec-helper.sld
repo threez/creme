@@ -57,15 +57,15 @@
 ;;                                 top-level forms, not a define-library
 ;;                                 wrapper.
 ;;
-;; Under icecreme/icecreme specifically (see icecreme/compiler-run.scm), `eval`/`native-
+;; Under icecreme/icecreme specifically (see icecreme/icecreme.scm), `eval`/`native-
 ;; eval`/`native-eval-forms` are NOT an independent-reference comparison
 ;; the way they are under plain `./bin/creme`/`--self-hosted` -- icecreme has
-;; no second evaluator at all, so its own top-level `eval` (compiler-run.
-;; scm) is necessarily "compile+run via the SAME self-hosted compiler,
+;; no second evaluator at all, so its own top-level `eval` (icecreme.scm)
+;; is necessarily "compile+run via the SAME self-hosted compiler,
 ;; just one form at a time instead of compile-program's whole-list-at-
 ;; once". should-match-native? under icecreme still catches real divergences
 ;; between those two entry points, just with a weaker guarantee than
-;; elsewhere -- see icecreme/compiler-run.scm's own header comment on `eval`.
+;; elsewhere -- see icecreme/icecreme.scm's own header comment on `eval`.
 ;;
 ;; should-match-native?/bootstrap-eval both run against THIS ONE PROCESS's
 ;; single shared global table (load-chunk-bytes always loads into the
@@ -91,12 +91,9 @@
   (import (scheme base) (scheme write) (scheme read) (scheme eval) (scheme lazy)
           (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
           (creme compiler reader) (creme compiler compiler)
-          (creme file) (creme string) (creme spec))
+          (creme file) (creme string) (creme spec)
+          (only (creme extra) write-to-string))
   (begin
-    (define (write-to-string v)
-      (let ((port (open-output-string)))
-        (write v port)
-        (get-output-string port)))
 
     (define (native-eval src)
       (let ((in (open-input-string src)))

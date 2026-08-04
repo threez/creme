@@ -19,7 +19,7 @@
 (import (scheme base) (scheme write) (scheme process-context) (scheme eval)
         (scheme lazy) (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
         (creme compiler reader) (creme compiler compiler) (creme file) (creme string)
-        (creme spec) (creme compiler spec-helper))
+        (creme hash-table) (creme spec) (creme compiler spec-helper))
 
 ;; A closure capturing a let-bound local, called AFTER several more
 ;; sibling scopes have run and popped, must still see the value at

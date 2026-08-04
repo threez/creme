@@ -116,6 +116,20 @@ module Creme::Builtins::HashTable
     SchemeHashTable.new.as(SchemeValue)
   end
 
+  # (eq-hash obj) -- a stable integer identity for `obj`, so a plain hash table
+  # keyed on it distinguishes objects by identity (eq?) rather than structure
+  # (make-hash-table hashes pairs/vectors by contents). Reference types use
+  # object_id (their address); a value type (immediate) uses its own structural
+  # hash, so eq? objects share a key. The icecreme counterpart is hashtable.c's
+  # bi_eq_hash; both back the self-hosted compiler's per-form source-position
+  # table (modules/creme/compiler/reader.sld).
+  @[Creme::SchemeFn("eq-hash", min: 1, max: 1)]
+  def eq_hash(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    v = args[0]
+    id = v.is_a?(Reference) ? v.object_id.to_i64! : v.hash.to_i64!
+    SchemeInt.new(id).as(SchemeValue)
+  end
+
   @[Creme::SchemeFn("hash-table?", min: 1, max: 1)]
   def hash_table_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     SchemeBool.of(args[0].is_a?(SchemeHashTable))

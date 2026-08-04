@@ -71,7 +71,7 @@
   (export make-logger logger? logger-port logger-level-set!
           logger-formatter-set! logger-debug! logger-info! logger-warn!
           logger-error! logger-fatal! logger-add!)
-  (import (scheme base) (scheme write) (creme time))
+  (import (scheme base) (scheme write) (creme time) (only (creme string) string-upcase))
   (begin
     (define logger-priv-level-rank
       (list (cons 'debug 0) (cons 'info 1) (cons 'warn 2) (cons 'error 3) (cons 'fatal 4)))
@@ -82,17 +82,9 @@
 
     (define (logger-priv-level-name level) (string-upcase (symbol->string level)))
 
-    ;; string-upcase is (scheme char)'s, not (creme string)'s -- avoid an
-    ;; extra import for one call by writing it locally over ASCII only
-    ;; (level names are always plain ASCII symbols, so this is exact for
-    ;; every value this library itself ever calls it with).
-    (define (string-upcase s)
-      (list->string
-       (map (lambda (c)
-              (if (and (char>=? c #\a) (char<=? c #\z))
-                  (integer->char (- (char->integer c) 32))
-                  c))
-            (string->list s))))
+    ;; string-upcase comes from (creme string) (imported above). Level names
+    ;; are always plain ASCII symbols, so its result matches the old local
+    ;; ASCII-only version for every value this library calls it with.
 
     (define (logger-priv-default-formatter level timestamp message)
       (string-append

@@ -1,5 +1,5 @@
 # ===========================================================================
-# ChunkDeserializer: the inverse of ChunkSerializer's "ICE1" format.
+# ChunkDeserializer: the inverse of ChunkSerializer's "ICE" format.
 # ===========================================================================
 #
 # This is the piece the self-hosting bootstrap plan actually needs long-
@@ -25,22 +25,43 @@ module Creme
       magic_buf = Bytes.new(4)
       io.read_fully(magic_buf)
       magic = String.new(magic_buf)
-      raise FormatError.new("chunk_deserializer: bad magic #{magic.inspect}, expected #{ChunkSerializer::MAGIC.inspect}") unless magic == ChunkSerializer::MAGIC
-      version = read_byte!(io)
+      # The version is the 4th magic byte ('0' + version); bytes 0..2 are the
+      # fixed "ICE" prefix. A mismatch on either is the same "re-emit this"
+      # signal (a stale v1 blob fails the version check here).
+      unless magic[0, 3] == ChunkSerializer::MAGIC_PREFIX
+        raise FormatError.new("chunk_deserializer: bad magic #{magic.inspect}, expected #{ChunkSerializer::MAGIC.inspect}")
+      end
+      version = magic_buf[3].to_i - '0'.ord
       unless version == ChunkSerializer::FORMAT_VERSION
         raise FormatError.new("chunk_deserializer: format version #{version} (expected #{ChunkSerializer::FORMAT_VERSION}) -- re-emit this chunk with the current creme/icecreme")
       end
-      read_required_families(io) # not yet consumed by any caller; just skip past it
-      read_chunk(io, env)
+      strings = read_string_pool(io)
+      read_required_families(io, strings) # not yet consumed by any caller; just skip past it
+      read_chunk(io, env, strings)
+    end
+
+    # The global string pool: every distinct string/symbol the chunk tree
+    # references, each written once here and referenced everywhere else by a
+    # u24 index -- see ChunkSerializer's StringInterner.
+    private def self.read_string_pool(io : IO) : Array(String)
+      count = read_i32(io)
+      Array(String).new(count) { read_pool_string(io) }
+    end
+
+    private def self.read_pool_string(io : IO) : String
+      len = read_i32(io)
+      buf = Bytes.new(len)
+      io.read_fully(buf)
+      String.new(buf)
     end
 
     # Reads (and discards) the "required families" metadata section that sits
-    # between the magic and the chunk body — see ChunkSerializer.serialize.
+    # between the string pool and the chunk body — see ChunkSerializer.serialize.
     # Nothing reads this yet, but it must be consumed here so the chunk body
     # that immediately follows it is read from the right offset.
-    private def self.read_required_families(io : IO) : Array(String)
+    private def self.read_required_families(io : IO, strings : Array(String)) : Array(String)
       count = read_i32(io)
-      Array(String).new(count) { read_string(io) }
+      Array(String).new(count) { strings[read_u24(io)] }
     end
 
     private def self.read_byte!(io : IO) : UInt8
@@ -55,14 +76,22 @@ module Creme
       io.read_bytes(Int64, IO::ByteFormat::LittleEndian)
     end
 
-    private def self.read_string(io : IO) : String
-      len = read_i32(io)
-      buf = Bytes.new(len)
-      io.read_fully(buf)
-      String.new(buf)
+    # Little-endian unsigned 24-/16-bit reads -- the inverse of
+    # ChunkSerializer's write_u24/write_u16 (pool indices, position fields).
+    private def self.read_u24(io : IO) : Int32
+      b0 = read_byte!(io).to_i
+      b1 = read_byte!(io).to_i
+      b2 = read_byte!(io).to_i
+      b0 | (b1 << 8) | (b2 << 16)
     end
 
-    private def self.read_chunk(io : IO, env : Env) : Chunk
+    private def self.read_u16(io : IO) : Int32
+      b0 = read_byte!(io).to_i
+      b1 = read_byte!(io).to_i
+      b0 | (b1 << 8)
+    end
+
+    private def self.read_chunk(io : IO, env : Env, strings : Array(String)) : Chunk
       chunk = Chunk.new
 
       num_instructions = read_i32(io)
@@ -74,47 +103,47 @@ module Creme
         d = read_i32(io)
         has_pos = read_byte!(io) == 1_u8
         pos = if has_pos
-                file = read_string(io)
-                line = read_i32(io)
-                col = read_i32(io)
+                file = strings[read_u24(io)]
+                line = read_u24(io)
+                col = read_u16(io)
                 SourcePos.new(file, line, col)
               end
         chunk.emit(op, a, b, c, d, pos)
       end
 
       num_consts = read_i32(io)
-      num_consts.times { chunk.add_const_raw(read_datum(io, env)) }
+      num_consts.times { chunk.add_const_raw(read_datum(io, env, strings)) }
 
       num_protos = read_i32(io)
-      num_protos.times { chunk.add_proto(read_chunk(io, env)) }
+      num_protos.times { chunk.add_proto(read_chunk(io, env, strings)) }
 
       num_upvalues = read_i32(io)
       num_upvalues.times do
         from_parent_local = read_byte!(io) == 1_u8
         index = read_i32(io)
-        name = read_string(io)
+        name = strings[read_u24(io)]
         chunk.upvalues << UpvalDesc.new(from_parent_local, index, name)
       end
 
       chunk.param_count = read_i32(io)
       chunk.has_rest = read_byte!(io) == 1_u8
       chunk.num_registers = read_i32(io)
-      chunk.name = read_string(io)
+      chunk.name = strings[read_u24(io)]
 
       num_qq_templates = read_i32(io)
-      num_qq_templates.times { chunk.add_qq_template(read_qq_template(io, env)) }
+      num_qq_templates.times { chunk.add_qq_template(read_qq_template(io, env, strings)) }
 
       num_case_dispatch_tables = read_i32(io)
       num_case_dispatch_tables.times do
         idx = chunk.add_case_dispatch_table
         table = chunk.case_dispatch_tables[idx]
-        read_case_dispatch_table_into(io, table)
+        read_case_dispatch_table_into(io, table, strings)
       end
 
       chunk
     end
 
-    private def self.read_case_dispatch_table_into(io : IO, table : CaseDispatchTable) : Nil
+    private def self.read_case_dispatch_table_into(io : IO, table : CaseDispatchTable, strings : Array(String)) : Nil
       table.default = read_i32(io)
       num_targets = read_i32(io)
       num_targets.times do
@@ -125,7 +154,7 @@ module Creme
               when ChunkSerializer::CDK_CHAR
                 CaseDispatchKey.for_char(read_i64(io).to_i32.chr)
               when ChunkSerializer::CDK_SYM
-                CaseDispatchKey.for_sym(read_string(io))
+                CaseDispatchKey.for_sym(strings[read_u24(io)])
               when ChunkSerializer::CDK_BOOL
                 CaseDispatchKey.for_bool(read_i64(io) != 0)
               when ChunkSerializer::CDK_NIL
@@ -138,11 +167,11 @@ module Creme
       end
     end
 
-    private def self.read_qq_template(io : IO, env : Env) : QQTemplate
+    private def self.read_qq_template(io : IO, env : Env, strings : Array(String)) : QQTemplate
       tag = read_byte!(io)
       case tag
       when ChunkSerializer::QQ_CONST
-        QQConst.new(read_datum(io, env))
+        QQConst.new(read_datum(io, env, strings))
       when ChunkSerializer::QQ_HOLE
         # `.node` is a compile-time-only AST backreference that VM#build_qq
         # never reads (see its `case t; when QQHole` arm) — a placeholder
@@ -152,12 +181,12 @@ module Creme
         QQSpliceItem.new(DUMMY_QQ_NODE)
       when ChunkSerializer::QQ_LIST
         count = read_i32(io)
-        items = Array(QQTemplate).new(count) { read_qq_template(io, env) }
-        tail = read_qq_template(io, env)
+        items = Array(QQTemplate).new(count) { read_qq_template(io, env, strings) }
+        tail = read_qq_template(io, env, strings)
         QQList.new(items, tail)
       when ChunkSerializer::QQ_VECTOR
         count = read_i32(io)
-        items = Array(QQTemplate).new(count) { read_qq_template(io, env) }
+        items = Array(QQTemplate).new(count) { read_qq_template(io, env, strings) }
         QQVector.new(items)
       else
         raise FormatError.new("chunk_deserializer: unknown QQTemplate tag #{tag}")
@@ -165,7 +194,7 @@ module Creme
     end
 
     # ameba:disable Metrics/CyclomaticComplexity
-    private def self.read_datum(io : IO, env : Env) : SchemeValue
+    private def self.read_datum(io : IO, env : Env, strings : Array(String)) : SchemeValue
       tag = read_byte!(io)
       case tag
       when ChunkSerializer::TAG_INT
@@ -177,13 +206,13 @@ module Creme
         den = read_i64(io)
         SchemeRational.make(num, den)
       when ChunkSerializer::TAG_COMPLEX
-        real = read_datum(io, env)
-        imag = read_datum(io, env)
+        real = read_datum(io, env, strings)
+        imag = read_datum(io, env, strings)
         SchemeComplex.make(real.as(RealComponent), imag.as(RealComponent))
       when ChunkSerializer::TAG_SYM
-        SchemeSym.of(read_string(io))
+        SchemeSym.of(strings[read_u24(io)])
       when ChunkSerializer::TAG_STR
-        SchemeStr.new(read_string(io))
+        SchemeStr.new(strings[read_u24(io)])
       when ChunkSerializer::TAG_BOOL
         SchemeBool.of(read_byte!(io) == 1_u8)
       when ChunkSerializer::TAG_NIL
@@ -191,19 +220,19 @@ module Creme
       when ChunkSerializer::TAG_CHAR
         SchemeChar.new(read_i64(io).to_i32.chr)
       when ChunkSerializer::TAG_PAIR
-        car = read_datum(io, env)
-        cdr = read_datum(io, env)
+        car = read_datum(io, env, strings)
+        cdr = read_datum(io, env, strings)
         Cons.new(car, cdr)
       when ChunkSerializer::TAG_VECTOR
         count = read_i32(io)
-        SchemeVector.new(Array(SchemeValue).new(count) { read_datum(io, env) })
+        SchemeVector.new(Array(SchemeValue).new(count) { read_datum(io, env, strings) })
       when ChunkSerializer::TAG_BLOB
         count = read_i32(io)
         buf = Bytes.new(count)
         io.read_fully(buf)
         SchemeBlob.new(buf)
       when ChunkSerializer::TAG_BUILTIN
-        name = read_string(io)
+        name = strings[read_u24(io)]
         value = env.get?(name) || raise FormatError.new("chunk_deserializer: unknown builtin #{name.inspect}")
         value
       else

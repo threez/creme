@@ -16,12 +16,12 @@
 
 /* Embedded at build time by icecreme/Makefile's bin2c-driven rules — see
  * that Makefile's own comment and icecreme/tools/bin2c.c. The precompiled
- * self-hosted-compiler driver's ICE1 chunk bytes, for creme_run_scheme_file.
+ * self-hosted-compiler driver's ICE chunk bytes, for creme_run_scheme_file.
  * Doesn't need to exist on disk at runtime — this is exactly what main.c's
  * own file-based CREME_COMPILER_DRIVER_PATH reads from disk, just baked
  * into the library binary instead. */
-extern const unsigned char creme_embedded_compiler_run_ice[];
-extern const size_t creme_embedded_compiler_run_ice_len;
+extern const unsigned char creme_embedded_icecreme_ice[];
+extern const size_t creme_embedded_icecreme_ice_len;
 
 /* Same allocator-redirection idiom main.c's own gmp_gc_alloc/_realloc/_free
  * use — duplicated here rather than shared, since embed.c (library-only)
@@ -76,6 +76,6 @@ void creme_run_repl(VM *vm) {
 
 void creme_run_scheme_file(VM *vm, const char *scm_path) {
   creme_set_target_path(scm_path);
-  Chunk *driver = creme_load_from_bytes(vm, creme_embedded_compiler_run_ice, creme_embedded_compiler_run_ice_len, NULL, NULL);
+  Chunk *driver = creme_load_from_bytes(vm, creme_embedded_icecreme_ice, creme_embedded_icecreme_ice_len, NULL, NULL);
   creme_run_chunk(vm, driver);
 }

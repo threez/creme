@@ -4,7 +4,7 @@
 #
 # `load-chunk-bytes` is the missing piece a Scheme-written bytecode compiler
 # needs to actually run something it compiled: it turns a bytevector holding
-# the "ICE1" format (ChunkSerializer/ChunkDeserializer, compile/chunk_*.cr)
+# the "ICE" format (ChunkSerializer/ChunkDeserializer, compile/chunk_*.cr)
 # into a real Chunk and runs it as a top-level program in the CALLING env —
 # same semantics as BytecodeCompiler.run_program running one already-
 # analyzed form, just skipping analyze/compile entirely since the bytes

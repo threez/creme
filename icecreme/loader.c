@@ -1,4 +1,4 @@
-/* Reads an "ICE1" file (the same format src/creme/compile/chunk_serializer.cr/
+/* Reads an "ICE" file (the same format src/creme/compile/chunk_serializer.cr/
  * chunk_deserializer.cr round-trip on the Crystal side, written here by
  * src/creme/compile/icecreme_emitter.cr) into the runtime Chunk tree, then
  * rewrites every global-name operand (originally a const-pool index into a
@@ -7,7 +7,7 @@
  * single static program, no eval/redefinition) even though it'd be unsound
  * in general.
  *
- * ICE1 encodes exactly ONE chunk, no multi-chunk envelope — see
+ * ICE encodes exactly ONE chunk, no multi-chunk envelope — see
  * icecreme_emitter.cr's own header comment for why: a whole script (plus its
  * transitively-imported pure-Scheme library bodies) is compiled into one
  * combined Chunk on the Crystal side specifically so this loader doesn't
@@ -50,6 +50,15 @@ typedef struct {
   const char *path; /* diagnostic label only -- a fixed string like
                       * "<bytevector>" when reading from a buffer, since
                       * there's no filename in that case. */
+  /* Global string pool: every distinct string/symbol the file
+   * references, read ONCE right after the magic (read_string_pool), then
+   * referenced everywhere else by a u24 index (read_pooled_string). Each
+   * entry is an owned, NUL-terminated GC copy; `string_lens[i]` is its byte
+   * length (strings may contain embedded NULs, so the length is authoritative,
+   * not strlen). */
+  char **strings;
+  int *string_lens;
+  int n_strings;
   DatumLabel labels[CREME_DATUM_LABELS_CAP];
   int n_labels;
   int datum_depth;  /* current read_datum_rec nesting -- see its own guard */
@@ -95,32 +104,50 @@ static unsigned char read_u8(Reader *r) {
   return v;
 }
 
+/* Little-endian unsigned 24-/16-bit reads: string-pool indices and the narrow
+ * position fields (file-index/line as u24, col as u16). Always small and
+ * non-negative. */
+static int read_u24(Reader *r) {
+  unsigned char b[3];
+  must_read(r, b, 3);
+  return (int)b[0] | ((int)b[1] << 8) | ((int)b[2] << 16);
+}
+
+static int read_u16(Reader *r) {
+  unsigned char b[2];
+  must_read(r, b, 2);
+  return (int)b[0] | ((int)b[1] << 8);
+}
+
 /* Mirrors chunk_serializer.cr's own FORMAT_VERSION exactly (same numeric
  * value) -- bump both in lockstep, plus modules/creme/bytecode.sld's own
  * writer and chunk_deserializer.cr's own reader, whenever the on-disk
  * chunk layout changes in a way an older reader couldn't safely parse.
  * See CHANGELOG.md/icecreme/STABILITY.md for the compatibility policy this
  * exists to support. */
-#define CREME_ICE1_FORMAT_VERSION 1
+#define CREME_ICE_FORMAT_VERSION 1
 
-/* Checks the "ICE1" magic + format-version byte every entry point below
- * reads first, before anything else -- shared so the three call sites
+/* Checks the "ICE" + version-digit magic every entry point below reads first,
+ * before anything else -- shared so the three call sites
  * (creme_peek_required_families/creme_load/creme_load_from_bytes) give
  * identical, consistent errors for either failure instead of three
- * hand-duplicated checks drifting apart over time. */
+ * hand-duplicated checks drifting apart over time. The format version is NOT a
+ * separate byte: it IS the 4th magic byte ('0' + version), so a chunk written
+ * by a different format version (a different trailing magic digit) fails the
+ * version check here rather than being misparsed. */
 static void check_magic_and_version(Reader *r) {
-  char magic[4];
+  unsigned char magic[4];
   must_read(r, magic, 4);
-  if (memcmp(magic, "ICE1", 4) != 0) {
-    creme_abort("icecreme: %s is not an ICE1 bytecode file (re-emit with `creme --emit-icecreme`?)", r->path);
+  if (memcmp(magic, "ICE", 3) != 0) {
+    creme_abort("icecreme: %s is not an ICE bytecode file (re-emit with `creme --emit-icecreme`?)", r->path);
   }
-  unsigned char version = read_u8(r);
-  if (version != CREME_ICE1_FORMAT_VERSION) {
-    creme_abort("icecreme: %s was compiled with ICE1 format version %d, this icecreme only reads version %d -- re-emit it with a matching `creme --emit-icecreme`", r->path, version, CREME_ICE1_FORMAT_VERSION);
+  int version = (int)magic[3] - '0';
+  if (version != CREME_ICE_FORMAT_VERSION) {
+    creme_abort("icecreme: %s was compiled with ICE format version %d, this icecreme only reads version %d -- re-emit it with a matching `creme --emit-icecreme`", r->path, version, CREME_ICE_FORMAT_VERSION);
   }
 }
 
-/* Every length/count field in the ICE1 format (instruction/const/proto/
+/* Every length/count field in the ICE format (instruction/const/proto/
  * upvalue/qq-template/case-table counts, and every string/vector/blob
  * length) feeds directly into a GC_MALLOC size and/or a loop bound right
  * after being read. Read plain via read_i32, a negative value wraps to a
@@ -133,7 +160,7 @@ static void check_magic_and_version(Reader *r) {
  * compiled-elsewhere .ice, or a load-chunk-bytes blob), so it must
  * reject an implausible count outright instead of attempting whatever
  * allocation it implies. CREME_LOADER_MAX_COUNT is generous headroom over
- * any real compiled program's own counts (icecreme/compiler-run.ice, the
+ * any real compiled program's own counts (icecreme/icecreme.ice, the
  * largest real chunk in this repo, needs a tiny fraction of it) while
  * still well short of "attempt a multi-gigabyte allocation on a corrupt/
  * hostile 4-byte claim" -- an EARLIER, far larger value here (1 << 26)
@@ -162,6 +189,35 @@ static char *read_bytes(Reader *r, int len) {
   if (len > 0) must_read(r, buf, (size_t)len);
   buf[len] = '\0';
   return buf;
+}
+
+/* Reads the global string pool (count, then that many raw length-prefixed
+ * entries) that sits right after the magic. Every later string/symbol in the
+ * file is a u24 index into this table (read_pooled_string). Must run before the
+ * required-families section and the chunk body, in every entry point. */
+static void read_string_pool(Reader *r) {
+  int n = read_count(r, "string-pool");
+  r->n_strings = n;
+  r->strings = n ? GC_MALLOC(sizeof(char *) * (size_t)n) : NULL;
+  r->string_lens = n ? GC_MALLOC(sizeof(int) * (size_t)n) : NULL;
+  for (int i = 0; i < n; i++) {
+    int len = read_i32(r);
+    r->strings[i] = read_bytes(r, len); /* owned, NUL-terminated */
+    r->string_lens[i] = len;
+  }
+}
+
+/* Resolves a u24 string-pool index to its (chars,len). The returned pointer
+ * aliases the pool entry (shared, immutable) -- callers that need mutable,
+ * per-use storage (an R7RS string literal, which OP_STRSET mutates in place)
+ * must copy it out; symbols/names/paths/keys share it freely. */
+static const char *read_pooled_string(Reader *r, int *len_out) {
+  int idx = read_u24(r);
+  if (idx < 0 || idx >= r->n_strings) {
+    creme_abort("icecreme: corrupt bytecode in %s: string-pool index %d out of range (n_strings=%d)", r->path, idx, r->n_strings);
+  }
+  if (len_out) *len_out = r->string_lens[idx];
+  return r->strings[idx];
 }
 
 /* Looks up `name` among already-registered globals (builtins are registered
@@ -330,16 +386,25 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
     return result;
   }
   case TAG_SYM: {
-    int len = read_i32(r);
-    char *s = read_bytes(r, len);
+    /* Symbols are immutable and compared by content, so aliasing the shared
+     * pool entry is safe (and the whole point of the pool). */
+    int len = 0;
+    const char *s = read_pooled_string(r, &len);
     Value result = v_sym(s, len);
     if (def_id >= 0) datum_label_add(r, def_id, result);
     return result;
   }
   case TAG_STR: {
-    int len = read_i32(r);
-    char *s = read_bytes(r, len);
-    Value result = v_str(s, len);
+    /* A string LITERAL is mutable in place (OP_STRSET writes through
+     * v.as.chars), so each string const needs its OWN storage -- copy it out of
+     * the shared pool rather than aliasing, which would let string-set! on one
+     * literal corrupt every other const (and the pool) sharing those bytes. */
+    int len = 0;
+    const char *s = read_pooled_string(r, &len);
+    char *copy = GC_MALLOC((size_t)len + 1);
+    if (len > 0) memcpy(copy, s, (size_t)len);
+    copy[len] = '\0';
+    Value result = v_str(copy, len);
     if (def_id >= 0) datum_label_add(r, def_id, result);
     return result;
   }
@@ -387,8 +452,8 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
     return result;
   }
   case TAG_BUILTIN: {
-    int len = read_i32(r);
-    char *s = read_bytes(r, len);
+    int len = 0;
+    const char *s = read_pooled_string(r, &len);
     Value result = resolve_builtin_const(vm, s, len);
     if (def_id >= 0) datum_label_add(r, def_id, result);
     return result;
@@ -455,10 +520,13 @@ static CaseDispatchTable read_case_dispatch_table(Reader *r) {
     case CDK_BOOL:
       e->ival = read_i64(r);
       break;
-    case CDK_SYM:
-      e->sval_len = read_i32(r);
-      e->sval = read_bytes(r, e->sval_len);
+    case CDK_SYM: {
+      /* Symbol key, compared by content only -- alias the shared pool entry. */
+      int len = 0;
+      e->sval = (char *)read_pooled_string(r, &len);
+      e->sval_len = len;
       break;
+    }
     case CDK_NIL:
       break;
     default:
@@ -496,7 +564,7 @@ static Chunk *read_chunk_impl(Reader *r, VM *vm) {
   c->n_instrs = read_count(r, "instruction");
   c->instrs = GC_MALLOC(sizeof(Instruction) * (size_t)c->n_instrs);
   /* Cold parallel array -- same index space as instrs, --profile-only (see
-   * vm.h's InsPos doc comment). Populated here as the ICE1 stream is read
+   * vm.h's InsPos doc comment). Populated here as the ICE stream is read
    * (position data is interleaved per-instruction on disk), then never
    * touched again except by profiler.c's report. */
   c->positions = GC_MALLOC(sizeof(InsPos) * (size_t)c->n_instrs);
@@ -508,13 +576,23 @@ static Chunk *read_chunk_impl(Reader *r, VM *vm) {
     ins->b = read_i32(r);
     ins->c = read_i32(r);
     ins->d = read_i32(r);
-    pos->has_pos = read_u8(r);
-    if (pos->has_pos) {
-      int file_len = read_i32(r);
-      pos->file = read_bytes(r, file_len);
-      pos->line = read_i32(r);
-      pos->col = read_i32(r);
+    if (read_u8(r)) {
+      pos->has_pos = 1;
+      pos->file = read_pooled_string(r, NULL); /* diagnostic-only; alias the pool */
+      pos->line = read_u24(r);
+      pos->col = read_u16(r);
+    } else if (i > 0 && c->positions[i - 1].has_pos) {
+      /* A position record is written only when it CHANGES (see (creme
+       * bytecode)'s write-chunk!), so byte 0 means "same source position as the
+       * previous instruction" -- inherit it, so every instruction in a run from
+       * one source form still resolves to a line for --profile, from a chunk
+       * that stored that line once. (A native-emitted chunk's genuinely
+       * position-less helper instruction inherits the nearest preceding line
+       * too -- a better attribution than none.) A leading byte 0 with nothing
+       * before it stays position-less. */
+      *pos = c->positions[i - 1];
     } else {
+      pos->has_pos = 0;
       pos->file = NULL;
       pos->line = 0;
       pos->col = 0;
@@ -541,16 +619,14 @@ static Chunk *read_chunk_impl(Reader *r, VM *vm) {
   for (int i = 0; i < c->n_upvalues; i++) {
     c->upvalues[i].from_parent_local = read_u8(r);
     c->upvalues[i].index = read_i32(r);
-    int name_len = read_i32(r);
-    c->upvalues[i].name = read_bytes(r, name_len);
+    c->upvalues[i].name = read_pooled_string(r, NULL); /* compared by content; alias the pool */
   }
 
   c->param_count = read_i32(r);
   c->has_rest = read_u8(r);
   c->num_registers = read_i32(r);
 
-  int name_len = read_i32(r);
-  c->name = read_bytes(r, name_len);
+  c->name = (char *)read_pooled_string(r, NULL); /* diagnostic label; alias the pool */
 
   c->n_qq_templates = read_count(r, "qq-template");
   c->qq_templates = GC_MALLOC(sizeof(QQTemplate *) * (size_t)(c->n_qq_templates ? c->n_qq_templates : 1));
@@ -689,9 +765,9 @@ static void resolve_globals(VM *vm, Chunk *c, const char *path) {
   }
 }
 
-/* Reads the "required families" metadata section (count, then that many
- * length-prefixed name strings) that sits between the magic and the chunk
- * body -- see chunk_serializer.cr's `serialize`. Always consumes exactly the
+/* Reads the "required families" metadata section (count, then that many u24
+ * string-pool indices) that sits between the string pool and the chunk body
+ * -- see chunk_serializer.cr's `serialize`. Always consumes exactly the
  * bytes this section occupies, regardless of whether the caller wants the
  * list, so the chunk body that follows is read from the right offset.
  * When `names_out`/`count_out` are non-NULL, fills them in with a
@@ -703,9 +779,10 @@ static void read_required_families(Reader *r, char ***names_out, int *count_out)
     names = GC_MALLOC(sizeof(char *) * (size_t)count);
   }
   for (int i = 0; i < count; i++) {
-    int len = read_i32(r);
-    char *name = read_bytes(r, len);
-    if (names) names[i] = name;
+    /* A family name is a u24 pool index; the pooled entry is already an owned,
+     * NUL-terminated GC copy that outlives this Reader, so alias it. */
+    const char *name = read_pooled_string(r, NULL);
+    if (names) names[i] = (char *)name;
   }
   if (names_out) *names_out = names;
   if (count_out) *count_out = count;
@@ -732,6 +809,7 @@ void creme_peek_required_families(const char *path, char ***names_out, int *coun
 
   check_magic_and_version(&r);
 
+  read_string_pool(&r);
   read_required_families(&r, names_out, count_out);
   fclose(r.f);
 }
@@ -744,6 +822,7 @@ Chunk *creme_load(const char *path, VM *vm, char ***required_families_out, int *
 
   check_magic_and_version(&r);
 
+  read_string_pool(&r);
   read_required_families(&r, required_families_out, required_families_count_out);
 
   Chunk *chunk = read_chunk(&r, vm);
@@ -767,6 +846,7 @@ Chunk *creme_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len, cha
 
   check_magic_and_version(&r);
 
+  read_string_pool(&r);
   read_required_families(&r, required_families_out, required_families_count_out);
 
   Chunk *chunk = read_chunk(&r, vm);

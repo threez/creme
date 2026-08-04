@@ -40,9 +40,55 @@
 ;; ===========================================================================
 
 (define-library (creme compiler reader)
-  (export read-program)
-  (import (scheme base) (scheme char) (scheme complex) (creme peg) (creme regex))
+  (export read-program form-source-position)
+  (import (scheme base) (scheme char) (scheme complex) (creme peg) (creme regex) (creme hash-table)
+          (only (creme bytes) list->bytevector))
   (begin
+
+    ;; ---- per-form source positions -----------------------------------------
+    ;; For every list form it reads, the reader records the (line . col) where
+    ;; that form starts, so the compiler can stamp each instruction with a
+    ;; source position (see modules/creme/bytecode.sld's instr `pos` field and
+    ;; compiler.sld's compile-expr!). Keyed by FORM IDENTITY via (eq-hash form):
+    ;; a plain make-hash-table keys structurally (equal?) and would collide two
+    ;; identical sub-forms (e.g. every `(newline)`) onto one line; eq-hash gives
+    ;; each object a distinct identity key (its address under non-moving GC).
+    ;; current-line-starts holds the offset each source line begins at (rebuilt
+    ;; per read-program), so offset->line-col is an O(log lines) binary search
+    ;; rather than an O(offset) newline count each time.
+    (define form-positions (make-hash-table))
+    (define current-line-starts (vector 0))
+
+    (define (compute-line-starts str)
+      (let ((len (string-length str)))
+        (let loop ((i 0) (acc (list 0)))
+          (if (>= i len)
+              (list->vector (reverse acc))
+              (loop (+ i 1)
+                    (if (char=? (string-ref str i) #\newline) (cons (+ i 1) acc) acc))))))
+
+    ;; offset -> (line . col), both 1-based -- the last line whose start is <=
+    ;; offset, via binary search on current-line-starts.
+    (define (offset->line-col offset)
+      (let ((starts current-line-starts))
+        (let loop ((lo 0) (hi (- (vector-length starts) 1)))
+          (if (>= lo hi)
+              (cons (+ lo 1) (+ (- offset (vector-ref starts lo)) 1))
+              (let ((mid (quotient (+ lo hi 1) 2)))
+                (if (<= (vector-ref starts mid) offset)
+                    (loop mid hi)
+                    (loop lo (- mid 1))))))))
+
+    (define (record-form-position! form offset)
+      (hash-table-set! form-positions (eq-hash form) (offset->line-col offset)))
+
+    ;; (form-source-position form) -> (line . col), or #f if the reader never
+    ;; saw this exact form (e.g. one a macro synthesized).
+    (define (form-source-position form)
+      (let ((k (eq-hash form)))
+        (if (hash-table-contains? form-positions k)
+            (hash-table-ref form-positions k)
+            #f)))
 
     ;; ---------------------------------------------------------------------
     ;; Numeric literal classification -- `string->number` (the RUNTIME
@@ -319,17 +365,10 @@
       (let ((r (parse-list-items str (+ pos 2) #\))))
         (cons (list->vector (car r)) (cdr r))))
 
-    (define (bv-from-list lst)
-      (let* ((n (length lst)) (bv (make-bytevector n 0)))
-        (let loop ((i 0) (l lst))
-          (if (null? l)
-              bv
-              (begin (bytevector-u8-set! bv i (car l)) (loop (+ i 1) (cdr l)))))))
-
     (define (parse-bytevector str pos)
       ;; str[pos..pos+3] == "#u8("
       (let ((r (parse-list-items str (+ pos 4) #\))))
-        (cons (bv-from-list (car r)) (cdr r))))
+        (cons (list->bytevector (car r)) (cdr r))))
 
     (define (dot-marker? str pos)
       (and (char=? (string-ref str pos) #\.)
@@ -457,18 +496,24 @@
       (let ((p (skip-atmosphere str pos)))
         (if (>= p (string-length str))
             #f
-            (let ((c (string-ref str p)))
-              (cond
-                ((or (char=? c #\() (char=? c #\[)) (parse-list str p))
-                ((char=? c #\") (string-literal-parser str p))
-                ((char=? c #\|) (piped-symbol-parser str p))
-                ((char=? c #\') (parse-quote-sugar str p "quote" 1))
-                ((char=? c #\`) (parse-quote-sugar str p "quasiquote" 1))
-                ((and (char=? c #\,) (< (+ p 1) (string-length str)) (char=? (string-ref str (+ p 1)) #\@))
-                 (parse-quote-sugar str p "unquote-splicing" 2))
-                ((char=? c #\,) (parse-quote-sugar str p "unquote" 1))
-                ((char=? c #\#) (parse-hash str p))
-                (else (parse-token str p)))))))
+            (let ((result
+                    (let ((c (string-ref str p)))
+                      (cond
+                        ((or (char=? c #\() (char=? c #\[)) (parse-list str p))
+                        ((char=? c #\") (string-literal-parser str p))
+                        ((char=? c #\|) (piped-symbol-parser str p))
+                        ((char=? c #\') (parse-quote-sugar str p "quote" 1))
+                        ((char=? c #\`) (parse-quote-sugar str p "quasiquote" 1))
+                        ((and (char=? c #\,) (< (+ p 1) (string-length str)) (char=? (string-ref str (+ p 1)) #\@))
+                         (parse-quote-sugar str p "unquote-splicing" 2))
+                        ((char=? c #\,) (parse-quote-sugar str p "unquote" 1))
+                        ((char=? c #\#) (parse-hash str p))
+                        (else (parse-token str p))))))
+              ;; result is (value . end-offset), or #f. Record the source
+              ;; position of any list form (pair value) at its start offset p.
+              (if (and (pair? result) (pair? (car result)))
+                  (record-form-position! (car result) p))
+              result))))
 
     ;; Public entry point: reads every top-level datum in `str`, in order.
     ;; Resets current-datum-labels before each TOP-LEVEL datum only (see
@@ -480,6 +525,7 @@
       (read-datum str pos))
 
     (define (read-program str)
+      (set! current-line-starts (compute-line-starts str))
       (let ((len (string-length str)))
         (let loop ((pos 0) (acc '()))
           (let ((p (skip-atmosphere str pos)))

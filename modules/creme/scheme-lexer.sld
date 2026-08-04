@@ -101,7 +101,7 @@
 ;; process (observed as a bogus "unbound variable: <mashed-together tokens>"
 ;; from `read` no longer treating spaces as token boundaries). Confirmed
 ;; empirically as the exact cause of that failure before this rename; see
-;; icecreme/compiler-run.scm's own `read`/`eval` bridge doc comments for the
+;; icecreme/icecreme.scm's own `read`/`eval` bridge doc comments for the
 ;; general reentrant-compilation background this bug lives in.
 ;; ===========================================================================
 

@@ -120,11 +120,11 @@
   ;; handling path with a hand-built key alist instead of a real terminal.
   (export run-repl process-key)
   (import (scheme base) (scheme cxr) (scheme char) (scheme read) (scheme write) (scheme eval) (scheme repl)
-          (creme highlight) (creme scheme-lexer) (creme term) (creme introspection) (creme string))
+          (creme highlight) (creme scheme-lexer) (creme term) (creme introspection) (creme version) (creme string)
+          (only (creme extra) write-to-string))
   (begin
 
-    (define (colorize code text)
-      (string-append "\x1b;[" code "m" text "\x1b;[0m"))
+    ;; colorize comes from (creme highlight); write-to-string from (creme extra).
 
     (define (repl-condition-message e)
       (cond
@@ -132,13 +132,8 @@
          (string-append (error-object-message e)
                          (if (null? (error-object-irritants e))
                              ""
-                             (string-append " " (call-with-write-string (error-object-irritants e))))))
+                             (string-append " " (write-to-string (error-object-irritants e))))))
         (else "non-error value raised")))
-
-    (define (call-with-write-string v)
-      (let ((port (open-output-string)))
-        (write v port)
-        (get-output-string port)))
 
     ;; ---- small list/string helpers (buffer is always tiny, so plain
     ;; O(n) rebuilds are simplest and fast enough) ----
@@ -798,12 +793,9 @@
     ;; ONCE, in this startup banner -- not repeated on every prompt line
     ;; (just a plain "> "/"...N> ", see build-prompt-from-text above).
     (define (run-repl)
-      (let* ((rt (runtime))
-             (vm (cdr (assq 'vm rt))) (compiler (cdr (assq 'compiler rt)))
-             (os (cdr (assq 'os rt))) (arch (cdr (assq 'arch rt))) (version (cdr (assq 'version rt))))
-        (display (string-append "creme " version " (" vm "/" compiler ", " os "/" arch ") -- Ctrl-D to exit"))
-        (newline)
-        (eval '(define $ #f) (interaction-environment))
-        (if (stdin-tty?)
-            (run-repl-interactive)
-            (run-repl-noninteractive))))))
+      (display (string-append (runtime-version-string) " -- Ctrl-D to exit"))
+      (newline)
+      (eval '(define $ #f) (interaction-environment))
+      (if (stdin-tty?)
+          (run-repl-interactive)
+          (run-repl-noninteractive)))))

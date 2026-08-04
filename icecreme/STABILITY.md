@@ -14,9 +14,9 @@ Versions follow `shard.yml`'s own `version:` field, synced into
 
 ## Stable (won't break without a version bump and a CHANGELOG.md entry)
 
-- **The ICE1 bytecode format's read compatibility, gated by an explicit
+- **The ICE bytecode format's read compatibility, gated by an explicit
   version check.** Every `.ice` file (and every `load-chunk-bytes`
-  blob) carries a format-version byte immediately after the `"ICE1"`
+  blob) carries a format-version byte immediately after the `"ICE"`
   magic (`ChunkSerializer::FORMAT_VERSION` in
   `src/creme/compile/chunk_serializer.cr`, mirrored by
   `modules/creme/bytecode.sld`'s own writer). `icecreme/loader.c`'s
@@ -53,7 +53,7 @@ Versions follow `shard.yml`'s own `version:` field, synced into
   once it exists, whatever it exposes moves into the "stable" list
   above and everything else stays here.)
 - **The self-hosted compiler's own internal IR/representation**
-  (`modules/creme/compiler/compiler.sld`) — only its OUTPUT (an ICE1
+  (`modules/creme/compiler/compiler.sld`) — only its OUTPUT (an ICE
   chunk) is covered by the format-version guarantee above; the
   compiler's own internal data shapes are free to change at any time.
 - **`icecreme --profile`'s report format** (column layout, exact wording) —

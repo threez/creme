@@ -25,7 +25,7 @@
 ;; (icecreme has no argv-passing mechanism into compiler mode beyond the
 ;; target path, so there'd be nothing to parse there anyway).
 ;;
-;; (icecreme/compiler-run.ice must already be built fresh before either icecreme
+;; (icecreme/icecreme.ice must already be built fresh before either icecreme
 ;; path -- see the Makefile's own creme-spec-icecreme target.)
 ;;
 ;; NOT itself named to match spec/creme/*_spec.scm's own usual naming --

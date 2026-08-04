@@ -90,7 +90,7 @@ module Creme::Builtins::MathExtra
 
   # Raw IEEE754 bit-level access — for a Scheme-level caller that needs
   # to encode/decode a float's exact 64-bit representation itself (e.g.
-  # bootstrap/compiler.scm's ICE1 serializer, which otherwise has no way
+  # bootstrap/compiler.scm's ICE serializer, which otherwise has no way
   # to build a general float encoder without bitwise primitives).
   # Float64/Int64 are both 8 bytes, so `unsafe_as` is an exact bit-level
   # reinterpret cast — not a numeric conversion — in both directions.

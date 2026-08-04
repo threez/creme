@@ -66,13 +66,9 @@
   (export bordered-style borderless-style make-bordered-style
           make-borderless-style table-style table->string)
   (import (scheme base) (scheme write) (scheme cxr)
-          (only (creme string) string-join string-repeat) (only (creme extra) filter))
+          (only (creme string) string-join string-repeat)
+          (only (creme extra) filter iota take drop))
   (begin
-    ;; (0 1 ... n-1), for indexed list-ref access — kept local rather than
-    ;; pulling in (creme extra)'s iota, to keep this module's imports minimal.
-    (define (range n)
-      (let loop ((i (- n 1)) (acc '()))
-        (if (< i 0) acc (loop (- i 1) (cons i acc)))))
 
     ;; A cell's width as it actually occupies terminal columns, skipping any
     ;; embedded ANSI SGR escape sequence ("\x1b;[...m", R7RS's own #\escape
@@ -101,7 +97,7 @@
     ;; row at that index.
     (define (column-widths rows)
       (map (lambda (i) (apply max (map (lambda (row) (visible-length (list-ref row i))) rows)))
-           (range (length (car rows)))))
+           (iota (length (car rows)))))
 
     ;; Pads by VISIBLE length, not raw string-length -- (creme string)'s
     ;; string-pad/string-pad-right pad against a Crystal String's own
@@ -117,15 +113,6 @@
             (string-append padding cell))))
 
     (define (non-empty? s) (> (string-length s) 0))
-
-    ;; take/drop aren't (creme extra) exports (SRFI-1 has them under
-    ;; slightly different names) — kept local for these few uses; filter
-    ;; itself is (creme extra)'s own (see this file's import list).
-    (define (take lst n)
-      (if (or (<= n 0) (null? lst)) '() (cons (car lst) (take (cdr lst) (- n 1)))))
-
-    (define (drop lst n)
-      (if (or (<= n 0) (null? lst)) lst (drop (cdr lst) (- n 1))))
 
     ;; (plist-ref plist key default) — plist alternates keys and values;
     ;; returns the value after the first eq? match, or `default`.

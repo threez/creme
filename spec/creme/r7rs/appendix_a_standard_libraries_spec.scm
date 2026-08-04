@@ -22,8 +22,8 @@
 ;;
 ;; (scheme load)'s `load` has no equivalent anywhere in icecreme (neither a
 ;; native C builtin in icecreme/builtins.c nor a Scheme-level shim in icecreme/
-;; compiler-run.scm, unlike eval/interaction-environment/scheme-report-
-;; environment/null-environment, which compiler-run.scm defines as
+;; icecreme.scm, unlike eval/interaction-environment/scheme-report-
+;; environment/null-environment, which icecreme.scm defines as
 ;; reduced-but-real stubs -- see that file's own comments) -- a genuine,
 ;; undocumented-but-real icecreme gap, so "(scheme load) provides the load
 ;; procedure" below is gated behind `it-unless (equal? (spec-vm) "icecreme")`

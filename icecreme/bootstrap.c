@@ -5,7 +5,7 @@
  * names/contracts, so the self-hosted compiler (modules/creme/compiler/
  * {reader,bytecode,compiler}.sld) and anything built on top of it (e.g. a
  * REPL driver) run unmodified under either backend: compile source into
- * an ICE1-format bytevector, then load-and-run it against the SAME
+ * an ICE-format bytevector, then load-and-run it against the SAME
  * running program's own global table, entirely inside this one process --
  * no live Crystal `creme` process involved after the one-time image that
  * bundled the compiler itself was built.
@@ -40,7 +40,7 @@ void creme_set_target_path(const char *path) {
   g_target_path = path;
 }
 
-/* args[0] must be a bytevector holding ICE1 bytes (typically the self-
+/* args[0] must be a bytevector holding ICE bytes (typically the self-
  * hosted compiler's own compile-source-to-bytes output). Loads it against
  * THIS running program's global table (creme_load_from_bytes interns by
  * name into the same vm->globals every other chunk already shares) and
@@ -55,7 +55,7 @@ static Value bi_load_chunk_bytes(VM *vm, Value *args, int nargs) {
    * real required-families metadata out of these bytes and register
    * whichever native builtin families it names -- the crucial case being
    * icecreme's own "compiler mode" (main.c), where main() itself only ever
-   * registers builtins based on precompiled compiler-run.ice's own
+   * registers builtins based on precompiled icecreme.ice's own
    * (near-empty) required-families list, never the REAL target script's:
    * that target isn't even read, let alone compiled, until well after
    * main()'s one-time startup registration already ran. The self-hosted
@@ -74,7 +74,7 @@ static Value bi_load_chunk_bytes(VM *vm, Value *args, int nargs) {
 }
 
 /* (scheme eval)'s environment/null-environment/eval-2-arg support --
- * see icecreme/compiler-run.scm's own `environment`/`null-environment`/`eval`
+ * see icecreme/icecreme.scm's own `environment`/`null-environment`/`eval`
  * for how these three primitives are actually used together (all real
  * import-set resolution -- only/except/prefix/rename, library-export
  * lookups -- stays in Scheme, reusing modules/creme/compiler/
@@ -103,7 +103,7 @@ static VM *as_environment_vm(Value v, const char *who) {
  * `environment`/`eval` call making this request is itself running in)
  * into env-box's own separate global table, under external-name. This
  * is how `environment`'s own import-sets actually populate a fresh
- * environment (icecreme/compiler-run.scm) -- once Scheme-side import-set
+ * environment (icecreme/icecreme.scm) -- once Scheme-side import-set
  * resolution (only/except/prefix/rename, library-export-alist) has
  * decided WHICH names map to WHICH, this is the one primitive that
  * actually moves a value across the VM boundary. A quiet no-op (NOT an
@@ -134,7 +134,7 @@ static Value bi_environment_copy_global(VM *vm, Value *args, int nargs) {
  * currently bound as a global in env-box's own separate table. Added so
  * `eval` can tell, for a given target environment, which of the fusable
  * primitive names (+, cons, vector-ref, ...) `environment`'s own only/
- * except filtering actually left OUT -- see icecreme/compiler-run.scm's
+ * except filtering actually left OUT -- see icecreme/icecreme.scm's
  * `eval` and compiler.sld's `mark-redefined!`/`unmark-redefined!`: a
  * fused opcode (e.g. Add for `(+ 1 2)` in call position) never consults
  * any environment at all, so without this check `except`-excluding `+`
@@ -163,7 +163,7 @@ static Value bi_current_environment(VM *vm, Value *args, int nargs) {
 
 /* (load-chunk-bytes-into env-box bytes) -- same contract as
  * load-chunk-bytes (bi_load_chunk_bytes, right below) but loads+runs
- * the given ICE1 bytes against env-box's own separate VM instead of the
+ * the given ICE bytes against env-box's own separate VM instead of the
  * currently-running one. This is what makes `eval`'s 2-arg form
  * actually evaluate against the GIVEN environment rather than always
  * the one real global table (icecreme/README.md's own previous "eval ignores
@@ -330,7 +330,7 @@ static Value bi_expand_if_macro(VM *vm, Value *args, int nargs) {
 
 /* Reads `path`'s entire contents into one T_STR -- icecreme's only other file-
  * reading capability (read-line) is hardwired to stdin, so compiler mode
- * (icecreme/compiler-run.scm) needs this to read the target script (and any
+ * (icecreme/icecreme.scm) needs this to read the target script (and any
  * file it (include ...)s) at all. */
 static Value bi_read_whole_file(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -390,7 +390,12 @@ static Value bi_cvm_target_path(VM *vm, Value *args, int nargs) {
   (void)vm;
   (void)args;
   (void)nargs;
-  if (!g_target_path) creme_abort("icecreme-target-path: no target path set (not running in compiler mode)");
+  /* #f (not a string) when unset -- the CLI dispatcher (icecreme.scm)
+   * branches on this: a string means the embedding path (creme_run_scheme_file
+   * set a specific file to compile+run), #f means main.c's CLI path (parse
+   * (command-line) and dispatch). Previously this aborted when unset, back when
+   * the driver was only ever reached with a target already set. */
+  if (!g_target_path) return v_bool(0);
   return v_str(g_target_path, (int)strlen(g_target_path));
 }
 
