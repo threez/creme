@@ -902,6 +902,10 @@ void creme_init_current_ports(VM *vm) {
  * its own, now-redundant copy of this same dispatch inline -- left as
  * is, narrow and unlikely to change). */
 static void write_bytes_to_port(Port *p, const char *bytes, size_t len, const char *who) {
+  if (p->kind == PORT_KIND_FILTER) {
+    p->filter->on_write(p, (const unsigned char *)bytes, (int)len);
+    return;
+  }
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fwrite(bytes, 1, len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return;
@@ -948,6 +952,10 @@ static Value bi_write_string(VM *vm, Value *args, int nargs) {
   int len;
   const char *s = creme_arg_bytes(args, nargs, 0, "write-string", &len);
   Port *p = creme_arg_port(args, nargs, 1, "write-string");
+  if (p->kind == PORT_KIND_FILTER) {
+    p->filter->on_write(p, (const unsigned char *)s, len);
+    return v_nil();
+  }
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fwrite(s, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
@@ -997,8 +1005,44 @@ static Value bi_port_p(VM *vm, Value *args, int nargs) {
   return v_bool(args[0].tag == T_PORT);
 }
 
-static int port_is_input(Port *p) { return p->kind == PORT_KIND_INPUT_STRING || p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE; }
-static int port_is_output(Port *p) { return p->kind == PORT_KIND_OUTPUT_STRING || p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE; }
+static int port_is_input(Port *p) { return p->kind == PORT_KIND_INPUT_STRING || p->kind == PORT_KIND_STDIN || p->kind == PORT_KIND_INPUT_FILE || (p->kind == PORT_KIND_FILTER && p->filter_input); }
+static int port_is_output(Port *p) { return p->kind == PORT_KIND_OUTPUT_STRING || p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE || (p->kind == PORT_KIND_FILTER && !p->filter_input); }
+
+/* A FILTER input port serves its decoded output from buf/len/pos like an
+ * INPUT_STRING port; when that's exhausted, `refill` decodes more (pulling from
+ * the wrapped port). The read builtins call this at the buffer-empty check, so
+ * their existing buf[pos++] path then serves filter output too. Returns 1 if
+ * bytes are now available, 0 at end of stream (or for a non-filter port). */
+static int filter_refill(Port *p) {
+  return (p->kind == PORT_KIND_FILTER && p->filter && p->filter->refill) ? p->filter->refill(p) : 0;
+}
+
+/* Close a port, cascading through a filter stack: a FILTER port flushes its tail
+ * to the wrapped port (on_close) and then closes the wrapped port too, so one
+ * close-port on the outer finalizes the whole pipeline down to the handle. */
+static void port_close(Port *p) {
+  if (p->closed) return;
+  if (p->kind == PORT_KIND_FILTER) {
+    if (p->filter && p->filter->on_close) p->filter->on_close(p);
+    p->closed = 1;
+    if (p->wrapped) port_close(p->wrapped);
+    return;
+  }
+  if ((p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
+  p->closed = 1;
+}
+
+/* Flush a port, cascading through a filter stack (emit a block boundary at each
+ * filter, then flush the real sink underneath). */
+static void port_flush(Port *p) {
+  if (p->kind == PORT_KIND_FILTER) {
+    if (p->filter && p->filter->on_flush) p->filter->on_flush(p);
+    if (p->wrapped) port_flush(p->wrapped);
+    return;
+  }
+  if (p->kind == PORT_KIND_STDOUT) fflush(stdout);
+  else if (p->kind == PORT_KIND_OUTPUT_FILE && p->file) fflush(p->file);
+}
 
 static Value bi_input_port_p(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -1028,8 +1072,7 @@ static Value bi_eof_object_p(VM *vm, Value *args, int nargs) {
 static Value bi_close_port(VM *vm, Value *args, int nargs) {
   (void)vm;
   Port *p = creme_arg_port(args, nargs, 0, "close-port");
-  if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
-  p->closed = 1;
+  port_close(p);
   return v_nil();
 }
 
@@ -1042,8 +1085,7 @@ static Value bi_flush_output_port(VM *vm, Value *args, int nargs) {
   (void)vm;
   Port *p = (nargs >= 1) ? (args[0].tag == T_PORT ? args[0].as.port : NULL) : g_current_output_port;
   if (!p) creme_abort("flush-output-port: expected a port");
-  if (p->kind == PORT_KIND_STDOUT) fflush(stdout);
-  else if (p->kind == PORT_KIND_OUTPUT_FILE && p->file) fflush(p->file);
+  port_flush(p);
   return v_nil();
 }
 
@@ -1344,7 +1386,7 @@ static Value bi_read_char(VM *vm, Value *args, int nargs) {
     int c = fgetc(stream);
     return c == EOF ? bi_eof_object(vm, NULL, 0) : v_char(c);
   }
-  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  if (p->pos >= p->len && !filter_refill(p)) return bi_eof_object(vm, NULL, 0);
   return v_char((unsigned char)p->buf[p->pos++]);
 }
 
@@ -1357,7 +1399,7 @@ static Value bi_peek_char(VM *vm, Value *args, int nargs) {
     ungetc(c, stream);
     return v_char(c);
   }
-  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  if (p->pos >= p->len && !filter_refill(p)) return bi_eof_object(vm, NULL, 0);
   return v_char((unsigned char)p->buf[p->pos]);
 }
 
@@ -1445,7 +1487,7 @@ static Value bi_read_u8(VM *vm, Value *args, int nargs) {
     int c = fgetc(stream);
     return c == EOF ? bi_eof_object(vm, NULL, 0) : v_int(c);
   }
-  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  if (p->pos >= p->len && !filter_refill(p)) return bi_eof_object(vm, NULL, 0);
   return v_int((unsigned char)p->buf[p->pos++]);
 }
 
@@ -1458,7 +1500,7 @@ static Value bi_peek_u8(VM *vm, Value *args, int nargs) {
     ungetc(c, stream);
     return v_int(c);
   }
-  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  if (p->pos >= p->len && !filter_refill(p)) return bi_eof_object(vm, NULL, 0);
   return v_int((unsigned char)p->buf[p->pos]);
 }
 
@@ -1471,6 +1513,10 @@ static Value bi_write_u8(VM *vm, Value *args, int nargs) {
   int64_t byte = creme_arg_int(args, nargs, 0, "write-u8");
   Port *p = creme_arg_port(args, nargs, 1, "write-u8");
   char c = (char)byte;
+  if (p->kind == PORT_KIND_FILTER) {
+    p->filter->on_write(p, (const unsigned char *)&c, 1);
+    return v_nil();
+  }
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fputc((int)(unsigned char)c, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
@@ -1494,11 +1540,17 @@ static Value bi_read_bytevector(VM *vm, Value *args, int nargs) {
     FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
     read = (int)fread(bv->bytes, 1, (size_t)n, stream);
   } else {
-    int avail = p->len - p->pos;
-    read = (n < avail) ? n : avail;
-    if (read < 0) read = 0;
-    memcpy(bv->bytes, p->buf + p->pos, (size_t)read);
-    p->pos += read;
+    /* Loop so a FILTER port refills across multiple decoded blocks until n
+     * bytes or EOF; for a plain buffer port refill is a no-op and this reads
+     * min(n, available) in one pass, exactly as before. */
+    while (read < n) {
+      if (p->pos >= p->len && !filter_refill(p)) break;
+      int avail = p->len - p->pos;
+      int take = (n - read < avail) ? (n - read) : avail;
+      memcpy(bv->bytes + read, p->buf + p->pos, (size_t)take);
+      p->pos += take;
+      read += take;
+    }
   }
   if (read == 0 && n > 0) return bi_eof_object(vm, NULL, 0);
   bv->len = read;
@@ -1517,11 +1569,14 @@ static Value bi_read_bytevector_bang(VM *vm, Value *args, int nargs) {
     FILE *stream = p->kind == PORT_KIND_STDIN ? stdin : p->file;
     read = (int)fread(bv->bytes + first, 1, (size_t)want, stream);
   } else {
-    int avail = p->len - p->pos;
-    read = (want < avail) ? want : avail;
-    if (read < 0) read = 0;
-    memcpy(bv->bytes + first, p->buf + p->pos, (size_t)read);
-    p->pos += read;
+    while (read < want) {
+      if (p->pos >= p->len && !filter_refill(p)) break;
+      int avail = p->len - p->pos;
+      int take = (want - read < avail) ? (want - read) : avail;
+      memcpy(bv->bytes + first + read, p->buf + p->pos, (size_t)take);
+      p->pos += take;
+      read += take;
+    }
   }
   if (read == 0 && want > 0) return bi_eof_object(vm, NULL, 0);
   return v_int(read);
@@ -1535,6 +1590,10 @@ static Value bi_write_bytevector(VM *vm, Value *args, int nargs) {
   int first, last;
   byte_range_args(args, nargs, 2, bv->len, &first, &last);
   int len = last - first;
+  if (p->kind == PORT_KIND_FILTER) {
+    p->filter->on_write(p, bv->bytes + first, len);
+    return v_nil();
+  }
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fwrite(bv->bytes + first, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return v_nil();
@@ -1554,8 +1613,7 @@ static Value bi_call_with_port(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 2, "call-with-port");
   Port *p = creme_arg_port(args, nargs, 0, "call-with-port");
   Value result = creme_apply(vm, args[1], args, 1);
-  if (!p->closed && (p->kind == PORT_KIND_INPUT_FILE || p->kind == PORT_KIND_OUTPUT_FILE) && p->file) fclose(p->file);
-  p->closed = 1;
+  port_close(p);
   return result;
 }
 
@@ -1564,6 +1622,10 @@ static Value bi_call_with_port(VM *vm, Value *args, int nargs) {
  * without duplicating the STDOUT/OUTPUT_FILE/OUTPUT_STRING dispatch
  * bi_write_string/bi_write_char/bi_write already do inline. */
 void creme_port_write_bytes(Port *p, const char *bytes, int len) {
+  if (p->kind == PORT_KIND_FILTER) {
+    p->filter->on_write(p, (const unsigned char *)bytes, len);
+    return;
+  }
   if (p->kind == PORT_KIND_STDOUT || p->kind == PORT_KIND_OUTPUT_FILE) {
     fwrite(bytes, 1, (size_t)len, p->kind == PORT_KIND_STDOUT ? stdout : p->file);
     return;
@@ -1586,7 +1648,7 @@ int creme_port_read_char(Port *p) {
     int c = fgetc(stream);
     return c == EOF ? -1 : c;
   }
-  if (p->pos >= p->len) return -1;
+  if (p->pos >= p->len && !filter_refill(p)) return -1;
   return (unsigned char)p->buf[p->pos++];
 }
 
@@ -1598,7 +1660,7 @@ int creme_port_peek_char(Port *p) {
     ungetc(c, stream);
     return c;
   }
-  if (p->pos >= p->len) return -1;
+  if (p->pos >= p->len && !filter_refill(p)) return -1;
   return (unsigned char)p->buf[p->pos];
 }
 
@@ -1615,7 +1677,7 @@ static Value bi_read_line(VM *vm, Value *args, int nargs) {
     free(line);
     return result;
   }
-  if (p->pos >= p->len) return bi_eof_object(vm, NULL, 0);
+  if (p->pos >= p->len && !filter_refill(p)) return bi_eof_object(vm, NULL, 0);
   int start = p->pos;
   while (p->pos < p->len && p->buf[p->pos] != '\n') p->pos++;
   int line_len = p->pos - start;
@@ -1647,7 +1709,10 @@ static Value bi_read_string(VM *vm, Value *args, int nargs) {
       buf[n++] = (char)c;
     }
   } else {
-    while (n < k && p->pos < p->len) buf[n++] = p->buf[p->pos++];
+    while (n < k) {
+      if (p->pos >= p->len && !filter_refill(p)) break;
+      while (n < k && p->pos < p->len) buf[n++] = p->buf[p->pos++];
+    }
   }
   if (n < k) return bi_eof_object(vm, NULL, 0);
   return v_str(buf, (int)n);

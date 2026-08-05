@@ -1,0 +1,19 @@
+# Vendored C deps for icecreme (the C11 self-hosting VM). Pinned to exact
+# upstream commits. `ignore = untracked` keeps in-tree build objects (e.g.
+# picohttpparser.o) from showing these submodules as dirty in `git status` --
+# icecreme/Makefile compiles them in place. sds is the exception: it's compiled
+# from a generated staging dir (icecreme/Makefile's SDS_STAGE) against a
+# generated GC-backed sdsalloc.h, so its submodule tree stays byte-for-byte
+# pristine and produces no in-tree objects at all.
+[submodule "icecreme/vendor/sds"]
+	path = icecreme/vendor/sds
+	url = https://github.com/antirez/sds.git
+	ignore = untracked
+[submodule "icecreme/vendor/picohttpparser"]
+	path = icecreme/vendor/picohttpparser
+	url = https://github.com/h2o/picohttpparser.git
+	ignore = untracked
+[submodule "icecreme/vendor/verstable"]
+	path = icecreme/vendor/verstable
+	url = https://github.com/JacksonAllan/Verstable.git
+	ignore = untracked

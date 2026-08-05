@@ -14,11 +14,18 @@ crystal-run-*.tm.core
 /icecreme/fuzz-loader
 /icecreme/icecreme.dSYM/
 /icecreme/*.o
-/icecreme/vendor/
+# icecreme/vendor/{sds,picohttpparser,verstable} are git submodules (tracked via
+# .gitmodules), so the tree itself is NOT ignored. Their in-tree build objects
+# are hidden by `ignore = untracked` in .gitmodules. sds compiles from a
+# generated staging dir (below) so its submodule stays pristine.
+/icecreme/sds-gc/
 /icecreme/repl.ice
 /icecreme/icecreme.ice
 /icecreme/icecreme-boot
-/icecreme/icecreme-boot.ice
+# icecreme-boot.ice is the COMMITTED bootstrap seed (a --static compiler image)
+# -- stage 0 reads it instead of running the native bin/creme, so a fresh
+# checkout builds icecreme with no Crystal toolchain. Refresh via
+# `make -C icecreme update-boot-seed`. NOT ignored.
 /icecreme/fuzz/corpus/
 /icecreme/crash-*
 /icecreme/oom-*

@@ -174,6 +174,7 @@ typedef struct Bytevector Bytevector;
 typedef struct Promise Promise;
 typedef struct MultiValues MultiValues;
 typedef struct Port Port;
+typedef struct FilterOps FilterOps;
 typedef struct Closure Closure;
 typedef struct CaseClosure CaseClosure;
 typedef struct RecordType RecordType;
@@ -270,6 +271,12 @@ typedef enum {
   PORT_KIND_INPUT_STRING,
   PORT_KIND_INPUT_FILE,
   PORT_KIND_OUTPUT_FILE,
+  /* A streaming FILTER port (e.g. (creme zstd)'s zstd-open-output-port/
+   * zstd-open-input-port): wraps another port and transforms bytes through a
+   * FilterOps vtable, so filters compose into pipelines like
+   * compressed(encrypted(buffered(handle))). See struct FilterOps below and
+   * builtins.c's PORT_KIND_FILTER dispatch. */
+  PORT_KIND_FILTER,
 } PortKind;
 
 /* `binary` distinguishes a bytevector-backed port (open-input-bytevector/
@@ -294,6 +301,33 @@ struct Port {
   int closed;
   int binary;
   FILE *file;
+  /* PORT_KIND_FILTER only (NULL/zeroed for every ordinary port -- all Ports
+   * are GC_MALLOC'd zeroed): `wrapped` is the downstream/upstream port this
+   * filter forwards to; `filter`/`filter_state` are its transform vtable and
+   * per-instance state; `filter_input` is 1 for an input (decode) filter, 0
+   * for an output (encode) filter. An input filter reuses buf/len/pos above to
+   * hold its decoded output (its `refill` fills them, like INPUT_STRING); an
+   * output filter carries no buffer of its own. */
+  struct Port *wrapped;
+  const FilterOps *filter;
+  void *filter_state;
+  int filter_input;
+};
+
+/* A composable byte-transform for a PORT_KIND_FILTER port. Filters forward to
+ * self->wrapped through the ordinary creme_port_write_bytes/creme_port_read_char
+ * helpers, so stacking filters composes recursively. See icecreme/zstd.c for the
+ * zstd compress/decompress instances. */
+struct FilterOps {
+  /* output: transform `in`/`len` and forward the result to self->wrapped */
+  void (*on_write)(Port *self, const unsigned char *in, int len);
+  /* output: emit a block boundary (may be NULL); called by flush-output-port */
+  void (*on_flush)(Port *self);
+  /* output: flush any tail to self->wrapped; called by close-port */
+  void (*on_close)(Port *self);
+  /* input: decode more into self->buf (reset pos=0,len=produced); return 1 if
+   * it produced anything, 0 at end of stream */
+  int (*refill)(Port *self);
 };
 
 struct MultiValues {

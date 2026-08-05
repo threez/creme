@@ -61,6 +61,9 @@
 #ifndef CREME_WITH_YAML
 #define CREME_WITH_YAML 1 /* yaml.c -- libyaml */
 #endif
+/* NOTE: zstd (zstd.c / libzstd) is intentionally NOT here -- it's a required
+ * core dependency (the ICE bytecode container is zstd-compressed; loader.c
+ * decompresses every chunk), always compiled and linked like GMP/PCRE2. */
 #ifndef CREME_WITH_MUX
 #define CREME_WITH_MUX 1 /* mux.c -- sockets/poll/pthread only */
 #endif

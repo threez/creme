@@ -34,6 +34,7 @@
 #include "http.h"
 #include "json.h"
 #include "yaml.h"
+#include "zstd.h"
 #include "mux.h"
 #include "process.h"
 #include "regex.h"
@@ -109,6 +110,7 @@ static const struct {
 #if CREME_WITH_YAML
     {"yaml", creme_register_yaml_builtins},
 #endif
+    {"zstd", creme_register_zstd_builtins}, /* required core dep -- never gated */
 #if CREME_WITH_BIGDECIMAL
     {"bigdecimal", creme_register_bigdecimal_builtins},
 #endif

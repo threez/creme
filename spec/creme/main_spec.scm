@@ -86,6 +86,7 @@
     "spec/creme/vm_spec.scm"
     "spec/creme/x509_spec.scm"
     "spec/creme/yaml_spec.scm"
+    "spec/creme/zstd_spec.scm"
     "spec/creme/r7rs/ch02_lexical_conventions_spec.scm"
     "spec/creme/r7rs/ch03_basic_concepts_spec.scm"
     "spec/creme/r7rs/ch04_expressions_spec.scm"

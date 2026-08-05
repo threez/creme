@@ -26,12 +26,22 @@ CC ?= cc
 ROOT := ../..
 ICECREME := $(ROOT)/icecreme
 
-GC_CFLAGS := $(shell pkg-config --cflags bdw-gc-threaded 2>/dev/null || pkg-config --cflags bdw-gc 2>/dev/null) -DGC_THREADS
-GC_LIBS := $(shell pkg-config --libs bdw-gc-threaded 2>/dev/null || pkg-config --libs bdw-gc 2>/dev/null || echo -lgc)
-PCRE2_LIBS := $(shell pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8)
-GMP_CFLAGS := $(shell pkg-config --cflags gmp 2>/dev/null)
-GMP_LIBS := $(shell pkg-config --libs gmp 2>/dev/null || echo -lgmp)
-EXECINFO_LIBS := $(if $(filter FreeBSD,$(shell uname -s)),-lexecinfo)
+# `!=` (shell-output assignment), not GNU-only `$(shell ...)`/`$(if $(filter ...))`
+# -- same portable BSD+GNU subset as icecreme/Makefile, so this demo builds under
+# either `make` or `gmake`. -DGC_THREADS is joined at the make level (outside the
+# shell command) rather than appended inside `$(shell ...)`.
+GC_PKG_CFLAGS != pkg-config --cflags bdw-gc-threaded 2>/dev/null || pkg-config --cflags bdw-gc 2>/dev/null
+GC_CFLAGS = $(GC_PKG_CFLAGS) -DGC_THREADS
+GC_LIBS != pkg-config --libs bdw-gc-threaded 2>/dev/null || pkg-config --libs bdw-gc 2>/dev/null || echo -lgc
+PCRE2_LIBS != pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8
+GMP_CFLAGS != pkg-config --cflags gmp 2>/dev/null
+GMP_LIBS != pkg-config --libs gmp 2>/dev/null || echo -lgmp
+# libzstd is a REQUIRED core dependency: the embedded compiler image is a
+# zstd-compressed ICE container, so libcreme.a's loader always decompresses --
+# it must be linked even for this minimal build.
+ZSTD_CFLAGS != pkg-config --cflags libzstd 2>/dev/null
+ZSTD_LIBS != pkg-config --libs libzstd 2>/dev/null || echo -lzstd
+EXECINFO_LIBS != case "$$(uname -s)" in FreeBSD) echo -lexecinfo;; esac
 
 # Every optional family off -- host_demo.scm needs none of them.
 MINIMAL_FAMILY_FLAGS := \
@@ -40,9 +50,13 @@ MINIMAL_FAMILY_FLAGS := \
   CREME_WITH_MUX=0 CREME_WITH_CSV=0 CREME_WITH_TREELIST=0 CREME_WITH_JSON=0 CREME_WITH_BIGDECIMAL=0 \
   CREME_WITH_TERM=0 CREME_WITH_PROCESS=0 CREME_WITH_STRING=0
 
-CFLAGS ?= -std=c11 -O2 -g -Wall -Wextra -I$(ROOT) $(GC_CFLAGS) $(GMP_CFLAGS)
-LDFLAGS ?= -rdynamic
-LDLIBS := -lm -lpthread $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(EXECINFO_LIBS)
+# Mandatory flags kept in their own variable (applied as `$(CREME_CFLAGS)
+# $(CFLAGS)`), not in a `CFLAGS ?=` default: BSD make predefines CFLAGS (to
+# `-O2 -pipe`), which would defeat `?=` and drop the -std/-I flags. User
+# $(CFLAGS)/$(LDFLAGS) still append on top. Same idiom as icecreme/Makefile.
+CREME_CFLAGS = -std=c11 -O2 -g -Wall -Wextra -I$(ROOT) $(GC_CFLAGS) $(GMP_CFLAGS) $(ZSTD_CFLAGS)
+CREME_LDFLAGS = -rdynamic
+LDLIBS := -lm -lpthread $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(ZSTD_LIBS) $(EXECINFO_LIBS)
 
 .PHONY: all clean
 all: host_demo
@@ -51,7 +65,7 @@ $(ICECREME)/libcreme.a:
 	$(MAKE) -C $(ICECREME) lib $(MINIMAL_FAMILY_FLAGS)
 
 host_demo: host_demo.c $(ICECREME)/libcreme.a
-	$(CC) $(CFLAGS) -o $@ host_demo.c $(ICECREME)/libcreme.a $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) -o $@ host_demo.c $(ICECREME)/libcreme.a $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f host_demo

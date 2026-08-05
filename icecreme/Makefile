@@ -17,34 +17,43 @@ CC ?= cc
 # support compiled in, that's a real, loud link error (undefined
 # GC_register_my_thread) rather than a silent runtime one -- correct
 # behavior, since actor.c genuinely cannot work without it.
-GC_CFLAGS := $(shell pkg-config --cflags bdw-gc-threaded 2>/dev/null || pkg-config --cflags bdw-gc 2>/dev/null) -DGC_THREADS
-GC_LIBS := $(shell pkg-config --libs bdw-gc-threaded 2>/dev/null || pkg-config --libs bdw-gc 2>/dev/null || echo -lgc)
+# `!=` (shell-output assignment), not GNU-only `$(shell ...)` -- this Makefile is
+# written in the subset both GNU make and BSD make agree on (see the header
+# comment on `.SUFFIXES` below). The literal -DGC_THREADS is joined at the make
+# level rather than inside the shell, so the `!=` command is just the pkg-config
+# lookup.
+GC_PKG_CFLAGS != pkg-config --cflags bdw-gc-threaded 2>/dev/null || pkg-config --cflags bdw-gc 2>/dev/null
+GC_CFLAGS = $(GC_PKG_CFLAGS) -DGC_THREADS
+GC_LIBS != pkg-config --libs bdw-gc-threaded 2>/dev/null || pkg-config --libs bdw-gc 2>/dev/null || echo -lgc
 
 # PCRE2 -- backs (creme regex)'s `regexp`/`regexp-matches?` (regex.c),
 # needed only so the self-hosted reader (modules/creme/compiler/
 # reader.sld) can run under icecreme; see regex.c's own header comment for why
 # PCRE2 specifically (matches the real Crystal Regex class's own flavor).
-PCRE2_CFLAGS := $(shell pkg-config --cflags libpcre2-8 2>/dev/null)
-PCRE2_LIBS := $(shell pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8)
+PCRE2_CFLAGS != pkg-config --cflags libpcre2-8 2>/dev/null
+PCRE2_LIBS != pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8
 
 # GMP -- backs T_RATIONAL's arbitrary-precision mpq_t (value.h); see
 # builtins.c's num_add/num_div/etc. and main.c's mp_set_memory_functions
 # call (redirects GMP's own allocator to GC_MALLOC/GC_REALLOC so an mpq_t's
 # limbs are reclaimed by the same Boehm GC as everything else here).
-GMP_CFLAGS := $(shell pkg-config --cflags gmp 2>/dev/null)
-GMP_LIBS := $(shell pkg-config --libs gmp 2>/dev/null || echo -lgmp)
+GMP_CFLAGS != pkg-config --cflags gmp 2>/dev/null
+GMP_LIBS != pkg-config --libs gmp 2>/dev/null || echo -lgmp
 
 # OpenSSL libcrypto -- backs (creme actor)'s TCP/Unix transport HMAC-SHA256
 # handshake (actor.c's Phase 4, HMAC()/RAND_bytes()), mirroring native's own
 # openssl/hmac + random/secure usage (actor.cr).
-CRYPTO_CFLAGS := $(shell pkg-config --cflags libcrypto 2>/dev/null)
-CRYPTO_LIBS := $(shell pkg-config --libs libcrypto 2>/dev/null || echo -lcrypto)
+CRYPTO_CFLAGS != pkg-config --cflags libcrypto 2>/dev/null
+# _RAW because the link-time list is gated below (CRYPTO_LDLIBS) by whether any
+# openssl-touching family is enabled -- keeping the raw pkg-config result under
+# its own name avoids a self-referential reassignment.
+CRYPTO_LIBS_RAW != pkg-config --libs libcrypto 2>/dev/null || echo -lcrypto
 
 # OpenSSL libssl -- (creme http)'s HTTPS client path (http.c), the actual
 # SSL/TLS layer that project used to leave untouched (libcrypto above was
 # already linked, just never for TLS itself).
-SSL_CFLAGS := $(shell pkg-config --cflags libssl 2>/dev/null)
-SSL_LIBS := $(shell pkg-config --libs libssl 2>/dev/null || echo -lssl)
+SSL_CFLAGS != pkg-config --cflags libssl 2>/dev/null
+SSL_LIBS_RAW != pkg-config --libs libssl 2>/dev/null || echo -lssl
 
 # libffi -- backs (creme ffi)'s ffi-function/ffi-call (creme_ffi.c), the
 # generic dlopen/native-call bridge. dlopen/dlsym/dlclose themselves come
@@ -52,8 +61,8 @@ SSL_LIBS := $(shell pkg-config --libs libssl 2>/dev/null || echo -lssl)
 # is a no-op there anyway, required on glibc Linux systems older than the
 # libc/libdl merge -- gated below alongside -lffi (CREME_WITH_FFI), since
 # creme_ffi.c is the only consumer of either.
-FFI_CFLAGS := $(shell pkg-config --cflags libffi 2>/dev/null)
-FFI_LIBS := $(shell pkg-config --libs libffi 2>/dev/null || echo -lffi)
+FFI_CFLAGS != pkg-config --cflags libffi 2>/dev/null
+FFI_LIBS != pkg-config --libs libffi 2>/dev/null || echo -lffi
 
 # libyaml (MIT) -- backs (creme yaml)'s yaml-read/yaml-write (yaml.c),
 # same pkg-config-with-a-fallback pattern as PCRE2/GMP/OpenSSL/libffi
@@ -61,8 +70,16 @@ FFI_LIBS := $(shell pkg-config --libs libffi 2>/dev/null || echo -lffi)
 # leans on Crystal's bundled `YAML` stdlib module, itself a libyaml
 # wrapper -- so both backends end up linking the same underlying C
 # library either way; see yaml.c's own header comment.
-YAML_CFLAGS := $(shell pkg-config --cflags yaml-0.1 2>/dev/null)
-YAML_LIBS := $(shell pkg-config --libs yaml-0.1 2>/dev/null || echo -lyaml)
+YAML_CFLAGS != pkg-config --cflags yaml-0.1 2>/dev/null
+YAML_LIBS != pkg-config --libs yaml-0.1 2>/dev/null || echo -lyaml
+
+# libzstd (facebook/zstd, BSD-3-Clause) -- backs (creme zstd)'s zstd-compress/
+# zstd-decompress (zstd.c), same pkg-config-with-a-fallback pattern as libyaml
+# above. Native's own (creme zstd) (src/creme/modules/creme/zstd.cr) binds the
+# same libzstd one-shot API directly, so both backends link the same underlying
+# C library either way; see zstd.c's own header comment.
+ZSTD_CFLAGS != pkg-config --cflags libzstd 2>/dev/null
+ZSTD_LIBS != pkg-config --libs libzstd 2>/dev/null || echo -lzstd
 
 # Verstable (vendor/verstable/verstable.h, MIT, single header, no deps) --
 # backs (creme hash-table)'s Value->Value map (hashtable.c). Header-only, so
@@ -124,45 +141,73 @@ FEATURE_DEFINES := \
   -DCREME_WITH_PROCESS=$(CREME_WITH_PROCESS) -DCREME_WITH_STRING=$(CREME_WITH_STRING)
 
 # Link-time gating to match: -lcrypto stays linked if ANY openssl-touching
-# family is on; -lssl only if http (the sole TLS consumer) is on. `filter-
-# out 0` drops every disabled entry from the list -- if anything survives,
-# at least one relevant family is enabled. -lpthread/$(GC_LIBS)/-lgmp/
-# -lpcre2-8 stay unconditional (pthread is tied to GC_THREADS regardless of
-# actor/mux; pcre2 because `regex` is a hard, non-gateable dependency of
-# the bundled self-hosted compiler).
-CRYPTO_FAMILIES_ON := $(filter-out 0,$(CREME_WITH_HTTP) $(CREME_WITH_CIPHER) $(CREME_WITH_PKEY) \
-                                      $(CREME_WITH_X509) $(CREME_WITH_DIGEST) $(CREME_WITH_SECURE_RANDOM) \
-                                      $(CREME_WITH_ACTOR))
-CRYPTO_LIBS := $(if $(strip $(CRYPTO_FAMILIES_ON)),$(CRYPTO_LIBS))
-SSL_LIBS := $(if $(filter-out 0,$(CREME_WITH_HTTP)),$(SSL_LIBS))
-SQL_LDLIBS := $(if $(filter-out 0,$(CREME_WITH_SQL)),-lsqlite3)
-FFI_LDLIBS := $(if $(filter-out 0,$(CREME_WITH_FFI)),$(FFI_LIBS) -ldl)
-YAML_LDLIBS := $(if $(filter-out 0,$(CREME_WITH_YAML)),$(YAML_LIBS))
+# family is on; -lssl only if http (the sole TLS consumer) is on.
+# -lpthread/$(GC_LIBS)/-lgmp/-lpcre2-8 stay unconditional (pthread is tied to
+# GC_THREADS regardless of actor/mux; pcre2 because `regex` is a hard,
+# non-gateable dependency of the bundled self-hosted compiler).
+#
+# Done in the shell via `!=` rather than GNU-only `$(if $(filter-out 0,...))`:
+# each `[ "$(VAR)" != 0 ]` reproduces `filter-out 0` for a single flag (empty
+# unless the flag is non-0), and the CRYPTO loop echoes the raw libs the moment
+# any of the seven openssl-touching families is non-0. `$$v` is a shell
+# variable ($$-escaped so make passes it through). Command-line overrides
+# (e.g. `make CREME_WITH_HTTP=0`) still expand into these before the shell runs.
+SQL_LDLIBS  != [ "$(CREME_WITH_SQL)" != 0 ] && echo -lsqlite3 || true
+SSL_LDLIBS  != [ "$(CREME_WITH_HTTP)" != 0 ] && echo "$(SSL_LIBS_RAW)" || true
+FFI_LDLIBS  != [ "$(CREME_WITH_FFI)" != 0 ] && echo "$(FFI_LIBS) -ldl" || true
+YAML_LDLIBS != [ "$(CREME_WITH_YAML)" != 0 ] && echo "$(YAML_LIBS)" || true
+# zstd is a required core dependency (the ICE bytecode container is
+# zstd-compressed -- loader.c decompresses every chunk), so libzstd is always
+# linked, ungated, like GMP/PCRE2.
+ZSTD_LDLIBS := $(ZSTD_LIBS)
+# trailing `; true` so the assignment exits 0 even when every family is 0 (the
+# final `[ ]` test fails then) -- BSD make warns on a non-zero `!=` command.
+CRYPTO_LDLIBS != for v in $(CREME_WITH_HTTP) $(CREME_WITH_CIPHER) $(CREME_WITH_PKEY) $(CREME_WITH_X509) $(CREME_WITH_DIGEST) $(CREME_WITH_SECURE_RANDOM) $(CREME_WITH_ACTOR); do [ "$$v" != 0 ] && { echo "$(CRYPTO_LIBS_RAW)"; break; }; done; true
 
-CFLAGS ?= -std=c11 -O2 -g -fno-omit-frame-pointer -Wall -Wextra -Wno-missing-field-initializers \
-          -Ivendor/verstable -Ivendor/sds -Ivendor/picohttpparser \
-          $(GC_CFLAGS) $(PCRE2_CFLAGS) $(GMP_CFLAGS) $(CRYPTO_CFLAGS) $(SSL_CFLAGS) $(FFI_CFLAGS) $(YAML_CFLAGS) \
-          $(FEATURE_DEFINES)
+# Mandatory build flags -- the -std/-I include paths, pkg-config cflags, and
+# feature defines the build genuinely cannot compile without. Kept in their OWN
+# variable (not CFLAGS) and always applied by every recipe as `$(CREME_CFLAGS)
+# $(CFLAGS)`, because BSD make PREDEFINES CFLAGS (to `-O2 -pipe` via sys.mk),
+# which would defeat a plain `CFLAGS ?= ...` default and silently drop all of
+# these. User $(CFLAGS) is appended after, so it still tunes/overrides (e.g.
+# `make CFLAGS=-O0`) without clobbering the mandatory set.
+CREME_CFLAGS = -std=c11 -O2 -g -fno-omit-frame-pointer -Wall -Wextra -Wno-missing-field-initializers \
+               -Ivendor/verstable -Ivendor/sds -Ivendor/picohttpparser \
+               $(GC_CFLAGS) $(PCRE2_CFLAGS) $(GMP_CFLAGS) $(CRYPTO_CFLAGS) $(SSL_CFLAGS) $(FFI_CFLAGS) $(YAML_CFLAGS) $(ZSTD_CFLAGS) \
+               $(FEATURE_DEFINES)
 # -rdynamic: exports the executable's own (non-imported) symbols into its
 # dynamic symbol table so dladdr(3) can resolve them on Linux/glibc — a no-op
 # on Darwin, where dladdr already sees the main binary's local symbol table.
-LDFLAGS ?= -rdynamic
+# Mandatory (same BSD-predefined-LDFLAGS reasoning as CREME_CFLAGS); user
+# $(LDFLAGS) is appended by the link recipes.
+CREME_LDFLAGS = -rdynamic
 # backtrace(3)/execinfo.h (profiler.c's SIGPROF sampler) ship inside libc on
 # Linux/glibc and Darwin, but FreeBSD splits them into their own libexecinfo
 # (part of the base system, not a package) — link it there only, so this
 # stays a no-op everywhere else.
-EXECINFO_LIBS := $(if $(filter FreeBSD,$(shell uname -s)),-lexecinfo)
-LDLIBS := -lm -lpthread $(SQL_LDLIBS) $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LIBS) $(SSL_LIBS) $(FFI_LDLIBS) $(YAML_LDLIBS) $(EXECINFO_LIBS)
+EXECINFO_LIBS != case "$$(uname -s)" in FreeBSD) echo -lexecinfo;; esac
+LDLIBS := -lm -lpthread $(SQL_LDLIBS) $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LDLIBS) $(SSL_LDLIBS) $(FFI_LDLIBS) $(YAML_LDLIBS) $(ZSTD_LDLIBS) $(EXECINFO_LIBS)
 
 # embedded_icecreme.c (bin2c of icecreme.ice, generated below) is in
 # the CLI's own SRCS now, not just the library's: main.c's no-args REPL mode
 # loads the compiler-mode driver from these embedded bytes rather than reading
 # icecreme/icecreme.ice off disk (the file-based compiler mode below still
 # reads it from disk, unchanged). This makes `make all` depend on regenerating
-# icecreme.ice via ./bin/creme, same build-time dependency the `lib` target
-# already had.
-SRCS = main.c loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c secure_random.c cipher.c pkey.c x509.c builtin_families.c embedded_icecreme.c \
-       vendor/sds/sds.c vendor/picohttpparser/picohttpparser.c
+# icecreme.ice from the committed bootstrap seed (see "Self-hosting bootstrap"
+# below), the same build-time dependency the `lib` target already had.
+# Source decomposition. main.c (the CLI entry) and embedded_icecreme.c (the
+# bin2c'd self-hosted-compiler image) are split into their own vars so the
+# fuzz/lib/boot variants below can be plain concatenations -- BSD make has no
+# `$(filter-out ...)` to subtract one entry from a list. sds is compiled from a
+# staging dir ($(SDS_STAGE)) that pairs it with a generated GC-backed sdsalloc.h,
+# so the pinned sds submodule stays byte-for-byte pristine (see the "Vendored
+# deps" section near the bottom); picohttpparser compiles in place.
+SDS_STAGE = sds-gc
+MAIN_SRC  = main.c
+EMBED_SRC = embedded_icecreme.c
+COMMON_SRCS = loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c zstd.c secure_random.c cipher.c pkey.c x509.c builtin_families.c \
+              $(SDS_STAGE)/sds.c vendor/picohttpparser/picohttpparser.c
+SRCS = $(MAIN_SRC) $(COMMON_SRCS) $(EMBED_SRC)
 OBJS = $(SRCS:.c=.o)
 BIN = icecreme
 
@@ -180,22 +225,36 @@ SANITIZE_FLAGS := -fsanitize=address,undefined -fno-sanitize-recover=all
 SANITIZE_OBJS := $(SRCS:.c=.san.o)
 SANBIN := icecreme-sanitize
 
+# ---- Portability: GNU make AND BSD make ------------------------------------
+# This project's FreeBSD dev box builds with the base-system `make` (BSD make),
+# so this file avoids every GNU-only construct: no `$(shell)`/`$(filter*)`/
+# `$(if)`/`$(strip)` (the `!=` shell assignments above cover those), and no
+# `%`-pattern rules -- BSD make silently IGNORES a `%.o: %.c` rule and falls
+# back to its builtin .c.o suffix rule (wrong recipe, no error). Object builds
+# therefore use SUFFIX rules, which both makes honor -- including the multi-dot
+# `.c.san.o`/`.c.fuzz.o`/`.c.lib.o` forms, once those suffixes are declared.
+# Suffix rules can't carry the old `%.o: %.c *.h` header prerequisite inline, so
+# a single shared prereq line near the bottom ($(OBJS) ...: $(HDRS) ...) gives
+# every object set the same "rebuild when any header changes" behavior.
+.SUFFIXES: .c .o .san.o .fuzz.o .lib.o
+HDRS != echo *.h
+
 .PHONY: all clean sanitize
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) -o $@ $(OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 
-%.o: %.c *.h
-	$(CC) $(CFLAGS) -c -o $@ $<
+.c.o:
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) -c -o $@ $<
 
 sanitize: $(SANBIN)
 
 $(SANBIN): $(SANITIZE_OBJS)
-	$(CC) $(CFLAGS) $(SANITIZE_FLAGS) -o $@ $(SANITIZE_OBJS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) $(SANITIZE_FLAGS) -o $@ $(SANITIZE_OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 
-%.san.o: %.c *.h
-	$(CC) $(CFLAGS) $(SANITIZE_FLAGS) -c -o $@ $<
+.c.san.o:
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) $(SANITIZE_FLAGS) -c -o $@ $<
 
 # libFuzzer harness (fuzz/fuzz_loader.c) targeting creme_load_from_bytes --
 # the ICE bytecode deserializer, the one place icecreme treats a byte blob as
@@ -207,7 +266,9 @@ $(SANBIN): $(SANITIZE_OBJS)
 # of main(). ASAN is included alongside the fuzzer instrumentation so a
 # memory-safety bug the fuzzer triggers is caught immediately, not just a
 # logic-level "wrong output".
-FUZZ_SRCS := $(filter-out main.c,$(SRCS))
+# $(COMMON_SRCS) $(EMBED_SRC) is $(SRCS) minus main.c -- the plain-concatenation
+# equivalent of the old `$(filter-out main.c,$(SRCS))` (BSD make has no filter).
+FUZZ_SRCS := $(COMMON_SRCS) $(EMBED_SRC)
 FUZZ_OBJS := $(FUZZ_SRCS:.c=.fuzz.o)
 FUZZBIN := fuzz-loader
 
@@ -215,10 +276,10 @@ FUZZBIN := fuzz-loader
 fuzz: $(FUZZBIN)
 
 $(FUZZBIN): $(FUZZ_OBJS) fuzz/fuzz_loader.c
-	clang $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(FUZZ_OBJS) fuzz/fuzz_loader.c $(LDFLAGS) $(LDLIBS)
+	clang $(CREME_CFLAGS) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(FUZZ_OBJS) fuzz/fuzz_loader.c $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 
-%.fuzz.o: %.c *.h
-	clang $(CFLAGS) -fsanitize=fuzzer,address -c -o $@ $<
+.c.fuzz.o:
+	clang $(CREME_CFLAGS) $(CFLAGS) -fsanitize=fuzzer,address -c -o $@ $<
 
 # ---- libcreme.a: an embeddable static library, plus a self-contained -------
 # ---- compiler+REPL bundle, for a host C program (see examples/libcream/) ---
@@ -241,49 +302,66 @@ $(FUZZBIN): $(FUZZ_OBJS) fuzz/fuzz_loader.c
 # icecreme/repl.scm fresh through the same bundled-compiler mechanism at
 # call time (a precompiled repl.ice loaded standalone is missing
 # interaction-environment -- see embed.c's own comment on creme_run_repl).
+# Names tools/bin2c.c explicitly rather than $< -- BSD make only sets $< in
+# inference/suffix rules, not explicit ones (where it would expand to empty).
 tools/bin2c: tools/bin2c.c
-	$(CC) -O2 -o $@ $<
+	$(CC) -O2 -o $@ tools/bin2c.c
 
 # ---- Self-hosting bootstrap -------------------------------------------------
-# The whole icecreme.scm CLI program (self-hosted compiler + disassembler +
-# dispatcher) is compiled to one ICE chunk and bin2c'd into the binary. That
-# compilation is done BY ICECREME ITSELF -- the shipped compiler image is
-# self-hosted, not produced by the native Crystal bin/creme. Because building
-# the binary needs the chunk and self-compiling the chunk needs a binary, the
-# cycle is broken with a throwaway bootstrap binary:
+# icecreme.scm (the whole CLI: self-hosted compiler + disassembler + dispatcher)
+# is compiled to one ICE chunk and bin2c'd into the binary. That compilation is
+# done BY ICECREME ITSELF, so building the binary needs a compiler image and the
+# image needs a binary. The cycle is broken with a COMMITTED bootstrap seed --
+# no native Crystal bin/creme, no toolchain beyond a C compiler:
 #
-#   stage 0  icecreme-boot : an intermediate binary whose embedded chunk WAS
-#                            compiled by bin/creme (the one remaining use of the
-#                            native compiler, only to bootstrap).
-#   stage 1  icecreme      : the real binary, whose embedded chunk icecreme-boot
-#                            --emit-icecreme --static-compiled from the SAME
-#                            icecreme.scm. `--static` inlines every imported .sld
-#                            so the image is self-contained (what native's
-#                            IcecremeEmitter does too).
+#   stage 0  icecreme-boot : a throwaway binary whose embedded chunk is the
+#                            committed seed icecreme-boot.ice (a --static image
+#                            checked into the repo). A fresh checkout bootstraps
+#                            from this file alone.
+#   stage 1  icecreme       : the real binary, whose embedded chunk icecreme-boot
+#                            RE-compiles from the CURRENT icecreme.scm with
+#                            `--static` (inlines every imported .sld so the image
+#                            is self-contained). Because stage 1 recompiles
+#                            current source, the binary always reflects edits to
+#                            icecreme.scm/*.sld -- the seed is only the bootstrap
+#                            root, never the shipped logic. (NOT --strip -- see
+#                            the stage-1 recipe comment below for why.)
 #
 # Soundness rests on the byte-for-byte fixpoint -- icecreme compiling itself
-# yields an identical chunk (spec/creme/compiler_self_host_spec.scm). Both the
-# boot and final chunks depend on icecreme.scm AND every .sld the self-hosted
-# compiler bundles (recursively under modules/creme/), so a change to e.g.
-# compiler.sld/bytecode.sld regenerates them and the binary -- never a stale
-# image. `make bootstrap-clean` (below) drops just the stage-0 artifacts to
-# force a fresh native bootstrap if the self-compile ever diverges.
-ICECREME_COMPILER_SLDS := $(shell find ../modules/creme -name '*.sld')
+# yields an identical chunk (spec/creme/compiler_self_host_spec.scm), so at
+# steady state stage 1's icecreme.ice EQUALS the committed icecreme-boot.ice.
+# When you change the compiler's codegen, stage 1's one-pass output diverges from
+# a self-emit (the fixpoint spec flags it): run `make update-boot-seed` to refresh
+# the committed seed from the freshly built compiler, then rebuild + commit it.
+#
+# `!=` + `find | tr` (not GNU-only `$(shell ...)`) -- space-joined onto one line
+# because a `!=` variable holding find's default newline-separated output breaks
+# BSD make's prerequisite-list parsing (each newline reads as a bare, unmatchable
+# prerequisite). Same portable idiom the root Makefile's CREME_SRCS uses.
+ICECREME_COMPILER_SLDS != find ../modules/creme -name '*.sld' | tr '\n' ' '
 
-# stage 0: bin/creme compiles the chunk, bin2c'd (under the SAME symbol) into a
-# bootstrap binary. This binary is never shipped -- only used to self-compile.
-icecreme-boot.ice: icecreme.scm $(ICECREME_COMPILER_SLDS)
-	cd .. && ./bin/creme --emit-icecreme icecreme/icecreme.scm icecreme/icecreme-boot.ice
-
+# stage 0: bin2c the COMMITTED seed into a throwaway binary. icecreme-boot.ice
+# has NO build rule -- it's a checked-in source file (see .gitignore). This
+# binary is never shipped, only used to self-compile stage 1.
 embedded_icecreme_boot.c: icecreme-boot.ice tools/bin2c
 	tools/bin2c icecreme-boot.ice creme_embedded_icecreme_ice > $@
 
-BOOT_OBJS := $(filter-out embedded_icecreme.o,$(OBJS)) embedded_icecreme_boot.o
+# $(MAIN_SRC:.c=.o) $(COMMON_SRCS:.c=.o) is $(OBJS) minus embedded_icecreme.o
+# (which embedded_icecreme_boot.o replaces below) -- the plain-concatenation
+# equivalent of the old `$(filter-out embedded_icecreme.o,$(OBJS))`.
+BOOT_OBJS := $(MAIN_SRC:.c=.o) $(COMMON_SRCS:.c=.o) embedded_icecreme_boot.o
 icecreme-boot: $(BOOT_OBJS)
-	$(CC) $(CFLAGS) -o $@ $(BOOT_OBJS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) -o $@ $(BOOT_OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
 
-# stage 1: the bootstrap binary self-compiles the shipped chunk (--static, so
-# self-contained). This is what makes the build self-hosting.
+# stage 1: the bootstrap binary self-compiles the shipped chunk from CURRENT
+# source. --static makes it self-contained (inlines every imported .sld) so at
+# the fixpoint icecreme.ice is byte-identical to icecreme-boot.ice. NOT --strip:
+# dead-global elimination removes globals only reached through the reflective
+# "compiler compiles its own source at runtime" path, which breaks
+# spec/creme/compiler_self_host_spec.scm (the build-time --emit and ordinary
+# programs don't exercise those, so they look fine -- but the shipped compiler
+# must). This is what makes the build self-hosting AND always reflect current
+# icecreme.scm/*.sld.
 icecreme.ice: icecreme.scm $(ICECREME_COMPILER_SLDS) icecreme-boot
 	cd .. && ./icecreme/icecreme-boot --emit-icecreme --static icecreme/icecreme.scm icecreme/icecreme.ice
 
@@ -293,7 +371,9 @@ embedded_icecreme.c: icecreme.ice tools/bin2c
 # embedded_icecreme.c already comes in via $(SRCS) now (see its comment
 # above), so it's not repeated here -- only embed.c stays a library-only
 # addition (main.c never calls its creme_run_scheme_file/creme_run_repl API).
-LIBCREME_SRCS := $(filter-out main.c,$(SRCS)) embed.c
+# $(COMMON_SRCS) $(EMBED_SRC) is $(SRCS) minus main.c (was `filter-out main.c`),
+# plus embed.c (the library-only host API).
+LIBCREME_SRCS := $(COMMON_SRCS) $(EMBED_SRC) embed.c
 LIBCREME_OBJS := $(LIBCREME_SRCS:.c=.lib.o)
 
 .PHONY: lib
@@ -302,19 +382,63 @@ lib: libcreme.a
 libcreme.a: $(LIBCREME_OBJS)
 	ar rcs $@ $(LIBCREME_OBJS)
 
-%.lib.o: %.c *.h
-	$(CC) $(CFLAGS) -fPIC -c -o $@ $<
+.c.lib.o:
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) -fPIC -c -o $@ $<
 
-# Drops ONLY the stage-0 bootstrap artifacts (see the self-hosting section
-# above), forcing the next build to re-bootstrap the embedded chunk from a fresh
-# bin/creme --emit-icecreme. Use this if a self-compile ever diverges from the
-# native bootstrap (a real compiler bug the OLD binary can't compile past).
+# ---- Vendored deps (git submodules) ----------------------------------------
+# vendor/{sds,picohttpparser,verstable} are git submodules pinned in .gitmodules
+# (repo root). A fresh checkout that skipped `git clone --recursive` gets them
+# auto-initialized on first build: the source files below are object
+# prerequisites, and their rule runs `git submodule update --init`. One primary
+# target (sds.c) inits all three; the others just declare the dependency with an
+# empty `@:` recipe so nothing re-inits.
+VENDOR_HDRS = vendor/sds/sds.h vendor/picohttpparser/picohttpparser.h vendor/verstable/verstable.h
+
+vendor/sds/sds.c:
+	cd .. && git submodule update --init icecreme/vendor/sds icecreme/vendor/picohttpparser icecreme/vendor/verstable
+vendor/sds/sds.h vendor/picohttpparser/picohttpparser.c vendor/picohttpparser/picohttpparser.h vendor/verstable/verstable.h: vendor/sds/sds.c
+	@:
+
+# sds selects its allocator by including sdsalloc.h, whose upstream form is an
+# UNCONDITIONAL `#define s_malloc malloc` (no include guard), so a `-Ds_malloc=...`
+# on the command line just gets redefined back to libc. The hook sds actually
+# offers is that header itself. sds.c includes it as `#include "sdsalloc.h"`,
+# resolved from the compiled file's OWN directory -- so we stage sds.c/sds.h into
+# $(SDS_STAGE) next to a generated sdsalloc.h that routes through Boehm GC, and
+# compile there. The pinned submodule stays byte-for-byte pristine; strings.c/
+# mux.c include only sds.h (declarations) via -Ivendor/sds, so they're unaffected.
+$(SDS_STAGE)/sds.c: vendor/sds/sds.c vendor/sds/sds.h
+	mkdir -p $(SDS_STAGE)
+	cp vendor/sds/sds.c vendor/sds/sds.h $(SDS_STAGE)/
+	printf '#include <gc.h>\n#define s_malloc GC_MALLOC\n#define s_realloc GC_REALLOC\n#define s_free GC_FREE\n' > $(SDS_STAGE)/sdsalloc.h
+
+.PHONY: vendor
+vendor: $(SDS_STAGE)/sds.c vendor/picohttpparser/picohttpparser.c $(VENDOR_HDRS)
+
+# The shared header prerequisite the suffix rules can't carry inline: every
+# object set rebuilds when any local header changes, and the vendored headers
+# here make a fresh checkout auto-init its submodules before the first compile.
+$(OBJS) $(SANITIZE_OBJS) $(FUZZ_OBJS) $(LIBCREME_OBJS) $(BOOT_OBJS): $(HDRS) $(VENDOR_HDRS)
+
+# Refresh the committed bootstrap seed from the freshly built self-hosted
+# compiler (no bin/creme). Run this after changing the compiler's codegen so the
+# seed tracks it, then `make` + commit icecreme-boot.ice. At steady state this
+# reproduces the identical seed (no git diff); it only changes after a real
+# codegen change. See the self-hosting bootstrap comment above.
+.PHONY: update-boot-seed
+update-boot-seed: $(BIN)
+	cd .. && ./icecreme/icecreme --emit-icecreme --static icecreme/icecreme.scm icecreme/icecreme-boot.ice
+	@echo "Regenerated icecreme-boot.ice; run 'make' and commit it if it changed."
+
+# Drops ONLY the DERIVED stage-0 artifacts (the throwaway boot binary and its
+# bin2c'd source), forcing them to rebuild from the committed seed. Does NOT
+# touch icecreme-boot.ice itself -- that's the checked-in seed, not derived.
 .PHONY: bootstrap-clean
 bootstrap-clean:
-	rm -f icecreme-boot icecreme-boot.ice embedded_icecreme_boot.c embedded_icecreme_boot.o
+	rm -f icecreme-boot embedded_icecreme_boot.c embedded_icecreme_boot.o
 
 clean:
 	rm -f $(OBJS) $(SANITIZE_OBJS) $(FUZZ_OBJS) $(LIBCREME_OBJS) $(BIN) $(SANBIN) $(FUZZBIN) libcreme.a
 	rm -f tools/bin2c embedded_icecreme.c
-	rm -f icecreme-boot icecreme-boot.ice embedded_icecreme_boot.c embedded_icecreme_boot.o icecreme.ice
-	rm -rf fuzz/corpus
+	rm -f icecreme-boot embedded_icecreme_boot.c embedded_icecreme_boot.o icecreme.ice
+	rm -rf fuzz/corpus $(SDS_STAGE)

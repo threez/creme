@@ -12,11 +12,13 @@
  * transitively-imported pure-Scheme library bodies) is compiled into one
  * combined Chunk on the Crystal side specifically so this loader doesn't
  * need to invent one. */
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <gc.h>
+#include <zstd.h>
 
 #include "opcodes.h"
 #include "vm.h"
@@ -145,6 +147,46 @@ static void check_magic_and_version(Reader *r) {
   if (version != CREME_ICE_FORMAT_VERSION) {
     creme_abort("icecreme: %s was compiled with ICE format version %d, this icecreme only reads version %d -- re-emit it with a matching `creme --emit-icecreme`", r->path, version, CREME_ICE_FORMAT_VERSION);
   }
+}
+
+/* Everything after the 4-byte magic is a single zstd frame of the body (see
+ * chunk_serializer.cr / bytecode.sld). Read the remaining bytes, decompress
+ * them, and repoint the Reader at the decompressed body (buffer mode) so the
+ * pool/chunk reads that follow run unchanged. Shared by all three entry points,
+ * called right after check_magic_and_version. In file mode this fully consumes
+ * and closes the file (so the callers no longer fclose). zstd is a required
+ * dependency now -- every .ice load decompresses here. */
+static void reader_decompress_body(Reader *r) {
+  const unsigned char *comp;
+  size_t comp_len;
+  if (r->f) {
+    long here = ftell(r->f);
+    if (here < 0 || fseek(r->f, 0, SEEK_END) != 0) creme_abort("icecreme: cannot seek %s", r->path);
+    long end = ftell(r->f);
+    if (end < 0 || end < here) creme_abort("icecreme: cannot size %s", r->path);
+    comp_len = (size_t)(end - here);
+    if (fseek(r->f, here, SEEK_SET) != 0) creme_abort("icecreme: cannot seek %s", r->path);
+    unsigned char *filebuf = GC_MALLOC(comp_len ? comp_len : 1);
+    if (comp_len && fread(filebuf, 1, comp_len, r->f) != comp_len) {
+      creme_abort("icecreme: truncated or corrupt bytecode file %s", r->path);
+    }
+    fclose(r->f);
+    r->f = NULL;
+    comp = filebuf;
+  } else {
+    comp = r->buf + r->buf_pos;
+    comp_len = r->buf_len - r->buf_pos;
+  }
+  unsigned long long sz = ZSTD_getFrameContentSize(comp, comp_len);
+  if (sz == ZSTD_CONTENTSIZE_ERROR) creme_abort("icecreme: %s body is not a valid zstd frame (stale or corrupt ICE?)", r->path);
+  if (sz == ZSTD_CONTENTSIZE_UNKNOWN) creme_abort("icecreme: %s body has no embedded content size", r->path);
+  if (sz > (unsigned long long)INT_MAX) creme_abort("icecreme: %s decompressed body too large", r->path);
+  unsigned char *body = GC_MALLOC(sz ? (size_t)sz : 1);
+  size_t n = ZSTD_decompress(body, (size_t)sz, comp, comp_len);
+  if (ZSTD_isError(n)) creme_abort("icecreme: %s decompression failed: %s", r->path, ZSTD_getErrorName(n));
+  r->buf = body;
+  r->buf_len = n;
+  r->buf_pos = 0;
 }
 
 /* Every length/count field in the ICE format (instruction/const/proto/
@@ -808,10 +850,10 @@ void creme_peek_required_families(const char *path, char ***names_out, int *coun
   if (!r.f) creme_abort("icecreme: cannot open %s", path);
 
   check_magic_and_version(&r);
+  reader_decompress_body(&r); /* consumes + closes the file, repoints to the decompressed body */
 
   read_string_pool(&r);
   read_required_families(&r, names_out, count_out);
-  fclose(r.f);
 }
 
 Chunk *creme_load(const char *path, VM *vm, char ***required_families_out, int *required_families_count_out) {
@@ -821,12 +863,12 @@ Chunk *creme_load(const char *path, VM *vm, char ***required_families_out, int *
   if (!r.f) creme_abort("icecreme: cannot open %s", path);
 
   check_magic_and_version(&r);
+  reader_decompress_body(&r); /* consumes + closes the file, repoints to the decompressed body */
 
   read_string_pool(&r);
   read_required_families(&r, required_families_out, required_families_count_out);
 
   Chunk *chunk = read_chunk(&r, vm);
-  fclose(r.f);
 
   validate_chunk(chunk, path);
   resolve_globals(vm, chunk, path);
@@ -845,6 +887,7 @@ Chunk *creme_load_from_bytes(VM *vm, const unsigned char *bytes, size_t len, cha
   r.buf_len = len;
 
   check_magic_and_version(&r);
+  reader_decompress_body(&r); /* repoints the Reader to the decompressed body */
 
   read_string_pool(&r);
   read_required_families(&r, required_families_out, required_families_count_out);

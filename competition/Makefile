@@ -29,11 +29,10 @@
 # fix, and reads identically to GNU make either way. Run this file with
 # either `make -C competition build` or `gmake -C competition build`.
 #
-# The one exception: icecreme/Makefile itself (delegated to below) DOES use
-# GNU-only `$(shell ...)` internally (its own pkg-config-driven CFLAGS),
-# so that one delegation hardcodes `gmake` rather than $(MAKE) -- see its
-# own recipe comment. Everything else in this file has no such
-# requirement.
+# Every delegation below uses `$(MAKE)`: icecreme/Makefile is now written in
+# the same portable BSD+GNU subset too (it used to need GNU-only `$(shell ...)`,
+# which is why this delegation once hardcoded `gmake`), so whichever make runs
+# THIS file drives every child Makefile as well -- no `gmake` process anywhere.
 #
 # Every build here is an all-or-nothing prerequisite of `build` -- matching
 # the root Makefile's own pre-existing `bench` target convention (it always
@@ -66,21 +65,19 @@ all: build
 creme:
 	$(MAKE) -C $(ROOT) bin/creme
 
-# Delegates to icecreme/Makefile -- which already has real per-.c/.h
-# prerequisite tracking (see its own %.o pattern rule) -- called
-# unconditionally, same reasoning as `creme` above. Hardcoded `gmake`, not
-# $(MAKE): icecreme/Makefile itself uses GNU-only $(shell ...) (pkg-config-
-# driven CFLAGS/LDLIBS), which BSD make silently mis-parses into broken,
-# empty flags rather than refusing to run -- so this one delegation always
-# needs the real GNU make binary, regardless of which make is running
-# THIS file.
+# Delegates to icecreme/Makefile -- which has real per-.c/.h prerequisite
+# tracking (see its own .c.o suffix rule) -- called unconditionally, same
+# reasoning as `creme` above. Plain `$(MAKE)`: icecreme/Makefile is now written
+# in the portable BSD+GNU subset (it used `$(shell ...)` and `%` pattern rules,
+# both GNU-only; those are gone), so whichever make runs THIS file drives it too.
+# Its vendored C deps are git submodules that auto-init on first build.
 icecreme:
-	gmake -C $(ROOT)/icecreme
+	$(MAKE) -C $(ROOT)/icecreme
 
 # icecreme's self-hosted-compiler image (icecreme.scm) is compiled to
 # icecreme.ice and bin2c'd straight INTO the icecreme binary by icecreme/Makefile,
 # which rebuilds it whenever icecreme.scm OR any compiler .sld it bundles
-# changes. So the `icecreme` target above (gmake -C icecreme) already yields a
+# changes. So the `icecreme` target above ($(MAKE) -C icecreme) already yields a
 # binary carrying a fresh embedded image -- icecreme no longer reads any .ice off
 # disk at run time, so there is no separate on-disk image to build or depend on.
 

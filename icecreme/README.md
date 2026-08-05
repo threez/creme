@@ -220,19 +220,27 @@ This is what the REPL above actually runs on: point `icecreme` at a plain
 touches the Crystal `creme` binary; the whole self-hosted compiler is baked
 into `icecreme` itself.
 
-The build is **self-hosting**: the embedded `icecreme.ice` (the compiler image)
-is produced BY ICECREME, not by the native Crystal `bin/creme`. Because
-building the binary needs that chunk and self-compiling the chunk needs a
-binary, `icecreme/Makefile` bootstraps in two stages — `bin/creme` compiles a
-throwaway `icecreme-boot` binary, which then `--emit-icecreme --static`-compiles
-the shipped chunk (see the Makefile's "Self-hosting bootstrap" section). A
-byte-for-byte fixpoint (icecreme compiling itself yields an identical chunk,
-`spec/creme/compiler_self_host_spec.scm`) is what makes this sound; `make
-bootstrap-clean` forces a fresh native bootstrap if a self-compile ever
-diverges. So a plain build just works:
+The build is **self-hosting** and needs **no Crystal toolchain** — a C compiler
+is enough. The embedded `icecreme.ice` (the compiler image) is produced BY
+ICECREME, not by the native `bin/creme`. Because building the binary needs that
+chunk and self-compiling the chunk needs a binary, `icecreme/Makefile` bootstraps
+in two stages from a **committed seed**: `icecreme-boot.ice` (a `--static`
+compiler image checked into the repo) is bin2c'd into a throwaway `icecreme-boot`
+binary, which then `--emit-icecreme --static`-compiles the shipped chunk from the
+*current* `icecreme.scm` (so the binary always reflects your edits — see the
+Makefile's "Self-hosting bootstrap" section). A byte-for-byte fixpoint (icecreme
+compiling itself yields an identical chunk, `spec/creme/compiler_self_host_spec.scm`)
+is what makes this sound; at steady state the built `icecreme.ice` equals the
+committed `icecreme-boot.ice`.
+
+When you change the compiler's codegen, refresh the committed seed with
+`make -C icecreme update-boot-seed` (it re-emits the seed from the freshly built,
+self-hosted `icecreme` — no `bin/creme`), then rebuild and commit `icecreme-boot.ice`.
+So a plain build just works, offline, on a fresh checkout:
 
 ```sh
-cd icecreme && gmake            # bin/creme bootstraps icecreme-boot, which self-compiles icecreme.ice
+cd icecreme && make             # bootstraps from the committed icecreme-boot.ice seed; no bin/creme
+                                # (the Makefile is portable to both GNU make and BSD make; `gmake` works too)
 ./icecreme/icecreme competition/scheme/bench/creme.scm   # compiles + runs directly
 ```
 
@@ -673,11 +681,16 @@ just before the chunk actually runs).
 ### Trimming dependencies: `CREME_WITH_<NAME>` build flags
 
 `libcreme.a` defaults to the same full dependency set (Boehm GC, PCRE2,
-GMP, OpenSSL libcrypto/libssl, libffi, libyaml, sqlite3) the `icecreme`
-binary itself links, but 18 native builtin families — each living in its
-own `.c` file with a real external-library or standalone-`.o` footprint —
-can be compiled out individually via `icecreme/builtin_config.h`'s
-`CREME_WITH_<NAME>` macros, passed as Make variables:
+GMP, **libzstd**, OpenSSL libcrypto/libssl, libffi, libyaml, sqlite3) the
+`icecreme` binary itself links. Most of that is optional, but **libzstd is a
+required core dependency and cannot be gated off**: the ICE bytecode container
+is zstd-compressed, so `loader.c` decompresses every chunk (including the
+embedded compiler image) and `bytecode.sld` compresses on emit — same
+non-negotiable footing as GMP (numeric tower) and PCRE2 (the self-hosted
+reader's regex). The other native builtin families — each living in its own
+`.c` file with a real external-library or standalone-`.o` footprint — can be
+compiled out individually via `icecreme/builtin_config.h`'s `CREME_WITH_<NAME>`
+macros, passed as Make variables:
 
 | Macro | File | External dependency dropped when off |
 |---|---|---|
@@ -723,11 +736,13 @@ the self-hosted compiler bundled into `libcreme.a` itself, needed by every
 own target script imports.
 
 `examples/libcream/` demonstrates the minimal case — its own `Makefile`
-builds `libcreme.a` with all 18 gateable families off, since
+builds `libcreme.a` with all 17 gateable families off (but still links
+libzstd, which is not gateable), since
 `host_demo.scm` only needs `(scheme base)`/`(scheme write)`/`(creme
 hash-table)` (the last of which is always-on regardless), and trims its
-own `LDLIBS` to match (just libm/pthread/GC/GMP/PCRE2 — see that
-directory's own README for the `ldd`-confirmed result).
+own `LDLIBS` to match (just libm/pthread/GC/GMP/PCRE2/**libzstd** — libzstd is
+required even here, since loading the embedded compiler image decompresses it —
+see that directory's own README for the `ldd`-confirmed result).
 
 `libcreme.a` is one monolithic archive regardless of which families are
 included — a consumer needs the same link-flag set at their own link
@@ -911,6 +926,7 @@ across these files:
 | `x509.c` | `(creme x509)` | 11 | `x509-self-signed-certificate`/`-create-csr`/`-sign-csr`/`-cert->pem`/`pem->x509-cert`/`-cert-subject`/`-issuer`/`-public-key`/`-not-before`/`-not-after`/`-verify-chain` — the full X509/X509_REQ/X509_STORE C API, `not-before`/`-after` converted from `ASN1_TIME` to epoch seconds via a self-contained civil-calendar calculation (Howard Hinnant's `days_from_civil`) rather than `timegm(3)`, whose declaration/feature-test-macro requirements vary across glibc/musl/BSD libc; every self-signed cert gets a `basicConstraints CA:TRUE` extension via `X509V3_EXT_nconf_nid`, required for `x509-verify-chain` to accept it as a trust anchor at all |
 | `json.c` | `(creme json)` | 2 | `json-read`/`json-write` — a small hand-rolled recursive-descent JSON parser/writer; matches native's own conventions exactly (array → vector, object → alist of `(string . value)` pairs usable with `assoc`/`cdr`/`car`, an empty object conflates with JSON null) |
 | `yaml.c` | `(creme yaml)` | 2 | `yaml-read`/`yaml-write` — unlike `json.c` above, wraps libyaml directly rather than hand-rolling a parser/emitter (a full YAML 1.1 implementation would be a much bigger lift than JSON's recursive descent); matches native's own conventions (mapping → alist, sequence → vector, an empty mapping conflates with YAML null) and its own libyaml-backed `YAML::Any`/`YAML::Builder` output closely, down to plain-scalar core-schema type resolution (bool words, `0x`/`0o`/octal/underscored ints, `.inf`/`.nan`) — one deliberate narrow divergence: a mapping KEY is always kept as its literal scalar text here, never run through that same typed resolution the way a value is on the native side (see the file's own header comment) |
+| `zstd.c` | `(creme zstd)` | 4 | `zstd-compress`/`zstd-decompress` — one-shot Zstandard via libzstd (facebook/zstd, BSD-3-Clause); input is a string or bytevector, output a bytevector. `zstd-compress` takes an optional level (default 3); compressed frames embed the content size, so `zstd-decompress` sizes its output exactly (a streamed frame with no embedded size is rejected). Plus two streaming, composable filter ports built on icecreme's general `PORT_KIND_FILTER` machinery (`value.h`'s `FilterOps` + `builtins.c`'s dispatch): `zstd-open-output-port out [level]` incrementally compresses each write and forwards it to `out`, and `zstd-open-input-port in` decompresses on demand from `in` — so filters stack into pipelines like `(zstd-open-output-port (zstd-open-output-port handle))`, with bounded memory, and `close-port` cascades through the whole stack. (Streamed frames carry no content size, so they round-trip via `zstd-open-input-port`/the `zstd` CLI, not the one-shot `zstd-decompress`.) Mirrors native's own `(creme zstd)` (`src/creme/modules/creme/zstd.cr`), which composes Crystal `IO` wrappers over the same libzstd streaming API |
 | `bigdecimal.c` | `(creme bigdecimal)` | 14 | `bigdecimal-add`/`-sub`/`-mul`/`-div`/`-neg`/`-compare`/`=?`/`<?`/`>?`/`-zero?`, `string->bigdecimal`/`integer->bigdecimal`/`bigdecimal->string`/`bigdecimal?` — a standalone boxed decimal type (like native, never hooked into the numeric tower), backed by an integer mantissa + a decimal scale on top of GMP's `mpz_t` (Java-`BigDecimal`-style, exact by construction — deliberately NOT GMP's own `mpf_t`, which is arbitrary-precision BINARY float, not exact base-10 decimal) |
 | `http.c` | `(creme http)` | 7 | `http-get`/`-head`/`-delete`/`-post`/`-put`/`-patch`/`-request` — an HTTP/1.1 CLIENT, raw `getaddrinfo`/`connect`/`read`/`write` (the same pattern `(creme actor)`'s own `dial()` uses); always sends `Connection: close` and drains the response until the peer closes the socket, decoding a chunked `Transfer-Encoding` body as a second pass if the server ever sends one. HTTPS/TLS is real (libssl, linked alongside the libcrypto this project already had for `(creme actor)`'s HMAC handshake and `(creme digest)`) — always full certificate + hostname verification (`SSL_VERIFY_PEER` against the system trust store, plus `SSL_set1_host`; no flag anywhere disables either), no separate opt-in needed, an `https://` URL just works |
 | `csv.c` | `(creme csv)` | 8 | `csv-read`/`-write`/`-read-headers`/`-write-headers` (bulk) and `csv-reader-open`/`-read!`/`-writer-open`/`-row!` (streaming, over a Port) — a self-contained RFC4180-ish parser/writer, not a port of native's own chunked-IO-optimized implementation |

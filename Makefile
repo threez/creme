@@ -1,4 +1,4 @@
-.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-icecreme bench version tag
+.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-icecreme icecreme bench version tag
 
 UNAME_M != uname -m
 NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
@@ -14,7 +14,7 @@ fmtcheck:
 # rfc8439's NEON C extension (aarch64 only) isn't built by `shards install`;
 # compile it once so `crystal spec`/`shards build` can link against it.
 lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext/chacha20_neon.h
-	$(CC) -O3 -march=armv8-a+simd -c -o $@ $<
+	$(CC) -O3 -march=armv8-a+simd -c -o $@ lib/rfc8439/ext/chacha20_neon.c
 
 # (creme ffi)'s small precompiled dlopen/libffi shim (see that file's own
 # header comment for why) -- unlike NEON_OBJ, needed on every platform, so
@@ -26,8 +26,10 @@ lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext
 # under /usr/local/include specifically (a ports/pkg convention).
 FFI_SHIM_OBJ = src/creme/modules/creme/ffi_shim.o
 
+# Names the .c explicitly, not $< -- BSD make only sets $< in inference/suffix
+# rules, not explicit ones (where it expands to empty).
 src/creme/modules/creme/ffi_shim.o: src/creme/modules/creme/ffi_shim.c
-	$(CC) -O2 -I/usr/local/include -c -o $@ $<
+	$(CC) -O2 -I/usr/local/include -c -o $@ src/creme/modules/creme/ffi_shim.c
 
 spec: $(NEON_OBJ) $(FFI_SHIM_OBJ)
 	crystal spec -v
@@ -59,7 +61,16 @@ bin/creme: $(CREME_SRCS) shard.yml shard.lock $(NEON_OBJ) $(FFI_SHIM_OBJ)
 creme-spec:
 	./bin/creme spec/creme/main_spec.scm
 
-# Rebuilds the icecreme binary first (`gmake -C icecreme`) so its EMBEDDED
+# Builds the icecreme self-hosting C VM from the repo root, delegating to
+# icecreme/Makefile (which owns its own per-.c/.h prerequisites and the
+# two-stage self-hosting bootstrap). `$(MAKE)`, not a hardcoded `gmake`:
+# icecreme/Makefile is now written in the portable subset both GNU make and BSD
+# make accept, so whichever make is running THIS file drives that one too. Its
+# vendored C deps are git submodules that auto-init on first build.
+icecreme:
+	$(MAKE) -C icecreme
+
+# Rebuilds the icecreme binary first (`$(MAKE) -C icecreme`) so its EMBEDDED
 # self-hosted-compiler image (icecreme.scm, baked in via bin2c -- icecreme no
 # longer reads it off disk at run time) reflects the current compiler/builtin
 # source; a stale binary would silently run each spec against old behavior. Then
@@ -91,7 +102,7 @@ creme-spec:
 # failed against the affected file's own documented list before assuming
 # something broke.
 creme-spec-icecreme:
-	gmake -C icecreme
+	$(MAKE) -C icecreme
 	./bin/creme spec/creme/main_spec.scm --icecreme
 
 # Every artifact competition/bench.scm's two suites need (bin/creme and
@@ -101,10 +112,9 @@ creme-spec-icecreme:
 # header comment for why (a hand-built, wrong-flags binary used to be able
 # to sit unrebuilt indefinitely; a target's only path to existing now is
 # through that Makefile's own recipe). competition/Makefile itself is
-# written in the same portable make subset as this file (works under
-# either plain `make` or `gmake` here) -- it only reaches for `gmake`
-# explicitly, internally, for the one delegation (icecreme/Makefile) that
-# actually needs GNU-only syntax; see its own header comment.
+# written in the same portable make subset as this file, and so is
+# icecreme/Makefile now, so every delegation uses `$(MAKE)` -- the whole
+# build runs under either plain `make` (BSD make) or `gmake` here.
 #
 # Runs BOTH the CPU-workload "bench" suite and the HTTP-benchmarked
 # "todo-app" suite, bench first -- pass --only bench / --only todo-app

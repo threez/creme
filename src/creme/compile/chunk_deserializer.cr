@@ -35,6 +35,11 @@ module Creme
       unless version == ChunkSerializer::FORMAT_VERSION
         raise FormatError.new("chunk_deserializer: format version #{version} (expected #{ChunkSerializer::FORMAT_VERSION}) -- re-emit this chunk with the current creme/icecreme")
       end
+      # Everything after the 4-byte magic is a zstd frame of the body (see
+      # ChunkSerializer.serialize). Decompress it and read the body from there.
+      # A stale UNcompressed "ICE1" body fails cleanly here (not a zstd frame).
+      body = Creme::Builtins::ZstdLibrary.decompress_bytes(bytes[4, bytes.size - 4], "chunk_deserializer")
+      io = IO::Memory.new(body)
       strings = read_string_pool(io)
       read_required_families(io, strings) # not yet consumed by any caller; just skip past it
       read_chunk(io, env, strings)

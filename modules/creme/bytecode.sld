@@ -65,7 +65,11 @@
           chunk->bytes bytes->chunk ice-bytes?
           strip-dead-globals!)
   (import (scheme base) (scheme cxr) (scheme inexact) (scheme complex) (creme hash-table) (creme math)
-          (only (creme bytes) list->bytevector))
+          (only (creme bytes) list->bytevector)
+          ;; The ICE container is zstd-compressed (see chunk->bytes/bytes->chunk).
+          ;; (creme zstd) exports these names and defines no records, so it's safe
+          ;; to bake into the self-hosted compiler image.
+          (only (creme zstd) zstd-compress zstd-decompress))
   (begin
 
     ;; -----------------------------------------------------------------
@@ -462,22 +466,24 @@
         ;; chunk tree (and the required-family names) into the global pool.
         (for-each (lambda (name) (interner-intern! pool name)) required-families)
         (collect-chunk-strings! pool ch)
-        ;; The 4-byte magic IS "ICE" + the ASCII format-version digit (so
-        ;; "ICE1" here), folding the old separate version byte into the magic
-        ;; -- chunk_serializer.cr/loader.c read the version straight from the
-        ;; 4th magic byte. Bump in lockstep whenever the on-disk layout
-        ;; changes in a way an older reader couldn't safely parse.
-        (sink-push-bytes! sink (map char->integer (string->list "ICE1")))
-        ;; Pass 2: the global string pool (count, then each raw entry), then
-        ;; the required-families as u24 pool indices, then the chunk itself
-        ;; with every inline string written as a u24 pool index.
+        ;; Pass 2: build the BODY into the sink -- the global string pool (count,
+        ;; then each raw entry), then the required-families as u24 pool indices,
+        ;; then the chunk itself with every inline string a u24 pool index. No
+        ;; magic in the body.
         (let ((strings (interner-strings pool)))
           (write-i32! sink (length strings))
           (for-each (lambda (s) (write-pool-string! sink s)) strings))
         (write-i32! sink (length required-families))
         (for-each (lambda (name) (write-str-ref! sink pool name)) required-families)
         (write-chunk! sink pool ch)
-        (sink->bytevector sink)))
+        ;; The file is the plaintext 4-byte magic "ICE" + the ASCII format-version
+        ;; digit ("ICE1"), followed by a single zstd frame of the body. The body
+        ;; compresses ~6x; zstd is now a required dependency of every backend, and
+        ;; chunk_serializer.cr / loader.c / this writer+reader move in lockstep
+        ;; (see loader.c's own format-version comment). Level 19 is deterministic
+        ;; for a given libzstd, so the self-hosting fixpoint still holds.
+        (bytevector-append (list->bytevector (map char->integer (string->list "ICE1")))
+                           (zstd-compress (sink->bytevector sink) 19))))
 
     ;; -----------------------------------------------------------------
     ;; ICE deserialization -- the exact inverse of chunk->bytes /
@@ -692,14 +698,18 @@
                         param-count has-rest num-registers name)))
 
     (define (bytes->chunk bv)
-      (let ((src (make-source bv)))
-        ;; Magic is "ICE" + the ASCII format-version digit; the 4th byte both
-        ;; identifies the format and carries its version (#\1 = version 1).
-        (let ((m0 (read-byte! src)) (m1 (read-byte! src))
-              (m2 (read-byte! src)) (m3 (read-byte! src)))
-          (if (not (and (= m0 (char->integer #\I)) (= m1 (char->integer #\C))
-                        (= m2 (char->integer #\E)) (= m3 (char->integer #\1))))
-              (error "creme bytecode: not an ICE1 bytevector (bad magic / unsupported format version)")))
+      ;; Magic is the plaintext "ICE" + the ASCII format-version digit (the 4th
+      ;; byte both identifies the format and carries its version). Everything
+      ;; after it is a zstd frame of the body (see chunk->bytes) -- verify the
+      ;; magic on the raw bytevector, then decompress and read the body. A stale
+      ;; UNcompressed body fails cleanly in zstd-decompress.
+      (if (not (and (>= (bytevector-length bv) 4)
+                    (= (bytevector-u8-ref bv 0) (char->integer #\I))
+                    (= (bytevector-u8-ref bv 1) (char->integer #\C))
+                    (= (bytevector-u8-ref bv 2) (char->integer #\E))
+                    (= (bytevector-u8-ref bv 3) (char->integer #\1))))
+          (error "creme bytecode: not an ICE1 bytevector (bad magic / unsupported format version)"))
+      (let ((src (make-source (zstd-decompress (bytevector-copy bv 4)))))
         (let ((pool (read-string-pool! src)))  ; global string pool, first
           (let ((n-fam (read-i32! src)))        ; skip the required-families section
             (let loop ((i 0))

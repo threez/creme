@@ -95,15 +95,23 @@ module Creme
       end
 
       # Pass 2: write the pool, then the chunk with u24 pool indices in place
-      # of every inline string.
-      io = IO::Memory.new
-      io.write(MAGIC.to_slice)
-      write_i32(io, pool.strings.size.to_i32)
-      pool.strings.each { |s| write_pool_string(io, s) }
-      write_i32(io, required_families.size.to_i32)
-      required_families.each { |name| write_u24(io, pool.id(name)) }
-      write_chunk(io, chunk, pool)
-      io.to_slice
+      # of every inline string, into a BODY buffer -- then the file is the
+      # plaintext MAGIC ("ICE1") followed by a single zstd frame of that body.
+      # The body compresses ~6x (big interned string pool + repetitive packed
+      # opcodes); zstd is a required dependency of every backend now (loader.c,
+      # bytecode.sld's reader/writer, and here all move in lockstep -- see
+      # loader.c's own format-version comment). Level 19 is deterministic for a
+      # given libzstd, so the self-hosting fixpoint still holds.
+      body = IO::Memory.new
+      write_i32(body, pool.strings.size.to_i32)
+      pool.strings.each { |s| write_pool_string(body, s) }
+      write_i32(body, required_families.size.to_i32)
+      required_families.each { |name| write_u24(body, pool.id(name)) }
+      write_chunk(body, chunk, pool)
+      out = IO::Memory.new
+      out.write(MAGIC.to_slice)
+      out.write(Creme::Builtins::ZstdLibrary.compress_bytes(body.to_slice, 19, "chunk_serializer"))
+      out.to_slice
     end
 
     private def self.write_i32(io : IO, v : Int32) : Nil
