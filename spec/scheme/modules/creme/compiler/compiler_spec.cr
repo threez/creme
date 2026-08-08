@@ -1,7 +1,7 @@
 require "../../../../spec_helper"
 
 private def load_toolchain(interp : Creme::Interpreter) : Nil
-  Creme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
+  Creme.run_source(interp, %((import (scheme lazy) (scheme eval) (scheme cxr) (creme peg) (creme regex) (creme hash-table) (creme bytes) (creme bytecode) (creme bootstrap) (creme compiler reader) (creme compiler compiler))))
   # Pre-seeds ensure-library-loaded!'s own tracking for every file-based
   # library just loaded NATIVELY above -- see src/main.cr's
   # SELF_HOSTED_TOOLCHAIN_MARK_LOADED's own doc comment for why this is

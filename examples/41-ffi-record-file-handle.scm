@@ -19,7 +19,10 @@
 (import (scheme base) (scheme write) (creme ffi) (creme foreign) (creme file) (creme introspection))
 
 (define os (cdr (assq 'os (runtime))))
-(define libc-soname (if (string=? os "FreeBSD") "libc.so.7" "libc.so.6"))
+(define libc-soname
+  (cond ((string=? os "FreeBSD") "libc.so.7")
+        ((string=? os "Darwin") "libSystem.dylib")
+        (else "libc.so.6")))
 (define libc (ffi-open libc-soname))
 
 ;; <file> wraps a FILE*; every accessor below is a real stdio call with

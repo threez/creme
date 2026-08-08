@@ -39,9 +39,13 @@
 (import (scheme base) (scheme write) (creme ffi) (creme foreign) (creme introspection))
 
 ;; Same platform-specific soname table as examples/39-ffi-libm-caller.scm
-;; (see that file's own comment) -- glibc vs. FreeBSD's BSD-style libc.
+;; (see that file's own comment) -- glibc vs. FreeBSD's BSD-style libc
+;; vs. macOS's libSystem.dylib.
 (define os (cdr (assq 'os (runtime))))
-(define libc-soname (if (string=? os "FreeBSD") "libc.so.7" "libc.so.6"))
+(define libc-soname
+  (cond ((string=? os "FreeBSD") "libc.so.7")
+        ((string=? os "Darwin") "libSystem.dylib")
+        (else "libc.so.6")))
 (define libc (ffi-open libc-soname))
 
 ;; int gettimeofday(struct timeval *tv, struct timezone *tz) -- the

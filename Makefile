@@ -23,13 +23,29 @@ lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext
 # base cc already searches it by default; Linux distros installing
 # libffi-dev under /usr/include don't need it either) and covers this
 # project's own FreeBSD dev environment, where libffi's headers live
-# under /usr/local/include specifically (a ports/pkg convention).
+# under /usr/local/include specifically (a ports/pkg convention). macOS
+# ships libffi's headers inside the Xcode/CLT SDK too, but nested under
+# usr/include/ffi/ffi.h rather than flat at usr/include/ffi.h like every
+# other platform above -- so on Darwin needs that nested dir explicitly
+# instead. This can't be a `!=`-assigned variable like NEON_OBJ/UNAME_M
+# above: Apple ships a GNU Make frozen at 3.81 (the last GPLv2 release)
+# as macOS's stock /usr/bin/make, and `!=` shell-assignment wasn't added
+# to GNU Make until 4.0, so it silently evaluates empty there even though
+# both BSD make and modern GNU make support it fine. Computing the flag
+# inside the recipe's own shell instead sidesteps that gap entirely --
+# every make flavor here runs recipes via /bin/sh regardless of its own
+# variable-assignment feature set.
 FFI_SHIM_OBJ = src/creme/modules/creme/ffi_shim.o
 
 # Names the .c explicitly, not $< -- BSD make only sets $< in inference/suffix
 # rules, not explicit ones (where it expands to empty).
 src/creme/modules/creme/ffi_shim.o: src/creme/modules/creme/ffi_shim.c
-	$(CC) -O2 -I/usr/local/include -c -o $@ src/creme/modules/creme/ffi_shim.c
+	@case "`uname -s`" in \
+		Darwin) inc="`xcrun --show-sdk-path`/usr/include/ffi" ;; \
+		*) inc=/usr/local/include ;; \
+	esac; \
+	echo $(CC) -O2 -I"$$inc" -c -o $@ src/creme/modules/creme/ffi_shim.c; \
+	$(CC) -O2 -I"$$inc" -c -o $@ src/creme/modules/creme/ffi_shim.c
 
 spec: $(NEON_OBJ) $(FFI_SHIM_OBJ)
 	crystal spec -v
@@ -67,7 +83,19 @@ creme-spec:
 # icecreme/Makefile is now written in the portable subset both GNU make and BSD
 # make accept, so whichever make is running THIS file drives that one too. Its
 # vendored C deps are git submodules that auto-init on first build.
-icecreme:
+#
+# icecreme/Makefile itself is GENERATED (by icecreme/configure, from
+# icecreme/Makefile.in -- see icecreme/configure.ac's own header comment for
+# why: it resolves every pkg-config-dependent build flag in configure's own
+# portable shell instead of a Make-level `!=`, which isn't supported by every
+# make this project runs under). Not committed -- a fresh checkout has no
+# icecreme/Makefile until configure creates one, so this depends on it and
+# runs configure automatically the first time (or whenever configure.ac/
+# Makefile.in change) rather than requiring a separate manual step.
+icecreme/Makefile: icecreme/configure icecreme/Makefile.in
+	cd icecreme && ./configure
+
+icecreme: icecreme/Makefile
 	$(MAKE) -C icecreme
 
 # Rebuilds the icecreme binary first (`$(MAKE) -C icecreme`) so its EMBEDDED
@@ -101,7 +129,7 @@ icecreme:
 # exit here isn't automatically a problem; check which specific case
 # failed against the affected file's own documented list before assuming
 # something broke.
-creme-spec-icecreme:
+creme-spec-icecreme: icecreme/Makefile
 	$(MAKE) -C icecreme
 	./bin/creme spec/creme/main_spec.scm --icecreme
 

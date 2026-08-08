@@ -1,4 +1,4 @@
-CC ?= cc
+CC ?= @CC@
 
 # Boehm GC (the same collector Crystal itself uses, via the bdwgc/libgc
 # package) -- every heap allocation in icecreme goes through GC_MALLOC/GC_REALLOC
@@ -17,43 +17,50 @@ CC ?= cc
 # support compiled in, that's a real, loud link error (undefined
 # GC_register_my_thread) rather than a silent runtime one -- correct
 # behavior, since actor.c genuinely cannot work without it.
-# `!=` (shell-output assignment), not GNU-only `$(shell ...)` -- this Makefile is
-# written in the subset both GNU make and BSD make agree on (see the header
-# comment on `.SUFFIXES` below). The literal -DGC_THREADS is joined at the make
-# level rather than inside the shell, so the `!=` command is just the pkg-config
-# lookup.
-GC_PKG_CFLAGS != pkg-config --cflags bdw-gc-threaded 2>/dev/null || pkg-config --cflags bdw-gc 2>/dev/null
+#
+# GC_PKG_CFLAGS/GC_LIBS (and every other *_CFLAGS/*_LIBS below down through
+# ZSTD_LIBS, plus EXECINFO_LIBS) are resolved by ./configure, NOT by a Make-
+# level `!=` shell-assignment -- see configure.ac's own header comment for
+# why: `!=` isn't supported by every make this project needs to run under
+# (specifically, Apple's stock macOS make, a GNU Make frozen at 3.81 for
+# licensing reasons, predates `!=` -- added in GNU Make 4.0), and there's no
+# single Make-level construct that works on both that AND real BSD make.
+# Resolving these in configure's own portable shell sidesteps the conflict
+# entirely, since these are genuine build-time constants (unlike
+# HDRS/ICECREME_COMPILER_SLDS near the bottom, which must stay dynamic --
+# see their own comment).
+GC_PKG_CFLAGS = @GC_PKG_CFLAGS@
 GC_CFLAGS = $(GC_PKG_CFLAGS) -DGC_THREADS
-GC_LIBS != pkg-config --libs bdw-gc-threaded 2>/dev/null || pkg-config --libs bdw-gc 2>/dev/null || echo -lgc
+GC_LIBS = @GC_LIBS@
 
 # PCRE2 -- backs (creme regex)'s `regexp`/`regexp-matches?` (regex.c),
 # needed only so the self-hosted reader (modules/creme/compiler/
 # reader.sld) can run under icecreme; see regex.c's own header comment for why
 # PCRE2 specifically (matches the real Crystal Regex class's own flavor).
-PCRE2_CFLAGS != pkg-config --cflags libpcre2-8 2>/dev/null
-PCRE2_LIBS != pkg-config --libs libpcre2-8 2>/dev/null || echo -lpcre2-8
+PCRE2_CFLAGS = @PCRE2_CFLAGS@
+PCRE2_LIBS = @PCRE2_LIBS@
 
 # GMP -- backs T_RATIONAL's arbitrary-precision mpq_t (value.h); see
 # builtins.c's num_add/num_div/etc. and main.c's mp_set_memory_functions
 # call (redirects GMP's own allocator to GC_MALLOC/GC_REALLOC so an mpq_t's
 # limbs are reclaimed by the same Boehm GC as everything else here).
-GMP_CFLAGS != pkg-config --cflags gmp 2>/dev/null
-GMP_LIBS != pkg-config --libs gmp 2>/dev/null || echo -lgmp
+GMP_CFLAGS = @GMP_CFLAGS@
+GMP_LIBS = @GMP_LIBS@
 
 # OpenSSL libcrypto -- backs (creme actor)'s TCP/Unix transport HMAC-SHA256
 # handshake (actor.c's Phase 4, HMAC()/RAND_bytes()), mirroring native's own
 # openssl/hmac + random/secure usage (actor.cr).
-CRYPTO_CFLAGS != pkg-config --cflags libcrypto 2>/dev/null
-# _RAW because the link-time list is gated below (CRYPTO_LDLIBS) by whether any
-# openssl-touching family is enabled -- keeping the raw pkg-config result under
-# its own name avoids a self-referential reassignment.
-CRYPTO_LIBS_RAW != pkg-config --libs libcrypto 2>/dev/null || echo -lcrypto
+CRYPTO_CFLAGS = @CRYPTO_CFLAGS@
+# _RAW because the link-time list is gated below (LDLIBS_GATED_SH) by whether
+# any openssl-touching family is enabled -- keeping the raw pkg-config result
+# under its own name avoids a self-referential reassignment.
+CRYPTO_LIBS_RAW = @CRYPTO_LIBS_RAW@
 
 # OpenSSL libssl -- (creme http)'s HTTPS client path (http.c), the actual
 # SSL/TLS layer that project used to leave untouched (libcrypto above was
 # already linked, just never for TLS itself).
-SSL_CFLAGS != pkg-config --cflags libssl 2>/dev/null
-SSL_LIBS_RAW != pkg-config --libs libssl 2>/dev/null || echo -lssl
+SSL_CFLAGS = @SSL_CFLAGS@
+SSL_LIBS_RAW = @SSL_LIBS_RAW@
 
 # libffi -- backs (creme ffi)'s ffi-function/ffi-call (creme_ffi.c), the
 # generic dlopen/native-call bridge. dlopen/dlsym/dlclose themselves come
@@ -61,8 +68,8 @@ SSL_LIBS_RAW != pkg-config --libs libssl 2>/dev/null || echo -lssl
 # is a no-op there anyway, required on glibc Linux systems older than the
 # libc/libdl merge -- gated below alongside -lffi (CREME_WITH_FFI), since
 # creme_ffi.c is the only consumer of either.
-FFI_CFLAGS != pkg-config --cflags libffi 2>/dev/null
-FFI_LIBS != pkg-config --libs libffi 2>/dev/null || echo -lffi
+FFI_CFLAGS = @FFI_CFLAGS@
+FFI_LIBS = @FFI_LIBS@
 
 # libyaml (MIT) -- backs (creme yaml)'s yaml-read/yaml-write (yaml.c),
 # same pkg-config-with-a-fallback pattern as PCRE2/GMP/OpenSSL/libffi
@@ -70,16 +77,16 @@ FFI_LIBS != pkg-config --libs libffi 2>/dev/null || echo -lffi
 # leans on Crystal's bundled `YAML` stdlib module, itself a libyaml
 # wrapper -- so both backends end up linking the same underlying C
 # library either way; see yaml.c's own header comment.
-YAML_CFLAGS != pkg-config --cflags yaml-0.1 2>/dev/null
-YAML_LIBS != pkg-config --libs yaml-0.1 2>/dev/null || echo -lyaml
+YAML_CFLAGS = @YAML_CFLAGS@
+YAML_LIBS = @YAML_LIBS@
 
 # libzstd (facebook/zstd, BSD-3-Clause) -- backs (creme zstd)'s zstd-compress/
 # zstd-decompress (zstd.c), same pkg-config-with-a-fallback pattern as libyaml
 # above. Native's own (creme zstd) (src/creme/modules/creme/zstd.cr) binds the
 # same libzstd one-shot API directly, so both backends link the same underlying
 # C library either way; see zstd.c's own header comment.
-ZSTD_CFLAGS != pkg-config --cflags libzstd 2>/dev/null
-ZSTD_LIBS != pkg-config --libs libzstd 2>/dev/null || echo -lzstd
+ZSTD_CFLAGS = @ZSTD_CFLAGS@
+ZSTD_LIBS = @ZSTD_LIBS@
 
 # Verstable (vendor/verstable/verstable.h, MIT, single header, no deps) --
 # backs (creme hash-table)'s Value->Value map (hashtable.c). Header-only, so
@@ -103,31 +110,37 @@ ZSTD_LIBS != pkg-config --libs libzstd 2>/dev/null || echo -lzstd
 # unit (that file's own `#if CREME_WITH_<NAME>` wrapper) and its
 # BUILTIN_FAMILIES table row (builtin_families.c) -- defaulting to 1
 # (included), matching every prior release's "everything always in"
-# behavior. Override on the command line or via an exported env var, e.g.
-# `make lib CREME_WITH_SQL=0 CREME_WITH_HTTP=0` for a trimmed libcreme.a
-# (see examples/libcream/Makefile for a full minimal-dependency build, and
+# behavior. Resolved by ./configure now (--disable-sql/--disable-http/etc.
+# -- see configure.ac's own header comment for the full list and why: a
+# persistent, `./configure --help`-discoverable choice instead of a Make
+# flag you have to remember to repeat every invocation). Still overridable
+# on the `make` command line exactly as before too, e.g. `make lib
+# CREME_WITH_SQL=0 CREME_WITH_HTTP=0` for a ONE-OFF trimmed libcreme.a build
+# without reconfiguring -- a variable given on the make command line always
+# wins over an in-Makefile assignment regardless of operator (see
+# examples/libcream/Makefile for a full minimal-dependency build, and
 # icecreme/README.md's "Embedding" section for the complete family list).
 # Flipping these off for the default `all`/CLI target works too, but isn't
 # the primary use case -- the CLI is meant to stay full-featured; these
 # knobs exist mainly for `make lib` embedders who want a trimmed library.
-CREME_WITH_SQL ?= 1
-CREME_WITH_HTTP ?= 1
-CREME_WITH_CIPHER ?= 1
-CREME_WITH_PKEY ?= 1
-CREME_WITH_X509 ?= 1
-CREME_WITH_DIGEST ?= 1
-CREME_WITH_SECURE_RANDOM ?= 1
-CREME_WITH_ACTOR ?= 1
-CREME_WITH_FFI ?= 1
-CREME_WITH_YAML ?= 1
-CREME_WITH_MUX ?= 1
-CREME_WITH_CSV ?= 1
-CREME_WITH_TREELIST ?= 1
-CREME_WITH_JSON ?= 1
-CREME_WITH_BIGDECIMAL ?= 1
-CREME_WITH_TERM ?= 1
-CREME_WITH_PROCESS ?= 1
-CREME_WITH_STRING ?= 1
+CREME_WITH_SQL = @CREME_WITH_SQL@
+CREME_WITH_HTTP = @CREME_WITH_HTTP@
+CREME_WITH_CIPHER = @CREME_WITH_CIPHER@
+CREME_WITH_PKEY = @CREME_WITH_PKEY@
+CREME_WITH_X509 = @CREME_WITH_X509@
+CREME_WITH_DIGEST = @CREME_WITH_DIGEST@
+CREME_WITH_SECURE_RANDOM = @CREME_WITH_SECURE_RANDOM@
+CREME_WITH_ACTOR = @CREME_WITH_ACTOR@
+CREME_WITH_FFI = @CREME_WITH_FFI@
+CREME_WITH_YAML = @CREME_WITH_YAML@
+CREME_WITH_MUX = @CREME_WITH_MUX@
+CREME_WITH_CSV = @CREME_WITH_CSV@
+CREME_WITH_TREELIST = @CREME_WITH_TREELIST@
+CREME_WITH_JSON = @CREME_WITH_JSON@
+CREME_WITH_BIGDECIMAL = @CREME_WITH_BIGDECIMAL@
+CREME_WITH_TERM = @CREME_WITH_TERM@
+CREME_WITH_PROCESS = @CREME_WITH_PROCESS@
+CREME_WITH_STRING = @CREME_WITH_STRING@
 
 FEATURE_DEFINES := \
   -DCREME_WITH_SQL=$(CREME_WITH_SQL) -DCREME_WITH_HTTP=$(CREME_WITH_HTTP) \
@@ -141,28 +154,33 @@ FEATURE_DEFINES := \
   -DCREME_WITH_PROCESS=$(CREME_WITH_PROCESS) -DCREME_WITH_STRING=$(CREME_WITH_STRING)
 
 # Link-time gating to match: -lcrypto stays linked if ANY openssl-touching
-# family is on; -lssl only if http (the sole TLS consumer) is on.
-# -lpthread/$(GC_LIBS)/-lgmp/-lpcre2-8 stay unconditional (pthread is tied to
-# GC_THREADS regardless of actor/mux; pcre2 because `regex` is a hard,
-# non-gateable dependency of the bundled self-hosted compiler).
+# family is on; -lssl only if http (the sole TLS consumer) is on. -lpthread/
+# $(GC_LIBS)/$(GMP_LIBS)/$(PCRE2_LIBS)/$(ZSTD_LIBS) stay unconditional
+# (pthread is tied to GC_THREADS regardless of actor/mux; gmp/pcre2/zstd are
+# hard, non-gateable dependencies -- T_RATIONAL/`regex`/the ICE bytecode
+# container format respectively).
 #
-# Done in the shell via `!=` rather than GNU-only `$(if $(filter-out 0,...))`:
-# each `[ "$(VAR)" != 0 ]` reproduces `filter-out 0` for a single flag (empty
-# unless the flag is non-0), and the CRYPTO loop echoes the raw libs the moment
-# any of the seven openssl-touching families is non-0. `$$v` is a shell
-# variable ($$-escaped so make passes it through). Command-line overrides
-# (e.g. `make CREME_WITH_HTTP=0`) still expand into these before the shell runs.
-SQL_LDLIBS  != [ "$(CREME_WITH_SQL)" != 0 ] && echo -lsqlite3 || true
-SSL_LDLIBS  != [ "$(CREME_WITH_HTTP)" != 0 ] && echo "$(SSL_LIBS_RAW)" || true
-FFI_LDLIBS  != [ "$(CREME_WITH_FFI)" != 0 ] && echo "$(FFI_LIBS) -ldl" || true
-YAML_LDLIBS != [ "$(CREME_WITH_YAML)" != 0 ] && echo "$(YAML_LIBS)" || true
-# zstd is a required core dependency (the ICE bytecode container is
-# zstd-compressed -- loader.c decompresses every chunk), so libzstd is always
-# linked, ungated, like GMP/PCRE2.
-ZSTD_LDLIBS := $(ZSTD_LIBS)
-# trailing `; true` so the assignment exits 0 even when every family is 0 (the
-# final `[ ]` test fails then) -- BSD make warns on a non-zero `!=` command.
-CRYPTO_LDLIBS != for v in $(CREME_WITH_HTTP) $(CREME_WITH_CIPHER) $(CREME_WITH_PKEY) $(CREME_WITH_X509) $(CREME_WITH_DIGEST) $(CREME_WITH_SECURE_RANDOM) $(CREME_WITH_ACTOR); do [ "$$v" != 0 ] && { echo "$(CRYPTO_LIBS_RAW)"; break; }; done; true
+# LDLIBS_GATED_SH is plain text (an ordinary `=` macro -- make never executes
+# it directly) holding a shell snippet that decides, AT LINK TIME, which
+# optional libs actually get linked; each of the 4 link recipes below splices
+# its stdout in via `$$(...)` shell command substitution, evaluated by the
+# recipe's own /bin/sh. That sidesteps `!=` (and GNU's `$(shell ...)`, which
+# BSD make lacks) entirely for this piece -- plain macro text expansion plus
+# a shell command substitution inside a recipe are both universal, unlike
+# shell-output assignment at the Make level itself (see configure.ac's header
+# comment for why `!=`/`$(shell)` aren't both available everywhere). `$$v`
+# is a shell variable ($$-escaped so make passes it through unexpanded).
+# Command-line overrides (e.g. `make CREME_WITH_HTTP=0`) still take effect,
+# since $(CREME_WITH_*) expands into the snippet's text before the shell
+# ever runs it. Trailing `:` (shell no-op) keeps the substitution's exit
+# status 0 even when every family is off.
+LDLIBS_GATED_SH = \
+  [ "$(CREME_WITH_SQL)" != 0 ] && echo -lsqlite3; \
+  [ "$(CREME_WITH_HTTP)" != 0 ] && echo "$(SSL_LIBS_RAW)"; \
+  for v in $(CREME_WITH_HTTP) $(CREME_WITH_CIPHER) $(CREME_WITH_PKEY) $(CREME_WITH_X509) $(CREME_WITH_DIGEST) $(CREME_WITH_SECURE_RANDOM) $(CREME_WITH_ACTOR); do [ "$$v" != 0 ] && { echo "$(CRYPTO_LIBS_RAW)"; break; }; done; \
+  [ "$(CREME_WITH_FFI)" != 0 ] && echo "$(FFI_LIBS) -ldl"; \
+  [ "$(CREME_WITH_YAML)" != 0 ] && echo "$(YAML_LIBS)"; \
+  :
 
 # Mandatory build flags -- the -std/-I include paths, pkg-config cflags, and
 # feature defines the build genuinely cannot compile without. Kept in their OWN
@@ -184,9 +202,10 @@ CREME_LDFLAGS = -rdynamic
 # backtrace(3)/execinfo.h (profiler.c's SIGPROF sampler) ship inside libc on
 # Linux/glibc and Darwin, but FreeBSD splits them into their own libexecinfo
 # (part of the base system, not a package) — link it there only, so this
-# stays a no-op everywhere else.
-EXECINFO_LIBS != case "$$(uname -s)" in FreeBSD) echo -lexecinfo;; esac
-LDLIBS := -lm -lpthread $(SQL_LDLIBS) $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(CRYPTO_LDLIBS) $(SSL_LDLIBS) $(FFI_LDLIBS) $(YAML_LDLIBS) $(ZSTD_LDLIBS) $(EXECINFO_LIBS)
+# stays a no-op everywhere else. Resolved by ./configure (a plain uname
+# check, no pkg-config involved) -- see this file's own top comment for why.
+EXECINFO_LIBS = @EXECINFO_LIBS@
+LDLIBS := -lm -lpthread $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(ZSTD_LIBS) $(EXECINFO_LIBS)
 
 # embedded_icecreme.c (bin2c of icecreme.ice, generated below) is in
 # the CLI's own SRCS now, not just the library's: main.c's no-args REPL mode
@@ -228,22 +247,29 @@ SANBIN := icecreme-sanitize
 # ---- Portability: GNU make AND BSD make ------------------------------------
 # This project's FreeBSD dev box builds with the base-system `make` (BSD make),
 # so this file avoids every GNU-only construct: no `$(shell)`/`$(filter*)`/
-# `$(if)`/`$(strip)` (the `!=` shell assignments above cover those), and no
-# `%`-pattern rules -- BSD make silently IGNORES a `%.o: %.c` rule and falls
-# back to its builtin .c.o suffix rule (wrong recipe, no error). Object builds
-# therefore use SUFFIX rules, which both makes honor -- including the multi-dot
-# `.c.san.o`/`.c.fuzz.o`/`.c.lib.o` forms, once those suffixes are declared.
-# Suffix rules can't carry the old `%.o: %.c *.h` header prerequisite inline, so
-# a single shared prereq line near the bottom ($(OBJS) ...: $(HDRS) ...) gives
-# every object set the same "rebuild when any header changes" behavior.
+# `$(if)`/`$(strip)`, and no `%`-pattern rules -- BSD make silently IGNORES a
+# `%.o: %.c` rule and falls back to its builtin .c.o suffix rule (wrong
+# recipe, no error). Object builds therefore use SUFFIX rules, which both
+# makes honor -- including the multi-dot `.c.san.o`/`.c.fuzz.o`/`.c.lib.o`
+# forms, once those suffixes are declared. Suffix rules can't carry the old
+# `%.o: %.c *.h` header prerequisite inline, so a single shared prereq line
+# near the bottom ($(OBJS) ...: $(HDRS) ...) gives every object set the same
+# "rebuild when any header changes" behavior.
+#
+# HDRS/ICECREME_COMPILER_SLDS are the two places this Makefile.in genuinely
+# still needs a shell-output assignment at Make level (not resolvable by
+# ./configure -- see this file's top comment for why) -- @HDRS_ASSIGN@/
+# @SLDS_ASSIGN@ are substituted by configure with whichever syntax the local
+# make actually supports (`!=` or GNU's `$(wildcard)`/`$(shell)`), decided by
+# the probe in configure.ac.
 .SUFFIXES: .c .o .san.o .fuzz.o .lib.o
-HDRS != echo *.h
+HDRS @HDRS_ASSIGN@
 
 .PHONY: all clean sanitize
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(CREME_CFLAGS) $(CFLAGS) -o $@ $(OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) -o $@ $(OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS) $$($(LDLIBS_GATED_SH))
 
 .c.o:
 	$(CC) $(CREME_CFLAGS) $(CFLAGS) -c -o $@ $<
@@ -251,7 +277,7 @@ $(BIN): $(OBJS)
 sanitize: $(SANBIN)
 
 $(SANBIN): $(SANITIZE_OBJS)
-	$(CC) $(CREME_CFLAGS) $(CFLAGS) $(SANITIZE_FLAGS) -o $@ $(SANITIZE_OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) $(SANITIZE_FLAGS) -o $@ $(SANITIZE_OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS) $$($(LDLIBS_GATED_SH))
 
 .c.san.o:
 	$(CC) $(CREME_CFLAGS) $(CFLAGS) $(SANITIZE_FLAGS) -c -o $@ $<
@@ -276,7 +302,7 @@ FUZZBIN := fuzz-loader
 fuzz: $(FUZZBIN)
 
 $(FUZZBIN): $(FUZZ_OBJS) fuzz/fuzz_loader.c
-	clang $(CREME_CFLAGS) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(FUZZ_OBJS) fuzz/fuzz_loader.c $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
+	clang $(CREME_CFLAGS) $(CFLAGS) -fsanitize=fuzzer,address -o $@ $(FUZZ_OBJS) fuzz/fuzz_loader.c $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS) $$($(LDLIBS_GATED_SH))
 
 .c.fuzz.o:
 	clang $(CREME_CFLAGS) $(CFLAGS) -fsanitize=fuzzer,address -c -o $@ $<
@@ -334,11 +360,12 @@ tools/bin2c: tools/bin2c.c
 # a self-emit (the fixpoint spec flags it): run `make update-boot-seed` to refresh
 # the committed seed from the freshly built compiler, then rebuild + commit it.
 #
-# `!=` + `find | tr` (not GNU-only `$(shell ...)`) -- space-joined onto one line
-# because a `!=` variable holding find's default newline-separated output breaks
-# BSD make's prerequisite-list parsing (each newline reads as a bare, unmatchable
-# prerequisite). Same portable idiom the root Makefile's CREME_SRCS uses.
-ICECREME_COMPILER_SLDS != find ../modules/creme -name '*.sld' | tr '\n' ' '
+# ICECREME_COMPILER_SLDS is space-joined onto one line because a `!=`/`$(shell)`
+# variable holding find's default newline-separated output breaks BSD make's
+# prerequisite-list parsing (each newline reads as a bare, unmatchable
+# prerequisite) -- same portable idiom the root Makefile's CREME_SRCS uses.
+# @SLDS_ASSIGN@ -- see this file's top comment and HDRS above.
+ICECREME_COMPILER_SLDS @SLDS_ASSIGN@
 
 # stage 0: bin2c the COMMITTED seed into a throwaway binary. icecreme-boot.ice
 # has NO build rule -- it's a checked-in source file (see .gitignore). This
@@ -351,7 +378,7 @@ embedded_icecreme_boot.c: icecreme-boot.ice tools/bin2c
 # equivalent of the old `$(filter-out embedded_icecreme.o,$(OBJS))`.
 BOOT_OBJS := $(MAIN_SRC:.c=.o) $(COMMON_SRCS:.c=.o) embedded_icecreme_boot.o
 icecreme-boot: $(BOOT_OBJS)
-	$(CC) $(CREME_CFLAGS) $(CFLAGS) -o $@ $(BOOT_OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CREME_CFLAGS) $(CFLAGS) -o $@ $(BOOT_OBJS) $(CREME_LDFLAGS) $(LDFLAGS) $(LDLIBS) $$($(LDLIBS_GATED_SH))
 
 # stage 1: the bootstrap binary self-compiles the shipped chunk from CURRENT
 # source. --static makes it self-contained (inlines every imported .sld) so at

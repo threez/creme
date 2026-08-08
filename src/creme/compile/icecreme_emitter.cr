@@ -204,69 +204,69 @@ module Creme
         collect_global_refs(node.value, into)
       when PrimCallNode
         into << node.name
-        node.args.each { |a| collect_global_refs(a, into) }
+        node.args.each { |arg| collect_global_refs(arg, into) }
       when DefineNode
         # a nested define binds a LOCAL -- skip the binder name, walk the value
         collect_global_refs(node.value, into)
       when IfNode
         collect_global_refs(node.test, into)
         collect_global_refs(node.conseq, into)
-        node.alt.try { |a| collect_global_refs(a, into) }
-      when BeginNode  then node.body.each { |n| collect_global_refs(n, into) }
-      when LambdaNode then node.body_nodes.each { |n| collect_global_refs(n, into) }
+        node.alt.try { |alt| collect_global_refs(alt, into) }
+      when BeginNode  then node.body.each { |child| collect_global_refs(child, into) }
+      when LambdaNode then node.body_nodes.each { |child| collect_global_refs(child, into) }
       when CaseLambdaNode
-        node.clauses.each { |c| c.body_nodes.each { |n| collect_global_refs(n, into) } }
+        node.clauses.each { |clause| clause.body_nodes.each { |child| collect_global_refs(child, into) } }
       when LetNode, LetStarNode, LetrecNode
-        node.inits.each { |n| collect_global_refs(n, into) }
-        node.body.each { |n| collect_global_refs(n, into) }
+        node.inits.each { |child| collect_global_refs(child, into) }
+        node.body.each { |child| collect_global_refs(child, into) }
       when NamedLetNode
-        node.inits.each { |n| collect_global_refs(n, into) }
-        node.body.each { |n| collect_global_refs(n, into) }
+        node.inits.each { |child| collect_global_refs(child, into) }
+        node.body.each { |child| collect_global_refs(child, into) }
       when WhenNode
         collect_global_refs(node.test, into)
-        node.body.each { |n| collect_global_refs(n, into) }
-      when AndNode then node.exprs.each { |n| collect_global_refs(n, into) }
-      when OrNode  then node.exprs.each { |n| collect_global_refs(n, into) }
+        node.body.each { |child| collect_global_refs(child, into) }
+      when AndNode then node.exprs.each { |child| collect_global_refs(child, into) }
+      when OrNode  then node.exprs.each { |child| collect_global_refs(child, into) }
       when CondNode
-        node.clauses.each do |cl|
-          cl.test.try { |t| collect_global_refs(t, into) }
-          cl.arrow.try { |a| collect_global_refs(a, into) }
-          cl.body.each { |n| collect_global_refs(n, into) }
+        node.clauses.each do |clause|
+          clause.test.try { |test| collect_global_refs(test, into) }
+          clause.arrow.try { |arrow| collect_global_refs(arrow, into) }
+          clause.body.each { |child| collect_global_refs(child, into) }
         end
       when CaseNode
         collect_global_refs(node.key, into)
-        node.clauses.each do |cl|
-          cl.arrow.try { |a| collect_global_refs(a, into) }
-          cl.body.each { |n| collect_global_refs(n, into) }
+        node.clauses.each do |clause|
+          clause.arrow.try { |arrow| collect_global_refs(arrow, into) }
+          clause.body.each { |child| collect_global_refs(child, into) }
         end
       when DoNode
-        node.inits.each { |n| collect_global_refs(n, into) }
-        node.steps.each { |n| n.try { |s| collect_global_refs(s, into) } }
+        node.inits.each { |child| collect_global_refs(child, into) }
+        node.steps.each { |step| step.try { |value| collect_global_refs(value, into) } }
         collect_global_refs(node.test, into)
-        node.results.each { |n| collect_global_refs(n, into) }
-        node.commands.each { |n| collect_global_refs(n, into) }
+        node.results.each { |child| collect_global_refs(child, into) }
+        node.commands.each { |child| collect_global_refs(child, into) }
       when DefineValuesNode then collect_global_refs(node.producer, into)
       when LetValuesNode
-        node.binders.each { |b| collect_global_refs(b.producer, into) }
-        node.body.each { |n| collect_global_refs(n, into) }
+        node.binders.each { |binder| collect_global_refs(binder.producer, into) }
+        node.body.each { |child| collect_global_refs(child, into) }
       when QuasiquoteNode then collect_qq_global_refs(node.template, into)
       when DelayNode      then collect_global_refs(node.thunk, into)
       when GuardNode
-        node.clauses.each do |cl|
-          cl.test.try { |t| collect_global_refs(t, into) }
-          cl.arrow.try { |a| collect_global_refs(a, into) }
-          cl.body.each { |n| collect_global_refs(n, into) }
+        node.clauses.each do |clause|
+          clause.test.try { |test| collect_global_refs(test, into) }
+          clause.arrow.try { |arrow| collect_global_refs(arrow, into) }
+          clause.body.each { |child| collect_global_refs(child, into) }
         end
-        node.body.each { |n| collect_global_refs(n, into) }
+        node.body.each { |child| collect_global_refs(child, into) }
       when ParameterizeNode
-        node.bindings.each do |b|
-          collect_global_refs(b.param, into)
-          collect_global_refs(b.value, into)
+        node.bindings.each do |binding|
+          collect_global_refs(binding.param, into)
+          collect_global_refs(binding.value, into)
         end
-        node.body.each { |n| collect_global_refs(n, into) }
+        node.body.each { |child| collect_global_refs(child, into) }
       when AppNode
         collect_global_refs(node.callee, into)
-        node.args.each { |a| collect_global_refs(a, into) }
+        node.args.each { |arg| collect_global_refs(arg, into) }
       when HelperFormNode
         # define-syntax/defmacro/define-record-type/import: raw, un-analyzed
         # s-exprs. Their expansion's references aren't visible as nodes, so

@@ -90,8 +90,9 @@ module Creme
       pool = StringInterner.new
       required_families.each { |name| pool.intern(name) }
       collect_chunk_strings(chunk, pool)
-      if pool.strings.size > 0xFF_FFFF
-        raise "chunk_serializer: string pool too large (#{pool.strings.size} > #{0xFF_FFFF}) for a u24 index"
+      max_pool_size = 0xFF_FFFF
+      if pool.strings.size > max_pool_size
+        raise "chunk_serializer: string pool too large (#{pool.strings.size} > #{max_pool_size}) for a u24 index"
       end
 
       # Pass 2: write the pool, then the chunk with u24 pool indices in place
@@ -104,7 +105,7 @@ module Creme
       # given libzstd, so the self-hosting fixpoint still holds.
       body = IO::Memory.new
       write_i32(body, pool.strings.size.to_i32)
-      pool.strings.each { |s| write_pool_string(body, s) }
+      pool.strings.each { |str| write_pool_string(body, str) }
       write_i32(body, required_families.size.to_i32)
       required_families.each { |name| write_u24(body, pool.id(name)) }
       write_chunk(body, chunk, pool)
@@ -192,9 +193,9 @@ module Creme
     # names, recursing through pairs/vectors/complex just like write_datum_rec.
     private def self.collect_datum_strings(v : SchemeValue, pool : StringInterner, seen : Set(UInt64)) : Nil
       case v
-      when SchemeSym  then pool.intern(v.name)
-      when SchemeStr  then pool.intern(v.value)
-      when Builtin    then pool.intern(v.name)
+      when SchemeSym then pool.intern(v.name)
+      when SchemeStr then pool.intern(v.value)
+      when Builtin   then pool.intern(v.name)
       when SchemeComplex
         collect_datum_strings(v.real, pool, seen)
         collect_datum_strings(v.imag, pool, seen)

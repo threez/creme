@@ -71,7 +71,15 @@ creme:
 # in the portable BSD+GNU subset (it used `$(shell ...)` and `%` pattern rules,
 # both GNU-only; those are gone), so whichever make runs THIS file drives it too.
 # Its vendored C deps are git submodules that auto-init on first build.
-icecreme:
+#
+# icecreme/Makefile itself is GENERATED, not committed (see the root
+# Makefile's own icecreme/Makefile rule for why) -- depending on it here runs
+# ./configure automatically on a fresh checkout instead of requiring a manual
+# step before `make bench` works.
+$(ROOT)/icecreme/Makefile: $(ROOT)/icecreme/configure $(ROOT)/icecreme/Makefile.in
+	cd $(ROOT)/icecreme && ./configure
+
+icecreme: $(ROOT)/icecreme/Makefile
 	$(MAKE) -C $(ROOT)/icecreme
 
 # icecreme's self-hosted-compiler image (icecreme.scm) is compiled to
@@ -134,15 +142,30 @@ node/demo-todo/node_modules: node/demo-todo/package.json node/demo-todo/package-
 c/demo-todo/bin/app:
 	$(MAKE) -C c/demo-todo bin/app
 
-# Ruby (Sinatra) and Racket have no compiled artifact of their own to track
-# here -- both run their app.rb/app.rkt source directly (bundler/raco
-# resolve dependencies at run time, same as scheme.cr's own bin/creme +
-# app.scm), so there's nothing for this Makefile to build for either.
+# Racket has no compiled artifact of its own to track here -- it runs
+# app.rkt source directly and raco resolves dependencies at run time, same
+# as scheme.cr's own bin/creme + app.scm.
+#
+# Ruby (Sinatra) DOES need a real prerequisite-tracked target though,
+# unlike those: `bundle exec` (which bench.scm shells out to) does NOT
+# auto-install missing gems the way `npm install`/node_modules above does
+# -- it fails outright if the Gemfile's gems (e.g. the native sqlite3
+# extension) aren't already present for this exact Ruby. Same stamp-file
+# shape as node_modules: bundler installs into a shared per-Ruby-version
+# gem path, not a directory local to this project, so there's no directory
+# of our own whose mtime would track "is this installed" the way
+# node_modules's own does -- a touched stamp file fills that role instead.
+ruby/demo-todo/.bundle-installed: ruby/demo-todo/Gemfile ruby/demo-todo/Gemfile.lock
+	cd ruby/demo-todo && bundle install
+	touch ruby/demo-todo/.bundle-installed
+
 todo-app-binaries: creme icecreme \
                     crystal/demo-todo/bin/app go/demo-todo/bin/app \
-                    node/demo-todo/node_modules c/demo-todo/bin/app
+                    node/demo-todo/node_modules c/demo-todo/bin/app \
+                    ruby/demo-todo/.bundle-installed
 
 clean:
 	rm -f $(ROOT)/bin/bench_cr $(ROOT)/bin/bench_go lua/bench/monotonic.so
 	rm -rf crystal/demo-todo/bin go/demo-todo/bin
+	rm -f ruby/demo-todo/.bundle-installed
 	$(MAKE) -C c/demo-todo clean

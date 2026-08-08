@@ -26,13 +26,20 @@
 
 ;; Sonames are platform-specific -- glibc (most Linux) uses libX.so.6,
 ;; FreeBSD (this project's own dev environment) uses BSD-style
-;; single-digit versioning instead. (runtime)'s `os` field is uname -s,
-;; so this picks the right one instead of hardcoding one platform --
+;; single-digit versioning instead, and macOS has no separate libm at
+;; all (both live in libSystem.dylib). (runtime)'s `os` field is uname
+;; -s, so this picks the right one instead of hardcoding one platform --
 ;; see spec/main_spec.cr's own copy of this same table for the ffi
 ;; backend test this example's demo is modeled on.
 (define os (cdr (assq 'os (runtime))))
-(define libm-soname (if (string=? os "FreeBSD") "libm.so.5" "libm.so.6"))
-(define libc-soname (if (string=? os "FreeBSD") "libc.so.7" "libc.so.6"))
+(define libm-soname
+  (cond ((string=? os "FreeBSD") "libm.so.5")
+        ((string=? os "Darwin") "libSystem.dylib")
+        (else "libm.so.6")))
+(define libc-soname
+  (cond ((string=? os "FreeBSD") "libc.so.7")
+        ((string=? os "Darwin") "libSystem.dylib")
+        (else "libc.so.6")))
 
 ;; --- libm: 'double in, 'double out -----------------------------------
 (define libm (ffi-open libm-soname))

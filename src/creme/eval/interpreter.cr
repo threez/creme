@@ -118,7 +118,7 @@ module Creme
     # own `(cond-expand ((library (creme builtin X)) ...) (else ...))` (e.g.
     # modules/creme/raft.sld) would wrongly pick the FFI branch based on the
     # COMPILING process's own capabilities rather than the TARGET's.
-    property emitting_for_icecreme : Bool = false
+    property? emitting_for_icecreme : Bool = false
 
     # Real R7RS parameter objects backing current-output-port/
     # current-input-port/current-error-port, so `(parameterize
@@ -1020,6 +1020,7 @@ module Creme
       env.define(rparam, Creme.a_to_list(vals[params.size..])) if rparam
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def cond_expand_matches?(requirement : SchemeValue) : Bool
       case requirement
       when SchemeSym
@@ -1048,7 +1049,7 @@ module Creme
           # useful side effect of actually registering it on success, same
           # as a real import would.
           libname = SchemeLibrary.parse_library_name(args[0])
-          return false if emitting_for_icecreme && libname.size == 3 && libname[0] == "creme" && libname[1] == "builtin"
+          return false if emitting_for_icecreme? && libname.size == 3 && libname[0] == "creme" && libname[1] == "builtin"
           @libraries.has_key?(libname) || !!(resolve_library(libname) rescue nil)
         else
           raise SchemeRuntimeError.new("cond-expand: unknown requirement '#{head.name}'")
