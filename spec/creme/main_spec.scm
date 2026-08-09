@@ -84,6 +84,7 @@
     "spec/creme/time_spec.scm"
     "spec/creme/treelist_spec.scm"
     "spec/creme/vm_spec.scm"
+    "spec/creme/xml-schema_spec.scm"
     "spec/creme/x509_spec.scm"
     "spec/creme/yaml_spec.scm"
     "spec/creme/zstd_spec.scm"

@@ -116,6 +116,9 @@
   (it-runs-under-icecreme "39-ffi-libm-caller.scm" "examples/39-ffi-libm-caller.scm")
   (it-runs-under-icecreme "40-ffi-struct-pointer-clock.scm" "examples/40-ffi-struct-pointer-clock.scm")
   (it-runs-under-icecreme "41-ffi-record-file-handle.scm" "examples/41-ffi-record-file-handle.scm")
+  (it-runs-under-icecreme "49-xml-schema-dsl.scm" "examples/49-xml-schema-dsl.scm")
+  (it-runs-under-icecreme "50-dtd-validation.scm" "examples/50-dtd-validation.scm")
+  (it-runs-under-icecreme "51-xsd-validation.scm" "examples/51-xsd-validation.scm")
   (it-runs-under-icecreme "demo.scm" "examples/demo.scm"))
 
 (spec-summary!)
