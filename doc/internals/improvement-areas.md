@@ -58,14 +58,14 @@ after `OP_COUNT` — runtime-only, never serialized) that re-checks the
 global's *current* value against the exact expected builtin pointer on
 every execution and permanently deopts back to plain `OP_CALLGLOBAL`
 the instant that check fails (a genuine redefinition). See
-`doc/optimization-icecreme.md`'s "Call-site quickening" section for the
+`doc/internals/optimization-icecreme.md`'s "Call-site quickening" section for the
 implementation and measured effect.
 
 icecreme already had a *compile-time-only* version of this general idea in
 two other places — the integer fast-path wrappers inlined into
-arithmetic/comparison opcodes (`doc/optimization-icecreme.md`, Section 3)
+arithmetic/comparison opcodes (`doc/internals/optimization-icecreme.md`, Section 3)
 and the counted-loop fusion opcodes (OP_FORLOOP*,
-OP_FORLOOPGUARDEDINC/DEC, `doc/optimization-general.md`) — this is the
+OP_FORLOOPGUARDEDINC/DEC, `doc/internals/optimization-general.md`) — this is the
 first place icecreme makes that kind of specialization decision at runtime
 instead of purely ahead of time.
 
@@ -84,7 +84,7 @@ current value (tag, `RC_ACCESSOR` kind, and the accessor's own
 `RecordType*` by pointer identity) and the argument's own record type
 on every execution, reading the field directly on a match and
 deopting back to plain `OP_CALLGLOBAL` otherwise — same pattern as
-item 2, same file. See `doc/optimization-icecreme.md`'s "Call-site
+item 2, same file. See `doc/internals/optimization-icecreme.md`'s "Call-site
 quickening for record accessors" section for the implementation and
 measured effect (~22% faster on a hot accessor loop), and
 `spec/creme/record_accessor_quicken_spec.scm` for the correctness
@@ -148,11 +148,11 @@ attach them. Revisit only alongside item 4, not before.
 1. ~~Inline caching for globals~~ — dropped, see item 1's correction note
    above (nothing to cache; global access was already O(1)).
 2. Call-site quickening for primitive calls — **done**, see
-   `doc/optimization-icecreme.md`'s "Call-site quickening for primitive
+   `doc/internals/optimization-icecreme.md`'s "Call-site quickening for primitive
    calls" section for the measured effect.
 3. Call-site quickening for record accessors — **done**, the same
    technique applied to `define-record-type` field accessors; see
-   `doc/optimization-icecreme.md`'s "Call-site quickening for record
+   `doc/internals/optimization-icecreme.md`'s "Call-site quickening for record
    accessors" section for the measured effect.
 4. Copy-and-patch native codegen — only if quickening turns out
    insufficient somewhere and real native code generation is

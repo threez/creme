@@ -10,8 +10,8 @@ portable library-level optimizations that benefit every backend equally
 because they're plain Scheme.
 
 Two sibling documents cover backend-specific work:
-- `doc/optimization-crystal.md` — the native Crystal VM/interpreter only.
-- `doc/optimization-icecreme.md` — the standalone C11 VM and its own compiler
+- `doc/internals/optimization-crystal.md` — the native Crystal VM/interpreter only.
+- `doc/internals/optimization-icecreme.md` — the standalone C11 VM and its own compiler
   only.
 
 ---
@@ -54,7 +54,7 @@ stepped by a compile-time-constant integer, tested against a
 loop-invariant bound — used to desugar into a real closure, called via
 `TailCall` every iteration. `TailCall` was already O(1)-space (frame and
 register-window reuse, no stack growth — see
-`doc/optimization-crystal.md`'s Section 3), but it still paid
+`doc/internals/optimization-crystal.md`'s Section 3), but it still paid
 per-iteration argument re-binding and callee-dispatch overhead that a
 plain counted loop doesn't need, the same way Lua's bytecode compiles a
 numeric `for` loop to a dedicated `FORPREP`/`FORLOOP` instruction pair

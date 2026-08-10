@@ -1,7 +1,7 @@
 # Build-flag tuning — explored and rejected
 
-Companion to `doc/deadend-icecreme.md` (VM/opcode-level dead-ends) and
-`doc/optimization-icecreme.md` (the wins). This file covers a different axis:
+Companion to `doc/internals/deadend-icecreme.md` (VM/opcode-level dead-ends) and
+`doc/internals/optimization-icecreme.md` (the wins). This file covers a different axis:
 compiler-flag tuning on `icecreme/Makefile` and `competition/c/demo-todo/Makefile`,
 prompted by the todo-app HTTP bench (`competition/bench.scm`) putting icecreme and
 the C/facil.io twin behind Crystal's `Kemal+Granite+ECR+SQLite` app, which

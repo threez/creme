@@ -1,6 +1,6 @@
 # icecreme dead-ends — explored and rejected
 
-Companion to `doc/optimization-icecreme.md` (which covers the optimizations that
+Companion to `doc/internals/optimization-icecreme.md` (which covers the optimizations that
 landed). This file collects icecreme optimization ideas that were explored and
 then **reverted or declined**, each with the measurement that ruled it out —
 so nobody re-chases them. Short by design; the point is the verdict, not the
@@ -82,7 +82,7 @@ those away.
   one predictably-false branch, not a call. **No change.**
 
 - **`GC_ENABLE_INCREMENTAL=1` (Boehm's incremental/generational mode).**
-  Tested alongside `doc/optimization-icecreme.md`'s Section 8 GC-heap-sizing work,
+  Tested alongside `doc/internals/optimization-icecreme.md`'s Section 8 GC-heap-sizing work,
   same 9-workload suite, median of 11 runs: **+26.4% slower** (0.201s → 0.254s
   vs. the libgc default; +27.1% with a 256M initial heap too, same
   regression). Expected going in: incremental mode buys shorter *pause*
@@ -98,4 +98,4 @@ those away.
 ---
 
 For the optimizations that landed (and their measured wins), see
-`doc/optimization-icecreme.md`.
+`doc/internals/optimization-icecreme.md`.

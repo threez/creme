@@ -1,6 +1,6 @@
 # The performance journey — native Crystal VM/interpreter
 
-How `scheme.cr` (the `creme` interpreter) got fast. This is a narrative of the
+How the `creme` interpreter got fast. This is a narrative of the
 performance work on the **native Crystal** evaluation core — the
 `Interpreter`/`VM`/`BytecodeCompiler` classes under `src/creme/` — **what we
 did, why, and where we ended up** — including the experiments we measured and
@@ -8,11 +8,11 @@ deliberately threw away.
 
 This file covers only the native Crystal side. Two sibling documents cover
 the rest of this project's performance work:
-- `doc/optimization-general.md` — techniques shared by (or ported across)
+- `doc/internals/optimization-general.md` — techniques shared by (or ported across)
   both the native compiler and the self-hosted Scheme-to-bytecode compiler,
   and portable library-level optimizations that benefit every backend
   equally.
-- `doc/optimization-icecreme.md` — `icecreme`, the standalone C11 VM and its own
+- `doc/internals/optimization-icecreme.md` — `icecreme`, the standalone C11 VM and its own
   compiler, which has a genuinely different implementation and its own
   distinct set of hot paths.
 
@@ -552,13 +552,13 @@ implemented or prototyped and then dropped on measurement.
   surfacing a genuine, not-yet-root-caused regression under `icecreme` (the general
   call-argument-compilation path silently failing to compile a call's arguments
   correctly in one narrow reentrant-compile scenario). Left unchanged pending
-  further investigation — see `doc/optimization-general.md`.
+  further investigation — see `doc/internals/optimization-general.md`.
 
 - **`GC_ENABLE_INCREMENTAL=1` (Boehm's incremental/generational mode).**
   Tested alongside Section 11's GC-heap-sizing work, same 9-workload
   `competition/scheme/bench/creme.scm` suite, median of 11 runs: **+17.3%
   slower** (0.342s → 0.401s vs. the libgc default). Same root cause as
-  `icecreme`'s identical result (`doc/deadend-icecreme.md`): incremental mode's write
+  `icecreme`'s identical result (`doc/internals/deadend-icecreme.md`): incremental mode's write
   barrier trades throughput for pause *latency*, which this batch-throughput
   benchmark never measures. Per-workload, the regression again concentrates
   on the most allocation/mutation-heavy workloads (`record-test` 0.087s →
@@ -569,7 +569,7 @@ implemented or prototyped and then dropped on measurement.
 
 ## 11. A larger default initial GC heap
 
-Same experiment as `icecreme/main.c`'s (see `doc/optimization-icecreme.md`'s own
+Same experiment as `icecreme/main.c`'s (see `doc/internals/optimization-icecreme.md`'s own
 Section 8) — Crystal links the identical Boehm/bdwgc collector, read via the
 stdlib's `crystal/gc/boehm.cr`, so the same lever applies: libgc grows its
 heap in increments as the program allocates past what it currently holds,

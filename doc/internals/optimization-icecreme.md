@@ -13,8 +13,8 @@ terms.
 This document covers optimization work specific to icecreme's own
 implementation. Two sibling documents cover the rest of this project's
 performance work:
-- `doc/optimization-crystal.md` — the native Crystal VM/interpreter only.
-- `doc/optimization-general.md` — techniques shared by (or ported across)
+- `doc/internals/optimization-crystal.md` — the native Crystal VM/interpreter only.
+- `doc/internals/optimization-general.md` — techniques shared by (or ported across)
   both compilers/VM backends, including several new opcodes implemented
   in icecreme as part of that shared work (counted-loop fusion, its
   redefinition-safe extension to self-recursive global functions) — not
@@ -37,7 +37,7 @@ measured effect. The load-bearing wins:
 
 For ideas explored and rejected — the measurements that ruled them out,
 and where icecreme stands against Guile (its JIT, and why the interpreter-level
-tail is exhausted) — see `doc/deadend-icecreme.md`. Read it before starting new
+tail is exhausted) — see `doc/internals/deadend-icecreme.md`. Read it before starting new
 work, so you don't chase a ceiling that isn't there.
 
 ---
@@ -148,7 +148,7 @@ Two distinct fixes, from two distinct root causes:
   instructions to these helpers on every arithmetic/comparison op, even
   for two plain machine integers. The native Crystal VM already avoids
   exactly this by inlining its own integer fast path directly into its
-  dispatch loop (see `doc/optimization-crystal.md`, Section 6); icecreme's C
+  dispatch loop (see `doc/internals/optimization-crystal.md`, Section 6); icecreme's C
   VM had never received the equivalent treatment. Small `static inline`
   wrapper functions were added, each checking for the same-integer-tag
   case and falling through to the real helper function — with identical
@@ -404,7 +404,7 @@ most of that workload's time is the actual per-element list-walking
 the whole achievable win at zero format risk: going further — a compiler-
 emitted `OP_SELFTAILCALL` that skips even the `upvalue_get` — was
 prototyped and measured at **0%** (the `upvalue_get` was never on the
-critical path), so it's a documented dead end, see `doc/deadend-icecreme.md`.
+critical path), so it's a documented dead end, see `doc/internals/deadend-icecreme.md`.
 
 Correctness is the gate here, since this is the single hottest VM path: the
 full icecreme spec suite runs unchanged (same pre-existing failures, zero new),
@@ -416,8 +416,8 @@ takes the generic path.
 
 ## 8. A larger default initial GC heap
 
-Every allocation in icecreme goes through Boehm's `GC_MALLOC` (see `doc/
-improvement_areas.md`'s "Boehm conservative GC" note and `hashtable.c`/
+Every allocation in icecreme goes through Boehm's `GC_MALLOC` (see
+`doc/internals/improvement-areas.md`'s "Boehm conservative GC" note and `hashtable.c`/
 `creme_ffi.c` for the only two exceptions, neither of which is an ordinary
 Scheme heap object — freeing ordinary GC objects by hand was considered and
 rejected, since Boehm's conservative stack/register scanning gives no way to
@@ -457,4 +457,4 @@ this costs nothing even for icecreme's long-running-server use (`mux-listen!`'s
 lazily as the heap is actually used.
 
 **`GC_ENABLE_INCREMENTAL=1`, tested at the same time, is a dead end** — see
-`doc/deadend-icecreme.md`.
+`doc/internals/deadend-icecreme.md`.
