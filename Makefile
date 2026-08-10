@@ -1,4 +1,4 @@
-.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-icecreme icecreme bench version tag
+.PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-icecreme icecreme bench bench-md version tag
 
 UNAME_M != uname -m
 NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
@@ -152,6 +152,16 @@ creme-spec-icecreme: icecreme/Makefile
 bench:
 	$(MAKE) -C competition build
 	./bin/creme competition/bench.scm
+
+# Same as `bench` above, but also writes a committed, per-machine markdown
+# snapshot to benchmarks/<arch>_<os>.md (see competition/bench.scm's own
+# --markdown flag, and (creme table)/(creme bench)'s markdown-style/
+# bench-table->markdown) -- reruns both suites fresh rather than reusing a
+# previous `bench` run's terminal output, since the snapshot is meant to
+# reflect a real run on the machine that generates it.
+bench-md:
+	$(MAKE) -C competition build
+	./bin/creme competition/bench.scm --markdown
 
 lib/ameba/bin/ameba:
 	shards install

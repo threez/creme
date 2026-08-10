@@ -37,10 +37,10 @@
 ;; except the 3 *-row ones always returns "".
 ;;
 ;; table->string only ever accepts a COMPILED style, produced by table-style
-;; — a base style (bordered-style, borderless-style, a custom one from
-;; make-bordered-style/make-borderless-style, (creme html)'s html-style, or
-;; a bespoke style function written from scratch) plus how many leading/
-;; trailing rows are the header/footer:
+;; — a base style (bordered-style, borderless-style, markdown-style, a
+;; custom one from make-bordered-style/make-borderless-style, (creme html)'s
+;; html-style, or a bespoke style function written from scratch) plus how
+;; many leading/trailing rows are the header/footer:
 ;;
 ;;   (table-style bordered-style 'header 1 'footer 1)
 ;;   ; -> the first row is the header section, the last is the footer
@@ -63,7 +63,7 @@
 ;; ===========================================================================
 
 (define-library (creme table)
-  (export bordered-style borderless-style make-bordered-style
+  (export bordered-style borderless-style markdown-style make-bordered-style
           make-borderless-style table-style table->string)
   (import (scheme base) (scheme write) (scheme cxr)
           (only (creme string) string-join string-repeat)
@@ -188,6 +188,51 @@
           (else (error "table style: unknown request" request)))))
 
     (define borderless-style (make-borderless-style "  "))
+
+    ;; ---- markdown style -----------------------------------------------------
+
+    ;; GFM-flavored markdown: pipe-delimited rows plus a `---`/`:---`/`---:`
+    ;; alignment separator directly below the header row. Assumes exactly one
+    ;; header row, matching every real bench-table->string/->html call site
+    ;; today (they all pass 'header 1) — GFM's separator must sit immediately
+    ;; under the header, so there's no way to express a markdown table with
+    ;; zero header rows; a style request sequence with no header section
+    ;; would render as ordinary pipe-joined text, not a real table.
+
+    ;; A literal "|" inside cell text would otherwise be read as a column
+    ;; separator by any markdown renderer — escape it, the one character
+    ;; markdown table syntax itself is sensitive to.
+    (define (escape-pipes s)
+      (let loop ((i 0) (acc '()))
+        (if (= i (string-length s))
+            (apply string-append (reverse acc))
+            (loop (+ i 1)
+                  (cons (if (char=? (string-ref s i) #\|) "\\|" (string (string-ref s i)))
+                        acc)))))
+
+    (define (markdown-cell-row cells widths aligns)
+      (string-append
+       "| "
+       (string-join (map (lambda (c w a) (pad-cell (escape-pipes c) w a)) cells widths aligns) " | ")
+       " |"))
+
+    ;; One column's separator segment: `n` dashes (at least 3, GFM's own
+    ;; minimum). No per-column alignment marker (`:---`/`---:`) — the style
+    ;; protocol only passes real `aligns` alongside a *-row request; 'header-
+    ;; close (where this separator is built) gets #f in aligns' place, same
+    ;; as every other widths-only request, so a column's actual alignment
+    ;; isn't available here to encode. The already-padded cell text above/
+    ;; below still reads aligned in the raw markdown source; only the
+    ;; *rendered* table loses per-column alignment, defaulting to left.
+    (define (markdown-separator widths)
+      (string-append "| " (string-join (map (lambda (w) (string-repeat "-" (max 3 w))) widths) " | ") " |"))
+
+    (define (markdown-style request cells widths aligns)
+      (case request
+        ((top bottom header-open body-open body-close footer-open footer-close) "")
+        ((header-close) (markdown-separator widths))
+        ((header-row row footer-row) (markdown-cell-row cells widths aligns))
+        (else (error "table style: unknown request" request))))
 
     ;; ---- compiling a style + header/footer placement into one value ----------
 

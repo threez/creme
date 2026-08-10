@@ -19,12 +19,15 @@
 ;;   (run-repeated thunk n)                  -> calls thunk n times
 ;;   (calibrate name thunk target-seconds)   -> benchmark + repeat-count combined
 ;;
-;; ---- terminal/HTML report plumbing -----------------------------------------
+;; ---- terminal/HTML/markdown report plumbing --------------------------------
 ;;   (bench-table->string headers rows aligns [footer-count])
 ;;   (bench-table->html headers rows aligns [footer-count])
+;;   (bench-table->markdown headers rows aligns [footer-count])
 ;;   report-css                              -> shared report CSS string
 ;;   (bench-document->html title body-html)  -> a full HTML document string
 ;;   (write-html-report path title body-html)
+;;   (bench-document->markdown title body-markdown) -> title + body, as markdown
+;;   (write-markdown-report path title body-markdown)
 ;;
 ;; ---- profiling --------------------------------------------------------
 ;;   (profile-workload name thunk target-seconds step-interval)
@@ -45,8 +48,9 @@
 
 (define-library (creme bench)
   (export benchmark repeat-count run-repeated calibrate
-          bench-table->string bench-table->html
+          bench-table->string bench-table->html bench-table->markdown
           report-css bench-document->html write-html-report
+          bench-document->markdown write-markdown-report
           profile-workload profile-top-rows profile-scheme-top-rows
           profile-report->string profile-report->html
           short-name truncate-str relativize location-str)
@@ -110,6 +114,15 @@
          (table->string (cons headers rows) aligns
                          (table-style html-style 'header 1 'footer footer-count)))))
 
+    ;; Same shape as bench-table->string, but renders a GFM markdown table
+    ;; (via (creme table)'s markdown-style) and returns the fragment string.
+    (define bench-table->markdown
+      (case-lambda
+        ((headers rows aligns) (bench-table->markdown headers rows aligns 0))
+        ((headers rows aligns footer-count)
+         (table->string (cons headers rows) aligns
+                         (table-style markdown-style 'header 1 'footer footer-count)))))
+
     ;; Shared look for any report written via bench-document->html /
     ;; write-html-report.
     (define report-css "
@@ -138,6 +151,18 @@
     ;; document (see bench-document->html) to path.
     (define (write-html-report path title body-html)
       (file-write path (bench-document->html title body-html)))
+
+    ;; (bench-document->markdown title body-markdown) -> a title heading plus
+    ;; the already-rendered body-markdown fragment. No CSS/document shell
+    ;; needed, unlike the HTML sibling above -- a markdown file's "document"
+    ;; is just its own text.
+    (define (bench-document->markdown title body-markdown)
+      (string-append "# " title "\n\n" body-markdown))
+
+    ;; (write-markdown-report path title body-markdown) -> writes a full
+    ;; markdown document (see bench-document->markdown) to path.
+    (define (write-markdown-report path title body-markdown)
+      (file-write path (bench-document->markdown title body-markdown)))
 
     ;; ---- profiling --------------------------------------------------------
 

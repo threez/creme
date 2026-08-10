@@ -107,15 +107,16 @@
 ; on musl/Alpine builds (see src/creme/modules/creme/prof_native.cr's
 ; header comment).
 
-(import (scheme base) (scheme write) (scheme cxr) (scheme process-context)
+(import (scheme base) (scheme write) (scheme cxr) (scheme char) (scheme process-context)
         (creme process) (creme regex) (creme string) (creme numfmt)
-        (creme bench) (creme cli) (creme introspection) (creme http)
+        (creme bench) (creme cli) (creme introspection) (creme hardware) (creme http)
         (creme file) (creme wrk) (creme shell) (creme sort) (creme term)
         (only (creme extra) filter))
 
 (define opts
   (cli "Cross-language CPU benchmark + demo-todo HTTP benchmark, in one run"
        (list (flag "html" "--html" "Also write competition/bench.html")
+             (flag "markdown" "--markdown" "Also write a benchmarks/<arch>_<os>.md snapshot")
              (flag "only" "--only" "Run only this suite: bench, todo-app" 'string #f)
              (flag "scheme-port" "--scheme-port" "scheme.cr server port" 'integer 4571)
              (flag "ruby-port" "--ruby-port" "Ruby server port" 'integer 4570)
@@ -133,6 +134,7 @@
 
 (define only (cli-get opts "only"))
 (define want-html? (cli-flag? opts "html"))
+(define want-markdown? (cli-flag? opts "markdown"))
 (define (run-bench-suite?) (or (not only) (string=? only "bench")))
 (define (run-todo-app-suite?) (or (not only) (string=? only "todo-app")))
 
@@ -143,10 +145,81 @@
 ; Darwin) the bare name is what's actually installed. (runtime)'s own `os`
 ; field (creme introspection, uname -s under the hood) picks the right one
 ; at run time instead of hardcoding either.
-(define freebsd? (equal? (cdr (assq 'os (runtime))) "FreeBSD"))
+(define runtime-info (runtime))
+(define runtime-os (cdr (assq 'os runtime-info)))
+(define runtime-arch (cdr (assq 'arch runtime-info)))
+(define freebsd? (equal? runtime-os "FreeBSD"))
 (define (freebsd-binary base freebsd-name) (if freebsd? freebsd-name base))
+
+; (creme hardware)'s best-effort local CPU/memory info -- see that library's
+; own header comment for why cpu-model/memory-total can be #f (no icecreme
+; counterpart, no guaranteed sysctl/procfs key) while cpu-cores (Crystal's
+; own System.cpu_count) always succeeds.
+(define hw-info (hardware-info))
+(define hw-cpu-model (cdr (assq 'cpu-model hw-info)))
+(define hw-cpu-cores (cdr (assq 'cpu-cores hw-info)))
+(define hw-memory-total (cdr (assq 'memory-total hw-info)))
+(define (bytes->gib-string bytes) (string-append (numfmt-fixed (/ bytes (* 1024.0 1024 1024)) 1) " GiB"))
+
+; ---- shared: --markdown's per-machine snapshot path + environment info ----
+;
+; benchmarks/<arch>_<os>.md, lowercased raw (runtime) values (e.g. this
+; project's own FreeBSD/amd64 dev machine writes benchmarks/amd64_freebsd.md)
+; -- one committed snapshot per architecture+OS combination, since a
+; benchmark run is inherently tied to the machine it ran on; see doc/README.md.
+(define markdown-report-path
+  (string-append "benchmarks/" (string-downcase runtime-arch) "_" (string-downcase runtime-os) ".md"))
+
+; process-run-safe returns raw stdout verbatim (trailing newline included;
+; `crystal --version` is several lines) -- first-line-and-trim gets a single
+; clean value out of either.
+(define (first-line-trimmed s) (string-trim (car (string-split s "\n"))))
+
+; (cmd --version-flag...)'s first line, trimmed, or "n/a" if cmd isn't on
+; PATH/fails -- the same process-run-safe fallback every shelled-out bench
+; variant already uses, just packaged for a one-line version string instead
+; of a benchmark's timed output.
+(define (tool-version cmd args)
+  (let ((out (process-run-safe cmd args)))
+    (if out (first-line-trimmed out) "n/a")))
+
 (define guile-cmd (freebsd-binary "guile" "guile3"))
 (define lua-cmd (freebsd-binary "lua" "lua55"))
+
+; Same fallback-to-#f-on-missing-tool posture as every shelled-out variant
+; below (process-run-safe) -- a --markdown run on a machine without git/
+; crystal on PATH still produces a report, just with "n/a" for those fields.
+(define (environment-markdown)
+  (let* ((commit (process-run-safe "git" (list "rev-parse" "--short" "HEAD")))
+         (crystal-version (process-run-safe "crystal" (list "--version"))))
+    (string-append
+     "## Environment\n\n"
+     "- Commit: " (if commit (first-line-trimmed commit) "n/a") "\n"
+     "- Crystal: " (if crystal-version (first-line-trimmed crystal-version) "n/a") "\n"
+     "- OS: " runtime-os "\n"
+     "- Arch: " runtime-arch "\n"
+     "- CPU: " (if hw-cpu-model hw-cpu-model "n/a") "\n"
+     "- Cores: " (number->string hw-cpu-cores) "\n"
+     "- Memory: " (if hw-memory-total (bytes->gib-string hw-memory-total) "n/a") "\n\n"
+     ; One line per language variant in the "bench" suite's comparison table
+     ; (see measurement-headers/variant-names below) -- a benchmark number is
+     ; only meaningful alongside exactly what ran it. "n/a" here means the
+     ; TOOLCHAIN itself is missing (e.g. no `go` on PATH); a workload column
+     ; showing "n/a" in the tables below instead usually means the derived
+     ; comparison BINARY (bin/bench_cr/bin/bench_go) hasn't been built yet --
+     ; run `make -C competition build` (or `make bench`/`make bench-md`,
+     ; which does this first) rather than invoking this script directly.
+     "## Runtime versions\n\n"
+     "- creme: " (cdr (assq 'version runtime-info)) "\n"
+     "- icecreme: " (tool-version "icecreme/icecreme" (list "--version")) "\n"
+     "- Crystal: " (if crystal-version (first-line-trimmed crystal-version) "n/a") " (native comparison floor)\n"
+     "- Go: " (tool-version "go" (list "version")) "\n"
+     "- Ruby: " (tool-version "ruby" (list "--version")) "\n"
+     "- Racket: " (tool-version "racket" (list "--version")) "\n"
+     "- Guile: " (tool-version guile-cmd (list "--version")) "\n"
+     "- Node: " (tool-version "node" (list "--version")) "\n"
+     "- Lua: " (tool-version lua-cmd (list "-v")) "\n"
+     "- LuaJIT: " (tool-version "luajit" (list "-v")) "\n\n")))
 
 ;; ---- terminal color: a per-column green(best)->red(worst) 256-color -------
 ;; gradient for the bench-suite tables below. Terminal-only (never applied to
@@ -405,7 +478,8 @@
 
       ; ---- print both tables -------------------------------------------------
 
-      (display "bench (cross-language CPU workloads)\n")
+      (display (string-append "bench (cross-language CPU workloads, single-threaded — 1 of "
+                               (number->string hw-cpu-cores) " logical cores)\n"))
       (display "measurements (seconds)\n")
       (display (bench-table->string measurement-headers-colored measurement-rows-colored measurement-aligns 1))
       (newline)
@@ -413,14 +487,27 @@
       (display (bench-table->string matrix-headers-colored matrix-rows-colored matrix-aligns))
       (newline)
 
-      (if want-html?
-          (string-append
-           "<h2>bench: measurements (seconds)</h2>\n"
-           (bench-table->html measurement-headers measurement-rows measurement-aligns)
-           "<h2>bench: comparison matrix</h2>\n"
-           "<p>row's total time / column's total time</p>\n"
-           (bench-table->html matrix-headers matrix-rows matrix-aligns))
-          ""))))
+      (list
+       (cons 'html
+             (if want-html?
+                 (string-append
+                  "<h2>bench: measurements (seconds)</h2>\n"
+                  "<p>single-threaded — 1 of " (number->string hw-cpu-cores) " logical cores</p>\n"
+                  (bench-table->html measurement-headers measurement-rows measurement-aligns)
+                  "<h2>bench: comparison matrix</h2>\n"
+                  "<p>row's total time / column's total time</p>\n"
+                  (bench-table->html matrix-headers matrix-rows matrix-aligns))
+                 ""))
+       (cons 'markdown
+             (if want-markdown?
+                 (string-append
+                  "## bench: measurements (seconds)\n\n"
+                  "single-threaded — 1 of " (number->string hw-cpu-cores) " logical cores\n\n"
+                  (bench-table->markdown measurement-headers measurement-rows measurement-aligns) "\n\n"
+                  "## bench: comparison matrix\n\n"
+                  "row's total time / column's total time\n\n"
+                  (bench-table->markdown matrix-headers matrix-rows matrix-aligns) "\n")
+                 ""))))))
 
 ;; ===========================================================================
 ;; Suite 2: todo-app -- HTTP-benchmarks the demo-todo web-app twins with wrk
@@ -774,31 +861,54 @@
   (print-latency-table!)
   (print-rankings!)
 
-  (if want-html?
-      (string-append
-       "<h2>todo-app: results (req/s)</h2>\n"
-       (bench-table->html (results-table-headers) (results-table-rows) (results-table-aligns))
-       "<h2>todo-app: latency (ms)</h2>\n"
-       (bench-table->html (latency-table-headers) (latency-rows) (latency-table-aligns))
-       "<h2>todo-app: ranked by HTML throughput</h2>\n"
-       (bench-table->html (ranking-headers) (ranked-rows (lambda (row) (stats-req (cadr row)))) (ranking-aligns))
-       "<h2>todo-app: ranked by JSON throughput</h2>\n"
-       (bench-table->html (ranking-headers) (ranked-rows (lambda (row) (stats-req (caddr row)))) (ranking-aligns)))
-      ""))
+  (list
+   (cons 'html
+         (if want-html?
+             (string-append
+              "<h2>todo-app: results (req/s)</h2>\n"
+              (bench-table->html (results-table-headers) (results-table-rows) (results-table-aligns))
+              "<h2>todo-app: latency (ms)</h2>\n"
+              (bench-table->html (latency-table-headers) (latency-rows) (latency-table-aligns))
+              "<h2>todo-app: ranked by HTML throughput</h2>\n"
+              (bench-table->html (ranking-headers) (ranked-rows (lambda (row) (stats-req (cadr row)))) (ranking-aligns))
+              "<h2>todo-app: ranked by JSON throughput</h2>\n"
+              (bench-table->html (ranking-headers) (ranked-rows (lambda (row) (stats-req (caddr row)))) (ranking-aligns)))
+             ""))
+   (cons 'markdown
+         (if want-markdown?
+             (string-append
+              "## todo-app: results (req/s)\n\n"
+              (bench-table->markdown (results-table-headers) (results-table-rows) (results-table-aligns)) "\n\n"
+              "## todo-app: latency (ms)\n\n"
+              (bench-table->markdown (latency-table-headers) (latency-rows) (latency-table-aligns)) "\n\n"
+              "## todo-app: ranked by HTML throughput\n\n"
+              (bench-table->markdown (ranking-headers) (ranked-rows (lambda (row) (stats-req (cadr row)))) (ranking-aligns)) "\n\n"
+              "## todo-app: ranked by JSON throughput\n\n"
+              (bench-table->markdown (ranking-headers) (ranked-rows (lambda (row) (stats-req (caddr row)))) (ranking-aligns)) "\n")
+             ""))))
 
 ;; ===========================================================================
 ;; Run whichever suite(s) --only selects, bench first, then write the
-;; combined --html report if requested.
+;; combined --html/--markdown report(s) if requested.
 ;; ===========================================================================
 
-(define html-fragments
+(define suite-results
   (append
    (if (run-bench-suite?) (list (run-bench-suite!)) '())
    (if (run-todo-app-suite?) (list (run-todo-app-suite!)) '())))
 
+(define (fragments-of key)
+  (apply string-append (map (lambda (r) (cdr (assq key r))) suite-results)))
+
 (if want-html?
     (begin
-      (write-html-report "competition/bench.html" "creme bench"
-                          (apply string-append html-fragments))
+      (write-html-report "competition/bench.html" "creme bench" (fragments-of 'html))
       (display "wrote competition/bench.html")
+      (newline)))
+
+(if want-markdown?
+    (begin
+      (write-markdown-report markdown-report-path "creme bench"
+                              (string-append (environment-markdown) (fragments-of 'markdown)))
+      (display (string-append "wrote " markdown-report-path))
       (newline)))
