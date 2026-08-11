@@ -51,8 +51,20 @@ describe "builtins: arithmetic" do
     w("(/ 1.0 4)").should eq("0.25")
   end
 
-  it "/ raises on division by zero" do
+  it "/ raises on division by zero when both operands are exact" do
     expect_raises(Creme::SchemeRuntimeError, /division by zero/) { w("(/ 1 0)") }
+  end
+
+  it "/ by an inexact positive zero yields +inf.0" do
+    w("(/ 1.0 0.0)").should eq("+inf.0")
+  end
+
+  it "/ by an inexact zero with a negative numerator yields -inf.0" do
+    w("(/ -1.0 0.0)").should eq("-inf.0")
+  end
+
+  it "/ of an inexact zero by an inexact zero yields +nan.0" do
+    w("(/ 0.0 0.0)").should eq("+nan.0")
   end
 
   it "modulo computes the modulus" do

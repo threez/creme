@@ -177,7 +177,10 @@ module Creme::BuiltinHelpers
   # Exact/exact division produces an exact SchemeRational (auto-collapsing
   # to SchemeInt when it divides evenly) instead of falling back to an
   # inexact float — e.g. (/ 1 3) yields exact 1/3, not 0.333...
-  # Division by zero raises whether the zero is exact or inexact (float).
+  # Division by an exact zero always raises. Division by an inexact
+  # (float) zero instead follows IEEE-754 float semantics, producing
+  # +inf.0/-inf.0/+nan.0 as appropriate — Crystal's native Float64
+  # division already does the right thing here.
   def divide(a : SchemeValue, b : SchemeValue) : SchemeValue
     return complex_div(to_complex(a, "/"), to_complex(b, "/")) if a.is_a?(SchemeComplex) || b.is_a?(SchemeComplex)
     rank = Math.max(Creme.num_rank(a, "/"), Creme.num_rank(b, "/"))
@@ -192,7 +195,6 @@ module Creme::BuiltinHelpers
       end
     else
       bf = Creme.as_f64(b, "/")
-      raise SchemeRuntimeError.new("/: division by zero") if bf == 0.0
       SchemeFloat.new(Creme.as_f64(a, "/") / bf)
     end
   end
