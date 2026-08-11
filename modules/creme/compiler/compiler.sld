@@ -360,24 +360,38 @@
     ;; always emitted Move/GetUpval/GetGlobal + a separate trailing Return,
     ;; a real extra-instruction codegen gap in every tail-position variable
     ;; reference, not just the local case).
+    ;; A hygiene alias (syntax-global-alias, populated by sr-apply-hygiene
+    ;; below) always forces straight to a global read/return under its
+    ;; ORIGINAL name, skipping local/upvalue resolution entirely — this is
+    ;; what protects a macro's own free reference to a global/macro from
+    ;; being hijacked by a use-site local of the same original name (the
+    ;; alias itself is a fresh gensym'd name that can never itself be a
+    ;; local, so without this check it would harmlessly but pointlessly
+    ;; fall through to the plain global branch below anyway, just under
+    ;; the wrong (alias) name).
     (define (compile-var-ref! fc name dest tail?)
-      (let ((local (fcomp-lookup-local fc name)))
-        (cond
-          (local
-           (if tail?
-               (chunk-emit! (fcomp-chunk fc) 'Return local 0 0 0)
-               (chunk-emit! (fcomp-chunk fc) 'Move dest local 0 0)))
-          (else
-           (let ((up (fcomp-resolve-upvalue! fc name)))
-             (cond
-               (up
-                (if tail?
-                    (chunk-emit! (fcomp-chunk fc) 'ReturnUpval up 0 0 0)
-                    (chunk-emit! (fcomp-chunk fc) 'GetUpval dest up 0 0)))
-               (else
-                (if tail?
-                    (chunk-emit! (fcomp-chunk fc) 'ReturnGlobal (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)) 0 0 0)
-                    (chunk-emit! (fcomp-chunk fc) 'GetGlobal dest (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)) 0 0)))))))))
+      (let ((original (syntax-global-alias-lookup name)))
+        (if original
+            (if tail?
+                (chunk-emit! (fcomp-chunk fc) 'ReturnGlobal (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc original)) 0 0 0)
+                (chunk-emit! (fcomp-chunk fc) 'GetGlobal dest (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc original)) 0 0))
+            (let ((local (fcomp-lookup-local fc name)))
+              (cond
+                (local
+                 (if tail?
+                     (chunk-emit! (fcomp-chunk fc) 'Return local 0 0 0)
+                     (chunk-emit! (fcomp-chunk fc) 'Move dest local 0 0)))
+                (else
+                 (let ((up (fcomp-resolve-upvalue! fc name)))
+                   (cond
+                     (up
+                      (if tail?
+                          (chunk-emit! (fcomp-chunk fc) 'ReturnUpval up 0 0 0)
+                          (chunk-emit! (fcomp-chunk fc) 'GetUpval dest up 0 0)))
+                     (else
+                      (if tail?
+                          (chunk-emit! (fcomp-chunk fc) 'ReturnGlobal (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)) 0 0 0)
+                          (chunk-emit! (fcomp-chunk fc) 'GetGlobal dest (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)) 0 0)))))))))))
 
     ;; ---------------------------------------------------------------------
     ;; syntax-rules macros -- non-hygienic (plain substitution, no renaming),
@@ -403,8 +417,14 @@
 
     (define macro-table '())
     (define (macro-register! name transformer) (set! macro-table (cons (cons name transformer) macro-table)))
+    ;; A hygiene alias (see syntax-global-alias/sr-apply-hygiene) always
+    ;; looks itself up under its ORIGINAL name — same reasoning as
+    ;; compile-var-ref!'s own alias check, for a macro's own free
+    ;; reference to ANOTHER macro (e.g. one macro's template expanding
+    ;; into a call to a different macro).
     (define (macro-lookup name)
-      (let ((hit (assq name macro-table)))
+      (let* ((original (syntax-global-alias-lookup name))
+             (hit (assq (if original original name) macro-table)))
         (if hit (cdr hit) #f)))
 
     (define (sr-pattern-vars pat literals)
@@ -500,6 +520,277 @@
     (define (sr-iota n)
       (let loop ((i 0) (acc '())) (if (= i n) (reverse acc) (loop (+ i 1) (cons i acc)))))
     (define (sr-list-ref lst i) (if (= i 0) (car lst) (sr-list-ref (cdr lst) (- i 1))))
+    (define (sr-dedupe lst)
+      (cond ((null? lst) '()) ((memq (car lst) (cdr lst)) (sr-dedupe (cdr lst))) (else (cons (car lst) (sr-dedupe (cdr lst))))))
+
+    ;; ---------------------------------------------------------------------
+    ;; Hygiene: mirrors src/creme/compile/syntax_rules.cr's own two
+    ;; mechanisms exactly (see that file's header comment for the full
+    ;; design), adapted to this compiler's macro-table/late-bound-global
+    ;; model:
+    ;;
+    ;;   1. Binder renaming: every literal template symbol introduced as a
+    ;;      NEW binding (a lambda/let-family/do/define/case-lambda bound-
+    ;;      name slot written literally in the template, never a pattern
+    ;;      variable) is alpha-renamed to a fresh, process-unique name.
+    ;;   2. Free-reference protection: every OTHER literal template symbol
+    ;;      (a free reference — not itself a binder) is ALSO renamed to a
+    ;;      fresh alias, recorded in syntax-global-alias, which compile-
+    ;;      var-ref!/macro-lookup consult to force resolution straight to
+    ;;      the ORIGINAL name's global/macro-table meaning, bypassing
+    ;;      whatever locals the use site's own lexical scope happens to
+    ;;      contain. Unlike native, this can safely rename UNCONDITIONALLY
+    ;;      (no "does this resolve to something" check first) — this
+    ;;      compiler has no compile-time global-binding registry to check
+    ;;      against at all (see this section's own header comment on
+    ;;      compile-var-ref!/global-ref-name), and every macro actually
+    ;;      written against this compiler already only ever free-
+    ;;      references globals/macro-table entries (confirmed against
+    ;;      modules/creme/foreign.sld's own define-foreign-record/
+    ;;      define-foreign-function macros) — never an enclosing lexical
+    ;;      local, which this mechanism can't (and doesn't try to) protect.
+    ;;
+    ;; ALSO unlike native (whose analyzer lets a local variable shadow a
+    ;; special-form keyword, so a macro's own `if`/`let`/etc. genuinely
+    ;; needs protecting): compile-form! dispatches special forms via a
+    ;; fixed `(eq? head 'if)`-style chain that never consults lexical
+    ;; scope at all (see compile-form!'s own header comment) — a special
+    ;; form can NEVER be locally shadowed here, so it needs no protection,
+    ;; and — critically — must NEVER be renamed, or that literal `eq?`
+    ;; dispatch would simply fail to recognize it at all. sr-hygiene-
+    ;; excluded is exactly compile-form!'s own special-form keyword list
+    ;; (plus syntax-rules' own auxiliary keywords) for this reason.
+    ;; Note: no λ alternative — unlike native, this compiler's compile-form!
+    ;; only ever dispatches on the literal `lambda` keyword, never `λ`.
+    (define sr-hygiene-excluded
+      '(... _ else => unquote unquote-splicing quasiquote quote
+        if lambda case-lambda delay delay-force
+        let let* letrec letrec* let-values let*-values define-values
+        guard parameterize when unless and or cond case do cond-expand
+        begin set! define define-record-type define-syntax defmacro
+        import let-syntax letrec-syntax))
+
+    (define (sr-classifiable? name bindings literals)
+      (and (not (assq name bindings)) (not (memq name literals)) (not (memq name sr-hygiene-excluded))))
+
+    (define (sr-formal-binders formals bindings literals)
+      (cond
+        ((symbol? formals) (if (sr-classifiable? formals bindings literals) (list formals) '()))
+        ((pair? formals)
+         (append (if (and (symbol? (car formals)) (sr-classifiable? (car formals) bindings literals)) (list (car formals)) '())
+                 (sr-formal-binders (cdr formals) bindings literals)))
+        (else '())))
+
+    ;; `((name init) ...)`-shaped let/let*/letrec/letrec*/do bindings.
+    (define (sr-let-binders clauses bindings literals)
+      (if (not (pair? clauses))
+          '()
+          (append
+            (if (and (pair? (car clauses)) (symbol? (caar clauses)) (sr-classifiable? (caar clauses) bindings literals))
+                (cons (caar clauses) (sr-collect-binders (cdar clauses) bindings literals))
+                '())
+            (sr-let-binders (cdr clauses) bindings literals))))
+
+    ;; `((formals expr) ...)`-shaped let-values/let*-values bindings.
+    (define (sr-let-values-binders clauses bindings literals)
+      (if (not (pair? clauses))
+          '()
+          (append
+            (if (pair? (car clauses))
+                (append (sr-formal-binders (caar clauses) bindings literals)
+                        (sr-collect-binders (cdar clauses) bindings literals))
+                '())
+            (sr-let-values-binders (cdr clauses) bindings literals))))
+
+    (define (sr-case-lambda-binders clauses bindings literals)
+      (if (not (pair? clauses))
+          '()
+          (append
+            (if (pair? (car clauses))
+                (append (sr-formal-binders (caar clauses) bindings literals)
+                        (sr-collect-binders (cdar clauses) bindings literals))
+                '())
+            (sr-case-lambda-binders (cdr clauses) bindings literals))))
+
+    ;; `((field-name accessor-name [mutator-name]) ...)`-shaped
+    ;; define-record-type field clauses -- field-name is included too (not
+    ;; just accessor/mutator): it's never separately bound as an external
+    ;; identifier, but it DOES need to be renamed CONSISTENTLY with its own
+    ;; occurrence in the constructor spec (sr-formal-binders below), since
+    ;; define-record-type cross-checks the constructor's field list
+    ;; against each field clause's own field-name by (originally, textual)
+    ;; equality -- renaming both occurrences of a given field-name to the
+    ;; SAME fresh name (one entry per distinct original name, applied
+    ;; everywhere -- see sr-apply-hygiene) preserves that correspondence.
+    (define (sr-record-type-field-binders fields bindings literals)
+      (if (not (pair? fields))
+          '()
+          (append (sr-formal-binders (car fields) bindings literals)
+                  (sr-record-type-field-binders (cdr fields) bindings literals))))
+
+    ;; Pass 1: every literal template symbol introduced as a NEW binding by
+    ;; a literally-written lambda/let-family/do/define/case-lambda form
+    ;; anywhere in `template` — see syntax_rules.cr's collect_binders for
+    ;; the exact same design, native side.
+    (define (sr-collect-binders template bindings literals)
+      (if (not (pair? template))
+          '()
+          (let ((head (car template)) (rest (cdr template)))
+            (cond
+              ((eq? head 'quote) '())
+              ((eq? head 'quasiquote) (sr-collect-binders-qq rest bindings literals 1))
+              ((eq? head 'lambda)
+               (if (pair? rest)
+                   (append (sr-formal-binders (car rest) bindings literals) (sr-collect-binders (cdr rest) bindings literals))
+                   '()))
+              ((memq head '(let let* letrec letrec*))
+               (if (not (pair? rest))
+                   '()
+                   (let ((first (car rest)))
+                     (if (symbol? first)
+                         ;; named let: (let loop ((v init)...) body...)
+                         (append (if (sr-classifiable? first bindings literals) (list first) '())
+                                 (if (pair? (cdr rest))
+                                     (append (sr-let-binders (cadr rest) bindings literals)
+                                             (sr-collect-binders (cddr rest) bindings literals))
+                                     '()))
+                         (append (sr-let-binders first bindings literals) (sr-collect-binders (cdr rest) bindings literals))))))
+              ((eq? head 'do)
+               (if (pair? rest)
+                   (append (sr-let-binders (car rest) bindings literals) (sr-collect-binders (cdr rest) bindings literals))
+                   '()))
+              ((eq? head 'define)
+               (if (not (pair? rest))
+                   '()
+                   (let ((target (car rest)))
+                     (append
+                       (if (pair? target)
+                           (append (if (sr-classifiable? (car target) bindings literals) (list (car target)) '())
+                                   (sr-formal-binders (cdr target) bindings literals))
+                           (if (sr-classifiable? target bindings literals) (list target) '()))
+                       (sr-collect-binders (cdr rest) bindings literals)))))
+              ((eq? head 'define-values)
+               (if (pair? rest)
+                   (append (sr-formal-binders (car rest) bindings literals) (sr-collect-binders (cdr rest) bindings literals))
+                   '()))
+              ((memq head '(let-values let*-values))
+               (if (pair? rest)
+                   (append (sr-let-values-binders (car rest) bindings literals) (sr-collect-binders (cdr rest) bindings literals))
+                   '()))
+              ((eq? head 'case-lambda) (sr-case-lambda-binders rest bindings literals))
+              ((eq? head 'define-record-type)
+               ;; (define-record-type type-name ctor-spec pred-name field-clause...)
+               ;; -- type-name/pred-name/every ctor-spec+field-clause name
+               ;; (ctor-name, each field-name, each accessor/mutator-name)
+               ;; are all binders. ctor-spec may be #f (no constructor) --
+               ;; sr-formal-binders already no-ops on a non-symbol/pair.
+               (if (and (pair? rest) (pair? (cdr rest)) (pair? (cddr rest)))
+                   (let ((type-name (car rest)) (ctor-spec (cadr rest)) (pred-name (caddr rest)) (fields (cdddr rest)))
+                     (append
+                       (sr-formal-binders type-name bindings literals)
+                       (sr-formal-binders ctor-spec bindings literals)
+                       (sr-formal-binders pred-name bindings literals)
+                       (sr-record-type-field-binders fields bindings literals)))
+                   '()))
+              (else (append (sr-collect-binders head bindings literals) (sr-collect-binders rest bindings literals)))))))
+
+    ;; Quasiquote-depth-aware binder walk: literal (non-unquoted) regions
+    ;; are pure data (a `let`/`lambda` there is quoted data, not real
+    ;; code) and are never classified; unquote/unquote-splicing at the
+    ;; innermost depth re-enters ordinary code mode.
+    (define (sr-collect-binders-qq template bindings literals depth)
+      (if (not (pair? template))
+          '()
+          (let ((head (car template)))
+            (cond
+              ((and (memq head '(unquote unquote-splicing)) (= depth 1))
+               (if (pair? (cdr template)) (sr-collect-binders (cadr template) bindings literals) '()))
+              ((memq head '(unquote unquote-splicing))
+               (sr-collect-binders-qq (cdr template) bindings literals (- depth 1)))
+              ((eq? head 'quasiquote) (sr-collect-binders-qq (cdr template) bindings literals (+ depth 1)))
+              (else (append (sr-collect-binders-qq head bindings literals depth)
+                            (sr-collect-binders-qq (cdr template) bindings literals depth)))))))
+
+    ;; Pass 2: every remaining literal template symbol used as a free
+    ;; reference (not itself a Pass-1 binder, pattern variable, literal,
+    ;; or excluded keyword) — quote/quasiquote handled the same skip-
+    ;; literal-data way as Pass 1.
+    (define (sr-collect-free-refs template bindings literals binders)
+      (cond
+        ((symbol? template)
+         (if (and (sr-classifiable? template bindings literals) (not (memq template binders))) (list template) '()))
+        ((pair? template)
+         (let ((head (car template)))
+           (cond
+             ((eq? head 'quote) '())
+             ((eq? head 'quasiquote) (sr-collect-free-refs-qq (cdr template) bindings literals binders 1))
+             (else (append (sr-collect-free-refs head bindings literals binders)
+                           (sr-collect-free-refs (cdr template) bindings literals binders))))))
+        (else '())))
+
+    (define (sr-collect-free-refs-qq template bindings literals binders depth)
+      (if (not (pair? template))
+          '()
+          (let ((head (car template)))
+            (cond
+              ((and (memq head '(unquote unquote-splicing)) (= depth 1))
+               (if (pair? (cdr template)) (sr-collect-free-refs (cadr template) bindings literals binders) '()))
+              ((memq head '(unquote unquote-splicing))
+               (sr-collect-free-refs-qq (cdr template) bindings literals binders (- depth 1)))
+              ((eq? head 'quasiquote) (sr-collect-free-refs-qq (cdr template) bindings literals binders (+ depth 1)))
+              (else (append (sr-collect-free-refs-qq head bindings literals binders depth)
+                            (sr-collect-free-refs-qq (cdr template) bindings literals binders depth)))))))
+
+    ;; alias-symbol -> original-symbol, forced by compile-var-ref!/macro-
+    ;; lookup to bypass local/upvalue resolution entirely (see this
+    ;; section's own header comment) -- process-wide, like macro-table,
+    ;; since aliases are fresh gensym'd names that never need un-registering.
+    (define syntax-global-alias '())
+    (define (syntax-global-alias-lookup name)
+      (let ((hit (assq name syntax-global-alias))) (if hit (cdr hit) #f)))
+
+    ;; Computes this expansion's hygienic rename/alias entries and merges
+    ;; them into `bindings` as ordinary pattern-substitution entries —
+    ;; already exactly what sr-expand's own symbol case does, so no change
+    ;; is needed there. See this section's own header comment for why
+    ;; free references are aliased unconditionally here (no resolvability
+    ;; check, unlike native).
+    ;; Free-reference aliasing is narrowed to names CURRENTLY registered in
+    ;; macro-table (a real compile-time structure, unlike globals — see
+    ;; this section's own header comment) — i.e. only "this macro's
+    ;; template calls into another macro" is protected here. Discovered
+    ;; via a real regression: aliasing every free reference unconditionally
+    ;; (the original design, matching the header comment's original
+    ;; reasoning) breaks a template whose free reference is actually meant
+    ;; to resolve as an ENCLOSING LEXICAL LOCAL, not a global — forcing
+    ;; global resolution for it turns a documented, accepted "unhygienic:
+    ;; use-site shadowing wins" case (see spec/creme/r7rs/
+    ;; ch04_expressions_spec.scm's own let-syntax case) into a hard
+    ;; "unbound variable" crash instead. Since this compiler has no
+    ;; compile-time global-binding registry to check "is this genuinely a
+    ;; global" against (confirmed — see compile-var-ref!/global-ref-name's
+    ;; own header comment), and a local can never be confused with a
+    ;; macro-table entry, this is the one safe subset: it still protects
+    ;; macro-to-macro composition (mirrors the special-form case, which
+    ;; needs no protection at all here — compile-form! never consults
+    ;; lexical scope for those either) without risking miscompiling a
+    ;; template that legitimately closes over an enclosing local. Ordinary
+    ;; global-procedure free references are NOT protected here — a real,
+    ;; narrower scope than native (which can and does check its own
+    ;; definition-time env), left as a known asymmetry rather than risking
+    ;; another crash like this one.
+    (define (sr-apply-hygiene template bindings literals)
+      (let* ((binders (sr-dedupe (sr-collect-binders template bindings literals)))
+             (free-refs (sr-dedupe (sr-collect-free-refs template bindings literals binders))))
+        (append
+          (map (lambda (name) (cons name (gensym (symbol->string name)))) binders)
+          (append
+            (map (lambda (name)
+                   (let ((alias (gensym (symbol->string name))))
+                     (set! syntax-global-alias (cons (cons alias name) syntax-global-alias))
+                     (cons name alias)))
+                 (sr-filter macro-lookup free-refs)))
+          bindings)))
 
     (define (sr-make-transformer literals clauses)
       (lambda (form)
@@ -510,7 +801,7 @@
                      (pattern (car clause))
                      (template (cadr clause))
                      (bindings (sr-match (cdr pattern) (cdr form) literals)))
-                (if bindings (sr-expand template bindings) (loop (cdr cs))))))))
+                (if bindings (sr-expand template (sr-apply-hygiene template bindings literals)) (loop (cdr cs))))))))
 
     ;; Compiles `forms` as an entirely fresh, independent top-level program
     ;; (its own <fcomp>, its own Chunk) and immediately runs the result
@@ -1266,22 +1557,30 @@
     ;; rebind a fusable primitive's name exactly like a top-level define
     ;; can, so it's tracked the same way (mark-redefined! is defined further
     ;; down, alongside the fusion machinery it protects).
+    ;; A hygiene alias on the set! target (a macro's own free `set!` on a
+    ;; global) forces straight to a global write under its ORIGINAL name --
+    ;; same reasoning as compile-var-ref!'s own alias check.
     (define (compile-set! fc expr dest tail?)
       (let* ((name (cadr expr))
              (val-expr (caddr expr))
              (ch (fcomp-chunk fc))
-             (val-reg (fcomp-alloc-reg! fc)))
+             (val-reg (fcomp-alloc-reg! fc))
+             (original (syntax-global-alias-lookup name)))
         (compile-expr! fc val-expr val-reg #f)
-        (let ((local (fcomp-lookup-local fc name)))
-          (cond
-            (local (chunk-emit! ch 'Move local val-reg 0 0))
-            (else
-             (let ((up (fcomp-resolve-upvalue! fc name)))
-               (if up
-                   (chunk-emit! ch 'SetUpval up val-reg 0 0)
-                   (begin
-                     (chunk-emit! ch 'SetGlobal (chunk-add-const! ch name) val-reg 0 0)
-                     (mark-redefined! name)))))))
+        (if original
+            (begin
+              (chunk-emit! ch 'SetGlobal (chunk-add-const! ch original) val-reg 0 0)
+              (mark-redefined! original))
+            (let ((local (fcomp-lookup-local fc name)))
+              (cond
+                (local (chunk-emit! ch 'Move local val-reg 0 0))
+                (else
+                 (let ((up (fcomp-resolve-upvalue! fc name)))
+                   (if up
+                       (chunk-emit! ch 'SetUpval up val-reg 0 0)
+                       (begin
+                         (chunk-emit! ch 'SetGlobal (chunk-add-const! ch name) val-reg 0 0)
+                         (mark-redefined! name))))))))
         (if tail? (chunk-emit! ch 'Return val-reg 0 0 0))))
 
     ;; A plain incrementing counter, not gensym/hygiene -- good enough for
@@ -2163,12 +2462,19 @@
     ;; be) primitive-fused (wrong arity, non-primitive name, shadowed
     ;; primitive name -- resolve-callee reflects whatever the real binding
     ;; is either way).
+    ;; A hygiene alias forces straight to 'global under its ORIGINAL name,
+    ;; skipping local/upvalue resolution entirely -- same reasoning as
+    ;; compile-var-ref!'s own alias check, just for this SEPARATE
+    ;; callee-fusion resolution path (compile-ordinary-app!).
     (define (resolve-callee fc name)
-      (let ((local (fcomp-lookup-local fc name)))
-        (cond
-          (local (cons 'local local))
-          ((fcomp-resolve-upvalue! fc name) => (lambda (up) (cons 'upvalue up)))
-          (else (cons 'global (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)))))))
+      (let ((original (syntax-global-alias-lookup name)))
+        (if original
+            (cons 'global (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc original)))
+            (let ((local (fcomp-lookup-local fc name)))
+              (cond
+                (local (cons 'local local))
+                ((fcomp-resolve-upvalue! fc name) => (lambda (up) (cons 'upvalue up)))
+                (else (cons 'global (chunk-add-const! (fcomp-chunk fc) (global-ref-name fc name)))))))))
 
     (define (call-op-for kind tail?)
       (cond

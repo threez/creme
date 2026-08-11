@@ -358,7 +358,26 @@ describe "R7RS §4.3.1/4.3.2 Macros (define-syntax/let-syntax/letrec-syntax/synt
     SCM
   end
 
-  pending "letrec-syntax + hygiene stress test (R7RS's own my-or example, whose expansion binds temp/if/let and relies on hygiene to not collide with a use-site shadowing of those same names) fails ('not applicable: 8') since define-syntax/syntax-rules is unhygienic — see README Known caveats"
+  it "letrec-syntax + hygiene stress test (R7RS's own my-or example, whose expansion binds temp/if/let) survives a use-site shadowing of those same names" do
+    # A pre-hygiene implementation used to raise 'not applicable: 8' here:
+    # the use site's own `if`-shadowing lambda (a plain 3-arg procedure)
+    # would get called INSTEAD of the real `if` special form the
+    # template's `(if t t (my-or e2 ...))` needs, eagerly evaluating (and
+    # then trying to invoke) its own arguments regardless of which branch
+    # a real `if` would have taken.
+    w(<<-SCM).should eq("5")
+      (let ((if (lambda (a b c) 'wrong-if)))
+        (letrec-syntax
+          ((my-or (syntax-rules ()
+                    ((my-or) #f)
+                    ((my-or e) e)
+                    ((my-or e1 e2 ...)
+                     (let ((t e1))
+                       (if t t (my-or e2 ...)))))))
+          (let ((t 'shadowed))
+            (my-or #f 5))))
+    SCM
+  end
 
   it "a simple-let macro using dotted/ellipsis patterns expands correctly on the non-error clause" do
     w(<<-SCM).should eq("3")

@@ -366,8 +366,15 @@ module Creme
     # op needed); a global/upvalue has no register to already be in, so
     # ReturnGlobal/ReturnUpval resolve and deliver directly, skipping the
     # register write GetGlobal/GetUpval would otherwise need.
-    private def compile_name_read(fc : FunctionCompiler, name : String, dst : Int32, tail : Bool) : Nil
-      kind, idx = resolve_variable(fc, name)
+    # `forced_global`: set only for a hygienic macro's own free reference
+    # (GlobalRefNode#forced, see that class's own doc comment) — skips
+    # resolve_variable entirely (which would otherwise independently
+    # re-derive local/upvalue-vs-global by walking `fc`'s own scope
+    # tracking, by the SAME name, and rediscover whatever local the
+    # surrounding scope happens to bind `name` to — exactly the capture
+    # this is meant to prevent) and goes straight to a global read/return.
+    private def compile_name_read(fc : FunctionCompiler, name : String, dst : Int32, tail : Bool, forced_global : Bool = false) : Nil
+      kind, idx = forced_global ? {:global, 0} : resolve_variable(fc, name)
       if tail
         ip = case kind
              when :local
@@ -394,12 +401,14 @@ module Creme
       end
     end
 
-    private def compile_name_write(fc : FunctionCompiler, name : String, src : Int32, define : Bool) : Nil
+    # `forced_global`: see compile_name_read's own doc comment — set only
+    # for a hygienic macro's own free `set!` target (SetBangNode#forced).
+    private def compile_name_write(fc : FunctionCompiler, name : String, src : Int32, define : Bool, forced_global : Bool = false) : Nil
       if define && (fc.scope.nil? && fc.is_toplevel?)
         fc.emit(Op::DefGlobal, fc.chunk.add_const(SchemeSym.of(name)), src)
         return
       end
-      kind, idx = resolve_variable(fc, name)
+      kind, idx = forced_global ? {:global, 0} : resolve_variable(fc, name)
       case kind
       when :local
         fc.emit(Op::Move, idx, src) unless idx == src
@@ -421,7 +430,7 @@ module Creme
       when LocalRefNode
         compile_name_read(fc, node.name, dst, tail)
       when GlobalRefNode
-        compile_name_read(fc, node.name, dst, tail)
+        compile_name_read(fc, node.name, dst, tail, forced_global: node.forced?)
       when DefineNode
         mark = fc.next_reg
         value_reg = fc.alloc_reg
@@ -451,7 +460,7 @@ module Creme
         # A set! expression evaluates to the value assigned, not an
         # unspecified/NIL result.
         compile_expr(fc, node.value, dst, false)
-        compile_name_write(fc, node.name, dst, false)
+        compile_name_write(fc, node.name, dst, false, forced_global: node.forced?)
         fc.emit(Op::Return, dst) if tail
       when ThrowNode
         # A malformed form the analyzer detected but whose error must
@@ -2248,6 +2257,7 @@ module Creme
     # nil for anything else (globals/upvalues still need GetGlobal/GetUpval
     # to materialize a value; there's no register to alias for those).
     private def local_register_of?(fc : FunctionCompiler, node : Node) : Int32?
+      return nil if node.is_a?(GlobalRefNode) && node.forced?
       name = case node
              when VarRefNode    then node.name
              when LocalRefNode  then node.name
@@ -2379,6 +2389,7 @@ module Creme
     # the mirror image of local_register_of?, for a variable resolving to
     # :upvalue instead of :local. Used by both Up-family fusions below.
     private def up_operand?(fc : FunctionCompiler, node : Node) : Int32?
+      return nil if node.is_a?(GlobalRefNode) && node.forced?
       name = case node
              when VarRefNode    then node.name
              when LocalRefNode  then node.name
@@ -2747,6 +2758,13 @@ module Creme
              when GlobalRefNode then node.name
              else                    return nil
              end
+      # A hygiene-forced GlobalRefNode (see its own doc comment) must skip
+      # resolve_variable here too — same reasoning as compile_name_read —
+      # this call-fusion fast path is a SEPARATE name-based re-resolution
+      # site that would otherwise silently undo the same protection.
+      if node.is_a?(GlobalRefNode) && node.forced?
+        return {:global, fc.chunk.add_const(SchemeSym.of(name))}
+      end
       kind, idx = resolve_variable(fc, name)
       case kind
       when :local, :upvalue then {kind, idx}

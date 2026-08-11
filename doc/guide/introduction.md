@@ -38,9 +38,8 @@ say so in their [library reference](libraries.md) entry.
 
 creme is a research implementation with a deliberately honest scope. It
 implements the large majority of R7RS-small, but a few areas are intentionally
-limited (unhygienic macros, escape-only `call/cc`, `Int64`-backed rationals, and
-more). These are documented up front in the README's **Known caveats** section —
-read them before relying on an edge case.
+limited (escape-only `call/cc`, and more). These are documented up front in the
+README's **Known caveats** section — read them before relying on an edge case.
 
 ## Where to go next
 

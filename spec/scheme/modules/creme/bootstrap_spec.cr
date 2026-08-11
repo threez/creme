@@ -80,7 +80,18 @@ describe "bootstrap module" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     Creme.run_source(interp, %((import (creme bootstrap)) (define-syntax my-swap! (syntax-rules () ((_ a b) (let ((tmp a)) (set! a b) (set! b tmp)))))))
     result = Creme.run_source(interp, %((expand-if-macro '(my-swap! x y))))
-    result.write_string.should eq("(#t let ((tmp x)) (set! x y) (set! y tmp))")
+    # Hygiene (see syntax_rules.cr) alpha-renames every template-introduced
+    # BINDER that isn't a pattern variable — here, `tmp` — to a fresh,
+    # process-unique name. A template's free references to special forms
+    # (`let`/`set!`) are instead protected via a non-textual marker (see
+    # SchemeSym#forced_free_ref) that only this process's own analyzer
+    # understands, so they stay written exactly as `let`/`set!` here (any
+    # other consumer of this raw expansion — introspection, the self-hosted
+    # compiler bridge, an eventual icecreme port — sees byte-identical text
+    # to before hygiene). `x`/`y` (pattern-variable-substituted, use-site-
+    # supplied) stay exactly as given too. The exact counter suffix isn't a
+    # stable contract, so match structurally instead of hardcoding it.
+    result.write_string.should match(/^\(#t let \(\((tmp~\d+) x\)\) \(set! x y\) \(set! y \1\)\)$/)
   end
 
   it "expand-if-macro returns #f for an ordinary procedure or unbound name" do

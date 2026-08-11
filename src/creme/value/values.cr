@@ -177,6 +177,24 @@ module Creme
     include SchemeBaseValue
     getter name : String
 
+    # Set ONLY on a deliberately non-interned SchemeSym instance minted by
+    # syntax_rules.cr's apply_hygiene for a macro template's free reference
+    # (to a special form/global/macro) that resolves at the macro's OWN
+    # definition point — never on an ordinary SchemeSym.of-interned
+    # instance (which is shared process-wide by name, so mutating this
+    # flag on one would incorrectly mark every use of that name). Deliberately
+    # NOT a renamed name (unlike a hygienic BINDER rename): this symbol's
+    # `.name`/written form stays byte-identical to before hygiene, so any
+    # OTHER consumer of the raw expanded s-expression that only looks at
+    # `.name` (the self-hosted-compiler bridge, expand-if-macro
+    # introspection, an eventual icecreme-side hygiene implementation) sees
+    # exactly what it always has — this flag only has meaning to THIS
+    # SAME process's own analyzer (analyzer.cr's analyze_cons/analyze_app/
+    # analyze_var/analyze_set), which checks it (by object, not by name) to
+    # force resolution back to this reference's definition-time meaning,
+    # bypassing whatever the use site's own local scope contains.
+    property? forced_free_ref : Bool = false
+
     @@table = {} of String => SchemeSym
     @@table_mutex = Mutex.new
 

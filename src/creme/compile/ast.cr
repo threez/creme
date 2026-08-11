@@ -72,12 +72,23 @@ module Creme
   # over a `let`-bound name. Inline-caches the resolved value keyed on the root
   # env's version, so a hot loop with no top-level (re)definition skips the
   # global hash lookup entirely.
+  #
+  # `forced`: set only for a hygienic macro's own free reference (see
+  # analyzer.cr's analyze_var/syntax_rules.cr's apply_hygiene) — such a
+  # reference is NOT provably free the ordinary way (the surrounding scope
+  # may well have `name` locally bound; that's exactly the capture this is
+  # protecting against), so the bytecode compiler's own name-based
+  # local/upvalue resolution (compile_name_read/resolve_variable, which
+  # would otherwise re-derive local-vs-global by walking its own scope
+  # tracking and rediscover that same local) must be skipped entirely for
+  # this one reference, going straight to a global lookup by `name`.
   class GlobalRefNode < Node
     getter name : String
+    getter? forced : Bool
     property cache_value : SchemeValue?
     property cache_version : Int32 = -1
 
-    def initialize(@name : String, pos : SourcePos? = nil)
+    def initialize(@name : String, pos : SourcePos? = nil, @forced : Bool = false)
       super(pos)
     end
   end
@@ -166,11 +177,14 @@ module Creme
 
   # (set! name value). Resolved by name at eval time (env.set!), which bumps the
   # target frame's version — invalidating any global inline cache of `name`.
+  # `forced`: see GlobalRefNode's own doc comment — set only for a hygienic
+  # macro's own free `set!` target, forcing straight to a global write.
   class SetBangNode < Node
     getter name : String
     getter value : Node
+    getter? forced : Bool
 
-    def initialize(@name : String, @value : Node, pos : SourcePos? = nil)
+    def initialize(@name : String, @value : Node, pos : SourcePos? = nil, @forced : Bool = false)
       super(pos)
     end
   end

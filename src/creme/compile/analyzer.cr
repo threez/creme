@@ -106,7 +106,7 @@ module Creme
     def analyze(sexpr : SchemeValue, env : Env, scope : AnalyzerScope = AnalyzerScope::EMPTY, pos : SourcePos? = nil) : Node
       case sexpr
       when SchemeSym
-        analyze_var(sexpr.name, scope, pos)
+        analyze_var(sexpr.name, scope, pos, sexpr.forced_free_ref?)
       when Cons
         analyze_cons(sexpr, env, scope)
       else
@@ -118,7 +118,14 @@ module Creme
     # param/rest local becomes a LocalRefNode (direct slot read); a free
     # variable becomes a GlobalRefNode (version-cached global lookup); a bound-
     # but-not-addressable name (an internal define) stays a name-keyed VarRef.
-    private def analyze_var(name : String, scope : AnalyzerScope, pos : SourcePos? = nil) : Node
+    # `forced` (SchemeSym#forced_free_ref, set only by syntax_rules.cr's
+    # apply_hygiene) always forces straight to a global reference, bypassing
+    # scope entirely — this is what protects a macro's own free reference
+    # (to a special form/global/macro) from being hijacked by a use-site
+    # local of the same name, without changing the symbol's written name at
+    # all (see SchemeSym#forced_free_ref's own doc comment for why).
+    private def analyze_var(name : String, scope : AnalyzerScope, pos : SourcePos? = nil, forced : Bool = false) : Node
+      return GlobalRefNode.new(icecreme_global_name(name, scope), pos, forced: true) if forced
       if addr = scope.address(name)
         LocalRefNode.new(addr[0], addr[1], name, pos)
       elsif scope.bound?(name)
@@ -147,19 +154,26 @@ module Creme
 
     private def analyze_cons(form : Cons, env : Env, scope : AnalyzerScope) : Node
       head = form.car
-      if head.is_a?(SchemeSym) && !scope.bound?(head.name)
+      # A hygiene-forced head (SchemeSym#forced_free_ref — see its own doc
+      # comment) always dispatches as a macro/special-form/global lookup,
+      # bypassing the scope-shadowed check entirely — this is what protects
+      # a macro's own use of e.g. `if`/`let`/another macro from being
+      # hijacked by a use-site local of the same NAME (unchanged; only this
+      # specific SchemeSym object is marked, so the text is unaffected).
+      if head.is_a?(SchemeSym) && (head.forced_free_ref? || !scope.bound?(head.name))
+        name = head.name
         # Macro (expanded at analyze time): a local macro (let-syntax / internal
         # define-syntax|defmacro) from @analyzing_macros, or a global/imported
         # macro from the runtime env. Expand and re-analyze the expansion.
-        if m = @analyzing_macros.lookup(head.name)
+        if m = @analyzing_macros.lookup(name)
           return expand_and_analyze(m, form, env, scope)
         end
-        binding = env.get?(head.name)
+        binding = env.get?(name)
         if binding.is_a?(SchemeSpecialForm)
           return analyze_special_form(binding.kind, form, env, scope)
         elsif binding.is_a?(Macro) || binding.is_a?(SchemeSyntaxRules)
           return expand_and_analyze(binding, form, env, scope)
-        elsif binding.nil? && (kind = SPECIAL_FORM_KEYWORDS[head.name]?)
+        elsif binding.nil? && (kind = SPECIAL_FORM_KEYWORDS[name]?)
           # A keyword not bound as a marker in this env (e.g. a fresh library
           # env, whose chain lacks the special-form markers) is still syntax —
           # fall back to the SPECIAL_FORM_KEYWORDS table for an unbound head.
@@ -246,7 +260,7 @@ module Creme
     # registers it in the runtime env too (needed for macro-as-value / errors).
     private def analyze_define_syntax(form : Cons, env : Env, scope : AnalyzerScope) : Node
       begin
-        name, syntax = build_syntax_rules(form)
+        name, syntax = build_syntax_rules(form, env)
         @analyzing_macros.define(name, syntax)
       rescue SchemeError
         # Malformed: skip registration. The emitted node calls eval_define_syntax
@@ -284,7 +298,7 @@ module Creme
       begin
         Creme.list_to_a(rest.car).each do |binding|
           return malformed("let-syntax: bad binding", form) unless binding.is_a?(Cons)
-          name, syntax = build_syntax_rules(Cons.new(SchemeSym.of("define-syntax"), binding))
+          name, syntax = build_syntax_rules(Cons.new(SchemeSym.of("define-syntax"), binding), env)
           @analyzing_macros.define(name, syntax)
         end
         analyze_plain_let(form, Cons.new(NIL, rest.cdr).as(Cons), env, scope)
@@ -491,6 +505,9 @@ module Creme
       args = Creme.list_to_a(form.cdr)
       return malformed("set!: expects 2 arguments", form) unless args.size == 2
       return malformed("set!: first argument must be a symbol", form) unless (n = args[0]).is_a?(SchemeSym)
+      if n.forced_free_ref?
+        return SetBangNode.new(icecreme_global_name(n.name, scope), analyze(args[1], env, scope), form.pos, forced: true)
+      end
       SetBangNode.new(icecreme_global_name(n.name, scope), analyze(args[1], env, scope), form.pos)
     end
 
@@ -775,6 +792,7 @@ module Creme
       nodes
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def analyze_app(form : Cons, env : Env, scope : AnalyzerScope) : Node
       head = form.car
       args = [] of Node
@@ -794,11 +812,14 @@ module Creme
       # Primitive specialization: a call whose head is a free (non-shadowed)
       # global currently bound to a known builtin, at the exact arity that
       # builtin expects, inlines the op (see PrimCallNode). Guarded at runtime
-      # against redefinition.
-      if head.is_a?(SchemeSym) && !scope.bound?(head.name)
-        if (spec = PRIM_OPS[head.name]?) && args.size == spec[1]
-          b = env.get?(head.name)
-          return PrimCallNode.new(spec[0], head.name, args, b, form, form.pos) if b.is_a?(Builtin)
+      # against redefinition. A hygiene-forced head (see SchemeSym#forced_free_ref)
+      # still fuses to its builtin's fast path via the same env.get? lookup —
+      # its name is unaffected by hygiene (only object identity is marked).
+      if head.is_a?(SchemeSym) && (head.forced_free_ref? || !scope.bound?(head.name))
+        name = head.name
+        if (spec = PRIM_OPS[name]?) && args.size == spec[1]
+          b = env.get?(name)
+          return PrimCallNode.new(spec[0], name, args, b, form, form.pos) if b.is_a?(Builtin)
         elsif args.size == 1
           # car/cdr/caar/.../cddddr — the whole (scheme cxr) accessor family
           # fuses into one PrimOp::Cxr (the car/cdr chain rides in the emitted
@@ -810,7 +831,7 @@ module Creme
           # user redefinition to a non-builtin won't fuse) and what limits this
           # to real accessors (only cxr builtins have cxr-shaped names). The
           # chain and profiler label come from the builtin's own name.
-          b = env.get?(head.name)
+          b = env.get?(name)
           return PrimCallNode.new(PrimOp::Cxr, b.name, args, b, form, form.pos) if b.is_a?(Builtin) && cxr_name?(b.name)
         end
       end

@@ -130,10 +130,23 @@
   (it "expand-if-macro detects and expands a defmacro-defined global"
     (should-equal? (write-to-string (expand-if-macro '(my-list2 1 2 3))) "(#t list 1 2 3)"))
 
+  ;; Hygiene (see src/creme/compile/syntax_rules.cr's header comment on
+  ;; the native side, compiler.sld's own matching section for the self-
+  ;; hosted/icecreme side) alpha-renames my-swap!'s own template-
+  ;; introduced `tmp` to a fresh, process-unique name -- not a stable
+  ;; literal to hardcode (and native's "tmp~N" vs. icecreme/self-hosted's
+  ;; own gensym-based "tmp__N" don't even share a separator), so this
+  ;; checks the shape (both occurrences renamed IDENTICALLY, everything
+  ;; else unchanged) rather than an exact string.
   (it "expand-if-macro detects and expands a define-syntax-defined global"
-    (should-equal?
-      (write-to-string (expand-if-macro '(my-swap! x y)))
-      "(#t let ((tmp x)) (set! x y) (set! y tmp))"))
+    (let* ((result (write-to-string (expand-if-macro '(my-swap! x y))))
+           (prefix "(#t let ((tmp")
+           (prefix-len (string-length prefix)))
+      (should-be-true? (and (>= (string-length result) prefix-len) (string=? (substring result 0 prefix-len) prefix)))
+      (let* ((suffix-end (let loop ((i prefix-len)) (if (char=? (string-ref result i) #\space) i (loop (+ i 1)))))
+             (tmp-name (substring result (- prefix-len 3) suffix-end))
+             (expected (string-append "(#t let ((" tmp-name " x)) (set! x y) (set! y " tmp-name "))")))
+        (should-equal? result expected))))
 
   (it "expand-if-macro returns #f for an ordinary procedure or unbound name"
     (should-equal? (write-to-string (expand-if-macro '(+ 1 2))) "#f")

@@ -252,7 +252,7 @@ end
 
 describe Creme::SchemeSyntaxRules do
   it "displays as #<syntax-rules:name>" do
-    Creme::SchemeSyntaxRules.new("my-if", [] of String, [] of {Creme::SchemeValue, Creme::SchemeValue}).display_string.should eq("#<syntax-rules:my-if>")
+    Creme::SchemeSyntaxRules.new("my-if", [] of String, [] of {Creme::SchemeValue, Creme::SchemeValue}, Creme::Env.new).display_string.should eq("#<syntax-rules:my-if>")
   end
 end
 
