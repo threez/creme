@@ -151,6 +151,17 @@ module Creme
       io.write(bytes)
     end
 
+    # TAG_INT/TAG_RATIONAL's payload: a decimal ASCII string, length-
+    # prefixed exactly like write_pool_string above — reused rather than
+    # a fixed 8-byte int64, so a value that doesn't fit Int64 (a RatInt
+    # that escaped to BigInt) round-trips exactly, with no separate wire
+    # tag needed for "big" vs "small". Parsing (BigInt.new, on the reader
+    # side) happens once, when the chunk's constant pool is deserialized
+    # at load time — never per-reference during execution.
+    private def self.write_int_str(io : IO, v : RatInt) : Nil
+      write_pool_string(io, v.to_s)
+    end
+
     # Source positions carry a filename resolved internally as an absolute
     # path (needed for correct `include`/relative-library resolution
     # regardless of the process's own working directory — see
@@ -391,14 +402,17 @@ module Creme
       case v
       when SchemeInt
         io.write_byte(TAG_INT)
-        write_i64(io, v.value)
+        write_int_str(io, v.value)
+      when SchemeBigInt
+        io.write_byte(TAG_INT)
+        write_int_str(io, v.value)
       when SchemeFloat
         io.write_byte(TAG_FLOAT)
         io.write_bytes(v.value, IO::ByteFormat::LittleEndian)
       when SchemeRational
         io.write_byte(TAG_RATIONAL)
-        write_i64(io, v.numerator)
-        write_i64(io, v.denominator)
+        write_int_str(io, v.numerator)
+        write_int_str(io, v.denominator)
       when SchemeComplex
         io.write_byte(TAG_COMPLEX)
         write_datum_rec(io, v.real, state, pool)

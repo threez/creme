@@ -70,11 +70,47 @@ module Creme
   # as a separately heap-allocated object, so integer arithmetic doesn't box
   # per result. Safe as a value type because SchemeInt is immutable and
   # eq?/eqv?/equal? compare it by value (helpers.cr), never by identity.
+  #
+  # Deliberately plain Int64, NOT RatInt — a struct's size is the size of
+  # its largest field, and SchemeInt is by far the most-copied SchemeValue
+  # variant (every loop counter, index, list element, ...), so widening it
+  # to fit a 16-byte BigInt inline would have tripled sizeof(SchemeInt)
+  # (8 -> 24 bytes) and, transitively, sizeof(SchemeValue) itself — a
+  # measured ~40% slowdown across the board, even for programs that never
+  # come near Int64's range. The overflow escape instead lives in the
+  # sibling SchemeBigInt class below: a class is just an 8-byte pointer in
+  # the SchemeValue union, so the common (never-overflows) case pays
+  # nothing extra. See Creme.int_value, the canonicalizing entry point
+  # that picks between the two.
   struct SchemeInt
     include SchemeBaseValue
     getter value : Int64
 
     def initialize(@value : Int64)
+    end
+
+    def to_display(io : IO) : Nil
+      io << @value
+    end
+  end
+
+  # The overflow escape for SchemeInt — an exact integer too large for
+  # Int64, arbitrary-precision via Crystal's GMP-backed BigInt (require
+  # "big"). A class (heap-allocated), not a struct, so it costs only a
+  # pointer in the SchemeValue union rather than growing every SchemeValue
+  # to fit a 16-byte BigInt inline (see SchemeInt's own doc comment).
+  # Never publicly constructed directly (see Creme.int_value) — a
+  # SchemeBigInt's value NEVER fits Int64 by construction, mirroring
+  # icecreme's own T_BIGINT/make_bigint_from_mpz invariant exactly, so two
+  # mathematically-equal exact integers are always represented identically
+  # (both SchemeInt, or both SchemeBigInt) regardless of computation
+  # history — this is what keeps scheme_equal?/scheme_eqv?/scheme_hash
+  # correct without any special-casing for "which representation."
+  class SchemeBigInt
+    include SchemeBaseValue
+    getter value : BigInt
+
+    def initialize(@value : BigInt)
     end
 
     def to_display(io : IO) : Nil

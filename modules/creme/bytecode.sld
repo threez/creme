@@ -280,12 +280,21 @@
 
     (define (write-i32! sink v) (sink-push-bytes! sink (i32->bytes v)))
 
-    ;; A raw, length-prefixed string -- now used ONLY to write the entries of
-    ;; the global string pool (see chunk->bytes). Every other string/symbol
-    ;; in the format is written as a u24 index into that pool instead.
+    ;; A raw, length-prefixed string -- used to write the entries of the
+    ;; global string pool (see chunk->bytes), AND (below) TAG_INT/
+    ;; TAG_RATIONAL's own payload. Every other string/symbol in the format
+    ;; is written as a u24 index into the pool instead.
     (define (write-pool-string! sink s)
       (write-i32! sink (string-length s))
       (string-for-each (lambda (c) (sink-push-byte! sink (char->integer c))) s))
+
+    ;; TAG_INT/TAG_RATIONAL's payload: a decimal string, same length-
+    ;; prefixed shape as write-pool-string! above, mirroring the native
+    ;; Crystal writer (ChunkSerializer.write_int_str) -- this is what lets
+    ;; an integer/rational too large for this Scheme's own fixnum range
+    ;; still round-trip (number->string/string->number have no such
+    ;; range limit), with no separate "big" tag needed.
+    (define (write-int-str! sink v) (write-pool-string! sink (number->string v)))
 
     ;; Little-endian unsigned 24-/16-bit writes: pool indices and the narrow
     ;; position fields (file-index/line as u24, col as u16). v must be >= 0.
@@ -362,12 +371,12 @@
 
     (define (write-datum! sink pool v)
       (cond
-        ((and (integer? v) (exact? v)) (sink-push-byte! sink 0) (sink-push-bytes! sink (i64->bytes v)))
+        ((and (integer? v) (exact? v)) (sink-push-byte! sink 0) (write-int-str! sink v))
         ((and (real? v) (inexact? v)) (sink-push-byte! sink 1) (write-float64! sink v))
         ((and (exact? v) (rational? v) (not (integer? v)))
          (sink-push-byte! sink 2)
-         (sink-push-bytes! sink (i64->bytes (numerator v)))
-         (sink-push-bytes! sink (i64->bytes (denominator v))))
+         (write-int-str! sink (numerator v))
+         (write-int-str! sink (denominator v)))
         ((and (complex? v) (not (real? v)))
          (sink-push-byte! sink 3)
          (write-datum! sink pool (real-part v))
@@ -561,6 +570,12 @@
     ;; A string/symbol reference: a u24 index into the already-read pool vector.
     (define (read-str-ref! pool src) (vector-ref pool (read-u24! src)))
 
+    ;; The inverse of write-int-str! above -- TAG_INT/TAG_RATIONAL's own
+    ;; payload, read once (at chunk-load time) via string->number rather
+    ;; than a fixed-width byte decode, so a value too large for this
+    ;; Scheme's own fixnum range round-trips exactly.
+    (define (read-int-str! src) (string->number (read-pool-string! src)))
+
     (define (read-float64! src) (bits->flonum (read-i64! src)))
 
     ;; One top-level datum (a const, or a QQ_CONST literal). Datum labels
@@ -587,9 +602,9 @@
              (if (hash-table-contains? labels label)
                  (hash-table-ref labels label)
                  'creme-disassemble-unresolved-cycle)))
-          ((= tag 0) (read-i64! src))
+          ((= tag 0) (read-int-str! src))
           ((= tag 1) (read-float64! src))
-          ((= tag 2) (let* ((n (read-i64! src)) (d (read-i64! src))) (/ n d)))
+          ((= tag 2) (let* ((n (read-int-str! src)) (d (read-int-str! src))) (/ n d)))
           ((= tag 3) (let* ((r (read-datum-rec! pool src labels)) (i (read-datum-rec! pool src labels))) (make-rectangular r i)))
           ((= tag 4) (string->symbol (read-str-ref! pool src)))
           ((= tag 5) (read-str-ref! pool src))

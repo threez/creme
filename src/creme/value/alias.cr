@@ -22,6 +22,7 @@ module Creme
   # (regex, sql connection, tui objects, ...) — new ones box themselves under
   # a tag and need no entry here (see value/box.cr).
   alias SchemeValue = SchemeInt |
+                      SchemeBigInt |
                       SchemeFloat |
                       SchemeStr |
                       SchemeSym |

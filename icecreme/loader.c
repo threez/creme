@@ -279,6 +279,26 @@ static Value resolve_builtin_const(VM *vm, const char *name, int len) {
   return v_nil();
 }
 
+/* TAG_INT/TAG_RATIONAL's own payload: a decimal ASCII string, length-
+ * prefixed the same way read_bytes/the string pool are -- NOT interned
+ * into the string pool (each occurrence is a fresh reader-owned buffer),
+ * mirroring ChunkSerializer.write_int_str (chunk_serializer.cr) exactly.
+ * Parsed into a fresh mpz_t via GMP's own decimal-string parser, so a
+ * value too large for int64_t round-trips exactly -- whichever caller
+ * eventually consumes it (make_bigint_from_mpz / make_rational_from_mpq)
+ * collapses back to a plain T_INT whenever it fits, same as any other
+ * exact-integer construction path. Hostile/corrupt input (not a valid
+ * decimal integer) is rejected here with a clean creme_abort, same
+ * posture as every other malformed-bytecode check in this file, rather
+ * than reaching GMP's own uncatchable internal error handler. */
+static void read_int_str_into(Reader *r, mpz_t out) {
+  int len = read_i32(r);
+  char *buf = read_bytes(r, len);
+  if (mpz_set_str(out, buf, 10) != 0) {
+    creme_abort("icecreme: corrupt bytecode in %s: malformed integer constant '%s'", r->path, buf);
+  }
+}
+
 static void datum_label_add(Reader *r, int id, Value v) {
   if (r->n_labels >= CREME_DATUM_LABELS_CAP) {
     creme_abort("icecreme: too many datum labels in one top-level datum (max %d) in %s", CREME_DATUM_LABELS_CAP, r->path);
@@ -383,7 +403,11 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
   }
   switch (tag) {
   case TAG_INT: {
-    Value result = v_int(read_i64(r));
+    mpz_t z;
+    mpz_init(z);
+    read_int_str_into(r, z);
+    Value result = make_bigint_from_mpz(z);
+    mpz_clear(z);
     if (def_id >= 0) datum_label_add(r, def_id, result);
     return result;
   }
@@ -393,30 +417,34 @@ static Value read_datum_rec_impl(Reader *r, VM *vm) {
     return result;
   }
   case TAG_RATIONAL: {
-    int64_t num = read_i64(r);
-    int64_t den = read_i64(r);
-    /* modules/creme/bytecode.sld's own write-datum! only ever emits an
-     * already-reduced rational (T_RATIONAL's own invariant, denominator
-     * never 0), but this loader can't assume the bytes it's reading
-     * still honor that -- a corrupt/hostile den=0 reaches GMP's own
-     * mpq_set_si/mpq_canonicalize, which detects the division by zero
-     * itself and calls ITS OWN exception handler (an unconditional
-     * raise/abort, not creme_abort's catchable path) -- a real,
-     * reproducible crash found via `make fuzz` (see fuzz/fuzz_loader.c)
-     * within a couple thousand runs. */
-    if (den == 0) {
+    mpz_t num, den;
+    mpz_inits(num, den, NULL);
+    read_int_str_into(r, num);
+    read_int_str_into(r, den);
+    /* modules/creme/bytecode.sld's own write-datum! (and ChunkSerializer's
+     * write_int_str on the Crystal side) only ever emit an already-
+     * reduced rational (T_RATIONAL's own invariant, denominator never 0
+     * or negative), but this loader can't assume the bytes it's reading
+     * still honor that -- a corrupt/hostile den<=0 reaching GMP's own
+     * mpq_set_num/mpq_canonicalize unchecked would be a real, reproducible
+     * crash (see fuzz/fuzz_loader.c), same class of bug the old fixed-
+     * width TAG_RATIONAL case already guarded against. */
+    if (mpz_sgn(den) == 0) {
+      mpz_clears(num, den, NULL);
       creme_abort("icecreme: corrupt bytecode in %s: rational constant has a zero denominator", r->path);
     }
-    /* mpq_set_si takes an UNSIGNED denominator; a negative den would be
-     * reinterpreted as a huge magnitude, silently producing the wrong value. */
-    if (den < 0) {
+    if (mpz_sgn(den) < 0) {
+      mpz_clears(num, den, NULL);
       creme_abort("icecreme: corrupt bytecode in %s: rational constant has a negative denominator", r->path);
     }
     mpq_t q;
     mpq_init(q);
-    mpq_set_si(q, (long)num, (unsigned long)den);
+    mpq_set_num(q, num);
+    mpq_set_den(q, den);
+    mpq_canonicalize(q);
     Value result = make_rational_from_mpq(q);
     mpq_clear(q);
+    mpz_clears(num, den, NULL);
     if (def_id >= 0) datum_label_add(r, def_id, result);
     return result;
   }

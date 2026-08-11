@@ -44,7 +44,7 @@ module Creme::Builtins::RandomLibrary
 
   private def random_int_arg(v : SchemeValue, who : String) : Int64
     raise SchemeRuntimeError.new("#{who}: expected integer, got #{v.write_string}") unless v.is_a?(SchemeInt)
-    v.value
+    Creme.checked_i64(v.value, who)
   end
 end
 

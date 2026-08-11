@@ -44,34 +44,26 @@ module Creme::R7RS::Arithmetic
 
   @[Creme::SchemeFn("modulo", min: 2, max: 2)]
   def modulo(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    a = int_arg(args[0], "modulo")
-    b = int_arg(args[1], "modulo")
+    a = rat_arg(args[0], "modulo")
+    b = rat_arg(args[1], "modulo")
     raise SchemeRuntimeError.new("modulo: division by zero") if b == 0
-    begin
-      SchemeInt.new(a % b)
-    rescue ArgumentError | OverflowError
-      raise SchemeRuntimeError.new("modulo: integer overflow")
-    end
+    Creme.int_value(Creme.rat_mod(a, b))
   end
 
   @[Creme::SchemeFn("remainder", min: 2, max: 2)]
   def remainder(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    a = int_arg(args[0], "remainder")
-    b = int_arg(args[1], "remainder")
+    a = rat_arg(args[0], "remainder")
+    b = rat_arg(args[1], "remainder")
     raise SchemeRuntimeError.new("remainder: division by zero") if b == 0
-    SchemeInt.new(a.remainder(b))
+    Creme.int_value(Creme.rat_remainder(a, b))
   end
 
   @[Creme::SchemeFn("quotient", min: 2, max: 2)]
   def quotient(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    a = int_arg(args[0], "quotient")
-    b = int_arg(args[1], "quotient")
+    a = rat_arg(args[0], "quotient")
+    b = rat_arg(args[1], "quotient")
     raise SchemeRuntimeError.new("quotient: division by zero") if b == 0
-    begin
-      SchemeInt.new(a.tdiv(b)) # truncate toward zero
-    rescue ArgumentError | OverflowError
-      raise SchemeRuntimeError.new("quotient: integer overflow")
-    end
+    Creme.int_value(Creme.rat_tdiv(a, b)) # truncate toward zero
   end
 
   # truncate-quotient/truncate-remainder are exactly quotient/remainder
@@ -91,14 +83,10 @@ module Creme::R7RS::Arithmetic
 
   @[Creme::SchemeFn("floor-quotient", min: 2, max: 2)]
   def floor_quotient(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    a = int_arg(args[0], "floor-quotient")
-    b = int_arg(args[1], "floor-quotient")
+    a = rat_arg(args[0], "floor-quotient")
+    b = rat_arg(args[1], "floor-quotient")
     raise SchemeRuntimeError.new("floor-quotient: division by zero") if b == 0
-    begin
-      SchemeInt.new(a // b)
-    rescue ArgumentError | OverflowError
-      raise SchemeRuntimeError.new("floor-quotient: integer overflow")
-    end
+    Creme.int_value(Creme.int_div(a, b))
   end
 
   @[Creme::SchemeFn("floor-remainder", min: 2, max: 2)]
@@ -120,14 +108,10 @@ module Creme::R7RS::Arithmetic
   def abs(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     v = args[0]
     case v
-    when SchemeInt
-      begin
-        SchemeInt.new(v.value.abs)
-      rescue OverflowError
-        raise SchemeRuntimeError.new("abs: integer overflow")
-      end
-    when SchemeFloat then SchemeFloat.new(v.value.abs)
-    else                  raise SchemeRuntimeError.new("abs: expected number, got #{v.write_string}")
+    when SchemeInt    then Creme.int_value(Creme.rat_abs(v.value))
+    when SchemeBigInt then Creme.int_value(Creme.rat_abs(v.value))
+    when SchemeFloat  then SchemeFloat.new(v.value.abs)
+    else                   raise SchemeRuntimeError.new("abs: expected number, got #{v.write_string}")
     end
   end
 
@@ -143,35 +127,32 @@ module Creme::R7RS::Arithmetic
 
   @[Creme::SchemeFn("gcd", min: 0, max: -1)]
   def gcd(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    result = args.reduce(0_i64) { |acc, v| Creme.int_gcd(acc, int_arg(v, "gcd")) }
-    SchemeInt.new(result).as(SchemeValue)
+    result = args.reduce(0_i64.as(RatInt)) { |acc, v| Creme.rat_gcd(acc, rat_arg(v, "gcd")) }
+    Creme.int_value(result).as(SchemeValue)
   end
 
   @[Creme::SchemeFn("lcm", min: 0, max: -1)]
   def lcm(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    result = args.reduce(1_i64) { |acc, v| Creme.int_lcm(acc, int_arg(v, "lcm")) }
-    SchemeInt.new(result).as(SchemeValue)
-  rescue OverflowError
-    raise SchemeRuntimeError.new("lcm: integer overflow")
+    result = args.reduce(1_i64.as(RatInt)) { |acc, v| Creme.rat_lcm(acc, rat_arg(v, "lcm")) }
+    Creme.int_value(result).as(SchemeValue)
   end
 
   # (expt 2 -1) is now exact 1/2, not inexact 0.5: a negative integer
   # exponent of an exact integer base routes through the same positive-
   # exponent path (expt_int_pow) and SchemeRational.make, rather than
-  # falling back to float power.
+  # falling back to float power. Neither path can overflow anymore —
+  # expt_int_pow escalates to BigInt itself.
   @[Creme::SchemeFn("expt", min: 2, max: 2)]
   def expt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     base = args[0]
     ex = args[1]
-    if base.is_a?(SchemeInt) && ex.is_a?(SchemeInt)
-      if ex.value >= 0
-        SchemeInt.new(expt_int_pow(base.value, ex.value))
+    if (base.is_a?(SchemeInt) || base.is_a?(SchemeBigInt)) && ex.is_a?(SchemeInt)
+      exv = ex.value
+      basev = Creme.rat_of(base)
+      if exv >= 0
+        Creme.int_value(expt_int_pow(basev, exv))
       else
-        begin
-          SchemeRational.make(1_i64, expt_int_pow(base.value, -ex.value))
-        rescue OverflowError
-          raise SchemeRuntimeError.new("expt: integer overflow")
-        end
+        SchemeRational.make(1_i64, expt_int_pow(basev, -exv))
       end
     else
       SchemeFloat.new(Creme.as_f64(base, "expt") ** Creme.as_f64(ex, "expt"))
@@ -180,10 +161,10 @@ module Creme::R7RS::Arithmetic
 
   @[Creme::SchemeFn("exact-integer-sqrt", min: 1, max: 1)]
   def exact_integer_sqrt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    n = int_arg(args[0], "exact-integer-sqrt")
+    n = rat_arg(args[0], "exact-integer-sqrt")
     raise SchemeRuntimeError.new("exact-integer-sqrt: expected a non-negative integer") if n < 0
     root, rem = exact_integer_sqrt_pair(n)
-    SchemeValues.new([SchemeInt.new(root).as(SchemeValue), SchemeInt.new(rem).as(SchemeValue)])
+    SchemeValues.new([Creme.int_value(root).as(SchemeValue), Creme.int_value(rem).as(SchemeValue)])
   end
 
   @[Creme::SchemeFn("inexact", min: 1, max: 1)]
@@ -202,8 +183,8 @@ module Creme::R7RS::Arithmetic
   def numerator(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     v = args[0]
     case v
-    when SchemeInt      then v.as(SchemeValue)
-    when SchemeRational then SchemeInt.new(v.numerator).as(SchemeValue)
+    when SchemeInt, SchemeBigInt then v.as(SchemeValue)
+    when SchemeRational          then Creme.int_value(v.numerator).as(SchemeValue)
     when SchemeFloat
       n, _ = Creme.as_ratio(to_exact(v))
       SchemeFloat.new(n.to_f64).as(SchemeValue)
@@ -215,8 +196,8 @@ module Creme::R7RS::Arithmetic
   def denominator(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     v = args[0]
     case v
-    when SchemeInt      then SchemeInt.new(1_i64).as(SchemeValue)
-    when SchemeRational then SchemeInt.new(v.denominator).as(SchemeValue)
+    when SchemeInt, SchemeBigInt then SchemeInt.new(1_i64).as(SchemeValue)
+    when SchemeRational          then Creme.int_value(v.denominator).as(SchemeValue)
     when SchemeFloat
       _, d = Creme.as_ratio(to_exact(v))
       SchemeFloat.new(d.to_f64).as(SchemeValue)
@@ -229,22 +210,22 @@ module Creme::R7RS::Arithmetic
   # inexact (float) argument is rounded and stays inexact.
   @[Creme::SchemeFn("floor", min: 1, max: 1)]
   def floor(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    round_like(args[0], "floor", ->rational_floor(Int64, Int64), &.floor)
+    round_like(args[0], "floor", ->rational_floor(RatInt, RatInt), &.floor)
   end
 
   @[Creme::SchemeFn("ceiling", min: 1, max: 1)]
   def ceiling(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    round_like(args[0], "ceiling", ->rational_ceiling(Int64, Int64), &.ceil)
+    round_like(args[0], "ceiling", ->rational_ceiling(RatInt, RatInt), &.ceil)
   end
 
   @[Creme::SchemeFn("truncate", min: 1, max: 1)]
   def truncate(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    round_like(args[0], "truncate", ->rational_truncate(Int64, Int64), &.trunc)
+    round_like(args[0], "truncate", ->rational_truncate(RatInt, RatInt), &.trunc)
   end
 
   @[Creme::SchemeFn("round", min: 1, max: 1)]
   def round(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    round_like(args[0], "round", ->rational_round(Int64, Int64), &.round(:ties_even))
+    round_like(args[0], "round", ->rational_round(RatInt, RatInt), &.round(:ties_even))
   end
 
   @[Creme::SchemeFn("=", min: 1, max: -1)]

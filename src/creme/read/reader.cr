@@ -62,7 +62,7 @@ module Creme
         raise SchemeIncompleteError.new("unexpected end of input")
       when TokKind::IntLit
         advance
-        SchemeInt.new(t.text.to_i64)
+        Creme.int_value(t.text.to_i64? || BigInt.new(t.text))
       when TokKind::RationalLit
         advance
         parse_rational_literal(t)
@@ -318,22 +318,16 @@ module Creme
     # ratio had been produced by (/ n d) at runtime.
     private def parse_rational_literal(t : Token) : SchemeValue
       num_text, den_text = t.text.split('/', 2)
-      begin
-        SchemeRational.make(num_text.to_i64, den_text.to_i64)
-      rescue ArgumentError
-        raise SchemeParseError.new("rational literal out of range '#{t.text}' at #{t.line}:#{t.col}")
-      end
+      num = num_text.to_i64? || BigInt.new(num_text)
+      den = den_text.to_i64? || BigInt.new(den_text)
+      SchemeRational.make(num, den)
     end
 
     private def parse_real_component(text : String, t : Token) : RealComponent
       if text.includes?('.') || text.includes?('e') || text.includes?('E')
         SchemeFloat.new(text.to_f64)
       else
-        begin
-          SchemeInt.new(text.to_i64)
-        rescue ArgumentError
-          raise SchemeParseError.new("integer literal out of range '#{text}' at #{t.line}:#{t.col}")
-        end
+        Creme.int_value(text.to_i64? || BigInt.new(text))
       end
     end
 

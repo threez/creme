@@ -60,6 +60,16 @@ module Creme
       String.new(buf)
     end
 
+    # The inverse of ChunkSerializer.write_int_str: TAG_INT/TAG_RATIONAL's
+    # payload is a decimal ASCII string (same length-prefixed shape as any
+    # other pool string), parsed once, here, at chunk-load time — never
+    # re-parsed per reference. Always via BigInt so a single code path
+    # handles both small and oversized values, then demoted to Int64 when
+    # it fits (RatInt's canonicalization invariant).
+    private def self.read_int_str(io : IO) : RatInt
+      Creme.rat_demote(BigInt.new(read_pool_string(io)))
+    end
+
     # Reads (and discards) the "required families" metadata section that sits
     # between the string pool and the chunk body — see ChunkSerializer.serialize.
     # Nothing reads this yet, but it must be consumed here so the chunk body
@@ -203,12 +213,12 @@ module Creme
       tag = read_byte!(io)
       case tag
       when ChunkSerializer::TAG_INT
-        SchemeInt.new(read_i64(io))
+        Creme.int_value(read_int_str(io))
       when ChunkSerializer::TAG_FLOAT
         SchemeFloat.new(io.read_bytes(Float64, IO::ByteFormat::LittleEndian))
       when ChunkSerializer::TAG_RATIONAL
-        num = read_i64(io)
-        den = read_i64(io)
+        num = read_int_str(io)
+        den = read_int_str(io)
         SchemeRational.make(num, den)
       when ChunkSerializer::TAG_COMPLEX
         real = read_datum(io, env, strings)

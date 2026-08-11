@@ -20,9 +20,9 @@ module Creme::R7RS::InexactExtra
   @[Creme::SchemeFn("sqrt", min: 1, max: 1)]
   def sqrt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     v = args[0]
-    if v.is_a?(SchemeInt) && v.value >= 0
+    if (v.is_a?(SchemeInt) || v.is_a?(SchemeBigInt)) && v.value >= 0
       root, rem = exact_integer_sqrt_pair(v.value)
-      rem == 0 ? SchemeInt.new(root).as(SchemeValue) : SchemeFloat.new(Math.sqrt(Creme.as_f64(v, "sqrt"))).as(SchemeValue)
+      rem == 0 ? Creme.int_value(root).as(SchemeValue) : SchemeFloat.new(Math.sqrt(Creme.as_f64(v, "sqrt"))).as(SchemeValue)
     elsif number?(v) && !v.is_a?(SchemeComplex) && Creme.as_f64(v, "sqrt") < 0
       # sqrt of a negative real is complex, per R7RS — the magnitude's
       # square root goes on the imaginary axis.

@@ -593,8 +593,9 @@ describe "builtins: exactness conversions" do
     w("(inexact 3)").should eq("3.0")
   end
 
-  it "inexact->exact raises for a float whose exact value is too large to represent" do
-    expect_raises(Creme::SchemeRuntimeError, /magnitude too large/) { w("(exact 1e300)") }
+  it "inexact->exact on a float whose exact value is too large for Int64 now succeeds via BigInt" do
+    w("(exact? (exact 1e300))").should eq("#t")
+    w("(integer? (exact 1e300))").should eq("#t")
   end
 
   it "numerator/denominator on an exact integer" do

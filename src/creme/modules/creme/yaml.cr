@@ -40,6 +40,7 @@ module Creme::Builtins::YamlLibrary
     elems.all? { |e| e.is_a?(Cons) && e.car.is_a?(SchemeStr) }
   end
 
+  # ameba:disable Metrics/CyclomaticComplexity
   private def yaml_write(v : SchemeValue, yaml : YAML::Builder, who : String) : Nil
     case v
     when SchemeNil
@@ -48,6 +49,8 @@ module Creme::Builtins::YamlLibrary
       yaml.scalar(v.value?)
     when SchemeInt
       yaml.scalar(v.value)
+    when SchemeBigInt
+      yaml.scalar(v.value.to_s)
     when SchemeFloat
       yaml.scalar(v.value)
     when SchemeStr

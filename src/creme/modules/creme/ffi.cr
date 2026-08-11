@@ -252,15 +252,16 @@ module Creme::Builtins::FfiLibrary
     case kind
     when Creme::CremeFfiShim::KIND_INT32
       raise SchemeRuntimeError.new("#{who}: expected an integer argument") unless v.is_a?(SchemeInt)
-      slot.as(Int32*).value = v.value.to_i32
+      slot.as(Int32*).value = Creme.checked_i32(v.value, who)
     when Creme::CremeFfiShim::KIND_INT64
       raise SchemeRuntimeError.new("#{who}: expected an integer argument") unless v.is_a?(SchemeInt)
-      slot.as(Int64*).value = v.value
+      slot.as(Int64*).value = Creme.checked_i64(v.value, who)
     when Creme::CremeFfiShim::KIND_DOUBLE
       f = case v
-          when SchemeFloat then v.value
-          when SchemeInt   then v.value.to_f64
-          else                  raise SchemeRuntimeError.new("#{who}: expected a real-number argument")
+          when SchemeFloat  then v.value
+          when SchemeInt    then v.value.to_f64
+          when SchemeBigInt then v.value.to_f64
+          else                   raise SchemeRuntimeError.new("#{who}: expected a real-number argument")
           end
       slot.as(Float64*).value = f
     when Creme::CremeFfiShim::KIND_BOOL

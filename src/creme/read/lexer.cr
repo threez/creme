@@ -390,10 +390,16 @@ module Creme
       text = read_atom_text
       raise SchemeParseError.new("numeric literal: expected digits after prefix at #{line}:#{col}") if text.empty?
 
+      # Magnitude is NOT checked here beyond "does it parse at all" — an
+      # integer too large for Int64 falls back to BigInt (still emitted as
+      # a plain base-10 IntLit token; Reader/the rest of the pipeline never
+      # needs to know a prefix or bignum escape was involved). Lexing only
+      # cares about lexical shape, not whether the value fits a machine
+      # word.
       value = if radix == 10
-                (text.to_i64? || text.to_f64?).as(Int64 | Float64 | Nil)
+                (text.to_i64? || big_int_or_nil(text, 10) || text.to_f64?).as(Int64 | BigInt | Float64 | Nil)
               else
-                text.to_i64?(radix).as(Int64 | Float64 | Nil)
+                (text.to_i64?(radix) || big_int_or_nil(text, radix)).as(Int64 | BigInt | Float64 | Nil)
               end
       raise SchemeParseError.new("invalid numeric literal '#{text}' at #{line}:#{col}") unless value
 
@@ -401,10 +407,21 @@ module Creme
       when 'i'
         tok(TokKind::FloatLit, value.to_f64.to_s, line, col)
       when 'e'
-        tok(TokKind::IntLit, value.to_i64.to_s, line, col)
+        tok(TokKind::IntLit, value.is_a?(Float64) ? value.to_i64.to_s : value.to_s, line, col)
       else
         value.is_a?(Float64) ? tok(TokKind::FloatLit, value.to_s, line, col) : tok(TokKind::IntLit, value.to_s, line, col)
       end
+    end
+
+    # Parses `text` as a BigInt in `radix`, or nil if it's not a valid
+    # numeral at all (as opposed to Int64#to_i64?'s nil, which conflates
+    # "invalid" with "out of range" — this is only ever tried after the
+    # Int64 fast path already failed, so here it specifically means "valid
+    # but too big").
+    private def big_int_or_nil(text : String, radix : Int32) : BigInt?
+      BigInt.new(text, base: radix)
+    rescue ArgumentError
+      nil
     end
 
     # ameba:disable Metrics/CyclomaticComplexity
@@ -486,13 +503,11 @@ module Creme
         return tok(TokKind::FloatLit, text, line, col)
       end
 
+      # Lexing is shape-only: INT_RE matching is sufficient to emit an
+      # IntLit token regardless of magnitude — an integer too large for
+      # Int64 falls back to BigInt at the parse step (Reader), not here.
       if INT_RE.matches?(text)
-        begin
-          text.to_i64
-          return tok(TokKind::IntLit, text, line, col)
-        rescue ArgumentError
-          raise SchemeParseError.new("integer literal out of range '#{text}' at #{line}:#{col}")
-        end
+        return tok(TokKind::IntLit, text, line, col)
       end
 
       if RATIONAL_RE.matches?(text)

@@ -518,12 +518,16 @@ int num_gt(Value x, Value y);
 int num_ge(Value x, Value y);
 int num_eq(Value x, Value y);
 /* Canonicalizes `q` (lowest terms, positive denominator) and collapses to
- * a plain T_INT when the denominator is 1 -- the ONE construction path
- * every T_RATIONAL Value goes through (see value.h's Rational doc
- * comment). Aborts if the collapsed integer doesn't fit an int64_t (this
- * prototype has no bignum T_INT to fall back to). Does NOT take ownership
- * of/clear `q` -- callers still own their own local mpq_t. */
+ * a plain T_INT/T_BIGINT when the denominator is 1 -- the ONE construction
+ * path every T_RATIONAL Value goes through (see value.h's Rational doc
+ * comment). Does NOT take ownership of/clear `q` -- callers still own
+ * their own local mpq_t. */
 Value make_rational_from_mpq(mpq_t q);
+/* Collapses to a plain T_INT when `z` fits int64_t, else wraps it as a
+ * T_BIGINT -- the ONE construction path every T_BIGINT Value goes through
+ * (see value.h's BigInt doc comment), and what make_rational_from_mpq's
+ * own den==1 collapse delegates to. Does NOT take ownership of/clear `z`. */
+Value make_bigint_from_mpz(mpz_t z);
 /* Collapses to `real` when `imag` is an exact (T_INT) zero, mirroring
  * SchemeComplex.make exactly (a T_RATIONAL is never itself zero, see
  * value.h) -- otherwise wraps both in a fresh T_COMPLEX. */

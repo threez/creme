@@ -39,6 +39,7 @@ module Creme::R7RS::Predicates
     is_int =
       case v
       when SchemeInt      then true
+      when SchemeBigInt   then true
       when SchemeRational then false
       when SchemeFloat    then v.value.finite? && v.value == v.value.to_i64.to_f64
       else                     false
@@ -48,7 +49,7 @@ module Creme::R7RS::Predicates
 
   @[Creme::SchemeFn("exact-integer?", min: 1, max: 1)]
   def exact_integer_p(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeBool.of(args[0].is_a?(SchemeInt))
+    SchemeBool.of(args[0].is_a?(SchemeInt) || args[0].is_a?(SchemeBigInt))
   end
 
   # zero?/positive?/negative? — the sign predicates, real builtins (rather than
@@ -86,9 +87,11 @@ module Creme::R7RS::Predicates
     SchemeBool.of(integer_value_for(args[0], "odd?").odd?)
   end
 
-  private def integer_value_for(v : SchemeValue, who : String) : Int64
+  private def integer_value_for(v : SchemeValue, who : String) : RatInt
     case v
     when SchemeInt
+      v.value
+    when SchemeBigInt
       v.value
     when SchemeFloat
       f = v.value

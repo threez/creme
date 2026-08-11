@@ -55,6 +55,7 @@ module Creme
   def self.as_f64(v : SchemeValue, who : String) : Float64
     case v
     when SchemeInt      then v.value.to_f64
+    when SchemeBigInt   then v.value.to_f64
     when SchemeRational then v.numerator.to_f64 / v.denominator.to_f64
     when SchemeFloat    then v.value
     else
@@ -63,7 +64,7 @@ module Creme
   end
 
   def self.exact?(v : SchemeValue) : Bool
-    v.is_a?(SchemeInt) || v.is_a?(SchemeRational)
+    v.is_a?(SchemeInt) || v.is_a?(SchemeBigInt) || v.is_a?(SchemeRational)
   end
 
   def self.inexact?(v : SchemeValue) : Bool
@@ -74,10 +75,12 @@ module Creme
   # < inexact float. The higher-ranked operand's representation "wins" —
   # this is the one place that rule is expressed; num_binop3 promotes to
   # the max rank of its two operands rather than every call site
-  # hand-writing the same 3-way case.
+  # hand-writing the same 3-way case. SchemeBigInt ranks alongside
+  # SchemeInt — both are just "an exact integer" to the tower.
   def self.num_rank(v : SchemeValue, who : String) : Int32
     case v
     when SchemeInt      then 0
+    when SchemeBigInt   then 0
     when SchemeRational then 1
     when SchemeFloat    then 2
     else
@@ -85,12 +88,13 @@ module Creme
     end
   end
 
-  # Normalizes any exact number (SchemeInt or SchemeRational) to a
-  # {numerator, denominator} pair, so rational-branch arithmetic can treat
-  # an int as "n/1" without a separate case.
-  def self.as_ratio(v : SchemeValue) : {Int64, Int64}
+  # Normalizes any exact number (SchemeInt, SchemeBigInt, or
+  # SchemeRational) to a {numerator, denominator} pair, so rational-branch
+  # arithmetic can treat an int as "n/1" without a separate case.
+  def self.as_ratio(v : SchemeValue) : {RatInt, RatInt}
     case v
     when SchemeInt      then {v.value, 1_i64}
+    when SchemeBigInt   then {v.value, 1_i64}
     when SchemeRational then {v.numerator, v.denominator}
     else                     raise SchemeRuntimeError.new("expected an exact number, got #{v.write_string}")
     end
@@ -101,7 +105,7 @@ module Creme
   def self.num_binop(a : SchemeValue, b : SchemeValue, who : String, int_op : Int64, Int64 -> Int64, flt_op : Float64, Float64 -> Float64) : SchemeValue
     if a.is_a?(SchemeInt) && b.is_a?(SchemeInt)
       begin
-        SchemeInt.new(int_op.call(a.value, b.value))
+        SchemeInt.new(int_op.call(checked_i64(a.value, who), checked_i64(b.value, who)))
       rescue OverflowError
         raise SchemeRuntimeError.new("#{who}: integer overflow")
       end
@@ -119,13 +123,13 @@ module Creme
   # anything+float (inexact contagion, unchanged from today's behavior).
   def self.num_binop3(
     a : SchemeValue, b : SchemeValue, who : String,
-    int_op : Int64, Int64 -> SchemeValue,
-    rat_op : {Int64, Int64}, {Int64, Int64} -> SchemeValue,
+    int_op : RatInt, RatInt -> SchemeValue,
+    rat_op : {RatInt, RatInt}, {RatInt, RatInt} -> SchemeValue,
     flt_op : Float64, Float64 -> Float64,
   ) : SchemeValue
     rank = Math.max(num_rank(a, who), num_rank(b, who))
     case rank
-    when 0 then int_op.call(a.as(SchemeInt).value, b.as(SchemeInt).value)
+    when 0 then int_op.call(Creme.rat_of(a), Creme.rat_of(b))
     when 1 then rat_op.call(as_ratio(a), as_ratio(b))
     else        SchemeFloat.new(flt_op.call(as_f64(a, who), as_f64(b, who)))
     end
@@ -145,6 +149,11 @@ module Creme
     case a
     when SchemeInt
       b.is_a?(SchemeInt) && a.value == b.value
+    when SchemeBigInt
+      # A class, unlike SchemeInt — MUST compare by value here, not fall
+      # through to the Reference#same? identity fallback below (two
+      # distinct SchemeBigInt objects holding the same BigInt are equal?).
+      b.is_a?(SchemeBigInt) && a.value == b.value
     when SchemeFloat
       b.is_a?(SchemeFloat) && a.value == b.value
     when SchemeRational
@@ -202,6 +211,10 @@ module Creme
     case a
     when SchemeInt
       b.is_a?(SchemeInt) && a.value == b.value
+    when SchemeBigInt
+      # Same rationale as scheme_equal?'s own SchemeBigInt case above —
+      # compare by value, don't fall through to the identity fallback.
+      b.is_a?(SchemeBigInt) && a.value == b.value
     when SchemeFloat
       # Bit-pattern comparison, not ==, so 0.0 and -0.0 (which Float64#==
       # treats as equal) correctly compare unequal per R7RS — eqv? must
@@ -248,6 +261,7 @@ module Creme
   def self.scheme_hash(v : SchemeValue, seen : Set(UInt64)? = nil) : UInt64
     case v
     when SchemeInt      then v.value.hash
+    when SchemeBigInt   then v.value.hash
     when SchemeFloat    then v.value.hash
     when SchemeRational then {v.numerator, v.denominator}.hash
     when SchemeStr      then v.value.hash

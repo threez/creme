@@ -3,6 +3,7 @@
 # interpreter (bindings from native data, results back as native data).
 # ===========================================================================
 
+require "big"
 require "json"
 require "yaml"
 
@@ -14,7 +15,7 @@ module Creme
   # convert it one-directionally: reopen `module Creme` and add your own
   # `def self.to_scheme(v : YourType) : SchemeValue` overload, exactly like every
   # file under src/creme/modules/ already does to add builtins.
-  alias Convertible = Nil | Bool | Int64 | Float64 | String | Bytes |
+  alias Convertible = Nil | Bool | Int64 | BigInt | Float64 | String | Bytes |
                       Array(Convertible) | Hash(String, Convertible)
 
   # Crystal -> SchemeValue. Overloaded per concrete type (rather than a single
@@ -93,14 +94,15 @@ module Creme
   # ameba:disable Metrics/CyclomaticComplexity
   def self.from_scheme(v : SchemeValue) : Convertible
     case v
-    when SchemeNil   then nil
-    when SchemeBool  then v.value?
-    when SchemeInt   then v.value
-    when SchemeFloat then v.value
-    when SchemeStr   then v.value
-    when SchemeChar  then v.value.to_s
-    when SchemeSym   then v.name
-    when SchemeBlob  then v.value
+    when SchemeNil    then nil
+    when SchemeBool   then v.value?
+    when SchemeInt    then v.value
+    when SchemeBigInt then v.value
+    when SchemeFloat  then v.value
+    when SchemeStr    then v.value
+    when SchemeChar   then v.value.to_s
+    when SchemeSym    then v.name
+    when SchemeBlob   then v.value
     when SchemeVector
       v.value.map { |e| from_scheme(e).as(Convertible) }
     when Cons

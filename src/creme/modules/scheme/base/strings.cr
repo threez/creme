@@ -81,18 +81,19 @@ module Creme::R7RS::Strings
 
   # radix (default 10) only applies to exact integers — R7RS leaves
   # non-decimal radix on inexact/non-integer numbers unspecified, so a
-  # radix other than 10 is rejected for anything but a SchemeInt here.
+  # radix other than 10 is rejected for anything but a SchemeInt/
+  # SchemeBigInt here.
   @[Creme::SchemeFn("number->string", min: 1, max: 2)]
   def number_to_string(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     n = args[0]
     radix = radix_arg(args[1]?, "number->string")
-    unless n.is_a?(SchemeInt) || n.is_a?(SchemeRational) || n.is_a?(SchemeFloat)
+    unless n.is_a?(SchemeInt) || n.is_a?(SchemeBigInt) || n.is_a?(SchemeRational) || n.is_a?(SchemeFloat)
       raise SchemeRuntimeError.new("number->string: expected number, got #{n.write_string}")
     end
     if radix == 10
       SchemeStr.new(n.display_string)
     else
-      raise SchemeRuntimeError.new("number->string: radix #{radix} requires an exact integer") unless n.is_a?(SchemeInt)
+      raise SchemeRuntimeError.new("number->string: radix #{radix} requires an exact integer") unless n.is_a?(SchemeInt) || n.is_a?(SchemeBigInt)
       SchemeStr.new(n.value.to_s(radix))
     end
   end
@@ -335,16 +336,23 @@ module Creme::R7RS::Strings
     SchemeBool.of(ok)
   end
 
+  # ameba:disable Metrics/CyclomaticComplexity
   private def parse_number_string(txt : String, radix : Int32) : SchemeValue
     if radix != 10
+      if parsed_int = txt.to_i64?(radix)
+        return SchemeInt.new(parsed_int).as(SchemeValue)
+      end
       begin
-        return SchemeInt.new(txt.to_i64(radix)).as(SchemeValue)
+        return Creme.int_value(BigInt.new(txt, base: radix)).as(SchemeValue)
       rescue ArgumentError
         return FALSE.as(SchemeValue)
       end
     end
-    if Lexer::INT_RE.matches?(txt) && (parsed_int = txt.to_i64?)
-      return SchemeInt.new(parsed_int).as(SchemeValue)
+    if Lexer::INT_RE.matches?(txt)
+      if parsed_int = txt.to_i64?
+        return SchemeInt.new(parsed_int).as(SchemeValue)
+      end
+      return Creme.int_value(BigInt.new(txt)).as(SchemeValue)
     end
     is_float_syntax = txt.includes?('.') || txt.includes?('e') || txt.includes?('E')
     if Lexer::FLOAT_RE.matches?(txt) && is_float_syntax && (parsed_float = txt.to_f64?)

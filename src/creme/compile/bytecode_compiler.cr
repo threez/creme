@@ -1587,7 +1587,11 @@ module Creme
     # SchemeChar, SchemeSym, SchemeBool, SchemeNil. Deliberately excluded:
     # SchemeFloat (eqv? distinguishes 0.0/-0.0 by bit pattern — hashable in
     # principle, but not worth the complexity for a datum type that's nearly
-    # never used in case clauses), SchemeRational, and everything falling to
+    # never used in case clauses), SchemeRational, SchemeBigInt (an integer
+    # literal too large for Int64 — the CaseDispatchKey wire/in-memory
+    # format is Int64-only; such a datum is exceedingly rare in a case
+    # clause, and correctly falls through to `else` below since it's a
+    # distinct Crystal type from SchemeInt), and everything falling to
     # scheme_eqv?'s generic Reference#same? identity fallback (strings/
     # pairs/vectors as datums — legal but vanishingly rare). Any of those
     # appearing anywhere makes the whole case form fall back to the linear

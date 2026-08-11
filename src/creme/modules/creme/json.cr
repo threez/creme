@@ -36,6 +36,7 @@ module Creme::Builtins::JsonLibrary
     elems.all? { |e| e.is_a?(Cons) && e.car.is_a?(SchemeStr) }
   end
 
+  # ameba:disable Metrics/CyclomaticComplexity
   private def json_write(v : SchemeValue, json : JSON::Builder, who : String) : Nil
     case v
     when SchemeNil
@@ -43,6 +44,8 @@ module Creme::Builtins::JsonLibrary
     when SchemeBool
       json.bool(v.value?)
     when SchemeInt
+      json.number(v.value)
+    when SchemeBigInt
       json.number(v.value)
     when SchemeFloat
       json.number(v.value)

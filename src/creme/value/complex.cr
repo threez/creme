@@ -1,16 +1,17 @@
 # ===========================================================================
 # Complex numbers (R7RS (scheme complex))
 #
-# Real/imag components are always SchemeInt | SchemeRational | SchemeFloat
-# (never a nested SchemeComplex) — the numeric tower stays flat. Following
-# SchemeRational's pattern: a private constructor plus a public .make that
-# normalizes, collapsing to the bare real component when imag is exactly
-# zero, so "is this genuinely complex" is answerable by type
-# (v.is_a?(SchemeComplex)) rather than a scattered runtime imag==0 check.
+# Real/imag components are always SchemeInt | SchemeBigInt | SchemeRational
+# | SchemeFloat (never a nested SchemeComplex) — the numeric tower stays
+# flat. Following SchemeRational's pattern: a private constructor plus a
+# public .make that normalizes, collapsing to the bare real component when
+# imag is exactly zero, so "is this genuinely complex" is answerable by
+# type (v.is_a?(SchemeComplex)) rather than a scattered runtime imag==0
+# check.
 # ===========================================================================
 
 module Creme
-  alias RealComponent = SchemeInt | SchemeRational | SchemeFloat
+  alias RealComponent = SchemeInt | SchemeBigInt | SchemeRational | SchemeFloat
 
   class SchemeComplex
     include SchemeBaseValue

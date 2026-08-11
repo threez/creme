@@ -23,9 +23,8 @@ genuine long-running HTTP CRUD app using SQLite, a real HTTP server, and
 several pure-Scheme libraries, end to end (see "Compatibility with `creme`"
 below for exactly what's covered and the value-model/numeric-tower/
 continuation gaps that remain). It is still not a general Scheme runtime —
-call/cc is escape-only (no multi-shot/re-entrant continuations), and plain
-fixnums are still `int64_t` with no bignum promotion on overflow (only
-rationals, via GMP, are arbitrary-precision) — but the right framing today
+call/cc is escape-only (no multi-shot/re-entrant continuations) — but the
+right framing today
 is "a second backend implementing the language's control-flow surface
 faithfully," not "a benchmark-only prototype."
 
@@ -200,8 +199,9 @@ the REPL feature itself:
   straight into an `Add`/`Sub`/etc. op), but the self-hosted compiler
   does no such fusion; anything it compiles calls these as ordinary
   global procedures. Reuse `vm.c`'s own `num_add`/`num_sub`/`num_lt`/…
-  so the semantics (int/float/rational/complex promotion, overflow
-  aborts) are identical to the fused fast-path ops. Also added along the
+  so the semantics (int/bigint/float/rational/complex promotion,
+  overflow escalating to `T_BIGINT`) are identical to the fused
+  fast-path ops. Also added along the
   way: `quotient`/`remainder`/`modulo` (needed by `(creme bytecode)`'s own
   integer encoding), `complex?`/`rational?`/`numerator`/`denominator`
   (needed by `(creme bytecode)`'s own datum-type dispatch when
@@ -1113,18 +1113,20 @@ counterpart.
 
 Per `value.h`'s own header comment — deliberate, not accidental:
 
-- **Numbers**: fixnum (`int64_t`) + IEEE double + exact rational
-  (`T_RATIONAL`, arbitrary-precision via GMP's `mpq_t`) + complex
-  (`T_COMPLEX`, a real/imag pair, each itself int/rational/float). Plain
-  fixnums are STILL fixed-width — arithmetic overflow on a `T_INT` still
-  **aborts** rather than promoting to a bignum; only `T_RATIONAL`'s own
-  numerator/denominator are arbitrary-precision. `+`/`-`/`*`/`/`/comparisons
-  promote across this tower the same way the real interpreter does (int <
-  rational < float rank, complex checked first and promoting both sides) —
-  see `vm.c`'s `num_add`/`num_div`/etc. and "numeric tower" above for what
-  motivated this and exactly what's still NOT covered (a bignum `T_INT`;
-  `floor`/`ceiling`/`round`/`truncate` of a rational; `abs`/`zero?`/
-  `positive?`/`negative?` of a complex value).
+- **Numbers**: fixnum (`int64_t`) + arbitrary-precision integer (`T_BIGINT`,
+  via GMP's `mpz_t`) + IEEE double + exact rational (`T_RATIONAL`,
+  arbitrary-precision via GMP's `mpq_t`) + complex (`T_COMPLEX`, a
+  real/imag pair, each itself int/bigint/rational/float). Fixnum arithmetic
+  (`+`/`-`/`*`/`expt`/`quotient`/`remainder`/`modulo`/`gcd`/`lcm`/...) stays
+  a fast, checked `int64_t` op in the common case, escalating to `T_BIGINT`
+  only when it would actually overflow (mirroring `T_RATIONAL`'s own
+  GMP-escape design) — `make_bigint_from_mpz` (`vm.c`) collapses a result
+  back down to a plain `T_INT` whenever it fits, the same way
+  `make_rational_from_mpq` already collapsed a whole-number rational.
+  `+`/`-`/`*`/`/`/comparisons promote across this tower the same way the
+  real interpreter does (int/bigint < rational < float rank, complex
+  checked first and promoting both sides) — see `vm.c`'s
+  `num_add`/`num_div`/etc. and "numeric tower" above.
 - **Representation**: a plain tagged `struct Value`, not NaN-boxed —
   chosen for debuggability over compactness.
 - **Types present**: `T_NIL`, `T_BOOL`, `T_INT`, `T_FLOAT`, `T_SYM`
@@ -1169,13 +1171,11 @@ Per `value.h`'s own header comment — deliberate, not accidental:
   `T_RECORD_CALLABLE`, though `procedure?` deliberately excludes it,
   matching the real interpreter's own narrower definition), `T_CONTINUATION`
   (`call/cc`'s escape-only captured jump point — see "Compiler mode"
-  above), and `T_RATIONAL`/`T_COMPLEX` (the numeric tower additions
-  described just above).
+  above), and `T_BIGINT`/`T_RATIONAL`/`T_COMPLEX` (the numeric tower
+  additions described just above).
 - **Not present at all**: multi-shot/re-entrant continuations (only
   escape-only `T_CONTINUATION`, above), any port beyond output-string,
-  first-class environments, and — unrelated to the value model itself,
-  but worth naming here too — no bignum promotion for plain `T_INT`
-  fixnums (see "Deliberate cuts" below).
+  first-class environments.
 - **GC**: every heap allocation (pairs, vectors, closures, upvalues,
   output-string port buffers, hash tables, the program's own `Chunk` tree)
   goes through Boehm GC (`GC_MALLOC`/`GC_REALLOC` — the same collector
@@ -1559,8 +1559,11 @@ different path.
   arithmetic family's fused ops (`AddImm`/`SubImm`/`MulImm`) still hard-
   abort on a non-fixnum operand instead of deopting to the real `+`/`-`/`*`
   (which would itself promote to float/rational for that case) — not
-  reachable by anything this project's own spec suite or bench exercises,
-  same footnote the overflow case below carries.
+  reachable by anything this project's own spec suite or bench exercises.
+  Int64 *overflow* on a fixnum operand is no longer part of this gap:
+  `AddImm`/`SubImm` already deopt through `fast_add`/`fast_sub` to the real
+  `num_add`/`num_sub` (which escalate to `T_BIGINT`), and `MulImm` deopts
+  to `num_mul` specifically on overflow (see `vm.c`'s `OP_MULIMM`).
 - **`HelperForm`** (the top-level `(import ...)`) is a runtime no-op —
   imports are already fully resolved by the Crystal compiler at *emit*
   time, and any pure-Scheme library body they need is already flattened

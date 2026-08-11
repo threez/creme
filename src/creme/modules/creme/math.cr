@@ -102,6 +102,9 @@ module Creme::Builtins::MathExtra
 
   @[Creme::SchemeFn("bits->flonum", min: 1, max: 1)]
   def bits_to_flonum(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+    # args[0].as?(SchemeInt) — not SchemeBigInt — already rejects anything
+    # that isn't a genuine 8-byte Int64: unsafe_as reinterprets raw bytes
+    # at this exact size, which is only meaningful (and safe) for that.
     i = args[0].as?(SchemeInt) || raise SchemeRuntimeError.new("bits->flonum: expected an exact integer, got #{args[0].write_string}")
     SchemeFloat.new(i.value.unsafe_as(Float64))
   end

@@ -1,19 +1,18 @@
 /* Value model for the icecreme prototype — see icecreme/README.md for full scope.
  *
- * Deliberately NOT what a general Scheme VM would need: fixnums are plain
- * int64_t (no bignum promotion — an overflowing add/sub/mul still aborts,
- * see vm.c's num_add/num_sub/num_mul), plain-tagged struct (not NaN-boxed) for
- * debuggability. Rationals (T_RATIONAL, below) ARE arbitrary-precision,
- * backed by GMP's mpq_t — a narrower addition than a full numeric tower,
- * added specifically because spec/creme's own reader/compiler literal
- * tests need real exact rationals and complex numbers to exist at all (see
- * icecreme/README.md's "numeric tower" note for exactly what this does and
- * doesn't cover — plain T_INT is still fixnum-only). Every heap object
- * (pairs, vectors, closures, upvalues, output-string ports, the program's
- * own Chunk tree, T_RATIONAL/T_COMPLEX's own wrapper structs) is allocated
- * via Boehm GC (GC_MALLOC/GC_REALLOC — the same collector Crystal itself
- * uses) rather than a custom allocator, so a long-running program (an HTTP
- * server, not just a one-shot benchmark) doesn't grow unbounded. */
+ * Fixnums (T_INT) stay plain int64_t for the common case — but unlike an
+ * earlier version of this prototype, an overflowing add/sub/mul no longer
+ * aborts: it escalates to T_BIGINT (GMP's mpz_t, below), collapsing back to
+ * a plain T_INT whenever the result fits again (vm.c's make_bigint_from_mpz
+ * mirrors make_rational_from_mpq's own collapse rule exactly). Plain-tagged
+ * struct (not NaN-boxed) for debuggability. Rationals (T_RATIONAL, below)
+ * are likewise arbitrary-precision, backed by GMP's mpq_t. Every heap
+ * object (pairs, vectors, closures, upvalues, output-string ports, the
+ * program's own Chunk tree, T_BIGINT/T_RATIONAL/T_COMPLEX's own wrapper
+ * structs) is allocated via Boehm GC (GC_MALLOC/GC_REALLOC — the same
+ * collector Crystal itself uses) rather than a custom allocator, so a
+ * long-running program (an HTTP server, not just a one-shot benchmark)
+ * doesn't grow unbounded. */
 #ifndef CREME_VALUE_H
 #define CREME_VALUE_H
 
@@ -109,12 +108,21 @@ typedef enum {
              * re-enterable continuation (no stack copying/CPS here, a
              * deliberate prototype-scope cut; invoking one again after
              * its own call/cc has already returned is undefined). */
+  T_BIGINT, /* an exact integer too large for a plain T_INT, arbitrary-
+             * precision via GMP's mpz_t (BigInt, below) -- NEVER a value
+             * that fits int64_t (vm.c's make_bigint_from_mpz collapses
+             * back to a plain T_INT whenever it does, before a T_BIGINT
+             * Value is ever constructed, mirroring T_RATIONAL's own
+             * collapse rule exactly). This is the overflow ESCAPE for
+             * T_INT arithmetic (num_add/num_sub/num_mul in vm.c), not a
+             * separate always-bignum type -- the common case (no
+             * overflow) never touches this tag or GMP at all. */
   T_RATIONAL, /* an exact rational in lowest terms, arbitrary-precision
              * numerator/denominator via GMP's mpq_t (Rational, below) --
              * NEVER an integer or zero (vm.c's make_rational_from_mpq
-             * collapses den==1 to a plain T_INT before a T_RATIONAL Value
-             * is ever constructed, mirroring SchemeRational.make exactly,
-             * see rational.cr). */
+             * collapses den==1 to a plain T_INT/T_BIGINT before a
+             * T_RATIONAL Value is ever constructed, mirroring
+             * SchemeRational.make exactly, see rational.cr). */
   T_COMPLEX,  /* real+imaginary, each itself a T_INT/T_RATIONAL/T_FLOAT
              * Value (Complex, below) -- NEVER a nested T_COMPLEX, and NEVER
              * constructed with an exact-zero imaginary part (vm.c's
@@ -182,6 +190,7 @@ typedef struct SchemeRecord SchemeRecord;
 typedef struct RecordCallable RecordCallable;
 typedef struct Parameter Parameter;
 typedef struct Continuation Continuation;
+typedef struct BigInt BigInt;
 typedef struct Rational Rational;
 typedef struct Complex Complex;
 typedef struct Upvalue Upvalue;
@@ -221,6 +230,7 @@ struct Value {
     RecordCallable *record_callable;
     Parameter *parameter;
     Continuation *continuation;
+    BigInt *bigint;
     Rational *rational;
     Complex *cplx;
     BuiltinFn builtin;
@@ -408,17 +418,29 @@ struct Continuation {
   Value result;
 };
 
-/* An arbitrary-precision exact rational, backed by GMP's mpq_t -- unlike
- * every other numeric tag here (T_INT is a plain machine int64_t, never
- * promoted to a bignum on overflow), a rational's OWN numerator/
- * denominator are arbitrary precision. Always canonicalized (mpq_
- * canonicalize: lowest terms, positive denominator) and never denominator
- * 1 -- see vm.c's make_rational_from_mpq for the single construction path
- * that upholds this. GMP's own allocator is redirected to GC_MALLOC/
- * GC_REALLOC (with a no-op free -- Boehm GC reclaims unreachable memory on
- * its own) at process start (main.c's mp_set_memory_functions call), so an
- * mpq_t's internal limbs are reclaimed the same way as every other heap
+/* An exact integer too large for int64_t, backed by GMP's mpz_t -- the
+ * overflow escape for T_INT arithmetic (see vm.c's num_add/num_sub/
+ * num_mul and make_bigint_from_mpz, which is the single construction path
+ * and mirrors make_rational_from_mpq's own collapse-when-it-fits rule
+ * exactly: a T_BIGINT Value's magnitude NEVER fits back in int64_t). Same
+ * GMP-allocator-redirected-to-GC_MALLOC story as Rational below, so an
+ * mpz_t's internal limbs are reclaimed the same way as every other heap
  * value here, never leaked. */
+struct BigInt {
+  mpz_t z;
+};
+
+/* An arbitrary-precision exact rational, backed by GMP's mpq_t -- unlike
+ * T_INT (a plain machine int64_t, escaping to T_BIGINT rather than being
+ * arbitrary-precision itself), a rational's OWN numerator/denominator are
+ * directly arbitrary precision. Always canonicalized (mpq_canonicalize:
+ * lowest terms, positive denominator) and never denominator 1 -- see vm.c's
+ * make_rational_from_mpq for the single construction path that upholds
+ * this. GMP's own allocator is redirected to GC_MALLOC/GC_REALLOC (with a
+ * no-op free -- Boehm GC reclaims unreachable memory on its own) at
+ * process start (main.c's mp_set_memory_functions call), so an mpq_t's
+ * internal limbs are reclaimed the same way as every other heap value
+ * here, never leaked. */
 struct Rational {
   mpq_t q;
 };
@@ -579,6 +601,16 @@ static inline Value v_continuation(Continuation *k) {
   Value v;
   v.tag = T_CONTINUATION;
   v.as.continuation = k;
+  return v;
+}
+
+/* Raw wrap only -- no collapse-to-int64 logic here (that's vm.c's
+ * make_bigint_from_mpz's job); callers elsewhere should always go through
+ * that, not construct a T_BIGINT directly. */
+static inline Value v_bigint(BigInt *b) {
+  Value v;
+  v.tag = T_BIGINT;
+  v.as.bigint = b;
   return v;
 }
 

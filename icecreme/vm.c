@@ -325,19 +325,28 @@ void creme_register_builtin(VM *vm, const char *name, BuiltinFn fn) {
 double as_double(Value v, const char *who) {
   if (v.tag == T_INT) return (double)v.as.i;
   if (v.tag == T_FLOAT) return v.as.f;
+  if (v.tag == T_BIGINT) return mpz_get_d(v.as.bigint->z);
   if (v.tag == T_RATIONAL) return mpq_get_d(v.as.rational->q);
   creme_abort("%s: not a real number", who);
   return 0.0; /* unreachable */
 }
 
-/* Fills `out` with an exact mpq_t representation of `v` -- T_INT as n/1,
- * T_RATIONAL as itself. Aborts for anything else (float/complex): every
- * call site here already checked both operands are exact (T_INT/
- * T_RATIONAL) before reaching this, so hitting the abort would mean a
- * dispatch bug upstream, not a normal user-facing error path. */
+/* T_INT, T_BIGINT, or T_RATIONAL -- the three exact-number tags, i.e.
+ * "safe to hand to value_to_mpq". */
+static int is_exact_real(Value v) {
+  return v.tag == T_INT || v.tag == T_BIGINT || v.tag == T_RATIONAL;
+}
+
+/* Fills `out` with an exact mpq_t representation of `v` -- T_INT/T_BIGINT
+ * as n/1, T_RATIONAL as itself. Aborts for anything else (float/complex):
+ * every call site here already checked is_exact_real(v) before reaching
+ * this, so hitting the abort would mean a dispatch bug upstream, not a
+ * normal user-facing error path. */
 static void value_to_mpq(Value v, mpq_t out) {
   if (v.tag == T_INT) {
     mpq_set_si(out, (long)v.as.i, 1);
+  } else if (v.tag == T_BIGINT) {
+    mpq_set_z(out, v.as.bigint->z);
   } else if (v.tag == T_RATIONAL) {
     mpq_set(out, v.as.rational->q);
   } else {
@@ -345,16 +354,28 @@ static void value_to_mpq(Value v, mpq_t out) {
   }
 }
 
+/* Collapses to a plain T_INT whenever `z` fits int64_t, else wraps it as
+ * a T_BIGINT -- the single construction path for both T_INT arithmetic's
+ * overflow escape and make_rational_from_mpq's own den==1 collapse below,
+ * mirroring SchemeInt.make (rational.cr) exactly: a T_BIGINT Value's
+ * magnitude NEVER fits int64_t by construction. mpz_fits_slong_p/
+ * mpz_get_si operate on C `long` -- on this project's only target
+ * (Linux/LP64, see icecreme/Makefile), that's 64 bits, matching T_INT's
+ * own int64_t exactly. */
+Value make_bigint_from_mpz(mpz_t z) {
+  if (mpz_fits_slong_p(z)) {
+    return v_int((int64_t)mpz_get_si(z));
+  }
+  BigInt *b = GC_MALLOC(sizeof(BigInt));
+  mpz_init(b->z);
+  mpz_set(b->z, z);
+  return v_bigint(b);
+}
+
 Value make_rational_from_mpq(mpq_t q) {
   mpq_canonicalize(q);
   if (mpz_cmp_ui(mpq_denref(q), 1) == 0) {
-    /* mpz_fits_slong_p/mpz_get_si operate on C `long` -- on this project's
-     * only target (Linux/LP64, see icecreme/Makefile), that's 64 bits, matching
-     * T_INT's own int64_t exactly. */
-    if (!mpz_fits_slong_p(mpq_numref(q))) {
-      creme_abort("icecreme: rational collapsed to an integer too large for this prototype's fixnum-only int type (bignum ints not implemented)");
-    }
-    return v_int((int64_t)mpz_get_si(mpq_numref(q)));
+    return make_bigint_from_mpz(mpq_numref(q));
   }
   Rational *r = GC_MALLOC(sizeof(Rational));
   mpq_init(r->q);
@@ -417,14 +438,13 @@ static Value complex_div(Value a, Value b) {
 Value num_add(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) {
     int64_t r;
-    if (__builtin_add_overflow(x.as.i, y.as.i, &r)) {
-      creme_abort("+: integer overflow (bignum fallback not implemented in this prototype)");
-    }
-    return v_int(r);
+    if (!__builtin_add_overflow(x.as.i, y.as.i, &r)) return v_int(r);
+    /* overflowed -- falls through to the general exact (mpq-based) path
+     * below, same as an explicit T_BIGINT/T_RATIONAL operand would. */
   }
   if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_add(to_complex_value(x), to_complex_value(y));
   if (x.tag == T_FLOAT || y.tag == T_FLOAT) return v_float(as_double(x, "+") + as_double(y, "+"));
-  if (x.tag == T_RATIONAL || y.tag == T_RATIONAL) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy, qr;
     mpq_init(qx);
     mpq_init(qy);
@@ -444,14 +464,11 @@ Value num_add(Value x, Value y) {
 Value num_sub(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) {
     int64_t r;
-    if (__builtin_sub_overflow(x.as.i, y.as.i, &r)) {
-      creme_abort("-: integer overflow (bignum fallback not implemented in this prototype)");
-    }
-    return v_int(r);
+    if (!__builtin_sub_overflow(x.as.i, y.as.i, &r)) return v_int(r);
   }
   if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_sub(to_complex_value(x), to_complex_value(y));
   if (x.tag == T_FLOAT || y.tag == T_FLOAT) return v_float(as_double(x, "-") - as_double(y, "-"));
-  if (x.tag == T_RATIONAL || y.tag == T_RATIONAL) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy, qr;
     mpq_init(qx);
     mpq_init(qy);
@@ -471,14 +488,11 @@ Value num_sub(Value x, Value y) {
 Value num_mul(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) {
     int64_t r;
-    if (__builtin_mul_overflow(x.as.i, y.as.i, &r)) {
-      creme_abort("*: integer overflow (bignum fallback not implemented in this prototype)");
-    }
-    return v_int(r);
+    if (!__builtin_mul_overflow(x.as.i, y.as.i, &r)) return v_int(r);
   }
   if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_mul(to_complex_value(x), to_complex_value(y));
   if (x.tag == T_FLOAT || y.tag == T_FLOAT) return v_float(as_double(x, "*") * as_double(y, "*"));
-  if (x.tag == T_RATIONAL || y.tag == T_RATIONAL) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy, qr;
     mpq_init(qx);
     mpq_init(qy);
@@ -502,7 +516,7 @@ Value num_mul(Value x, Value y) {
  * through it exactly like bi_plus/bi_minus/bi_star already do. */
 Value num_div(Value x, Value y) {
   if (x.tag == T_COMPLEX || y.tag == T_COMPLEX) return complex_div(to_complex_value(x), to_complex_value(y));
-  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy, qr;
     mpq_init(qx);
     mpq_init(qy);
@@ -528,7 +542,7 @@ Value num_div(Value x, Value y) {
  * here, matching native's own as_f64-based fallback. */
 int num_lt(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i < y.as.i;
-  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy;
     mpq_init(qx);
     mpq_init(qy);
@@ -544,7 +558,7 @@ int num_lt(Value x, Value y) {
 
 int num_le(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i <= y.as.i;
-  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy;
     mpq_init(qx);
     mpq_init(qy);
@@ -560,7 +574,7 @@ int num_le(Value x, Value y) {
 
 int num_gt(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i > y.as.i;
-  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy;
     mpq_init(qx);
     mpq_init(qy);
@@ -576,7 +590,7 @@ int num_gt(Value x, Value y) {
 
 int num_ge(Value x, Value y) {
   if (x.tag == T_INT && y.tag == T_INT) return x.as.i >= y.as.i;
-  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy;
     mpq_init(qx);
     mpq_init(qy);
@@ -611,7 +625,7 @@ int num_eq(Value x, Value y) {
     Value cx = to_complex_value(x), cy = to_complex_value(y);
     return num_eq(cx.as.cplx->real, cy.as.cplx->real) && num_eq(cx.as.cplx->imag, cy.as.cplx->imag);
   }
-  if ((x.tag == T_INT || x.tag == T_RATIONAL) && (y.tag == T_INT || y.tag == T_RATIONAL)) {
+  if (is_exact_real(x) && is_exact_real(y)) {
     mpq_t qx, qy;
     mpq_init(qx);
     mpq_init(qy);
@@ -750,6 +764,8 @@ int creme_eqv(Value a, Value b) {
     return a.as.builtin == b.as.builtin;
   case T_BOX:
     return a.as.ptr == b.as.ptr;
+  case T_BIGINT:
+    return mpz_cmp(a.as.bigint->z, b.as.bigint->z) == 0;
   case T_RATIONAL:
     return mpq_equal(a.as.rational->q, b.as.rational->q);
   case T_COMPLEX:
@@ -1654,7 +1670,14 @@ static Value creme_dispatch(VM *vm, int target_depth) {
     Value x = stack[base + ins->b];
     if (x.tag != T_INT) creme_abort("*: not an integer (float/overflow fallback not implemented in this prototype)");
     int64_t r;
-    if (__builtin_mul_overflow(x.as.i, (int64_t)ins->c, &r)) creme_abort("*: integer overflow (bignum fallback not implemented in this prototype)");
+    if (__builtin_mul_overflow(x.as.i, (int64_t)ins->c, &r)) {
+      /* Overflowed -- deopt to num_mul, which escalates to T_BIGINT
+       * (same as OP_ADDIMM/OP_SUBIMM already do for free via fast_add/
+       * fast_sub falling through to num_add/num_sub on anything that
+       * isn't two plain ints). */
+      stack[base + ins->a] = num_mul(x, v_int((int64_t)ins->c));
+      NEXT();
+    }
     stack[base + ins->a] = v_int(r);
     NEXT();
   }

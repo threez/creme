@@ -356,12 +356,13 @@ module Creme::Builtins::SqlLibrary
 
   private def lisp_to_db_any(v : SchemeValue, who : String) : DB::Any
     case v
-    when SchemeInt   then v.value
-    when SchemeFloat then v.value
-    when SchemeStr   then v.value
-    when SchemeBool  then v.value?
-    when SchemeNil   then nil
-    when SchemeChar  then v.value.to_s
+    when SchemeInt    then v.value
+    when SchemeBigInt then v.value.to_s
+    when SchemeFloat  then v.value
+    when SchemeStr    then v.value
+    when SchemeBool   then v.value?
+    when SchemeNil    then nil
+    when SchemeChar   then v.value.to_s
     else
       raise SchemeRuntimeError.new("#{who}: unsupported parameter type: #{v.write_string}")
     end

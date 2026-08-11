@@ -125,9 +125,10 @@ module Creme::Builtins::ProfNative
 
   private def prof_interval_arg(v : SchemeValue) : Float64
     case v
-    when SchemeInt   then v.value.to_f64
-    when SchemeFloat then v.value
-    else                  raise SchemeRuntimeError.new("profile: expected a number for interval-ms, got #{v.write_string}")
+    when SchemeInt    then v.value.to_f64
+    when SchemeBigInt then v.value.to_f64
+    when SchemeFloat  then v.value
+    else                   raise SchemeRuntimeError.new("profile: expected a number for interval-ms, got #{v.write_string}")
     end
   end
 end

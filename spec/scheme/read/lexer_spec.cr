@@ -103,10 +103,8 @@ describe Creme::Lexer do
     kinds("42 -7 +3").should eq([Creme::TokKind::IntLit, Creme::TokKind::IntLit, Creme::TokKind::IntLit, Creme::TokKind::EOF])
   end
 
-  it "raises on an out-of-range integer literal" do
-    expect_raises(Creme::SchemeParseError, /integer literal out of range/) do
-      Creme::Lexer.tokenize("999999999999999999999999999999")
-    end
+  it "tokenizes an integer literal too large for Int64 as a plain IntLit (escapes to BigInt at the parse step)" do
+    kinds("999999999999999999999999999999").should eq([Creme::TokKind::IntLit, Creme::TokKind::EOF])
   end
 
   it "tokenizes floats" do

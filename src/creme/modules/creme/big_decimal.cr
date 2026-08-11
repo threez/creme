@@ -33,8 +33,11 @@ module Creme::Builtins::BigDecimalLibrary
   @[Creme::SchemeFn("integer->bigdecimal", min: 1, max: 1)]
   def integer_to_bigdecimal(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     n = args[0]
-    raise SchemeRuntimeError.new("integer->bigdecimal: expected integer, got #{n.write_string}") unless n.is_a?(SchemeInt)
-    SchemeBigDecimal.new(BigDecimal.new(n.value))
+    case n
+    when SchemeInt    then SchemeBigDecimal.new(BigDecimal.new(n.value))
+    when SchemeBigInt then SchemeBigDecimal.new(BigDecimal.new(n.value))
+    else                   raise SchemeRuntimeError.new("integer->bigdecimal: expected integer, got #{n.write_string}")
+    end
   end
 
   @[Creme::SchemeFn("bigdecimal-add", min: 2, max: 2)]
@@ -115,8 +118,9 @@ module Creme::Builtins::BigDecimalLibrary
 
   private def bigdecimal_str_arg(v : SchemeValue, who : String) : String
     case v
-    when SchemeStr then v.value
-    when SchemeInt then v.value.to_s
+    when SchemeStr    then v.value
+    when SchemeInt    then v.value.to_s
+    when SchemeBigInt then v.value.to_s
     else
       raise SchemeRuntimeError.new("#{who}: expected string, got #{v.write_string}")
     end

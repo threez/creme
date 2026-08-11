@@ -663,11 +663,12 @@ module Creme::Builtins::CsvLibrary
 
   private def csv_cell_value(v : SchemeValue, who : String) : String | Bool | Int64 | Float64 | Nil
     case v
-    when SchemeStr   then v.value
-    when SchemeChar  then v.value.to_s
-    when SchemeBool  then v.value?
-    when SchemeInt   then v.value
-    when SchemeFloat then v.value
+    when SchemeStr    then v.value
+    when SchemeChar   then v.value.to_s
+    when SchemeBool   then v.value?
+    when SchemeInt    then v.value
+    when SchemeBigInt then v.value.to_s
+    when SchemeFloat  then v.value
     else
       raise SchemeRuntimeError.new("#{who}: cannot write cell #{v.write_string}")
     end

@@ -16,12 +16,25 @@ require "big"
 
 module Creme::BuiltinHelpers
   private def number?(v : SchemeValue) : Bool
-    v.is_a?(SchemeInt) || v.is_a?(SchemeRational) || v.is_a?(SchemeFloat) || v.is_a?(SchemeComplex)
+    v.is_a?(SchemeInt) || v.is_a?(SchemeBigInt) || v.is_a?(SchemeRational) || v.is_a?(SchemeFloat) || v.is_a?(SchemeComplex)
   end
 
   def int_arg(v : SchemeValue, who : String) : Int64
     case v
-    when SchemeInt then v.value
+    when SchemeInt    then Creme.checked_i64(v.value, who)
+    when SchemeBigInt then Creme.checked_i64(v.value, who)
+    else
+      raise SchemeRuntimeError.new("#{who}: expected integer, got #{v.write_string}")
+    end
+  end
+
+  # Like int_arg, but for genuine arithmetic (modulo/quotient/gcd/lcm/...)
+  # rather than an index/count/radix — an oversized BigInt is a perfectly
+  # valid integer here, so this doesn't narrow to Int64.
+  def rat_arg(v : SchemeValue, who : String) : RatInt
+    case v
+    when SchemeInt    then v.value
+    when SchemeBigInt then v.value
     else
       raise SchemeRuntimeError.new("#{who}: expected integer, got #{v.write_string}")
     end
@@ -33,8 +46,12 @@ module Creme::BuiltinHelpers
   end
 
   def vector_index_arg(v : SchemeValue, who : String) : Int32
-    raise SchemeRuntimeError.new("#{who}: expected integer, got #{v.write_string}") unless v.is_a?(SchemeInt)
-    v.value.to_i32
+    case v
+    when SchemeInt    then Creme.checked_i32(v.value, who)
+    when SchemeBigInt then Creme.checked_i32(v.value, who)
+    else
+      raise SchemeRuntimeError.new("#{who}: expected integer, got #{v.write_string}")
+    end
   end
 
   def blob_arg(v : SchemeValue, who : String) : Bytes
@@ -53,89 +70,82 @@ module Creme::BuiltinHelpers
     {first, last}
   end
 
-  private def checked_int_op(who : String, & : -> Int64) : SchemeValue
-    SchemeInt.new(yield)
-  rescue OverflowError
-    raise SchemeRuntimeError.new("#{who}: integer overflow")
-  end
-
   def num_add(a : SchemeValue, b : SchemeValue, who : String) : SchemeValue
     return complex_add(to_complex(a, who), to_complex(b, who), who) if a.is_a?(SchemeComplex) || b.is_a?(SchemeComplex)
     Creme.num_binop3(a, b, who,
-      ->(x : Int64, y : Int64) { checked_int_op(who) { x + y } },
-      ->(x : {Int64, Int64}, y : {Int64, Int64}) { SchemeRational.make(x[0]*y[1] + y[0]*x[1], x[1]*y[1]) },
+      ->(x : RatInt, y : RatInt) { Creme.int_value(Creme.rat_add(x, y)) },
+      ->(x : {RatInt, RatInt}, y : {RatInt, RatInt}) { SchemeRational.make(Creme.rat_add(Creme.rat_mul(x[0], y[1]), Creme.rat_mul(y[0], x[1])), Creme.rat_mul(x[1], y[1])) },
       ->(x : Float64, y : Float64) { x + y })
   end
 
   def num_sub(a : SchemeValue, b : SchemeValue, who : String) : SchemeValue
     return complex_sub(to_complex(a, who), to_complex(b, who), who) if a.is_a?(SchemeComplex) || b.is_a?(SchemeComplex)
     Creme.num_binop3(a, b, who,
-      ->(x : Int64, y : Int64) { checked_int_op(who) { x - y } },
-      ->(x : {Int64, Int64}, y : {Int64, Int64}) { SchemeRational.make(x[0]*y[1] - y[0]*x[1], x[1]*y[1]) },
+      ->(x : RatInt, y : RatInt) { Creme.int_value(Creme.rat_sub(x, y)) },
+      ->(x : {RatInt, RatInt}, y : {RatInt, RatInt}) { SchemeRational.make(Creme.rat_sub(Creme.rat_mul(x[0], y[1]), Creme.rat_mul(y[0], x[1])), Creme.rat_mul(x[1], y[1])) },
       ->(x : Float64, y : Float64) { x - y })
   end
 
   def num_mul(a : SchemeValue, b : SchemeValue, who : String) : SchemeValue
     return complex_mul(to_complex(a, who), to_complex(b, who), who) if a.is_a?(SchemeComplex) || b.is_a?(SchemeComplex)
     Creme.num_binop3(a, b, who,
-      ->(x : Int64, y : Int64) { checked_int_op(who) { x * y } },
-      ->(x : {Int64, Int64}, y : {Int64, Int64}) { SchemeRational.make(x[0]*y[0], x[1]*y[1]) },
+      ->(x : RatInt, y : RatInt) { Creme.int_value(Creme.rat_mul(x, y)) },
+      ->(x : {RatInt, RatInt}, y : {RatInt, RatInt}) { SchemeRational.make(Creme.rat_mul(x[0], y[0]), Creme.rat_mul(x[1], y[1])) },
       ->(x : Float64, y : Float64) { x * y })
   end
 
-  # base ** exp for exp >= 0, raising on Int64 overflow. Shared by expt's
-  # positive-exponent path and its negative-exponent path (which negates
-  # the exponent, computes the positive power, then routes the result
-  # through SchemeRational.make as a reciprocal).
-  def expt_int_pow(base : Int64, exp : Int64) : Int64
-    result = 1_i64
-    begin
-      exp.times { result *= base }
-    rescue OverflowError
-      raise SchemeRuntimeError.new("expt: integer overflow")
-    end
+  # base ** exp for exp >= 0, escaping to BigInt when Int64 would
+  # overflow (mirrors Creme.rat_mul/rat_add's own escape). Shared by
+  # expt's positive-exponent path and its negative-exponent path (which
+  # negates the exponent, computes the positive power, then routes the
+  # result through SchemeRational.make as a reciprocal).
+  def expt_int_pow(base : RatInt, exp : Int64) : RatInt
+    result = 1_i64.as(RatInt)
+    exp.times { result = Creme.rat_mul(result, base) }
     result
   end
 
-  # Integer square root of a non-negative Int64: {floor(sqrt(n)), n -
-  # floor(sqrt(n))**2}. A zero remainder means n is a perfect square.
-  # Shared by sqrt's exact fast path and the exact-integer-sqrt builtin.
-  def exact_integer_sqrt_pair(n : Int64) : {Int64, Int64}
+  # Integer square root of a non-negative RatInt: {floor(sqrt(n)), n -
+  # floor(sqrt(n))**2}. A zero remainder means n is a perfect square. The
+  # initial Float64 guess can be off (rounding, or for a BigInt n whose
+  # magnitude exceeds Float64's exact integer range) but the correction
+  # loops below fix that unconditionally regardless of magnitude, since
+  # they only ever move the guess by relative single steps. Shared by
+  # sqrt's exact fast path and the exact-integer-sqrt builtin.
+  def exact_integer_sqrt_pair(n : RatInt) : {RatInt, RatInt}
     return {0_i64, 0_i64} if n == 0
-    root = Math.sqrt(n.to_f64).to_i64
-    # Float64 sqrt can be off by one at the boundary; correct it.
-    while (root + 1) * (root + 1) <= n
-      root += 1
+    root = Creme.rat_demote(Math.sqrt(n.to_f64).to_big_i)
+    # Float64 sqrt can be off by one (or more, for a huge BigInt) at the
+    # boundary; correct it.
+    while Creme.rat_mul(Creme.rat_add(root, 1_i64), Creme.rat_add(root, 1_i64)) <= n
+      root = Creme.rat_add(root, 1_i64)
     end
-    while root * root > n
-      root -= 1
+    while Creme.rat_mul(root, root) > n
+      root = Creme.rat_sub(root, 1_i64)
     end
-    {root, n - root * root}
+    {root, Creme.rat_sub(n, Creme.rat_mul(root, root))}
   end
 
   # inexact->exact / exact on a SchemeInt/SchemeRational is the identity
   # (already exact); on a SchemeFloat, decomposes the IEEE-754 double
   # into an exact numerator/denominator via Crystal's BigRational (which
   # already handles the exponent/subnormal decomposition correctly, so
-  # this doesn't hand-roll bit manipulation), then downcasts to Int64 —
-  # raising a clear error rather than silently losing precision for a
-  # float whose exact value doesn't fit (e.g. 1e300).
+  # this doesn't hand-roll bit manipulation) — BigRational's numerator/
+  # denominator are already BigInt, so this can no longer overflow; the
+  # old downcast-to-Int64/rescue is gone.
   def to_exact(v : SchemeValue) : SchemeValue
-    return v if v.is_a?(SchemeInt) || v.is_a?(SchemeRational)
+    return v if v.is_a?(SchemeInt) || v.is_a?(SchemeBigInt) || v.is_a?(SchemeRational)
     raise SchemeRuntimeError.new("exact: expected number, got #{v.write_string}") unless v.is_a?(SchemeFloat)
     raise SchemeRuntimeError.new("exact: cannot convert a non-finite float") unless v.value.finite?
     r = BigRational.new(v.value)
-    begin
-      SchemeRational.make(r.numerator.to_i64, r.denominator.to_i64)
-    rescue OverflowError
-      raise SchemeRuntimeError.new("exact: magnitude too large to represent exactly")
-    end
+    SchemeRational.make(r.numerator, r.denominator)
   end
 
-  def round_like(v : SchemeValue, who : String, rational_op : Int64, Int64 -> Int64, &block : Float64 -> Float64) : SchemeValue
+  def round_like(v : SchemeValue, who : String, rational_op : RatInt, RatInt -> RatInt, &block : Float64 -> Float64) : SchemeValue
     case v
     when SchemeInt      then v
-    when SchemeRational then SchemeInt.new(rational_op.call(v.numerator, v.denominator))
+    when SchemeBigInt   then v
+    when SchemeRational then Creme.int_value(rational_op.call(v.numerator, v.denominator))
     when SchemeFloat    then SchemeFloat.new(block.call(v.value))
     else                     raise SchemeRuntimeError.new("#{who}: expected number, got #{v.write_string}")
     end
@@ -145,32 +155,33 @@ module Creme::BuiltinHelpers
   # per SchemeRational.make's own invariant) — staying exact throughout,
   # since going through Float64 could lose precision or overflow for
   # large numerators/denominators. Crystal's // is floor division, so
-  # floor is a one-liner; the other three build on it.
-  def rational_floor(n : Int64, d : Int64) : Int64
-    n // d
+  # floor is a one-liner; the other three build on it. Each op stays
+  # within RatInt (int_div/rat_* already escape to BigInt as needed).
+  def rational_floor(n : RatInt, d : RatInt) : RatInt
+    Creme.int_div(n, d)
   end
 
-  def rational_ceiling(n : Int64, d : Int64) : Int64
-    -((-n) // d)
+  def rational_ceiling(n : RatInt, d : RatInt) : RatInt
+    Creme.rat_sub(0_i64, Creme.int_div(Creme.rat_sub(0_i64, n), d))
   end
 
-  def rational_truncate(n : Int64, d : Int64) : Int64
+  def rational_truncate(n : RatInt, d : RatInt) : RatInt
     n.sign < 0 ? rational_ceiling(n, d) : rational_floor(n, d)
   end
 
   # Round-half-to-even: compare the fractional part against 1/2 by
   # cross-multiplication (2 * remainder vs d) to stay in exact integer
   # arithmetic, then break an exact tie by rounding to the even quotient.
-  def rational_round(n : Int64, d : Int64) : Int64
+  def rational_round(n : RatInt, d : RatInt) : RatInt
     q = rational_floor(n, d)
-    r = n - q * d
-    twice_r = r * 2
+    r = Creme.rat_sub(n, Creme.rat_mul(q, d))
+    twice_r = Creme.rat_mul(r, 2_i64)
     if twice_r < d
       q
     elsif twice_r > d
-      q + 1
+      Creme.rat_add(q, 1_i64)
     else
-      q.even? ? q : q + 1
+      q.even? ? q : Creme.rat_add(q, 1_i64)
     end
   end
 
@@ -188,26 +199,23 @@ module Creme::BuiltinHelpers
       an, ad = Creme.as_ratio(a)
       bn, bd = Creme.as_ratio(b)
       raise SchemeRuntimeError.new("/: division by zero") if bn == 0
-      begin
-        SchemeRational.make(an * bd, ad * bn)
-      rescue OverflowError
-        raise SchemeRuntimeError.new("/: integer overflow")
-      end
+      SchemeRational.make(Creme.rat_mul(an, bd), Creme.rat_mul(ad, bn))
     else
       bf = Creme.as_f64(b, "/")
       SchemeFloat.new(Creme.as_f64(a, "/") / bf)
     end
   end
 
+  # ameba:disable Metrics/CyclomaticComplexity
   def fold_minmax(args : Array(SchemeValue), who : String, is_min : Bool) : SchemeValue
     best = args[0]
-    unless best.is_a?(SchemeInt) || best.is_a?(SchemeFloat)
+    unless best.is_a?(SchemeInt) || best.is_a?(SchemeBigInt) || best.is_a?(SchemeFloat)
       raise SchemeRuntimeError.new("#{who}: expected number, got #{best.write_string}")
     end
     any_float = best.is_a?(SchemeFloat)
     (1...args.size).each do |i|
       v = args[i]
-      unless v.is_a?(SchemeInt) || v.is_a?(SchemeFloat)
+      unless v.is_a?(SchemeInt) || v.is_a?(SchemeBigInt) || v.is_a?(SchemeFloat)
         raise SchemeRuntimeError.new("#{who}: expected number, got #{v.write_string}")
       end
       any_float = true if v.is_a?(SchemeFloat)
@@ -219,25 +227,27 @@ module Creme::BuiltinHelpers
         best = v if vv > bv
       end
     end
-    if any_float && best.is_a?(SchemeInt)
-      SchemeFloat.new(best.value.to_f64)
+    if any_float && !best.is_a?(SchemeFloat)
+      SchemeFloat.new(Creme.as_f64(best, who))
     else
       best
     end
   end
 
-  # Three-way exact comparison (-1, 0, 1) between two exact numbers (int
-  # or rational), via cross-multiplication in BigInt so large numerator/
-  # denominator pairs can't silently overflow Int64 mid-comparison — this
-  # widening is purely internal, a BigInt never becomes a Scheme-visible
-  # value.
+  # Three-way exact comparison (-1, 0, 1) between two exact numbers (int,
+  # bigint, or rational), via cross-multiplication in BigInt so large
+  # numerator/denominator pairs can't silently overflow Int64 mid-
+  # comparison — this widening is purely internal, a BigInt never becomes
+  # a Scheme-visible value on its own (only ever wrapped in a SchemeBigInt).
   private def exact_compare(a : SchemeValue, b : SchemeValue) : Int32
     # Fast path: two plain ints compare natively, no BigInt promotion.
-    return a.value <=> b.value if a.is_a?(SchemeInt) && b.is_a?(SchemeInt)
+    if a.is_a?(SchemeInt) && b.is_a?(SchemeInt)
+      return a.value <=> b.value
+    end
     an, ad = Creme.as_ratio(a)
     bn, bd = Creme.as_ratio(b)
-    lhs = an.to_big_i * bd
-    rhs = bn.to_big_i * ad
+    lhs = Creme.to_big_i(an) * Creme.to_big_i(bd)
+    rhs = Creme.to_big_i(bn) * Creme.to_big_i(ad)
     return -1 if lhs < rhs
     return 1 if lhs > rhs
     0
@@ -270,7 +280,7 @@ module Creme::BuiltinHelpers
 
   def real_component_arg(v : SchemeValue, who : String) : RealComponent
     case v
-    when SchemeInt, SchemeRational, SchemeFloat then v
+    when SchemeInt, SchemeBigInt, SchemeRational, SchemeFloat then v
     else
       raise SchemeRuntimeError.new("#{who}: expected a real number, got #{v.write_string}")
     end

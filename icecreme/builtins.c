@@ -8,6 +8,7 @@
  * expose it unconditionally). */
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -314,28 +315,75 @@ static Value bi_num_eq(VM *vm, Value *args, int nargs) {
  * (creme bytecode) int->le-bytes for correct full-range little-endian
  * encoding of negative integers (see modules/creme/bytecode.sld's own
  * comment on exactly this). */
+/* Fills `out` with an exact mpz_t representation of `v` -- T_INT or
+ * T_BIGINT only, aborting for anything else. Shared by quotient/
+ * remainder/modulo/floor-quotient/gcd/lcm's own T_BIGINT escape paths
+ * below. */
+static void value_to_mpz(Value v, mpz_t out, const char *who) {
+  if (v.tag == T_INT) {
+    mpz_set_si(out, (long)v.as.i);
+  } else if (v.tag == T_BIGINT) {
+    mpz_set(out, v.as.bigint->z);
+  } else {
+    creme_abort("%s: expected an integer, got a non-integer value", who);
+  }
+}
+
 static Value bi_quotient(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("quotient: expected two integers");
-  if (args[1].as.i == 0) creme_abort("quotient: division by zero");
-  return v_int(args[0].as.i / args[1].as.i);
+  if (nargs != 2) creme_abort("quotient: expected two integers");
+  if (args[0].tag == T_INT && args[1].tag == T_INT) {
+    if (args[1].as.i == 0) creme_abort("quotient: division by zero");
+    return v_int(args[0].as.i / args[1].as.i);
+  }
+  mpz_t a, b, q;
+  mpz_inits(a, b, q, NULL);
+  value_to_mpz(args[0], a, "quotient");
+  value_to_mpz(args[1], b, "quotient");
+  if (mpz_sgn(b) == 0) creme_abort("quotient: division by zero");
+  mpz_tdiv_q(q, a, b);
+  Value result = make_bigint_from_mpz(q);
+  mpz_clears(a, b, q, NULL);
+  return result;
 }
 
 static Value bi_remainder(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("remainder: expected two integers");
-  if (args[1].as.i == 0) creme_abort("remainder: division by zero");
-  return v_int(args[0].as.i % args[1].as.i);
+  if (nargs != 2) creme_abort("remainder: expected two integers");
+  if (args[0].tag == T_INT && args[1].tag == T_INT) {
+    if (args[1].as.i == 0) creme_abort("remainder: division by zero");
+    return v_int(args[0].as.i % args[1].as.i);
+  }
+  mpz_t a, b, r;
+  mpz_inits(a, b, r, NULL);
+  value_to_mpz(args[0], a, "remainder");
+  value_to_mpz(args[1], b, "remainder");
+  if (mpz_sgn(b) == 0) creme_abort("remainder: division by zero");
+  mpz_tdiv_r(r, a, b);
+  Value result = make_bigint_from_mpz(r);
+  mpz_clears(a, b, r, NULL);
+  return result;
 }
 
 Value bi_modulo(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("modulo: expected two integers");
-  int64_t b = args[1].as.i;
-  if (b == 0) creme_abort("modulo: division by zero");
-  int64_t r = args[0].as.i % b;
-  if (r != 0 && ((r < 0) != (b < 0))) r += b;
-  return v_int(r);
+  if (nargs != 2) creme_abort("modulo: expected two integers");
+  if (args[0].tag == T_INT && args[1].tag == T_INT) {
+    int64_t b = args[1].as.i;
+    if (b == 0) creme_abort("modulo: division by zero");
+    int64_t r = args[0].as.i % b;
+    if (r != 0 && ((r < 0) != (b < 0))) r += b;
+    return v_int(r);
+  }
+  mpz_t a, b, r;
+  mpz_inits(a, b, r, NULL);
+  value_to_mpz(args[0], a, "modulo");
+  value_to_mpz(args[1], b, "modulo");
+  if (mpz_sgn(b) == 0) creme_abort("modulo: division by zero");
+  mpz_fdiv_r(r, a, b);
+  Value result = make_bigint_from_mpz(r);
+  mpz_clears(a, b, r, NULL);
+  return result;
 }
 
 /* floor-quotient: floor(a/b) -- truncate-toward-zero quotient/remainder
@@ -348,12 +396,23 @@ Value bi_modulo(VM *vm, Value *args, int nargs) {
  * names below). */
 static Value bi_floor_quotient(VM *vm, Value *args, int nargs) {
   (void)vm;
-  if (nargs != 2 || args[0].tag != T_INT || args[1].tag != T_INT) creme_abort("floor-quotient: expected two integers");
-  int64_t a = args[0].as.i, b = args[1].as.i;
-  if (b == 0) creme_abort("floor-quotient: division by zero");
-  int64_t q = a / b, r = a % b;
-  if (r != 0 && ((r < 0) != (b < 0))) q -= 1;
-  return v_int(q);
+  if (nargs != 2) creme_abort("floor-quotient: expected two integers");
+  if (args[0].tag == T_INT && args[1].tag == T_INT) {
+    int64_t a = args[0].as.i, b = args[1].as.i;
+    if (b == 0) creme_abort("floor-quotient: division by zero");
+    int64_t q = a / b, r = a % b;
+    if (r != 0 && ((r < 0) != (b < 0))) q -= 1;
+    return v_int(q);
+  }
+  mpz_t a, b, q;
+  mpz_inits(a, b, q, NULL);
+  value_to_mpz(args[0], a, "floor-quotient");
+  value_to_mpz(args[1], b, "floor-quotient");
+  if (mpz_sgn(b) == 0) creme_abort("floor-quotient: division by zero");
+  mpz_fdiv_q(q, a, b);
+  Value result = make_bigint_from_mpz(q);
+  mpz_clears(a, b, q, NULL);
+  return result;
 }
 
 static Value make_values2(VM *vm, Value a, Value b) {
@@ -389,88 +448,163 @@ static int64_t i64_gcd(int64_t a, int64_t b) {
   return a;
 }
 
+/* Fast int64 path (i64_gcd never overflows for two genuine int64 inputs,
+ * EXCEPT negating INT64_MIN, guarded against below) as long as every
+ * argument stays a plain T_INT; escalates to mpz_gcd, and stays escalated
+ * for the rest of the fold, the moment a T_BIGINT argument (or an
+ * INT64_MIN operand) is seen -- mirrors Creme.rat_gcd's own escape design
+ * (rational.cr) on the Crystal side. */
 static Value bi_gcd(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t acc = 0;
+  int is_big = 0;
+  mpz_t bacc;
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_INT) creme_abort("gcd: expected an integer");
-    acc = i64_gcd(acc, args[i].as.i);
+    Value v = args[i];
+    if (!is_big && v.tag == T_INT && v.as.i != INT64_MIN && acc != INT64_MIN) {
+      acc = i64_gcd(acc, v.as.i);
+      continue;
+    }
+    if (v.tag != T_INT && v.tag != T_BIGINT) creme_abort("gcd: expected an integer");
+    if (!is_big) {
+      mpz_init_set_si(bacc, (long)acc);
+      is_big = 1;
+    }
+    mpz_t bv;
+    mpz_init(bv);
+    value_to_mpz(v, bv, "gcd");
+    mpz_gcd(bacc, bacc, bv);
+    mpz_clear(bv);
   }
-  return v_int(acc);
+  if (!is_big) return v_int(acc);
+  Value result = make_bigint_from_mpz(bacc);
+  mpz_clear(bacc);
+  return result;
 }
 
 static Value bi_lcm(VM *vm, Value *args, int nargs) {
   (void)vm;
   int64_t acc = 1;
+  int is_big = 0;
+  mpz_t bacc;
   for (int i = 0; i < nargs; i++) {
-    if (args[i].tag != T_INT) creme_abort("lcm: expected an integer");
-    int64_t v = args[i].as.i < 0 ? -args[i].as.i : args[i].as.i;
-    if (v == 0) { acc = 0; continue; }
-    int64_t g = i64_gcd(acc, v);
-    acc = (acc / g) * v;
+    Value v = args[i];
+    if (v.tag != T_INT && v.tag != T_BIGINT) creme_abort("lcm: expected an integer");
+    if (!is_big && v.tag == T_INT && v.as.i != INT64_MIN && acc != INT64_MIN) {
+      int64_t vv = v.as.i < 0 ? -v.as.i : v.as.i;
+      if (vv == 0) {
+        acc = 0;
+        continue;
+      }
+      int64_t g = i64_gcd(acc, vv);
+      int64_t r;
+      if (!__builtin_mul_overflow(acc / g, vv, &r)) {
+        acc = r;
+        continue;
+      }
+      /* the multiply overflowed -- fall through to escalate below,
+       * re-deriving this same step in arbitrary precision. */
+    }
+    if (!is_big) {
+      mpz_init_set_si(bacc, (long)acc);
+      is_big = 1;
+    }
+    mpz_t bv, g;
+    mpz_inits(bv, g, NULL);
+    value_to_mpz(v, bv, "lcm");
+    if (mpz_sgn(bv) == 0) {
+      mpz_set_si(bacc, 0);
+    } else {
+      mpz_gcd(g, bacc, bv);
+      mpz_divexact(bacc, bacc, g);
+      mpz_mul(bacc, bacc, bv);
+    }
+    mpz_clears(bv, g, NULL);
   }
-  return v_int(acc < 0 ? -acc : acc);
-}
-
-/* Overflow-checked integer power. Aborts on overflow to match `*`'s own
- * documented overflow-abort (an unchecked signed `*=` is UB and diverges from
- * the rest of the numeric tower). The |base|<=1 early-outs also avoid looping
- * `exp` times for a huge exponent -- for |base|>=2 overflow fires within ~63
- * iterations anyway. */
-static int64_t i64_pow(int64_t base, int64_t exp) {
-  if (base == 0) return exp == 0 ? 1 : 0;
-  if (base == 1) return 1;
-  if (base == -1) return (exp % 2 == 0) ? 1 : -1;
-  int64_t result = 1;
-  for (int64_t i = 0; i < exp; i++)
-    if (__builtin_mul_overflow(result, base, &result)) creme_abort("expt: integer result too large");
+  if (!is_big) return v_int(acc < 0 ? -acc : acc);
+  mpz_abs(bacc, bacc);
+  Value result = make_bigint_from_mpz(bacc);
+  mpz_clear(bacc);
   return result;
 }
 
-/* (expt base exp): an exact-integer base with a non-negative exact-
- * integer exponent stays an exact integer; a NEGATIVE exact-integer
- * exponent produces an exact T_RATIONAL (1/base^|exp|, sign folded into
- * the numerator since GMP's mpq_set_si takes an unsigned denominator) --
+/* (expt base exp): an exact-integer (or bigint) base with a non-negative
+ * exact-integer exponent stays an exact integer, computed via GMP's own
+ * mpz_pow_ui -- no more overflow-abort, this escalates to T_BIGINT the
+ * same way num_mul/num_add/num_sub do (make_bigint_from_mpz collapses
+ * back to T_INT whenever the result fits). A NEGATIVE exact-integer
+ * exponent produces an exact T_RATIONAL (1/base^|exp|) via mpq_inv, which
+ * handles the sign correctly regardless of the denominator's own sign --
  * matches native's own expt exactly ((expt 2 -1) is exact 1/2, not
  * inexact 0.5). Everything else falls back to a float pow via as_double. */
 static Value bi_expt(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_exact_args(nargs, 2, "expt");
   Value base = args[0], ex = args[1];
-  if (base.tag == T_INT && ex.tag == T_INT) {
-    if (ex.as.i >= 0) return v_int(i64_pow(base.as.i, ex.as.i));
-    /* Negative exponent -> reciprocal 1/base^|exp|. Handle the bases whose
-     * result doesn't depend on the (possibly un-negatable) magnitude first:
-     * base 0 is a zero denominator (reject like `/`); +-1 depend only on the
-     * exponent's parity. Then guard exp==INT64_MIN, whose magnitude 2^63 can't
-     * be negated in int64 (UB) and only base +-1/0 -- all handled above -- could
-     * avoid overflow anyway. */
-    if (base.as.i == 0) creme_abort("expt: division by zero (0 raised to a negative power)");
-    if (base.as.i == 1) return v_int(1);
-    if (base.as.i == -1) return v_int((ex.as.i % 2 == 0) ? 1 : -1);
-    if (ex.as.i == INT64_MIN) creme_abort("expt: integer result too large");
-    int64_t denom = i64_pow(base.as.i, -ex.as.i);
-    int64_t num = 1;
-    if (denom < 0) { denom = -denom; num = -1; }
+  if ((base.tag == T_INT || base.tag == T_BIGINT) && ex.tag == T_INT) {
+    mpz_t b;
+    mpz_init(b);
+    value_to_mpz(base, b, "expt");
+    if (ex.as.i >= 0) {
+      mpz_t r;
+      mpz_init(r);
+      /* ex.as.i >= 0 here, and unsigned long is 64-bit on this project's
+       * only target (see vm.c's own comment on this same LP64 fact), so
+       * this cast is exact for every non-negative int64_t. */
+      mpz_pow_ui(r, b, (unsigned long)ex.as.i);
+      Value result = make_bigint_from_mpz(r);
+      mpz_clears(b, r, NULL);
+      return result;
+    }
+    if (mpz_sgn(b) == 0) {
+      mpz_clear(b);
+      creme_abort("expt: division by zero (0 raised to a negative power)");
+    }
+    /* |ex| via mpz_abs (not raw int64_t negation) so exp==INT64_MIN, whose
+     * magnitude 2**63 can't be negated in int64_t (UB), is handled exactly
+     * like any other exponent. */
+    mpz_t exp_abs, denom;
+    mpz_inits(exp_abs, denom, NULL);
+    mpz_set_si(exp_abs, (long)ex.as.i);
+    mpz_abs(exp_abs, exp_abs);
+    if (!mpz_fits_ulong_p(exp_abs)) creme_abort("expt: exponent too large");
+    mpz_pow_ui(denom, b, mpz_get_ui(exp_abs));
     mpq_t q;
     mpq_init(q);
-    mpq_set_si(q, num, (unsigned long)denom);
+    mpq_set_z(q, denom);
+    mpq_inv(q, q);
     mpq_canonicalize(q);
     Value result = make_rational_from_mpq(q);
     mpq_clear(q);
+    mpz_clears(b, exp_abs, denom, NULL);
     return result;
   }
   return v_float(pow(as_double(base, "expt"), as_double(ex, "expt")));
 }
 
 static Value bi_exact_integer_sqrt(VM *vm, Value *args, int nargs) {
-  int64_t n = creme_arg_int(args, nargs, 0, "exact-integer-sqrt");
-  if (n < 0) creme_abort("exact-integer-sqrt: expected a non-negative integer");
-  int64_t root = (int64_t)sqrt((double)n);
-  while (root > 0 && root * root > n) root--;
-  while ((root + 1) * (root + 1) <= n) root++;
-  int64_t rem = n - root * root;
-  return make_values2(vm, v_int(root), v_int(rem));
+  (void)vm;
+  creme_check_min_args(nargs, 1, "exact-integer-sqrt");
+  if (args[0].tag == T_INT) {
+    int64_t n = args[0].as.i;
+    if (n < 0) creme_abort("exact-integer-sqrt: expected a non-negative integer");
+    int64_t root = (int64_t)sqrt((double)n);
+    while (root > 0 && root * root > n) root--;
+    while ((root + 1) * (root + 1) <= n) root++;
+    int64_t rem = n - root * root;
+    return make_values2(vm, v_int(root), v_int(rem));
+  }
+  if (args[0].tag == T_BIGINT) {
+    if (mpz_sgn(args[0].as.bigint->z) < 0) creme_abort("exact-integer-sqrt: expected a non-negative integer");
+    mpz_t root, rem;
+    mpz_inits(root, rem, NULL);
+    mpz_sqrtrem(root, rem, args[0].as.bigint->z);
+    Value root_v = make_bigint_from_mpz(root);
+    Value rem_v = make_bigint_from_mpz(rem);
+    mpz_clears(root, rem, NULL);
+    return make_values2(vm, root_v, rem_v);
+  }
+  creme_abort("exact-integer-sqrt: expected a non-negative integer");
 }
 
 /* R7RS's (scheme time) current-second: wall-clock time (seconds since the
@@ -774,6 +908,9 @@ static void print_value(FILE *out, Value v) {
     break;
   case T_BOX:
     fputs(v.aux == BOX_KIND_EOF ? "#<eof>" : "#<native-object>", out);
+    break;
+  case T_BIGINT:
+    mpz_out_str(out, 10, v.as.bigint->z);
     break;
   case T_RATIONAL:
     mpz_out_str(out, 10, mpq_numref(v.as.rational->q));
@@ -2437,6 +2574,13 @@ static uint64_t creme_hash_value_rec(Value v, HashSeen *seen) {
   }
   case T_BYTEVECTOR:
     return tag_salt ^ fnv1a(v.as.bv->bytes, (size_t)v.as.bv->len);
+  case T_BIGINT: {
+    /* Same GMP-allocated-string-then-fnv1a approach as T_RATIONAL below,
+     * for the same reason: hashes exactly the state creme_eqv's own
+     * T_BIGINT comparison (mpz_cmp) compares. */
+    char *z_str = mpz_get_str(NULL, 10, v.as.bigint->z);
+    return tag_salt ^ fnv1a(z_str, strlen(z_str));
+  }
   case T_RATIONAL: {
     /* Hash the canonicalized numerator/denominator's decimal digits --
      * exactly the state mpq_equal (creme_eqv's own T_RATIONAL comparison)
@@ -2655,10 +2799,10 @@ static Value bi_char_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_m
  * (T_PARAMETER) -- a parameter is callable via apply's generic dispatch
  * without being procedure?-true. */
 static Value bi_procedure_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "procedure?"); return v_bool(args[0].tag == T_CLOSURE || args[0].tag == T_CASE_CLOSURE || args[0].tag == T_RECORD_CALLABLE || args[0].tag == T_BUILTIN || args[0].tag == T_CONTINUATION); }
-static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "number?"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL || args[0].tag == T_COMPLEX); }
+static Value bi_number_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "number?"); return v_bool(args[0].tag == T_INT || args[0].tag == T_BIGINT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL || args[0].tag == T_COMPLEX); }
 /* real? is every number EXCEPT a genuine T_COMPLEX -- mirrors real?
  * (predicates.cr) exactly: number?(v) && !v.is_a?(SchemeComplex). */
-static Value bi_real_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "real?"); return v_bool(args[0].tag == T_INT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL); }
+static Value bi_real_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "real?"); return v_bool(args[0].tag == T_INT || args[0].tag == T_BIGINT || args[0].tag == T_FLOAT || args[0].tag == T_RATIONAL); }
 /* complex? is literally an alias for number? -- every number is complex
  * per R7RS (mirrors complex.cr's own complex_p exactly, "true for any
  * number, real or complex"). */
@@ -2666,21 +2810,22 @@ static Value bi_complex_p(VM *vm, Value *args, int nargs) { return bi_number_p(v
 static Value bi_integer_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "integer?");
-  if (args[0].tag == T_INT) return v_bool(1);
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT) return v_bool(1);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f == floor(args[0].as.f));
   /* T_RATIONAL is never whole by construction (make_rational_from_mpq
-   * collapses den==1 to T_INT before a T_RATIONAL Value ever exists), so
-   * always false here -- mirrors integer? (predicates.cr) exactly. */
+   * collapses den==1 to T_INT/T_BIGINT before a T_RATIONAL Value ever
+   * exists), so always false here -- mirrors integer? (predicates.cr)
+   * exactly. */
   return v_bool(0);
 }
-/* exact? is int/rational, matching Creme.exact? exactly (helpers.cr);
- * complex is neither exact? nor inexact? here, same gap native itself
- * has (see complex.cr's own header comment on this not being special-
- * cased) -- not something this port is trying to fix. */
-static Value bi_exact_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "exact?"); return v_bool(args[0].tag == T_INT || args[0].tag == T_RATIONAL); }
+/* exact? is int/bigint/rational, matching Creme.exact? exactly
+ * (helpers.cr); complex is neither exact? nor inexact? here, same gap
+ * native itself has (see complex.cr's own header comment on this not
+ * being special-cased) -- not something this port is trying to fix. */
+static Value bi_exact_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "exact?"); return v_bool(args[0].tag == T_INT || args[0].tag == T_BIGINT || args[0].tag == T_RATIONAL); }
 static Value bi_inexact_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "inexact?"); return v_bool(args[0].tag == T_FLOAT); }
-static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "exact-integer?"); return v_bool(args[0].tag == T_INT); }
-/* rational? is exact (int/rational) OR a finite float -- mirrors
+static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 1, "exact-integer?"); return v_bool(args[0].tag == T_INT || args[0].tag == T_BIGINT); }
+/* rational? is exact (int/bigint/rational) OR a finite float -- mirrors
  * rational? (predicates.cr) exactly. Needed by modules/creme/bytecode.
  * sld's own write-datum! (ICE chunk serialization) to detect a rational
  * constant, so this isn't just a nicety -- without it, compiling any
@@ -2690,35 +2835,27 @@ static Value bi_exact_integer_p(VM *vm, Value *args, int nargs) { (void)vm; crem
 static Value bi_rational_p(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "rational?");
-  if (args[0].tag == T_INT || args[0].tag == T_RATIONAL) return v_bool(1);
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT || args[0].tag == T_RATIONAL) return v_bool(1);
   if (args[0].tag == T_FLOAT) return v_bool(isfinite(args[0].as.f));
   return v_bool(0);
 }
-/* numerator/denominator -- int/rational only (matches native's own int/
- * rational cases exactly); a float argument would need native's own
+/* numerator/denominator -- int/bigint/rational only (matches native's own
+ * int/rational cases exactly, now extended to bigint the same way native's
+ * SchemeInt.make widening did); a float argument would need native's own
  * round-trip-through-to_exact conversion, not needed by anything in this
- * project's own icecreme test surface (write-datum! above only ever calls
- * these on a value it already confirmed is exact AND rational AND NOT an
- * integer, i.e. always a genuine T_RATIONAL) -- left unimplemented rather
- * than half-built. */
+ * project's own icecreme test surface. */
 static Value bi_numerator(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "numerator");
-  if (args[0].tag == T_INT) return args[0];
-  if (args[0].tag == T_RATIONAL) {
-    if (!mpz_fits_slong_p(mpq_numref(args[0].as.rational->q))) creme_abort("numerator: too large for this prototype's fixnum-only int type");
-    return v_int((int64_t)mpz_get_si(mpq_numref(args[0].as.rational->q)));
-  }
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT) return args[0];
+  if (args[0].tag == T_RATIONAL) return make_bigint_from_mpz(mpq_numref(args[0].as.rational->q));
   creme_abort("numerator: expected an exact rational or integer");
 }
 static Value bi_denominator(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "denominator");
-  if (args[0].tag == T_INT) return v_int(1);
-  if (args[0].tag == T_RATIONAL) {
-    if (!mpz_fits_slong_p(mpq_denref(args[0].as.rational->q))) creme_abort("denominator: too large for this prototype's fixnum-only int type");
-    return v_int((int64_t)mpz_get_si(mpq_denref(args[0].as.rational->q)));
-  }
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT) return v_int(1);
+  if (args[0].tag == T_RATIONAL) return make_bigint_from_mpz(mpq_denref(args[0].as.rational->q));
   creme_abort("denominator: expected an exact rational or integer");
 }
 static Value bi_eq_p(VM *vm, Value *args, int nargs) { (void)vm; creme_check_min_args(nargs, 2, "eq?"); return v_bool(creme_eqv(args[0], args[1])); }
@@ -2742,6 +2879,7 @@ static Value bi_zero_p(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 1, "zero?");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i == 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f == 0.0);
+  if (args[0].tag == T_BIGINT) return v_bool(0); /* never zero, see value.h */
   if (args[0].tag == T_RATIONAL) return v_bool(0); /* never zero, see value.h */
   creme_abort("zero?: not a number");
 }
@@ -2750,6 +2888,7 @@ static Value bi_positive_p(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 1, "positive?");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i > 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f > 0.0);
+  if (args[0].tag == T_BIGINT) return v_bool(mpz_sgn(args[0].as.bigint->z) > 0);
   if (args[0].tag == T_RATIONAL) return v_bool(mpq_sgn(args[0].as.rational->q) > 0);
   creme_abort("positive?: not a number");
 }
@@ -2758,11 +2897,22 @@ static Value bi_negative_p(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 1, "negative?");
   if (args[0].tag == T_INT) return v_bool(args[0].as.i < 0);
   if (args[0].tag == T_FLOAT) return v_bool(args[0].as.f < 0.0);
+  if (args[0].tag == T_BIGINT) return v_bool(mpz_sgn(args[0].as.bigint->z) < 0);
   if (args[0].tag == T_RATIONAL) return v_bool(mpq_sgn(args[0].as.rational->q) < 0);
   creme_abort("negative?: not a number");
 }
-static Value bi_odd_p(VM *vm, Value *args, int nargs) { (void)vm; return v_bool(creme_arg_int(args, nargs, 0, "odd?") % 2 != 0); }
-static Value bi_even_p(VM *vm, Value *args, int nargs) { (void)vm; return v_bool(creme_arg_int(args, nargs, 0, "even?") % 2 == 0); }
+static Value bi_odd_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "odd?");
+  if (args[0].tag == T_BIGINT) return v_bool(mpz_odd_p(args[0].as.bigint->z));
+  return v_bool(creme_arg_int(args, nargs, 0, "odd?") % 2 != 0);
+}
+static Value bi_even_p(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "even?");
+  if (args[0].tag == T_BIGINT) return v_bool(mpz_even_p(args[0].as.bigint->z));
+  return v_bool(creme_arg_int(args, nargs, 0, "even?") % 2 == 0);
+}
 /* (square z) is equivalent to (* z z) -- reuse num_mul so it promotes
  * through the same int/rational/float/complex tower `*` itself does,
  * rather than re-deriving a narrower version here. */
@@ -2774,8 +2924,30 @@ static Value bi_square(VM *vm, Value *args, int nargs) {
 static Value bi_abs(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "abs");
-  if (args[0].tag == T_INT) return v_int(args[0].as.i < 0 ? -args[0].as.i : args[0].as.i);
+  if (args[0].tag == T_INT) {
+    /* INT64_MIN's own magnitude (2**63) doesn't fit back in int64_t --
+     * negating it directly is signed-overflow UB, so escalate through
+     * mpz instead of negating in place, mirroring rat_abs (rational.cr). */
+    if (args[0].as.i == INT64_MIN) {
+      mpz_t z;
+      mpz_init_set_si(z, (long)args[0].as.i);
+      mpz_neg(z, z);
+      Value result = make_bigint_from_mpz(z);
+      mpz_clear(z);
+      return result;
+    }
+    return v_int(args[0].as.i < 0 ? -args[0].as.i : args[0].as.i);
+  }
   if (args[0].tag == T_FLOAT) return v_float(fabs(args[0].as.f));
+  if (args[0].tag == T_BIGINT) {
+    if (mpz_sgn(args[0].as.bigint->z) >= 0) return args[0];
+    mpz_t z;
+    mpz_init(z);
+    mpz_neg(z, args[0].as.bigint->z);
+    Value result = make_bigint_from_mpz(z);
+    mpz_clear(z);
+    return result;
+  }
   if (args[0].tag == T_RATIONAL) {
     if (mpq_sgn(args[0].as.rational->q) >= 0) return args[0];
     mpq_t q;
@@ -2809,14 +2981,14 @@ static Value bi_max(VM *vm, Value *args, int nargs) {
  * GMP primitives line up exactly with R7RS's own floor/ceiling/truncate.
  * Result is always exact and integral, so always collapses to a T_INT. */
 static Value mpz_to_int_value(mpz_t z, const char *who) {
-  if (!mpz_fits_slong_p(z)) creme_abort("%s: result too large for this prototype's fixnum-only int type", who);
-  return v_int((int64_t)mpz_get_si(z));
+  (void)who;
+  return make_bigint_from_mpz(z);
 }
 
 static Value bi_round(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "round");
-  if (args[0].tag == T_INT) return args[0];
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(round(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
     mpq_t *q = &args[0].as.rational->q;
@@ -2840,7 +3012,7 @@ static Value bi_round(VM *vm, Value *args, int nargs) {
 static Value bi_floor(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "floor");
-  if (args[0].tag == T_INT) return args[0];
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(floor(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
     mpz_t z;
@@ -2855,7 +3027,7 @@ static Value bi_floor(VM *vm, Value *args, int nargs) {
 static Value bi_ceiling(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "ceiling");
-  if (args[0].tag == T_INT) return args[0];
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(ceil(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
     mpz_t z;
@@ -2870,7 +3042,7 @@ static Value bi_ceiling(VM *vm, Value *args, int nargs) {
 static Value bi_truncate(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "truncate");
-  if (args[0].tag == T_INT) return args[0];
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT) return args[0];
   if (args[0].tag == T_FLOAT) return v_float(trunc(args[0].as.f));
   if (args[0].tag == T_RATIONAL) {
     mpz_t z;
@@ -2885,7 +3057,7 @@ static Value bi_truncate(VM *vm, Value *args, int nargs) {
 static Value bi_exact(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "exact");
-  if (args[0].tag == T_INT || args[0].tag == T_RATIONAL) return args[0];
+  if (args[0].tag == T_INT || args[0].tag == T_BIGINT || args[0].tag == T_RATIONAL) return args[0];
   /* Truncates rather than finding the float's own exact rational value
    * (native's to_exact does the latter via BigRational -- see
    * builtin_helpers.cr) -- a pre-existing simplification of this
@@ -2898,6 +3070,7 @@ static Value bi_inexact(VM *vm, Value *args, int nargs) {
   creme_check_min_args(nargs, 1, "inexact");
   if (args[0].tag == T_FLOAT) return args[0];
   if (args[0].tag == T_INT) return v_float((double)args[0].as.i);
+  if (args[0].tag == T_BIGINT) return v_float(mpz_get_d(args[0].as.bigint->z));
   if (args[0].tag == T_RATIONAL) return v_float(mpq_get_d(args[0].as.rational->q));
   creme_abort("inexact: not a number");
 }
@@ -2907,7 +3080,7 @@ static Value bi_inexact(VM *vm, Value *args, int nargs) {
  * imag-part/magnitude/angle); complex?/number? are above, alongside the
  * other predicates. This IS the complete native surface, not a subset --
  * nothing was left out here. ---- */
-static int is_real_component(Value v) { return v.tag == T_INT || v.tag == T_FLOAT || v.tag == T_RATIONAL; }
+static int is_real_component(Value v) { return v.tag == T_INT || v.tag == T_BIGINT || v.tag == T_FLOAT || v.tag == T_RATIONAL; }
 
 static Value bi_make_rectangular(VM *vm, Value *args, int nargs) {
   (void)vm;
@@ -3636,8 +3809,29 @@ static Value bi_string_to_number(VM *vm, Value *args, int nargs) {
   memcpy(buf, s, (size_t)len);
   buf[len] = 0;
   char *endptr;
+  errno = 0;
   long long iv = strtoll(buf, &endptr, radix);
-  if (endptr != buf && *endptr == 0) { free(buf); return v_int(iv); }
+  if (endptr != buf && *endptr == 0) {
+    if (errno != ERANGE) {
+      free(buf);
+      return v_int(iv);
+    }
+    /* strtoll itself overflowed -- the text is still a syntactically
+     * valid integer (endptr consumed it in full), just too large for
+     * int64_t, so escalate to mpz_set_str instead of falling through to
+     * the float/false paths below. */
+    mpz_t z;
+    mpz_init(z);
+    int rc = mpz_set_str(z, buf, radix);
+    free(buf);
+    if (rc != 0) {
+      mpz_clear(z);
+      return v_bool(0); /* unreachable in practice (strtoll already validated the digits) */
+    }
+    Value result = make_bigint_from_mpz(z);
+    mpz_clear(z);
+    return result;
+  }
   if (radix == 10) {
     double dv = strtod(buf, &endptr);
     if (endptr != buf && *endptr == 0) { free(buf); return v_float(dv); }
@@ -3666,26 +3860,22 @@ Value bi_number_to_string(VM *vm, Value *args, int nargs) {
   char buf[128];
   int len;
   if (radix != 10) {
-    if (args[0].tag != T_INT) creme_abort("number->string: radix %d requires an exact integer", radix);
-    int64_t n = args[0].as.i;
-    int neg = n < 0;
-    /* Negating INT64_MIN directly overflows -- widen through uint64_t
-     * first (two's-complement wraparound gives the correct magnitude). */
-    uint64_t un = neg ? (uint64_t)(-(n + 1)) + 1 : (uint64_t)n;
-    char tmp[70];
-    int ti = 0;
-    if (un == 0) tmp[ti++] = '0';
-    while (un > 0) {
-      int d = (int)(un % (uint64_t)radix);
-      tmp[ti++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
-      un /= (uint64_t)radix;
-    }
-    int bi = 0;
-    if (neg) buf[bi++] = '-';
-    while (ti > 0) buf[bi++] = tmp[--ti];
-    len = bi;
+    if (args[0].tag != T_INT && args[0].tag != T_BIGINT) creme_abort("number->string: radix %d requires an exact integer", radix);
+    /* GMP's mpz_get_str supports any base 2..62 natively (lowercase a-z
+     * for 11..36, matching this function's own long-standing digit
+     * convention) -- simpler than a hand-rolled digit loop, and handles
+     * T_BIGINT for free. */
+    mpz_t z;
+    mpz_init(z);
+    value_to_mpz(args[0], z, "number->string");
+    char *s = mpz_get_str(NULL, radix, z);
+    mpz_clear(z);
+    return creme_bytes_value(s, (int)strlen(s));
   } else if (args[0].tag == T_INT) {
     len = snprintf(buf, sizeof(buf), "%lld", (long long)args[0].as.i);
+  } else if (args[0].tag == T_BIGINT) {
+    char *s = mpz_get_str(NULL, 10, args[0].as.bigint->z);
+    return creme_bytes_value(s, (int)strlen(s));
   } else if (args[0].tag == T_FLOAT) {
     double f = args[0].as.f;
     if (fabs(f) < 1e15 && f == (double)(int64_t)f) {

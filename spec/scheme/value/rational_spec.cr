@@ -62,31 +62,31 @@ describe Creme::SchemeRational do
   end
 end
 
-describe "Creme.int_gcd" do
+describe "Creme.rat_gcd" do
   it "computes the greatest common divisor" do
-    Creme.int_gcd(12_i64, 18_i64).should eq(6_i64)
+    Creme.rat_gcd(12_i64, 18_i64).should eq(6_i64)
   end
 
   it "is always non-negative" do
-    Creme.int_gcd(-12_i64, 18_i64).should eq(6_i64)
-    Creme.int_gcd(12_i64, -18_i64).should eq(6_i64)
+    Creme.rat_gcd(-12_i64, 18_i64).should eq(6_i64)
+    Creme.rat_gcd(12_i64, -18_i64).should eq(6_i64)
   end
 
   it "gcd of 0 and 0 is 0" do
-    Creme.int_gcd(0_i64, 0_i64).should eq(0_i64)
+    Creme.rat_gcd(0_i64, 0_i64).should eq(0_i64)
   end
 
   it "gcd of 0 and n is n" do
-    Creme.int_gcd(0_i64, 5_i64).should eq(5_i64)
+    Creme.rat_gcd(0_i64, 5_i64).should eq(5_i64)
   end
 end
 
-describe "Creme.int_lcm" do
+describe "Creme.rat_lcm" do
   it "computes the least common multiple" do
-    Creme.int_lcm(4_i64, 6_i64).should eq(12_i64)
+    Creme.rat_lcm(4_i64, 6_i64).should eq(12_i64)
   end
 
   it "lcm with 0 is 0" do
-    Creme.int_lcm(0_i64, 5_i64).should eq(0_i64)
+    Creme.rat_lcm(0_i64, 5_i64).should eq(0_i64)
   end
 end
