@@ -528,6 +528,73 @@ static Value bi_lcm(VM *vm, Value *args, int nargs) {
   return result;
 }
 
+/* ---- complex-double helpers for the transcendentals below (sin/cos/tan/
+ * asin/acos/atan/exp/log/sqrt/expt) that need to accept a T_COMPLEX
+ * argument, or extend a real argument's domain into the complex plane
+ * (e.g. (log -4), (asin 2)) -- same hand-rolled-over-two-doubles style as
+ * complex_add/sub/mul/div (vm.c), no <complex.h>/C99 _Complex anywhere in
+ * this codebase. All textbook complex-analysis identities. ---- */
+typedef struct {
+  double re, im;
+} CD;
+
+static CD cd_mul(CD a, CD b) { return (CD){a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re}; }
+static CD cd_div(CD a, CD b) {
+  double d = b.re * b.re + b.im * b.im;
+  return (CD){(a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d};
+}
+static CD cd_exp(CD z) {
+  double e = exp(z.re);
+  return (CD){e * cos(z.im), e * sin(z.im)};
+}
+static CD cd_log(CD z) { return (CD){log(sqrt(z.re * z.re + z.im * z.im)), atan2(z.im, z.re)}; }
+static CD cd_sqrt(CD z) {
+  double r = sqrt(z.re * z.re + z.im * z.im);
+  double sre = sqrt((r + z.re) / 2.0), sim = sqrt((r - z.re) / 2.0);
+  return (CD){sre, z.im < 0 ? -sim : sim};
+}
+static CD cd_sin(CD z) { return (CD){sin(z.re) * cosh(z.im), cos(z.re) * sinh(z.im)}; }
+static CD cd_cos(CD z) { return (CD){cos(z.re) * cosh(z.im), -sin(z.re) * sinh(z.im)}; }
+static CD cd_tan(CD z) { return cd_div(cd_sin(z), cd_cos(z)); }
+/* asin(z) = -i * log(iz + sqrt(1 - z^2)) ; acos(z) = -i * log(z + i*sqrt(1 - z^2)) */
+static CD cd_asin(CD z) {
+  CD z2 = cd_mul(z, z);
+  CD s = cd_sqrt((CD){1.0 - z2.re, -z2.im});
+  CD l = cd_log((CD){-z.im + s.re, z.re + s.im});
+  return (CD){l.im, -l.re};
+}
+static CD cd_acos(CD z) {
+  CD z2 = cd_mul(z, z);
+  CD s = cd_sqrt((CD){1.0 - z2.re, -z2.im});
+  CD l = cd_log((CD){z.re - s.im, z.im + s.re});
+  return (CD){l.im, -l.re};
+}
+/* atan(z) = (i/2) * log((1-iz)/(1+iz)) */
+static CD cd_atan(CD z) {
+  CD q = cd_div((CD){1.0 + z.im, -z.re}, (CD){1.0 - z.im, z.re});
+  CD l = cd_log(q);
+  return (CD){-l.im / 2.0, l.re / 2.0};
+}
+static CD cd_pow(CD base, CD ex) {
+  if (base.re == 0.0 && base.im == 0.0) return (CD){0.0, 0.0};
+  return cd_exp(cd_mul(ex, cd_log(base)));
+}
+
+static CD value_to_cd(Value v, const char *who) {
+  if (v.tag == T_COMPLEX) return (CD){as_double(v.as.cplx->real, who), as_double(v.as.cplx->imag, who)};
+  return (CD){as_double(v, who), 0.0};
+}
+static Value cd_to_value(CD z) { return make_complex(v_float(z.re), v_float(z.im)); }
+
+/* Whether v is an exact integer, or a float with no fractional part --
+ * used by expt to decide whether a negative real base still yields a
+ * real result (integer-valued exponent) or must go complex. */
+static int is_integer_valued(Value v) {
+  if (v.tag == T_INT || v.tag == T_BIGINT) return 1;
+  if (v.tag == T_FLOAT) return isfinite(v.as.f) && v.as.f == floor(v.as.f);
+  return 0;
+}
+
 /* (expt base exp): an exact-integer (or bigint) base with a non-negative
  * exact-integer exponent stays an exact integer, computed via GMP's own
  * mpz_pow_ui -- no more overflow-abort, this escalates to T_BIGINT the
@@ -578,6 +645,14 @@ static Value bi_expt(VM *vm, Value *args, int nargs) {
     mpq_clear(q);
     mpz_clears(b, exp_abs, denom, NULL);
     return result;
+  }
+  int base_is_real = base.tag == T_INT || base.tag == T_BIGINT || base.tag == T_FLOAT || base.tag == T_RATIONAL;
+  if (base.tag == T_COMPLEX || ex.tag == T_COMPLEX ||
+      (base_is_real && as_double(base, "expt") < 0.0 && !is_integer_valued(ex))) {
+    /* A negative real base with a non-integer real exponent (or either
+     * operand already complex) is genuinely complex -- e.g. (expt -8 1/3)
+     * -- rather than the NaN a plain float pow would silently produce. */
+    return cd_to_value(cd_pow(value_to_cd(base, "expt"), value_to_cd(ex, "expt")));
   }
   return v_float(pow(as_double(base, "expt"), as_double(ex, "expt")));
 }
@@ -652,14 +727,60 @@ static Value bi_bits_to_flonum(VM *vm, Value *args, int nargs) {
 /* ---- (scheme inexact)/(creme math): transcendentals -- thin libm
  * wrappers over as_double (already used by abs/magnitude/etc., accepts
  * T_INT/T_RATIONAL/T_FLOAT), same "always returns a float" contract as
- * native's own Math.sin/cos/etc.-based implementation. */
-static Value bi_sin(VM *vm, Value *args, int nargs) { (void)vm; return v_float(sin(creme_arg_double(args, nargs, 0, "sin"))); }
-static Value bi_cos(VM *vm, Value *args, int nargs) { (void)vm; return v_float(cos(creme_arg_double(args, nargs, 0, "cos"))); }
-static Value bi_tan(VM *vm, Value *args, int nargs) { (void)vm; return v_float(tan(creme_arg_double(args, nargs, 0, "tan"))); }
-static Value bi_asin(VM *vm, Value *args, int nargs) { (void)vm; return v_float(asin(creme_arg_double(args, nargs, 0, "asin"))); }
-static Value bi_acos(VM *vm, Value *args, int nargs) { (void)vm; return v_float(acos(creme_arg_double(args, nargs, 0, "acos"))); }
-static Value bi_atan(VM *vm, Value *args, int nargs) { (void)vm; return v_float(atan(creme_arg_double(args, nargs, 0, "atan"))); }
-static Value bi_exp(VM *vm, Value *args, int nargs) { (void)vm; return v_float(exp(creme_arg_double(args, nargs, 0, "exp"))); }
+ * native's own Math.sin/cos/etc.-based implementation. sin/cos/tan/exp/
+ * atan additionally accept a genuine T_COMPLEX argument (via the cd_*
+ * helpers above), matching native's own math.cr exactly -- these four
+ * (plus asin/acos/log below) have no real-domain restriction issue of
+ * their own, so only the "argument is already complex" branch is needed. */
+static Value bi_sin(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "sin");
+  if (args[0].tag == T_COMPLEX) return cd_to_value(cd_sin(value_to_cd(args[0], "sin")));
+  return v_float(sin(creme_arg_double(args, nargs, 0, "sin")));
+}
+static Value bi_cos(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "cos");
+  if (args[0].tag == T_COMPLEX) return cd_to_value(cd_cos(value_to_cd(args[0], "cos")));
+  return v_float(cos(creme_arg_double(args, nargs, 0, "cos")));
+}
+static Value bi_tan(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "tan");
+  if (args[0].tag == T_COMPLEX) return cd_to_value(cd_tan(value_to_cd(args[0], "tan")));
+  return v_float(tan(creme_arg_double(args, nargs, 0, "tan")));
+}
+/* (asin x)/(acos x) for a real |x| > 1 is genuinely complex (its correct
+ * value doesn't fit on the real line) -- same "real input, complex-valued
+ * result" treatment sqrt already gives negative reals. */
+static Value bi_asin(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "asin");
+  if (args[0].tag == T_COMPLEX) return cd_to_value(cd_asin(value_to_cd(args[0], "asin")));
+  double x = creme_arg_double(args, nargs, 0, "asin");
+  if (fabs(x) > 1.0) return cd_to_value(cd_asin((CD){x, 0.0}));
+  return v_float(asin(x));
+}
+static Value bi_acos(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "acos");
+  if (args[0].tag == T_COMPLEX) return cd_to_value(cd_acos(value_to_cd(args[0], "acos")));
+  double x = creme_arg_double(args, nargs, 0, "acos");
+  if (fabs(x) > 1.0) return cd_to_value(cd_acos((CD){x, 0.0}));
+  return v_float(acos(x));
+}
+static Value bi_atan(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "atan");
+  if (args[0].tag == T_COMPLEX) return cd_to_value(cd_atan(value_to_cd(args[0], "atan")));
+  return v_float(atan(creme_arg_double(args, nargs, 0, "atan")));
+}
+static Value bi_exp(VM *vm, Value *args, int nargs) {
+  (void)vm;
+  creme_check_min_args(nargs, 1, "exp");
+  if (args[0].tag == T_COMPLEX) return cd_to_value(cd_exp(value_to_cd(args[0], "exp")));
+  return v_float(exp(creme_arg_double(args, nargs, 0, "exp")));
+}
 static Value bi_log2(VM *vm, Value *args, int nargs) { (void)vm; return v_float(log2(creme_arg_double(args, nargs, 0, "log2"))); }
 static Value bi_log10(VM *vm, Value *args, int nargs) { (void)vm; return v_float(log10(creme_arg_double(args, nargs, 0, "log10"))); }
 static Value bi_atan2(VM *vm, Value *args, int nargs) { (void)vm; return v_float(atan2(creme_arg_double(args, nargs, 0, "atan2"), creme_arg_double(args, nargs, 1, "atan2"))); }
@@ -667,11 +788,22 @@ static Value bi_pow(VM *vm, Value *args, int nargs) { (void)vm; return v_float(p
 static Value bi_hypot(VM *vm, Value *args, int nargs) { (void)vm; return v_float(hypot(creme_arg_double(args, nargs, 0, "hypot"), creme_arg_double(args, nargs, 1, "hypot"))); }
 
 /* log's optional 2nd argument is an explicit base, computed as log(x)/
- * log(base) -- matches native's own MathLibrary#log exactly. */
+ * log(base) -- matches native's own MathLibrary#log exactly; this 2-arg
+ * form stays real-only, same as native. The 1-arg form additionally
+ * accepts a genuine T_COMPLEX argument, and extends a negative real's
+ * domain into the complex plane (log|x| + i*pi), same precedent as
+ * sqrt/asin/acos above. */
 static Value bi_log(VM *vm, Value *args, int nargs) {
   (void)vm;
-  double x = log(creme_arg_double(args, nargs, 0, "log"));
-  return nargs >= 2 ? v_float(x / log(as_double(args[1], "log"))) : v_float(x);
+  creme_check_min_args(nargs, 1, "log");
+  if (nargs == 1) {
+    if (args[0].tag == T_COMPLEX) return cd_to_value(cd_log(value_to_cd(args[0], "log")));
+    double x = as_double(args[0], "log");
+    if (x < 0.0) return cd_to_value(cd_log((CD){x, 0.0}));
+    return v_float(log(x));
+  }
+  double x = log(as_double(args[0], "log"));
+  return v_float(x / log(as_double(args[1], "log")));
 }
 
 /* (scheme inexact)'s sqrt/nan?/infinite?/finite? -- sqrt has an exact
@@ -679,13 +811,12 @@ static Value bi_log(VM *vm, Value *args, int nargs) {
  * of the float fallback, and returns a T_COMPLEX for a negative real
  * (the magnitude's square root goes on the imaginary axis, per R7RS),
  * mirroring native's own sqrt (modules/scheme/inexact.cr) exactly. A
- * genuinely T_COMPLEX argument aborts via as_double itself (same as
- * native's own Creme.as_f64) -- this prototype's sqrt doesn't support
- * complex input either. */
+ * genuinely T_COMPLEX argument now also works, via cd_sqrt. */
 static Value bi_sqrt(VM *vm, Value *args, int nargs) {
   (void)vm;
   creme_check_min_args(nargs, 1, "sqrt");
   Value v = args[0];
+  if (v.tag == T_COMPLEX) return cd_to_value(cd_sqrt(value_to_cd(v, "sqrt")));
   if (v.tag == T_INT && v.as.i >= 0) {
     int64_t n = v.as.i;
     int64_t root = (int64_t)sqrt((double)n);
@@ -3113,11 +3244,34 @@ static Value bi_imag_part(VM *vm, Value *args, int nargs) {
   return v_int(0);
 }
 
+/* magnitude is sqrt(re^2 + im^2) -- stays exact when re^2 + im^2 is an
+ * exact perfect-square integer (e.g. (magnitude (make-rectangular 3 4))
+ * is exact 5, not 5.0), same int64-fast-path/mpz-escalation shape as
+ * bi_sqrt's own perfect-square fast path and bi_exact_integer_sqrt's
+ * T_BIGINT branch above. re^2 + im^2 can also be an exact non-integer
+ * T_RATIONAL -- sqrt of THAT stays inexact, same as bi_sqrt's own scope
+ * (no exact rational-radicand fast path either), not a regression. */
 static Value bi_magnitude(VM *vm, Value *args, int nargs) {
   creme_check_exact_args(nargs, 1, "magnitude");
   if (args[0].tag == T_COMPLEX) {
-    double re = as_double(args[0].as.cplx->real, "magnitude"), im = as_double(args[0].as.cplx->imag, "magnitude");
-    return v_float(sqrt(re * re + im * im));
+    Complex *c = args[0].as.cplx;
+    Value sumsq = num_add(num_mul(c->real, c->real), num_mul(c->imag, c->imag));
+    if (sumsq.tag == T_INT && sumsq.as.i >= 0) {
+      int64_t n = sumsq.as.i;
+      int64_t root = (int64_t)sqrt((double)n);
+      while (root > 0 && root * root > n) root--;
+      while ((root + 1) * (root + 1) <= n) root++;
+      if (root * root == n) return v_int(root);
+    } else if (sumsq.tag == T_BIGINT) {
+      mpz_t root, rem;
+      mpz_inits(root, rem, NULL);
+      mpz_sqrtrem(root, rem, sumsq.as.bigint->z);
+      int is_perfect = mpz_sgn(rem) == 0;
+      Value root_v = is_perfect ? make_bigint_from_mpz(root) : v_int(0);
+      mpz_clears(root, rem, NULL);
+      if (is_perfect) return root_v;
+    }
+    return v_float(sqrt(as_double(sumsq, "magnitude")));
   }
   return bi_abs(vm, args, nargs);
 }

@@ -422,17 +422,20 @@ static Value complex_mul(Value a, Value b) {
   return make_complex(real, imag);
 }
 
-/* ALWAYS produces a float-valued result, even for two exact-only complex
- * operands -- mirrors complex_div (builtin_helpers.cr) exactly, a real,
- * slightly-inconsistent-with-the-rest-of-the-tower quirk of the native
- * implementation this replicates rather than "fixes". */
+/* a/b = a * conj(b) / |b|^2 -- stays exact when every component is
+ * exact, since num_add/num_sub/num_mul already preserve exactness for
+ * exact real operands, and num_div's own exact/exact (mpq) path does
+ * too -- same precedent as complex_add/sub/mul above, which already
+ * stay exact; mirrors native's own complex_div (builtin_helpers.cr)
+ * exactly. Only falls back to inexact once either operand's component
+ * already is. */
 static Value complex_div(Value a, Value b) {
   Complex *ca = a.as.cplx, *cb = b.as.cplx;
-  double ar = as_double(ca->real, "/"), ai = as_double(ca->imag, "/");
-  double br = as_double(cb->real, "/"), bi = as_double(cb->imag, "/");
-  double denom = br * br + bi * bi;
-  if (denom == 0.0) creme_abort("/: division by zero");
-  return make_complex(v_float((ar * br + ai * bi) / denom), v_float((ai * br - ar * bi) / denom));
+  Value denom = num_add(num_mul(cb->real, cb->real), num_mul(cb->imag, cb->imag));
+  if (as_double(denom, "/") == 0.0) creme_abort("/: division by zero");
+  Value re = num_add(num_mul(ca->real, cb->real), num_mul(ca->imag, cb->imag));
+  Value im = num_sub(num_mul(ca->imag, cb->real), num_mul(ca->real, cb->imag));
+  return make_complex(num_div(re, denom), num_div(im, denom));
 }
 
 Value num_add(Value x, Value y) {

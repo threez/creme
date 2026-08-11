@@ -143,6 +143,7 @@ module Creme::R7RS::Arithmetic
   # falling back to float power. Neither path can overflow anymore —
   # expt_int_pow escalates to BigInt itself.
   @[Creme::SchemeFn("expt", min: 2, max: 2)]
+  # ameba:disable Metrics/CyclomaticComplexity
   def expt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     base = args[0]
     ex = args[1]
@@ -154,6 +155,14 @@ module Creme::R7RS::Arithmetic
       else
         SchemeRational.make(1_i64, expt_int_pow(basev, -exv))
       end
+    elsif base.is_a?(SchemeComplex) || ex.is_a?(SchemeComplex) ||
+          (!base.is_a?(SchemeComplex) && number?(base) && Creme.as_f64(base, "expt") < 0 && !integer_valued?(ex))
+      # A negative real base with a non-integer real exponent (or either
+      # operand already complex) is genuinely complex — e.g. (expt -8 1/3)
+      # — rather than the NaN a plain float pow would silently produce.
+      br, bi = complex_parts(base, "expt")
+      er, ei = complex_parts(ex, "expt")
+      complex_result(*Creme::ComplexMath.pow(br, bi, er, ei))
     else
       SchemeFloat.new(Creme.as_f64(base, "expt") ** Creme.as_f64(ex, "expt"))
     end

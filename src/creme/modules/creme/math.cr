@@ -14,47 +14,74 @@ module Creme::Builtins::MathLibrary
 
   @[Creme::SchemeFn("sin", min: 1, max: 1)]
   def sin(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeFloat.new(Math.sin(Creme.as_f64(args[0], "sin")))
+    v = args[0]
+    return complex_result(*Creme::ComplexMath.sin(*complex_parts(v, "sin"))) if v.is_a?(SchemeComplex)
+    SchemeFloat.new(Math.sin(Creme.as_f64(v, "sin")))
   end
 
   @[Creme::SchemeFn("cos", min: 1, max: 1)]
   def cos(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeFloat.new(Math.cos(Creme.as_f64(args[0], "cos")))
+    v = args[0]
+    return complex_result(*Creme::ComplexMath.cos(*complex_parts(v, "cos"))) if v.is_a?(SchemeComplex)
+    SchemeFloat.new(Math.cos(Creme.as_f64(v, "cos")))
   end
 
   @[Creme::SchemeFn("tan", min: 1, max: 1)]
   def tan(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeFloat.new(Math.tan(Creme.as_f64(args[0], "tan")))
+    v = args[0]
+    return complex_result(*Creme::ComplexMath.tan(*complex_parts(v, "tan"))) if v.is_a?(SchemeComplex)
+    SchemeFloat.new(Math.tan(Creme.as_f64(v, "tan")))
   end
 
+  # (asin x) for a real |x| > 1 is genuinely complex (its correct value
+  # doesn't fit on the real line) — same "real input, complex-valued
+  # result" treatment sqrt already gives negative reals.
   @[Creme::SchemeFn("asin", min: 1, max: 1)]
   def asin(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeFloat.new(Math.asin(Creme.as_f64(args[0], "asin")))
+    v = args[0]
+    return complex_result(*Creme::ComplexMath.asin(*complex_parts(v, "asin"))) if v.is_a?(SchemeComplex)
+    x = Creme.as_f64(v, "asin")
+    return complex_result(*Creme::ComplexMath.asin(x, 0.0)) if x.abs > 1.0
+    SchemeFloat.new(Math.asin(x))
   end
 
   @[Creme::SchemeFn("acos", min: 1, max: 1)]
   def acos(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeFloat.new(Math.acos(Creme.as_f64(args[0], "acos")))
+    v = args[0]
+    return complex_result(*Creme::ComplexMath.acos(*complex_parts(v, "acos"))) if v.is_a?(SchemeComplex)
+    x = Creme.as_f64(v, "acos")
+    return complex_result(*Creme::ComplexMath.acos(x, 0.0)) if x.abs > 1.0
+    SchemeFloat.new(Math.acos(x))
   end
 
   @[Creme::SchemeFn("atan", min: 1, max: 1)]
   def atan(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeFloat.new(Math.atan(Creme.as_f64(args[0], "atan")))
+    v = args[0]
+    return complex_result(*Creme::ComplexMath.atan(*complex_parts(v, "atan"))) if v.is_a?(SchemeComplex)
+    SchemeFloat.new(Math.atan(Creme.as_f64(v, "atan")))
   end
 
+  # (log x) for a negative real x is genuinely complex (log|x| + i*pi) —
+  # same real-input-complex-result treatment as sqrt/asin/acos above. The
+  # optional explicit-base 2-argument form stays real-only, same as native.
   @[Creme::SchemeFn("log", min: 1, max: 2)]
   def log(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    x = Creme.as_f64(args[0], "log")
-    if args.size == 2
-      SchemeFloat.new(Math.log(x) / Math.log(Creme.as_f64(args[1], "log")))
-    else
-      SchemeFloat.new(Math.log(x))
+    v = args[0]
+    if args.size == 1
+      return complex_result(*Creme::ComplexMath.log(*complex_parts(v, "log"))) if v.is_a?(SchemeComplex)
+      x = Creme.as_f64(v, "log")
+      return complex_result(*Creme::ComplexMath.log(x, 0.0)) if x < 0
+      return SchemeFloat.new(Math.log(x))
     end
+    x = Creme.as_f64(v, "log")
+    SchemeFloat.new(Math.log(x) / Math.log(Creme.as_f64(args[1], "log")))
   end
 
   @[Creme::SchemeFn("exp", min: 1, max: 1)]
   def exp(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-    SchemeFloat.new(Math.exp(Creme.as_f64(args[0], "exp")))
+    v = args[0]
+    return complex_result(*Creme::ComplexMath.exp(*complex_parts(v, "exp"))) if v.is_a?(SchemeComplex)
+    SchemeFloat.new(Math.exp(Creme.as_f64(v, "exp")))
   end
 end
 

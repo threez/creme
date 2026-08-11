@@ -50,8 +50,13 @@ describe "(scheme complex)" do
   end
 
   describe "magnitude / angle" do
-    it "magnitude of a complex value is its Euclidean norm" do
-      w("(magnitude (make-rectangular 3 4))").should eq("5.0")
+    it "magnitude of a complex value is its Euclidean norm, staying exact for a perfect-square sum" do
+      w("(magnitude (make-rectangular 3 4))").should eq("5")
+    end
+
+    it "magnitude falls back to inexact once the sum of squares isn't a perfect-square integer" do
+      w("(magnitude (make-rectangular 1 1))").should eq("1.4142135623730951")
+      w("(magnitude (make-rectangular 3.0 4))").should eq("5.0")
     end
 
     it "magnitude of a real value falls back to abs" do
@@ -90,8 +95,19 @@ describe "(scheme complex)" do
       w("(* (make-rectangular 1 2) (make-rectangular 3 4))").should eq("-5+10i")
     end
 
-    it "divides two complex numbers" do
-      w("(/ (make-rectangular 1 2) (make-rectangular 1 0))").should eq("1.0+2.0i")
+    it "divides two complex numbers, staying exact when both operands are exact" do
+      w("(/ (make-rectangular 1 2) (make-rectangular 1 0))").should eq("1+2i")
+      w("(/ (make-rectangular 1 2) (make-rectangular 3 4))").should eq("11/25+2/25i")
+    end
+
+    it "division falls back to inexact once either operand has an inexact component" do
+      w("(/ (make-rectangular 1.0 2) (make-rectangular 1 0))").should eq("1.0+2.0i")
+    end
+
+    it "division by a genuine complex zero raises, matching real division by zero" do
+      expect_raises(Creme::SchemeRuntimeError, /division by zero/) do
+        run("(/ (make-rectangular 1 2) (make-rectangular 0 0))")
+      end
     end
 
     it "promotes a plain real operand to complex for mixed arithmetic" do
@@ -113,6 +129,52 @@ describe "(scheme complex)" do
     it "sqrt of a non-negative real is unaffected" do
       w("(import (scheme inexact)) (sqrt 4)").should eq("2")
       w("(import (scheme inexact)) (sqrt 4.0)").should eq("2.0")
+    end
+  end
+
+  describe "complex-aware transcendentals" do
+    it "sin/cos/tan/exp accept a genuine complex argument" do
+      w("(import (creme math)) (sin 1+2i)").should eq("3.165778513216168+1.9596010414216063i")
+      w("(import (creme math)) (cos 1+2i)").should eq("2.0327230070196656-3.0518977991518i")
+      w("(import (creme math)) (tan 1+2i)").should eq("0.0338128260798966+1.0147936161466335i")
+      w("(import (creme math)) (exp 1+1i)").should eq("1.4686939399158854+2.2873552871788427i")
+    end
+
+    it "sqrt of a genuinely complex argument" do
+      w("(import (scheme inexact)) (sqrt -1+0.0i)").should eq("0.0+1.0i")
+    end
+
+    it "log of a genuinely complex argument, and of a negative real (domain extension)" do
+      w("(import (creme math)) (log 1+1i)").should eq("0.3465735902799727+0.7853981633974483i")
+      w("(import (creme math)) (log -4)").should eq("1.3862943611198906+3.141592653589793i")
+      w("(import (creme math)) (log 0)").should eq("-inf.0")
+    end
+
+    it "asin/acos of an out-of-range real argument, and of a genuinely complex argument" do
+      w("(import (creme math)) (asin 2)").should eq("1.5707963267948966-1.3169578969248166i")
+      w("(import (creme math)) (acos 2)").should eq("0.0+1.3169578969248164i")
+      w("(import (creme math)) (asin 1+1i)").should eq("0.6662394324925153+1.0612750619050355i")
+      w("(import (creme math)) (acos 1+1i)").should eq("0.9045568943023814-1.0612750619050357i")
+      w("(import (creme math)) (asin 0.5)").should eq("0.5235987755982989")
+    end
+
+    it "atan of a genuinely complex argument, real atan unaffected" do
+      w("(import (creme math)) (atan 1+1i)").should eq("1.0172219678978514+0.4023594781085251i")
+      w("(import (creme math)) (atan 1)").should eq("0.7853981633974483")
+    end
+
+    it "expt: negative real base with a non-integer exponent goes complex instead of NaN" do
+      w("(import (creme math)) (expt -8 1/3)").should eq("1.0+1.732050807568877i")
+    end
+
+    it "expt: negative real base with an integer-valued exponent still stays real" do
+      w("(import (creme math)) (expt -8.0 2.0)").should eq("64.0")
+      w("(import (creme math)) (expt -8 3)").should eq("-512")
+    end
+
+    it "expt: a genuinely complex base or exponent" do
+      w("(import (creme math)) (real-part (expt 1+1i 2))").should eq("1.2246467991473532e-16")
+      w("(import (creme math)) (imag-part (expt 1+1i 2))").should eq("2.0")
     end
   end
 end

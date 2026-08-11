@@ -662,10 +662,13 @@ describe "builtins: type predicates" do
     w("(import (scheme inexact)) (finite? 1)").should eq("#t")
   end
 
-  it "nan?/infinite?/finite? on a non-finite float (via a real math builtin, since / by float 0 still raises)" do
+  it "nan?/infinite?/finite? on a non-finite float (via a real math builtin)" do
     w("(import (scheme inexact)) (infinite? (log 0))").should eq("#t")
     w("(import (scheme inexact)) (finite? (log 0))").should eq("#f")
-    w("(import (scheme inexact)) (nan? (log -1))").should eq("#t")
+    # log's optional explicit-base 2-argument form stays real-only (unlike
+    # the 1-argument form, which now returns a complex result for a
+    # negative real argument) — a negative base still yields NaN here.
+    w("(import (scheme inexact)) (nan? (log 1 -1))").should eq("#t")
     w("(import (scheme inexact)) (nan? (log 0))").should eq("#f")
   end
 

@@ -34,7 +34,7 @@ describe "(scheme inexact)" do
 
   it "re-exports sqrt/finite?/infinite?/nan? which are already core" do
     w("(import (scheme inexact)) (sqrt 4)").should eq("2")
-    w("(import (scheme inexact)) (nan? (asin 2.0))").should eq("#t")
+    w("(import (scheme inexact)) (nan? (log 1 -1))").should eq("#t")
   end
 end
 

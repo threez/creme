@@ -23,7 +23,9 @@ module Creme::R7RS::InexactExtra
     if (v.is_a?(SchemeInt) || v.is_a?(SchemeBigInt)) && v.value >= 0
       root, rem = exact_integer_sqrt_pair(v.value)
       rem == 0 ? Creme.int_value(root).as(SchemeValue) : SchemeFloat.new(Math.sqrt(Creme.as_f64(v, "sqrt"))).as(SchemeValue)
-    elsif number?(v) && !v.is_a?(SchemeComplex) && Creme.as_f64(v, "sqrt") < 0
+    elsif v.is_a?(SchemeComplex)
+      complex_result(*Creme::ComplexMath.sqrt(*complex_parts(v, "sqrt")))
+    elsif number?(v) && Creme.as_f64(v, "sqrt") < 0
       # sqrt of a negative real is complex, per R7RS — the magnitude's
       # square root goes on the imaginary axis.
       SchemeComplex.make(SchemeFloat.new(0.0), SchemeFloat.new(Math.sqrt(-Creme.as_f64(v, "sqrt")))).as(SchemeValue)

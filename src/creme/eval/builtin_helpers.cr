@@ -294,6 +294,32 @@ module Creme::BuiltinHelpers
     SchemeComplex.wrap(real_component_arg(v, who), SchemeInt.new(0_i64))
   end
 
+  # Extracts a (re, im) Float64 pair for the complex-aware transcendentals
+  # (Creme::ComplexMath, complex_math.cr) — a real value promotes with
+  # im = 0.0, mirroring to_complex's own real->complex promotion.
+  def complex_parts(v : SchemeValue, who : String) : {Float64, Float64}
+    if v.is_a?(SchemeComplex)
+      {Creme.as_f64(v.real, who), Creme.as_f64(v.imag, who)}
+    else
+      {Creme.as_f64(v, who), 0.0}
+    end
+  end
+
+  def complex_result(re : Float64, im : Float64) : SchemeValue
+    SchemeComplex.make(SchemeFloat.new(re), SchemeFloat.new(im))
+  end
+
+  # Whether v is an exact integer, or a float with no fractional part —
+  # used by expt to decide whether a negative real base still yields a
+  # real result (integer-valued exponent) or must go complex.
+  def integer_valued?(v : SchemeValue) : Bool
+    case v
+    when SchemeInt, SchemeBigInt then true
+    when SchemeFloat             then v.value.finite? && v.value == v.value.round
+    else                              false
+    end
+  end
+
   def complex_add(a : SchemeComplex, b : SchemeComplex, who : String) : SchemeValue
     SchemeComplex.make(num_add(a.real, b.real, who).as(RealComponent), num_add(a.imag, b.imag, who).as(RealComponent))
   end
@@ -502,12 +528,19 @@ module Creme::BuiltinHelpers
     end
   end
 
+  # a/b = a * conj(b) / |b|^2 — stays exact when every component is
+  # exact, since |b|^2 (real^2 + imag^2) and every numerator product are
+  # computed via num_mul/num_add/num_sub (which already preserve
+  # exactness) and the final divide by that exact rational denom does
+  # too — same precedent as complex_add/sub/mul above, which already
+  # stay exact. Only falls back to inexact when an operand's component
+  # already is (routed through the ordinary real `divide`, same as any
+  # other real division).
   def complex_div(a : SchemeComplex, b : SchemeComplex) : SchemeValue
-    # a/b = a * conj(b) / |b|^2
-    bre, bim = Creme.as_f64(b.real, "/"), Creme.as_f64(b.imag, "/")
-    denom = bre*bre + bim*bim
-    raise SchemeRuntimeError.new("/: division by zero") if denom == 0
-    are, aim = Creme.as_f64(a.real, "/"), Creme.as_f64(a.imag, "/")
-    SchemeComplex.make(SchemeFloat.new((are*bre + aim*bim) / denom), SchemeFloat.new((aim*bre - are*bim) / denom))
+    denom = num_add(num_mul(b.real, b.real, "/"), num_mul(b.imag, b.imag, "/"), "/")
+    raise SchemeRuntimeError.new("/: division by zero") if Creme.as_f64(denom, "/") == 0.0
+    re = num_add(num_mul(a.real, b.real, "/"), num_mul(a.imag, b.imag, "/"), "/")
+    im = num_sub(num_mul(a.imag, b.real, "/"), num_mul(a.real, b.imag, "/"), "/")
+    SchemeComplex.make(divide(re, denom).as(RealComponent), divide(im, denom).as(RealComponent))
   end
 end
