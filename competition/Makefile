@@ -155,8 +155,19 @@ c/demo-todo/bin/app:
 # gem path, not a directory local to this project, so there's no directory
 # of our own whose mtime would track "is this installed" the way
 # node_modules's own does -- a touched stamp file fills that role instead.
+# BUNDLE_JOBS=1 -- Bundler's parallel installer (any @size > 1) sets up a
+# GNU-make-only jobserver (MAKEFLAGS=--jobserver-auth=R,W) around every
+# native-extension gem's own `make` invocation. BSD make (the default
+# `make` on this project's own portable-build targets, see the top-level
+# README's build docs) doesn't understand that flag and aborts with
+# "argument '...auth=R,W' to option '-j' must be a positive number" --
+# forcing a single install job sidesteps Bundler's jobserver setup
+# entirely (see bundler's parallel_installer.rb: the jobserver path is
+# only taken when @size > 1), so it can't inject anything BSD make
+# chokes on. Serial install is a one-time, few-second cost here (this
+# Gemfile has ~15 gems), not worth trading for the platform breakage.
 ruby/demo-todo/.bundle-installed: ruby/demo-todo/Gemfile ruby/demo-todo/Gemfile.lock
-	cd ruby/demo-todo && bundle install
+	cd ruby/demo-todo && BUNDLE_JOBS=1 bundle install
 	touch ruby/demo-todo/.bundle-installed
 
 todo-app-binaries: creme icecreme \
