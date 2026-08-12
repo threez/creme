@@ -75,6 +75,12 @@ module Creme
     property max_eval_depth : Int32
     property max_steps : Int32?
 
+    # Off by default: a host-configured execution budget/exit request isn't
+    # a guest-catchable condition unless explicitly allowed (see
+    # doc/guide/embedding.md's "Execution limits" section).
+    property? guard_catches_execution_limit_errors : Bool
+    property? guard_catches_exit : Bool
+
     # Restricts which libraries (import ...) may resolve, by space-joined
     # name (e.g. "creme sql" for (creme sql), "scheme base" for (scheme
     # base)) — nil (the default) means unrestricted. Library names are the
@@ -185,6 +191,8 @@ module Creme
     def initialize(
       @max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH,
       @max_steps : Int32? = nil,
+      @guard_catches_execution_limit_errors : Bool = false,
+      @guard_catches_exit : Bool = false,
       @allowed_libraries : Array(String)? = nil,
       @library_search_path : Array(String) = [] of String,
       @stdout : IO = STDOUT,
@@ -287,6 +295,8 @@ module Creme
     def initialize(inherit_from parent : Interpreter)
       @max_eval_depth = parent.max_eval_depth
       @max_steps = parent.max_steps
+      @guard_catches_execution_limit_errors = parent.guard_catches_execution_limit_errors?
+      @guard_catches_exit = parent.guard_catches_exit?
       @allowed_libraries = parent.allowed_libraries
       @library_search_path = parent.library_search_path
       @stdout = parent.stdout
@@ -500,13 +510,15 @@ module Creme
       allowed_libraries : Array(String) = [] of String,
       max_steps : Int32? = 100_000,
       max_eval_depth : Int32 = DEFAULT_MAX_EVAL_DEPTH,
+      guard_catches_execution_limit_errors : Bool = false,
+      guard_catches_exit : Bool = false,
       library_search_path : Array(String) = ["./modules"],
       stdout : IO = IO::Memory.new,
       stdin : IO = IO::Memory.new,
       stderr : IO = IO::Memory.new,
       auto_import_base : Bool = false,
     ) : Interpreter
-      new(max_eval_depth: max_eval_depth, max_steps: max_steps, allowed_libraries: allowed_libraries, library_search_path: library_search_path, stdout: stdout, stdin: stdin, stderr: stderr, auto_import_base: auto_import_base)
+      new(max_eval_depth: max_eval_depth, max_steps: max_steps, guard_catches_execution_limit_errors: guard_catches_execution_limit_errors, guard_catches_exit: guard_catches_exit, allowed_libraries: allowed_libraries, library_search_path: library_search_path, stdout: stdout, stdin: stdin, stderr: stderr, auto_import_base: auto_import_base)
     end
 
     # ---- Evaluation (trampolined) --------------------------------------------

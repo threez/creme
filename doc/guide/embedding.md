@@ -141,12 +141,38 @@ exceeded, distinguishable from an ordinary bug in the guest code:
 interp = Creme::Interpreter.new(max_steps: 100_000)
 ```
 
-`(exit ...)` raises a catchable `Creme::SchemeExit` rather than terminating the
-host process — `src/main.cr` (the `creme` CLI) is the only place that translates
-it back into a real process exit.
+`max_steps` resets per top-level form (per `run_source`/`run_file`/`apply` call),
+not once for an entire multi-form script — a script with many top-level forms
+gets a fresh budget at each one, rather than sharing a single budget across the
+whole file.
 
-> **Note:** This is `import`-gating (via `allowed_libraries`), output redirection,
-> and a step budget — not OS-level sandboxing. There's no CPU/memory ceiling
-> beyond `max_steps`, and no protection against concurrent use of one
-> `Interpreter` from multiple fibers (construct one per fiber instead). See the
-> README's **Known caveats** for the full list.
+`guard` never catches `SchemeExecutionLimitError` or `SchemeExit` by
+default — a host-configured ceiling, or an `(exit ...)` request, isn't a
+guest-catchable condition unless the host explicitly allows it. `(exit ...)`
+raises a catchable `Creme::SchemeExit` rather than terminating the host
+process — `src/main.cr` (the `creme` CLI) is the only place that translates it
+back into a real process exit.
+
+Pass `guard_catches_execution_limit_errors: true` and/or `guard_catches_exit:
+true` to `Interpreter.new`/`.sandboxed` (independently — a host can allow one
+without the other) to let guest `guard` intercept either instead, e.g. to run
+cleanup or logging before a budget or exit propagates:
+
+```crystal
+interp = Creme::Interpreter.new(max_steps: 100_000, guard_catches_exit: true)
+```
+
+Both default to `false`. This is native-only: icecreme's `exit` builtin calls
+the real C `exit()` directly and never reaches a `guard` at all, and icecreme
+has no `max_eval_depth`/`max_steps` budget to catch in the first place.
+
+### Limitations
+
+This is `import`-gating (via `allowed_libraries`), output redirection, and a
+step budget — not OS-level sandboxing:
+
+- No CPU/memory ceiling beyond `max_steps`.
+- No protection against concurrent use of one `Interpreter` from multiple
+  fibers — construct one per fiber instead.
+- `max_steps` is a per-call budget, not a per-script one (see above) — a
+  multi-form script can still run arbitrarily long in aggregate.

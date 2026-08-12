@@ -166,7 +166,7 @@ module Creme
       @depth = 0
       @unwind_stack = [] of UnwindAction
       @handlers = [] of GuardHandler
-      @pending_reraise = nil.as(SchemeError?)
+      @pending_reraise = nil.as((SchemeError | SchemeExit)?)
     end
 
     # Interpreter.push_current/pop_current lets SchemeError#initialize find
@@ -1176,9 +1176,16 @@ module Creme
             frame.ip += instr.b unless Creme.scheme_eqv?(x, y)
           end
         rescue ex : SchemeExecutionLimitError
-          # Sandboxing budgets must never be interceptable by guard — always
-          # propagate.
-          raise ex
+          # Sandboxing budgets are host-vs-guest by default — never
+          # interceptable by guard unless the host explicitly opted in via
+          # Interpreter#guard_catches_execution_limit_errors.
+          if @interp.guard_catches_execution_limit_errors?
+            result = handle_guarded_error(ex)
+            return result unless result.nil?
+            frame, base, instructions = refresh_frame
+          else
+            raise ex
+          end
         rescue ex : SchemeError
           result = handle_guarded_error(ex)
           return result unless result.nil?
@@ -1187,13 +1194,23 @@ module Creme
           # the error was raised), so the cached triplet must be re-derived
           # before the loop resumes, same as after any Call/Return above.
           frame, base, instructions = refresh_frame
-        rescue ex : ContinuationInvoked | SchemeExit
-          # Neither is a SchemeError (deliberately, so guard can never
-          # intercept them — see errors.cr) — this VM instance's entire
+        rescue ex : SchemeExit
+          # Not a SchemeError (see errors.cr) — host-vs-guest by default,
+          # same opt-in posture as SchemeExecutionLimitError above, via
+          # Interpreter#guard_catches_exit.
+          if @interp.guard_catches_exit?
+            result = handle_guarded_error(ex)
+            return result unless result.nil?
+            frame, base, instructions = refresh_frame
+          else
+            drain_unwind_stack
+            raise ex
+          end
+        rescue ex : ContinuationInvoked
+          # Never catchable by guard, no opt-in — this VM instance's entire
           # `execute` is being abandoned (a captured continuation escaping
-          # past it, or the program exiting), so every pending UnwindAction
-          # (parameterize restores) must still run first, same as the no-
-          # guard-found path above.
+          # past it), so every pending UnwindAction (parameterize restores)
+          # must still run first, same as the no-guard-found path above.
           drain_unwind_stack
           raise ex
         end
@@ -1222,10 +1239,10 @@ module Creme
     # compile_guard_clauses) via an explicit handler stack rather than
     # Crystal's own begin/rescue, since ordinary Scheme calls in this VM
     # don't create new Crystal stack frames to hang a rescue off of.
-    private def handle_guarded_error(ex : SchemeError) : SchemeValue?
+    private def handle_guarded_error(ex : SchemeError | SchemeExit) : SchemeValue?
       handler = @handlers.pop?
       unless handler
-        # No guard anywhere in scope — this SchemeError is escaping this
+        # No guard anywhere in scope — this error/exit is escaping this
         # entire `execute` invocation, so every pending UnwindAction
         # (parameterize restores) must still run before it does, matching
         # Crystal's own `ensure` firing all the way out of an uncaught
@@ -1238,7 +1255,15 @@ module Creme
       end
       (handler.depth...@depth).each { |depth| close_upvalues(@frames[depth]) }
       @depth = handler.depth
-      condition = ex.payload || SchemeRecord.new(CONDITION_TYPE, [SchemeStr.new(ex.message || "error"), NIL] of SchemeValue).as(SchemeValue)
+      # SchemeExit has no `payload` (it's not a SchemeError) — a caught
+      # `(exit N)` binds `e` to the same generic condition shape an
+      # unstructured runtime error would.
+      condition = case ex
+                  when SchemeError
+                    ex.payload || SchemeRecord.new(CONDITION_TYPE, [SchemeStr.new(ex.message || "error"), NIL] of SchemeValue).as(SchemeValue)
+                  else
+                    SchemeRecord.new(CONDITION_TYPE, [SchemeStr.new(ex.message || "exit"), NIL] of SchemeValue).as(SchemeValue)
+                  end
       @stack.unsafe_put(handler.frame.base + handler.condition_reg, condition)
       @pending_reraise = ex
       handler.frame.ip = handler.resume_ip

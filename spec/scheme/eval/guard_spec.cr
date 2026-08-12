@@ -72,6 +72,25 @@ describe "guard" do
     end
   end
 
+  it "catches a max_eval_depth exceeded error when guard_catches_execution_limit_errors is true" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"], max_eval_depth: 10, guard_catches_execution_limit_errors: true)
+    result = Creme.run_source(interp, "(define (f n) (+ 1 (f (+ n 1)))) (guard (e (#t 'caught)) (f 0))")
+    result.write_string.should eq("caught")
+  end
+
+  it "catches (exit ...) when guard_catches_exit is true" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"], guard_catches_exit: true)
+    result = Creme.run_source(interp, "(import (scheme process-context)) (guard (e (#t 'caught)) (exit 1))")
+    result.write_string.should eq("caught")
+  end
+
+  it "still re-raises (exit ...) as SchemeExit when guard_catches_exit is true but no clause matches" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"], guard_catches_exit: true)
+    expect_raises(Creme::SchemeExit) do
+      Creme.run_source(interp, "(import (scheme process-context)) (guard (e (#f 'never)) (exit 1))")
+    end
+  end
+
   it "supports nested guard, re-raising from inner to outer when the inner clause doesn't match" do
     src = <<-SCHEME
       (guard (outer (#t (list 'outer (error-object-message outer))))
