@@ -275,11 +275,45 @@
 
 ;; ---- shared helpers used by several dispatch cases below -----------------
 
+;; A bare (define ...) as the LAST form of forms -- literal syntax only, not
+;; macro-expansion-aware (unlike native's equivalent fix in bytecode_
+;; compiler.cr's run_program, which inspects the post-expansion analyzed
+;; AST): compile-program only ever sees this raw, pre-expansion form list,
+;; and there's no supported entry point here to fully macro-expand an
+;; arbitrary standalone form outside of an active compile (defmacro-expand-
+;; form/define-syntax-expand-form both need the macro's own definition form
+;; in hand, not just a call site). A macro that expands to a top-level
+;; define as a script's last form is a narrow, accepted gap -- returns #f
+;; here, so run-forms below falls back to its pre-fix behavior (the
+;; compiled symbol) for that case only, same as before this fix existed.
+;; Returns the defined name (a symbol) or #f.
+(define (trailing-define-name forms)
+  (and (pair? forms)
+       (let loop ((fs forms))
+         (if (null? (cdr fs))
+             (let ((last (car fs)))
+               (and (pair? last)
+                    (eq? (car last) 'define)
+                    (pair? (cdr last))
+                    (let ((target (cadr last)))
+                      (if (pair? target) (car target) target))))
+             (loop (cdr fs))))))
+
 ;; Compile an already-include-expanded list of forms and run it, registering
 ;; whatever native builtin families the compiled chunk needs -- the exact line
-;; the run/`--`/stdin/embedding paths all share.
+;; the run/`--`/stdin/embedding paths all share. When forms ends in a bare
+;; define, returns the defined VALUE instead of compile-define!'s own
+;; unconditional symbol-return (a script's return value is more useful to a
+;; caller than the name it just defined) -- via a plain (eval name) lookup
+;; against the same ambient global environment run-forms just populated,
+;; since there's no dedicated "get global by name" primitive. Gated on
+;; forms itself (not on compile-define!), so eval/REPL echo -- which compile
+;; a single form at a time via a completely separate codepath (`eval` below,
+;; `(scheme repl)`'s eval-print-forms!) -- are unaffected.
 (define (run-forms forms name)
-  (load-chunk-bytes (chunk->bytes (compile-program forms name) (required-native-families-list))))
+  (let ((result (load-chunk-bytes (chunk->bytes (compile-program forms name) (required-native-families-list))))
+        (defined-name (trailing-define-name forms)))
+    (if defined-name (eval defined-name) result)))
 
 ;; Read a .scm source file, expand its includes relative to its own directory,
 ;; and run it. (set! current-load-dir ...) so a relative (include ...) inside

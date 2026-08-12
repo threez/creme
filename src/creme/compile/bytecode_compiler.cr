@@ -239,14 +239,25 @@ module Creme
     # lives on Interpreter, not the VM — and its own fresh max_steps budget
     # (interp.reset_step_count), so one form's cost never eats into a later
     # form's limit.
-    def self.run_program(interp : Interpreter, forms : Array(SchemeValue), env : Env? = nil) : SchemeValue
+    # resolve_trailing_define: a script's return value is more useful to a
+    # host than `define`'s own compiled-in value (the defined *symbol* --
+    # see DefineNode's compile arm below, a contract this never touches). Off
+    # by default so `eval`/REPL echo callers (which want the symbol, e.g. to
+    # print `x` after `(define x 5)`) are unaffected -- only run_source/
+    # run_file's whole-script callers opt in.
+    def self.run_program(interp : Interpreter, forms : Array(SchemeValue), env : Env? = nil, resolve_trailing_define : Bool = false) : SchemeValue
       target_env = env || interp.global
       result : SchemeValue = NIL
+      last_node = nil.as(Node?)
       forms.each do |form|
         interp.reset_step_count
         node = interp.analyze(form, target_env)
+        last_node = node
         chunk = compile_program([node])
         result = VM.new(interp, target_env).run(chunk)
+      end
+      if resolve_trailing_define && (define_node = last_node).is_a?(DefineNode)
+        result = target_env.get?(define_node.name) || result
       end
       result
     end

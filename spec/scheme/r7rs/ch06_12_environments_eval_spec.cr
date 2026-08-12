@@ -37,6 +37,10 @@ describe "R7RS §6.12 Environments and evaluation" do
     w("(import (scheme eval)) (eval '(* 7 3))").should eq("21")
   end
 
+  it "eval of a bare (define ...) still returns the defined symbol, not its value" do
+    w("(import (scheme eval)) (eval '(define x 5))").should eq("x")
+  end
+
   it "eval's two-argument form evaluates expr-or-def in the specified environment" do
     w(<<-SCM).should eq("20")
       (import (scheme eval))

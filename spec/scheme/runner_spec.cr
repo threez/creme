@@ -25,6 +25,30 @@ describe "Creme.run_source" do
       Creme.run_source(interp, "undefined-var")
     end
   end
+
+  it "returns the assigned value, not the symbol, when the script ends in a variable define" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    result = Creme.run_source(interp, "(define x 42)")
+    result.as(Creme::SchemeInt).value.should eq(42_i64)
+  end
+
+  it "returns the assigned value, not the symbol, when a trailing define follows other forms" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    result = Creme.run_source(interp, "(+ 1 2) (define x 42)")
+    result.as(Creme::SchemeInt).value.should eq(42_i64)
+  end
+
+  it "returns the closure, not the symbol, when the script ends in a function define" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    result = Creme.run_source(interp, "(define (f n) n)")
+    result.should be_a(Creme::BytecodeClosure)
+  end
+
+  it "still returns an ordinary result when the script does not end in a define" do
+    interp = Creme::Interpreter.new(library_search_path: ["./modules"])
+    result = Creme.run_source(interp, "(define x 1) x")
+    result.as(Creme::SchemeInt).value.should eq(1_i64)
+  end
 end
 
 describe "Creme.run_file" do

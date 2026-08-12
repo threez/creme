@@ -457,7 +457,7 @@ end
 def run_piped_script : Nil
   interp = Creme::Interpreter.new(library_search_path: ["./modules"], auto_import_base: false)
   src = STDIN.gets_to_end
-  Creme::BytecodeCompiler.run_program(interp, Creme::Reader.read_all(src, "<stdin>"), interp.global)
+  Creme::BytecodeCompiler.run_program(interp, Creme::Reader.read_all(src, "<stdin>"), interp.global, resolve_trailing_define: true)
 rescue ex : Creme::SchemeExit
   exit(ex.code)
 rescue ex : Creme::SchemeError

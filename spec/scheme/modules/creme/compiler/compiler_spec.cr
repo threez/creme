@@ -19,7 +19,15 @@ end
 
 private def native_eval(source : String) : String
   interp = Creme::Interpreter.new(library_search_path: ["./modules"])
-  Creme.run_source(interp, "(import (scheme lazy) (scheme eval)) #{source}").write_string
+  # This compares the native bytecode compiler's raw output against the
+  # self-hosted bootstrap compiler's (bootstrap_eval below) form by form --
+  # a compiler-contract check, not a script-runner one -- so it must NOT go
+  # through Creme.run_source's resolve_trailing_define post-processing
+  # (which deliberately diverges from the compiler's own define-returns-
+  # the-symbol contract for a script's last form; see bytecode_compiler.cr's
+  # run_program).
+  forms = Creme::Reader.read_all("(import (scheme lazy) (scheme eval)) #{source}", "<spec>")
+  Creme::BytecodeCompiler.run_program(interp, forms, interp.global).write_string
 end
 
 private def bootstrap_eval(interp : Creme::Interpreter, source : String) : String

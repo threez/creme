@@ -128,7 +128,7 @@ module Creme
     # time against `env` (mirroring this exact per-form loop) rather than
     # analyzing the whole program up front — required for a top-level
     # define-syntax/import to affect a LATER form's analysis.
-    BytecodeCompiler.run_program(interp, forms_for(interp, src, source_name), env)
+    BytecodeCompiler.run_program(interp, forms_for(interp, src, source_name), env, resolve_trailing_define: true)
   end
 
   def self.run_file(interp : Interpreter, path : String, bindings : Hash(String, SchemeValue)? = nil, parent : Env? = nil) : SchemeValue
