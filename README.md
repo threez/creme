@@ -1,27 +1,72 @@
+![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)
+
 # creme
 
-A Scheme interpreter, written in Crystal. It follows R7RS-small and adds a large,
-practical extension library. The interpreter library is the `creme` shard; the
-CLI/REPL executable is also called `creme`. A companion self-hosting C11 bytecode
-VM, **icecreme**, runs the same language.
+**creme** is a small, practical [Scheme](https://www.scheme.org/) implementation
+written in [Crystal](https://crystal-lang.org/), following R7RS-small. It's
+both a standalone CLI/REPL and an embeddable library, with a large,
+batteries-included extension library and a second, self-hosting C11 VM
+backend (**icecreme**) that runs the same bytecode with no Crystal process
+involved.
 
-📖 **[Documentation](doc/README.md)** — introduction, guides, library reference,
-and the codebase map. New here? Start with the
-[Introduction](doc/guide/introduction.md).
+```scheme
+(define (fact n) (if (<= n 1) 1 (* n (fact (- n 1)))))
+(write (fact 10)) (newline) ; => 3628800
+
+(define (make-counter)
+  (let ((n 0))
+    (lambda () (set! n (+ n 1)) n)))
+(define c (make-counter))
+(write (list (c) (c) (c))) (newline) ; => (1 2 3)
+
+(write (map (lambda (x) (* x x)) '(1 2 3 4))) (newline) ; => (1 4 9 16)
+
+(write (/ 1 3)) (newline) ; => 1/3 (exact, not 0.333...)
+
+(define-record-type point (make-point x y) point? (x point-x) (y point-y))
+(write (point-x (make-point 3 4))) (newline) ; => 3
+
+(write (guard (e (#t (list 'caught (error-object-message e))))
+         (error "boom"))) (newline) ; => (caught "boom")
+```
+
+More in the [Language tour](doc/guide/language-tour.md), and 50+ runnable
+programs under [`examples/`](examples/).
 
 ## Features
 
-- REPL and script execution, or embed the interpreter as a library
-- An R7RS `define-library`/`import` library system (see the [Libraries reference](doc/guide/libraries.md)) — the interactive REPL auto-imports `(scheme base)` and `(scheme write)` for zero-friction live typing; scripts (files or piped stdin) follow strict R7RS and must `(import ...)` everything they use, same as a `define-library` body
-- Tail-call optimized eval/apply loop, closures, `let`/`let*`/`letrec`/named-`let`/`let-values`/`let*-values`, `do`, `case`/`case-lambda`, `cond-expand`, `defmacro`, `define-syntax`/`syntax-rules` (hygienic — see [Known caveats](#known-caveats) for the one narrow residual gap), `let-syntax`/`letrec-syntax`
-- `define-record-type`, `delay`/`delay-force`/`force`, `parameterize`, `dynamic-wind`
-- A full R7RS exception system: `guard`, `raise`/`raise-continuable`/`with-exception-handler`, `error`/`error-object?`/`error-object-message`/`error-object-irritants`, `file-error?`/`read-error?`
-- `values`/`call-with-values`/`define-values`
-- `call/cc`/`call-with-current-continuation` — **escape continuations only**, not full R7RS multi-shot continuations (see [Known caveats](#known-caveats))
-- A full numeric tower including complex numbers: exact integers, exact rationals (`SchemeRational`, auto-reducing, e.g. `(/ 1 3)` is exact `1/3`), inexact floats, and complex numbers (`SchemeComplex`, reader literal syntax like `3+4i`/`2i`/`-i`, plus `(scheme complex)`'s `make-rectangular`/`make-polar`/`real-part`/`imag-part`/`magnitude`/`angle`) — with `exact?`/`inexact?`/`exact->inexact`/`inexact->exact`/`exact-integer?`/`rational?`/`numerator`/`denominator`/`gcd`/`lcm`/`nan?`/`infinite?`/`finite?`/`square` — see [Known caveats](#known-caveats) for what's deliberately out of scope
-- Bytevectors: `#u8(...)` reader literal syntax, `bytevector`/`make-bytevector`/`bytevector-u8-ref`/`bytevector-u8-set!`/`bytevector-copy`/`bytevector-append`, byte-oriented ports (`open-input-bytevector`, `open-output-bytevector`, `read-u8`/`write-u8`), `utf8->string`/`string->utf8`
-- Quoting: `quote`, `` ` `` quasiquote, `,` unquote, `,@` unquote-splicing
-- Comments: `;` line comments, `#| ... |#` nestable block comments, `#;` datum comments
+- A complete R7RS-small language — library system, tail calls, hygienic
+  `syntax-rules`, `define-record-type`, a full exception system, multiple
+  values, `call/cc` (escape continuations), and a numeric tower with exact
+  rationals and complex numbers.
+- A batteries-included `(creme …)` standard library — JSON, YAML, CSV, XML,
+  SQLite, HTTP, crypto (digests, ciphers, PKey, X.509, JOSE), regex, an actor
+  system, Raft consensus, an FFI bridge, and more.
+- Two backends: the native Crystal interpreter, and **icecreme**, a
+  standalone self-hosting C11 bytecode VM.
+- Embed it as a Crystal library, or link `libcreme.a` into a C program.
+- Ruby-flavored conveniences: a `(dialect ruby)` naming layer and a
+  `#lang (creme syntax ruby)` concrete-syntax dialect.
+
+See the full [Features](doc/guide/features.md) list for everything above in
+detail, and [Known caveats](doc/guide/known-caveats.md) for what's
+deliberately out of scope (e.g. `call/cc` is escape-only, not full multi-shot
+continuations).
+
+## Benchmarks
+
+A sample from `make bench-md`'s output — single-threaded wall-clock time in
+seconds, lower is better. Native-language floors (Crystal, Go) are included
+for context; see [`benchmarks/amd64_freebsd.md`](benchmarks/amd64_freebsd.md)
+for the full table (more workloads, more languages), the environment it ran
+on, and how to regenerate it on your own machine.
+
+| workload                | crystal | go      | node    | luajit  | racket  | guile   | icecreme | creme   | ruby    |
+| ------------------------ | ------- | ------- | ------- | ------- | ------- | ------- | -------- | ------- | ------- |
+| fib(27)                  | 0.00054 | 0.00060 | 0.00153 | 0.00144 | 0.00085 | 0.00308 |  0.00935 | 0.03069 | 0.01010 |
+| record-test(500000)      | 0.00348 | 0.01011 | 0.00684 | 0.05522 | 0.01180 | 0.01154 |  0.03677 | 0.06148 | 0.09714 |
+| nqueens(9)                | 0.00048 | 0.00051 | 0.00113 | 0.00200 | 0.00078 | 0.00107 |  0.00882 | 0.01323 | 0.01187 |
+| **total** (all 9 workloads) | 0.04578 | 0.10587 | 0.07660 | 0.11843 | 0.12980 | 0.13703 |  0.15998 | 0.27220 | 0.32783 |
 
 ## Quick start
 
@@ -33,54 +78,24 @@ shards build
 ```
 
 Building requires Crystal ≥ 1.19.0 and the system SQLite3, OpenSSL, and libyaml
-libraries. See [Getting started](doc/guide/getting-started.md) for prerequisites,
-the REPL, and piped input; the [Language tour](doc/guide/language-tour.md) for the
-language by example; and the [CLI reference](doc/guide/cli-reference.md) for every
-flag. To embed creme in a Crystal application, see
-[Embedding](doc/guide/embedding.md).
+libraries. See [Getting started](doc/guide/getting-started.md) for
+prerequisites, building, the REPL, piped input, and running the test suite.
 
 ## Documentation
 
 - [Introduction](doc/guide/introduction.md) — what creme is, the two backends, project scope
-- [Getting started](doc/guide/getting-started.md) — build, run, REPL
+- [Features](doc/guide/features.md) — the full feature list
+- [Getting started](doc/guide/getting-started.md) — build, run, REPL, development
 - [Language tour](doc/guide/language-tour.md) — the language by example
 - [Libraries](doc/guide/libraries.md) — the full standard-library surface
 - [CLI reference](doc/guide/cli-reference.md) — every subcommand and flag
 - [Embedding](doc/guide/embedding.md) — using creme as a Crystal library
 - [icecreme](doc/guide/icecreme.md) — the self-hosting C VM
 - [Repository structure](doc/guide/repository-structure.md) — a map of the codebase
+- [Known caveats](doc/guide/known-caveats.md) — what's deliberately out of scope
 
-The full index, including maintainer/internals notes, is in
+📖 The full documentation index, including maintainer/internals notes, is in
 [`doc/README.md`](doc/README.md).
-
-## Known caveats
-
-- `define-syntax`/`syntax-rules` is hygienic: a template-introduced binding (e.g. a `swap!` macro's own `tmp`) is alpha-renamed so it can never capture (or be captured by) a use-site identifier of the same name. A macro's own reference to a special form or another macro also can't be hijacked by a use-site local of the same name, on both backends. A macro's own reference to an ordinary *global procedure* gets the same protection under the native Crystal interpreter, but not under icecreme/the self-hosted compiler (which has no compile-time global-binding registry to check against safely — see `modules/creme/compiler/compiler.sld`'s own `sr-apply-hygiene` comment) — a real, narrow asymmetry between the two backends, not a bug. The one gap on both backends: a macro that free-references an identifier meant to resolve as a *local variable enclosing its own definition* (not a global) can still be captured by a use-site local of that name — genuinely rare in practice (a macro almost always either introduces its own bindings or references globals/special forms/other macros). `defmacro` is unaffected by any of this — it's a separate, deliberately-manual fexpr mechanism (its "template" is arbitrary evaluated code, not a pattern/template pair) where authors who need capture-avoidance should still `gensym` identifiers by hand.
-- `parameterize` and `guard` cannot tail-call out of their body in the final position — both need to run cleanup (restoring parameter values, or letting the `rescue` boundary close) before returning to the caller, so the body's last form is evaluated as an ordinary (non-tail) call.
-- `call/cc`/`call-with-current-continuation` implement **escape continuations only**, via a Crystal exception unwind — not full R7RS multi-shot/re-entrant continuations. A captured continuation can be invoked at most once, and only while its originating `call/cc` call is still on the (real) call stack (i.e. before `call/cc` has returned normally). This covers non-local exit, early return, and `guard`-style unwinding — the large majority of real-world call/cc use — but not `amb`-style backtracking or re-entrant/restartable generators. Invoking a continuation after its `call/cc` has already returned raises `SchemeRuntimeError` ("continuation invoked outside its dynamic extent") rather than resuming.
-- `dynamic-wind` runs its before/after thunks correctly around normal return, an error, or a call/cc escape (including escaping past multiple nested `dynamic-wind` frames, innermost-first). What it does **not** do, matching the escape-only `call/cc` limitation above: re-fire `before` when a continuation captured *inside* a `dynamic-wind` call is invoked to re-enter it from *outside*, after that `dynamic-wind` call has already returned — true re-entrant continuations would be required for that, and invoking such a continuation instead raises the same "continuation invoked outside its dynamic extent" error rather than behaving incorrectly.
-- `angle`/`make-polar` on complex numbers always produce an inexact (float) result — `angle` is `atan2`, `make-polar` needs `cos`/`sin` of an arbitrary angle, and neither π nor a general trigonometric value has an exact rational representation in this tower. (Complex division and `magnitude` *do* stay exact for exact-integer-component operands, e.g. `(magnitude (make-rectangular 3 4))` is exact `5`, not `5.0`.)
-
-## Development
-
-```sh
-shards install                 # install dependencies (also vendors ameba for linting)
-crystal spec                   # run the test suite
-crystal tool format --check    # check formatting
-lib/ameba/bin/ameba            # lint
-```
-
-`make` wraps these as `fmt`/`fmtcheck`/`spec`/`lint`/`fix`. Building requires the
-system SQLite3 library (already present on macOS; `apt install libsqlite3-dev` on
-Debian/Ubuntu), since the `sql` module links against it. The `jose` module links
-against system OpenSSL (via the `jose`/`ed25519` shards) — already present on
-macOS with no extra setup; `apt install libssl-dev` on Debian/Ubuntu if missing.
-The `yaml` module links against system libyaml (via Crystal's own bundled `YAML`
-stdlib module) — already present on macOS with no extra setup;
-`apt install libyaml-dev` on Debian/Ubuntu if missing. `icecreme` links libyaml
-directly too (see `icecreme/README.md`), so this is a build-time dependency for
-both backends. See the [Repository structure](doc/guide/repository-structure.md)
-guide for a map of the source tree.
 
 ## License
 

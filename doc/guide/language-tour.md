@@ -2,7 +2,7 @@
 
 A quick tour of the language by example. For the full standard-library surface see
 [Libraries](libraries.md); for the deliberately-out-of-scope edge cases see the
-**Known caveats** section of the [README](../../README.md#known-caveats).
+[Known caveats](known-caveats.md) page.
 
 ```scheme
 (define (fact n) (if (<= n 1) 1 (* n (fact (- n 1)))))

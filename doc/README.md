@@ -8,6 +8,7 @@ you're new here.
 Guides for people writing Scheme with creme or embedding it in an application:
 
 - [Introduction](guide/introduction.md) — what creme is, the two backends, and project scope.
+- [Features](guide/features.md) — the full feature list, language and standard library.
 - [Getting started](guide/getting-started.md) — build it, run a script, use the REPL.
 - [Language tour](guide/language-tour.md) — the language by example.
 - [Libraries](guide/libraries.md) — the full standard-library surface (`(scheme …)`, `(creme …)`, `(dialect ruby)`, `(creme syntax ruby)`).
@@ -15,9 +16,10 @@ Guides for people writing Scheme with creme or embedding it in an application:
 - [Embedding](guide/embedding.md) — using creme as a Crystal library, with sandboxing and limits.
 - [icecreme](guide/icecreme.md) — the self-hosting C VM: build, run, and portability.
 - [Repository structure](guide/repository-structure.md) — a map of the codebase.
+- [Known caveats](guide/known-caveats.md) — deliberately out-of-scope edge cases.
 
 See also the top-level [README](../README.md) (project overview, feature list,
-and **Known caveats**) and, for icecreme specifically,
+and quick start) and, for icecreme specifically,
 [`icecreme/README.md`](../icecreme/README.md) and
 [`icecreme/STABILITY.md`](../icecreme/STABILITY.md).
 

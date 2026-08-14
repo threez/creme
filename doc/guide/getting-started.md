@@ -7,11 +7,17 @@ embed creme in a Crystal program, see [Embedding](embedding.md).
 ## Prerequisites
 
 - **Crystal** ≥ 1.19.0
-- **SQLite3** — `apt install libsqlite3-dev` on Debian/Ubuntu (already present on
-  macOS); the `(creme sql)` module links against it.
-- **OpenSSL** — `apt install libssl-dev` on Debian/Ubuntu; used by the crypto
-  modules (`jose`, `pkey`, `x509`, `cipher`).
-- **libyaml** — `apt install libyaml-dev` on Debian/Ubuntu; used by `(creme yaml)`.
+- **SQLite3** — already present on macOS; `apt install libsqlite3-dev` on
+  Debian/Ubuntu. The `(creme sql)` module links against it.
+- **OpenSSL** — already present on macOS with no extra setup; `apt install
+  libssl-dev` on Debian/Ubuntu if missing. The `jose` module links against
+  system OpenSSL (via the `jose`/`ed25519` shards); also used by the other
+  crypto modules (`pkey`, `x509`, `cipher`).
+- **libyaml** — already present on macOS with no extra setup; `apt install
+  libyaml-dev` on Debian/Ubuntu if missing. The `yaml` module links against
+  system libyaml (via Crystal's own bundled `YAML` stdlib module).
+  `icecreme` links libyaml directly too, so this is a build-time dependency
+  for both backends.
 
 ## Build
 
@@ -75,6 +81,20 @@ starting the REPL. Like a file, piped input is strict R7RS (no auto-import):
 ```sh
 echo '(import (scheme base) (scheme write)) (write (+ 1 2))' | ./bin/creme
 ```
+
+## Development
+
+```sh
+shards install                 # install dependencies (also vendors ameba for linting)
+crystal spec                   # run the test suite
+crystal tool format --check    # check formatting
+lib/ameba/bin/ameba            # lint
+```
+
+`make` wraps these as `fmt`/`fmtcheck`/`spec`/`lint`/`fix` (and rebuilds
+`bin/creme` first when needed, since it's a proper prerequisite-tracked
+target). See the [Repository structure](repository-structure.md) guide for a
+map of the source tree.
 
 ## Next steps
 

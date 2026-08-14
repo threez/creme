@@ -9,40 +9,29 @@ application.
 
 ## What you get
 
-- A complete R7RS-small language: the `define-library`/`import` library system, a
-  tail-call-optimized evaluator, `syntax-rules` macros, `define-record-type`, a
-  full exception system, multiple values, `call/cc` (escape continuations), and a
-  numeric tower with exact rationals and complex numbers.
-- A batteries-included standard library under the `(creme …)` namespace — JSON,
-  YAML, CSV, XML, SQLite, HTTP, crypto (digests, ciphers, PKey, X.509, JOSE),
-  regular expressions, an actor system, Raft consensus, an FFI bridge, and much
-  more. See the [Libraries reference](libraries.md).
-- Ruby-flavored conveniences: a `(dialect ruby)` naming layer and a
-  `#lang (creme syntax ruby)` concrete-syntax dialect.
+creme implements the large majority of R7RS-small — the library system, a
+tail-call-optimized evaluator, hygienic `syntax-rules` macros,
+`define-record-type`, a full exception system, multiple values, `call/cc`
+(escape continuations), and a numeric tower with exact rationals and complex
+numbers — plus a large, batteries-included extension library under the
+`(creme …)` namespace (JSON, YAML, SQLite, HTTP, crypto, an actor system, an
+FFI bridge, and more). See the full [Features](features.md) list and the
+[Libraries reference](libraries.md).
 
-## Two backends
-
-creme runs the same language on two independent engines:
-
-1. **Native (`bin/creme`)** — the interpreter/compiler implemented in Crystal. This
-   is the default and the most complete backend.
-2. **icecreme** — a standalone, self-hosting C11 bytecode VM. creme can compile a
-   program (and the compiler itself) to icecreme's compact bytecode, which
-   icecreme then loads and runs with no Crystal process involved. See the
-   [icecreme guide](icecreme.md) and `icecreme/README.md`.
-
-Most programs run unchanged on both; a handful of libraries are native-only and
-say so in their [library reference](libraries.md) entry.
+It runs on two independent backends — the native Crystal interpreter
+(`bin/creme`) and **icecreme**, a standalone self-hosting C11 bytecode VM —
+see [Features](features.md#two-backends) for how the two relate.
 
 ## Project scope and status
 
-creme is a research implementation with a deliberately honest scope. It
-implements the large majority of R7RS-small, but a few areas are intentionally
-limited (escape-only `call/cc`, and more). These are documented up front in the
-README's **Known caveats** section — read them before relying on an edge case.
+creme is a research implementation with a deliberately honest scope. A few
+areas are intentionally limited (escape-only `call/cc`, and more) — see
+[Known caveats](known-caveats.md) and read them before relying on an edge
+case, or before assuming something is a bug.
 
 ## Where to go next
 
+- **See what it can do:** [Features](features.md)
 - **Run your first program:** [Getting started](getting-started.md)
 - **Learn the language:** [Language tour](language-tour.md)
 - **Browse the standard library:** [Libraries](libraries.md)
@@ -50,3 +39,4 @@ README's **Known caveats** section — read them before relying on an edge case.
 - **Embed creme in Crystal:** [Embedding](embedding.md)
 - **The self-hosting VM:** [icecreme](icecreme.md)
 - **Find your way around the source:** [Repository structure](repository-structure.md)
+- **What's deliberately out of scope:** [Known caveats](known-caveats.md)
