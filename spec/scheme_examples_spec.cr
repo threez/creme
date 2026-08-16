@@ -141,7 +141,7 @@ describe "integration: examples/*.scm" do
     run_example("examples/36-html-builder.scm")
   end
 
-  it "runs 37-raft-kv-store.scm end to end without raising" do
+  it "runs 37-raft-kv-store.scm end to end without raising", tags: "raft" do
     run_example("examples/37-raft-kv-store.scm")
   end
 

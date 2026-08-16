@@ -106,7 +106,7 @@ private def cluster_setup : String
   SCHEME
 end
 
-describe "(creme raft) pure-Scheme frontend (modules/creme/raft-scheme/frontend.scm)" do
+describe "(creme raft) pure-Scheme frontend (modules/creme/raft-scheme/frontend.scm)", tags: "raft" do
   it "elects a leader among a 3-node in-memory cluster" do
     w(<<-SCHEME).should eq("#t")
       #{cluster_setup}

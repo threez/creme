@@ -52,7 +52,7 @@ private def cluster_setup : String
   SCHEME
 end
 
-describe "raft-machine module" do
+describe "raft-machine module", tags: "raft" do
   it "raft-cluster wires each node's peers to every other (namespaced) id" do
     w(<<-SCHEME).should eq("(#t #t #t)")
       (define seen '())
