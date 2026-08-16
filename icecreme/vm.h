@@ -6,6 +6,14 @@
 #ifndef CREME_VM_H
 #define CREME_VM_H
 
+/* struct sigaction's fields (old_sigprof_action below, profiler.c's SIGPROF
+ * handling) need _DEFAULT_SOURCE on glibc to be visible under plain
+ * -std=c11 -- see Makefile.in's own CREME_CFLAGS comment for why that's a
+ * compiler flag (-D_DEFAULT_SOURCE, applied to every .c file) rather than
+ * a #define here, and specifically _DEFAULT_SOURCE rather than
+ * _XOPEN_SOURCE (which also compiles, but narrows FreeBSD/Darwin's own
+ * libc into strict conformance mode and breaks mux.c's BSD-only
+ * SO_REUSEPORT/_SC_NPROCESSORS_ONLN there). */
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>

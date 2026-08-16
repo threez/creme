@@ -189,7 +189,42 @@ LDLIBS_GATED_SH = \
 # which would defeat a plain `CFLAGS ?= ...` default and silently drop all of
 # these. User $(CFLAGS) is appended after, so it still tunes/overrides (e.g.
 # `make CFLAGS=-O0`) without clobbering the mandatory set.
+#
+# -D_DEFAULT_SOURCE: needed on glibc for struct sigaction's fields (vm.h's
+# old_sigprof_action, profiler.c's SIGPROF handling) to be visible under
+# plain -std=c11 -- glibc gates <signal.h>'s full POSIX surface behind a
+# feature-test macro there, unlike FreeBSD/Darwin libc, which expose it
+# unconditionally (so this was never caught until icecreme was first built
+# on Linux CI). Specifically _DEFAULT_SOURCE, NOT _XOPEN_SOURCE: an
+# earlier attempt at this fix used -D_XOPEN_SOURCE=700, which does widen
+# glibc's namespace enough for struct sigaction, but ALSO narrows FreeBSD's
+# libc (and likely Darwin's) into strict X/Open conformance mode, hiding
+# mux.c's own BSD-only SO_REUSEPORT/_SC_NPROCESSORS_ONLN and breaking that
+# build -- a real regression this project's own FreeBSD/macOS CI legs
+# caught. _DEFAULT_SOURCE is glibc-specific (glibc's own "restore the
+# implicit default namespace -std= would otherwise narrow" macro); FreeBSD
+# and Darwin's libc's don't gate anything behind it at all, so defining it
+# there is a harmless no-op -- no platform conditional needed. A
+# per-.c-file #define isn't a reliable fix on its own either way: a
+# feature-test macro only takes effect if set before a translation unit's
+# FIRST system header, and every .c file that (transitively, via vm.h/
+# embed.h) needs this already includes several plain system headers of its
+# own first -- a -D flag applied to every compile, before any source is
+# even read, is the only fix that can't be defeated by include order.
+# builtins.c's own earlier, narrower #define _XOPEN_SOURCE 700 (added for
+# strptime(3), predates this) is untouched and still needed there (glibc's
+# strptime specifically wants _XOPEN_SOURCE, not _DEFAULT_SOURCE) --
+# harmless alongside this flag, since the two macros are independent.
+#
+# -D_GNU_SOURCE: needed on glibc for profiler.c's Dl_info/dladdr(3) (used
+# to symbolize native stack samples for --profile) -- dladdr is a GNU/
+# glibc extension, not POSIX/XSI, so _DEFAULT_SOURCE alone (above) doesn't
+# expose it there; FreeBSD/Darwin libc's expose dladdr unconditionally
+# regardless of any feature-test macro. Same no-platform-conditional-
+# needed reasoning as _DEFAULT_SOURCE: glibc-specific, harmless no-op on
+# FreeBSD/Darwin since neither gates anything behind it.
 CREME_CFLAGS = -std=c11 -O2 -g -fno-omit-frame-pointer -Wall -Wextra -Wno-missing-field-initializers \
+               -D_DEFAULT_SOURCE -D_GNU_SOURCE \
                -Ivendor/verstable -Ivendor/sds -Ivendor/picohttpparser \
                $(GC_CFLAGS) $(PCRE2_CFLAGS) $(GMP_CFLAGS) $(CRYPTO_CFLAGS) $(SSL_CFLAGS) $(FFI_CFLAGS) $(YAML_CFLAGS) $(ZSTD_CFLAGS) \
                $(FEATURE_DEFINES)

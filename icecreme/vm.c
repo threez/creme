@@ -1343,6 +1343,27 @@ static inline __attribute__((always_inline)) int try_self_tail_call(VM *vm, Fram
   return 1;
 }
 
+static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *frame, Instruction *ins, Value callee, int tail, Value *out, int target_depth);
+
+/* Plain (non-forced-inline) forwarding wrapper, used ONLY for
+ * dispatch_call's own single self-recursive call site below (the
+ * T_CASE_CLOSURE arm, resolving to a plain closure and recursing once).
+ * always_inline + a structurally-recursive call is a hard error under
+ * GCC ("recursive inlining"), even though the actual recursion here is
+ * bounded to exactly one extra level by construction (the recursive call
+ * always passes v_closure(matched), which lands directly in the
+ * T_CLOSURE arm and returns without recursing further) -- GCC can't see
+ * that bound from the call graph alone and refuses to force-inline
+ * through it. clang (FreeBSD/macOS's default) tolerates this fine, which
+ * is why this was never caught until icecreme was first built on Linux
+ * CI. Breaking the recursive call out through an ordinary, not-forced-
+ * inline function stops GCC from needing to inline through the cycle at
+ * all, while every OTHER call site (from creme_dispatch's hot loop,
+ * below) still goes through the force-inlined dispatch_call directly. */
+static int dispatch_call_noinline(VM *vm, Frame *frame, Instruction *ins, Value callee, int tail, Value *out, int target_depth) {
+  return dispatch_call(vm, frame, ins, callee, tail, out, target_depth);
+}
+
 /* Returns 1 if this call delivered the target frame's return (mirrors
  * deliver_return's own signal), writing the result into *out. `callee` is
  * already resolved by the caller (register / global / local / upvalue —
@@ -1420,8 +1441,10 @@ static inline __attribute__((always_inline)) int dispatch_call(VM *vm, Frame *fr
      * still skips T_RECORD_CALLABLE/T_CONTINUATION/T_PARAMETER below on
      * this second pass, since it lands directly in the T_CLOSURE arm
      * above. Rare enough (case-lambda calls are cold relative to plain
-     * closure/builtin calls) that a second dispatch_call call is fine. */
-    return dispatch_call(vm, frame, ins, v_closure(matched), tail, out, target_depth);
+     * closure/builtin calls) that a second dispatch_call call is fine --
+     * routed through dispatch_call_noinline (see its own comment above)
+     * so this self-recursive call doesn't force GCC to inline through it. */
+    return dispatch_call_noinline(vm, frame, ins, v_closure(matched), tail, out, target_depth);
   }
 
   if (callee.tag == T_RECORD_CALLABLE) {

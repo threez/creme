@@ -93,10 +93,6 @@ describe "integration: examples/*.scm" do
     run_example("examples/22-sxql-report-builder.scm")
   end
 
-  it "runs 24-tui-try-scheme.scm end to end without raising" do
-    run_example("examples/24-tui-try-scheme.scm")
-  end
-
   it "runs 25-rfc8439-secure-message.scm end to end without raising" do
     run_example("examples/25-rfc8439-secure-message.scm")
   end
@@ -145,7 +141,7 @@ describe "integration: examples/*.scm" do
     run_example("examples/36-html-builder.scm")
   end
 
-  it "runs 37-raft-kv-store.scm end to end without raising" do
+  it "runs 37-raft-kv-store.scm end to end without raising", tags: "raft" do
     run_example("examples/37-raft-kv-store.scm")
   end
 

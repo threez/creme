@@ -1,8 +1,5 @@
 .PHONY: all clean fmt fmtcheck lint fix docs spec creme-spec creme-spec-icecreme icecreme bench bench-md version tag
 
-UNAME_M != uname -m
-NEON_OBJ != case "$(UNAME_M)" in arm64|aarch64) echo lib/rfc8439/ext/chacha20_neon.o ;; esac
-
 all: clean fmt lint docs spec
 
 fmt:
@@ -12,29 +9,42 @@ fmtcheck:
 	crystal tool format --check
 
 # rfc8439's NEON C extension (aarch64 only) isn't built by `shards install`;
-# compile it once so `crystal spec`/`shards build` can link against it.
+# compile it once so `crystal spec`/`shards build` can link against it. Always
+# a bin/creme/spec prerequisite (not gated behind a `!=`-computed variable --
+# see FFI_SHIM_OBJ's own comment below for why that breaks under Apple's
+# stock GNU Make 3.81), but the recipe itself is arch-gated in its own
+# shell: on non-arm64/aarch64 it just touches an empty object file rather
+# than invoking $(CC) with -march=armv8-a+simd, which would fail to
+# assemble on a non-ARM target.
+NEON_OBJ = lib/rfc8439/ext/chacha20_neon.o
+
 lib/rfc8439/ext/chacha20_neon.o: lib/rfc8439/ext/chacha20_neon.c lib/rfc8439/ext/chacha20_neon.h
-	$(CC) -O3 -march=armv8-a+simd -c -o $@ lib/rfc8439/ext/chacha20_neon.c
+	@case "`uname -m`" in \
+		arm64|aarch64) $(CC) -O3 -march=armv8-a+simd -c -o $@ lib/rfc8439/ext/chacha20_neon.c ;; \
+		*) : > $@ ;; \
+	esac
 
 # (creme ffi)'s small precompiled dlopen/libffi shim (see that file's own
-# header comment for why) -- unlike NEON_OBJ, needed on every platform, so
-# it's an unconditional bin/creme prerequisite below rather than arch-
-# gated. -I/usr/local/include is a no-op where it doesn't exist (BSD's
-# base cc already searches it by default; Linux distros installing
-# libffi-dev under /usr/include don't need it either) and covers this
-# project's own FreeBSD dev environment, where libffi's headers live
-# under /usr/local/include specifically (a ports/pkg convention). macOS
-# ships libffi's headers inside the Xcode/CLT SDK too, but nested under
-# usr/include/ffi/ffi.h rather than flat at usr/include/ffi.h like every
-# other platform above -- so on Darwin needs that nested dir explicitly
-# instead. This can't be a `!=`-assigned variable like NEON_OBJ/UNAME_M
-# above: Apple ships a GNU Make frozen at 3.81 (the last GPLv2 release)
-# as macOS's stock /usr/bin/make, and `!=` shell-assignment wasn't added
-# to GNU Make until 4.0, so it silently evaluates empty there even though
-# both BSD make and modern GNU make support it fine. Computing the flag
-# inside the recipe's own shell instead sidesteps that gap entirely --
-# every make flavor here runs recipes via /bin/sh regardless of its own
-# variable-assignment feature set.
+# header comment for why) -- needed on every platform, so it's an
+# unconditional bin/creme prerequisite below (a plain `=` assignment, same
+# as NEON_OBJ above -- no arch gating needed for the prerequisite itself).
+# -I/usr/local/include is a no-op where it doesn't exist (BSD's base cc
+# already searches it by default; Linux distros installing libffi-dev under
+# /usr/include don't need it either) and covers this project's own FreeBSD
+# dev environment, where libffi's headers live under /usr/local/include
+# specifically (a ports/pkg convention). macOS ships libffi's headers
+# inside the Xcode/CLT SDK too, but nested under usr/include/ffi/ffi.h
+# rather than flat at usr/include/ffi.h like every other platform above --
+# so on Darwin needs that nested dir explicitly instead. This can't be a
+# `!=`-assigned variable: Apple ships a GNU Make frozen at 3.81 (the last
+# GPLv2 release) as macOS's stock /usr/bin/make, and `!=` shell-assignment
+# wasn't added to GNU Make until 4.0, so it silently evaluates empty there
+# even though both BSD make and modern GNU make support it fine (the same
+# gap NEON_OBJ's own recipe above works around, by moving its arch check
+# into the recipe's shell instead of a `!=`-computed variable). Computing
+# the include-path flag inside the recipe's own shell instead sidesteps
+# that gap entirely -- every make flavor here runs recipes via /bin/sh
+# regardless of its own variable-assignment feature set.
 FFI_SHIM_OBJ = src/creme/modules/creme/ffi_shim.o
 
 # Names the .c explicitly, not $< -- BSD make only sets $< in inference/suffix

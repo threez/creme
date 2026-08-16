@@ -2,17 +2,21 @@ require "../../../spec_helper"
 
 private def w(src : String) : String
   interp = Creme::Interpreter.new(library_search_path: ["./modules"])
-  Creme.run_source(interp, "(import (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}").write_string
+  Creme.run_source(interp, "(import (scheme base) (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}").write_string
 end
 
 private def run(src : String) : Creme::SchemeValue
   interp = Creme::Interpreter.new(library_search_path: ["./modules"])
-  Creme.run_source(interp, "(import (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}")
+  Creme.run_source(interp, "(import (scheme base) (scheme cxr) (creme raft-scheme) (creme hash-table) (creme process) (creme file)) #{src}")
 end
 
 # A tiny in-memory 3-node KV-store cluster, shared by every example below.
 # Unlike (creme raft), (creme raft-scheme)'s propose!/read speak plain
 # s-expressions directly -- no bytevector encode/decode step needed.
+# Election/heartbeat timeouts below are short but not razor-thin: 30/60/15ms
+# was fine on an unloaded dev machine but flaky under CI scheduling jitter
+# (e.g. a shared/virtualized runner), causing repeated split votes that
+# never converged within the await-leader! deadline.
 private def cluster_setup : String
   <<-SCHEME
   (define (make-kv-node id peers transport)
@@ -29,15 +33,46 @@ private def cluster_setup : String
         (lambda (data) (for-each (lambda (kv) (hash-table-set! store (car kv) (cdr kv))) data)))
       transport
       ":memory:"
-      (raft-scheme-config 'election-timeout-min 30 'election-timeout-max 60 'heartbeat-interval 15)))
+      ;; Wider than a minimal dev-machine-tuned timeout on purpose -- see
+      ;; this file's cluster_setup comment for why.
+      (raft-scheme-config 'election-timeout-min 100 'election-timeout-max 200 'heartbeat-interval 40)))
 
   (define cluster (raft-scheme-cluster '("n1" "n2" "n3") make-kv-node))
   (define nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
-  (define leader (raft-scheme-await-leader! nodes 3000))
+  ;; A first election can, rarely, fail to converge at all within 30s on a
+  ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
+  ;; just a slow one -- observed on macOS CI late in a long spec run).
+  ;; Restarting the whole cluster and retrying is safe here since nothing
+  ;; has been proposed yet. raft-scheme-start! takes the raw node handle
+  ;; (cluster's own (id . node) pairs), not the started actor-ref it
+  ;; returns, so restart re-maps `cluster` fresh rather than reusing `nodes`.
+  (define leader
+    (let loop ((tries 3))
+      (let ((got (raft-scheme-await-leader! nodes 30000)))
+        (cond (got got)
+              ((> tries 1)
+               (for-each raft-scheme-stop! nodes)
+               (set! nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
+               (loop (- tries 1)))
+              (else #f)))))
+
+  ;; raft-scheme-await-leader! only confirms leadership at the instant it
+  ;; returns -- it's a snapshot, not a lease. Under real CI-runner scheduling
+  ;; pressure, enough wall-clock time can pass before the NEXT line's
+  ;; raft-scheme-propose! that the node has legitimately lost leadership in
+  ;; between (a real, correct Raft outcome, not a bug) -- observed on macOS
+  ;; CI. Retry against a freshly re-awaited leader instead of assuming
+  ;; `leader` stays valid indefinitely.
+  (define (raft-scheme-propose-retry! cmd)
+    (let loop ((tries 5))
+      (guard (e (#t (if (> tries 1)
+                        (begin (set! leader (raft-scheme-await-leader! nodes 30000)) (loop (- tries 1)))
+                        (raise e))))
+        (raft-scheme-propose! leader cmd))))
   SCHEME
 end
 
-describe "(creme raft-scheme)" do
+describe "(creme raft-scheme)", tags: "raft" do
   it "elects a leader among a 3-node in-memory cluster" do
     w(<<-SCHEME).should eq("#t")
       #{cluster_setup}
@@ -49,7 +84,7 @@ describe "(creme raft-scheme)" do
   it "propose!/read round-trip a command through the leader and commit it cluster-wide" do
     w(<<-SCHEME).should eq("ok")
       #{cluster_setup}
-      (define set-response (raft-scheme-propose! leader '(set x 42)))
+      (define set-response (raft-scheme-propose-retry! '(set x 42)))
       (for-each raft-scheme-stop! nodes)
       set-response
       SCHEME
@@ -58,7 +93,7 @@ describe "(creme raft-scheme)" do
   it "raft-scheme-read returns the applied value after a commit" do
     w(<<-SCHEME).should eq("42")
       #{cluster_setup}
-      (raft-scheme-propose! leader '(set x 42))
+      (raft-scheme-propose-retry! '(set x 42))
       (define get-response (raft-scheme-read leader '(get x)))
       (for-each raft-scheme-stop! nodes)
       get-response
@@ -91,7 +126,7 @@ describe "(creme raft-scheme)" do
   it "raft-scheme-metrics reports at least one committed proposal after propose!" do
     w(<<-SCHEME).should eq("#t")
       #{cluster_setup}
-      (raft-scheme-propose! leader '(set x 42))
+      (raft-scheme-propose-retry! '(set x 42))
       (define committed (cdr (assq 'proposals-committed (raft-scheme-metrics leader))))
       (for-each raft-scheme-stop! nodes)
       (if (> committed 0) #t #f)
@@ -114,15 +149,30 @@ describe "(creme raft-scheme)" do
             (lambda (data) (for-each (lambda (kv) (hash-table-set! store (car kv) (cdr kv))) data)))
           transport
           ":memory:"
-          (raft-scheme-config 'election-timeout-min 30 'election-timeout-max 60 'heartbeat-interval 15)))
+          ;; Wider than a minimal dev-machine-tuned timeout on purpose -- see
+          ;; this file's cluster_setup comment for why.
+          (raft-scheme-config 'election-timeout-min 100 'election-timeout-max 200 'heartbeat-interval 40)))
 
       (define transport (raft-scheme-transport-in-memory))
       (define n1 (raft-scheme-start! (make-kv-node "n1" '("n2") transport)))
       (define n2 (raft-scheme-start! (make-kv-node "n2" '("n1") transport)))
-      (define leader (raft-scheme-await-leader! (list n1 n2) 3000))
+      (define leader (raft-scheme-await-leader! (list n1 n2) 30000))
       (define n3 (raft-scheme-start! (make-kv-node "n3" '() transport)))
-      (raft-scheme-add-peer! leader "n3")
-      (raft-scheme-propose! leader '(set z 9))
+
+      ;; raft-scheme-await-leader! only confirms leadership at the instant it
+      ;; returns -- see cluster_setup's own comment for why this file retries
+      ;; against a freshly re-awaited leader rather than assuming `leader`
+      ;; stays valid indefinitely (observed on macOS CI).
+      (let loop ((tries 5))
+        (guard (e (#t (if (> tries 1)
+                          (begin (set! leader (raft-scheme-await-leader! (list n1 n2) 30000)) (loop (- tries 1)))
+                          (raise e))))
+          (raft-scheme-add-peer! leader "n3")))
+      (let loop ((tries 5))
+        (guard (e (#t (if (> tries 1)
+                          (begin (set! leader (raft-scheme-await-leader! (list n1 n2) 30000)) (loop (- tries 1)))
+                          (raise e))))
+          (raft-scheme-propose! leader '(set z 9))))
       (sleep-ms! 300)
       (define n3-applied (cdr (assq 'entries-applied (raft-scheme-metrics n3))))
       (for-each raft-scheme-stop! (list n1 n2 n3))
@@ -141,13 +191,26 @@ describe "(creme raft-scheme)" do
               ((string=? (car lst) x) (drop-str (cdr lst) x))
               (else (cons (car lst) (drop-str (cdr lst) x)))))
       #{cluster_setup}
-      (raft-scheme-propose! leader '(set x 1))
+      (raft-scheme-propose-retry! '(set x 1))
       (define transport (list-ref (cdr (car cluster)) 4))
       (define leader-id (raft-scheme-leader leader))
       (define other-ids (drop-str '("n1" "n2" "n3") leader-id))
       (for-each (lambda (id) (raft-scheme-transport-partition! transport leader-id id)) other-ids)
       (define others (drop-eq nodes leader))
-      (define new-leader (raft-scheme-await-leader! others 5000))
+      ;; A post-partition re-election can, like the initial one (see
+      ;; cluster_setup's own comment), rarely fail to converge at all
+      ;; within 40s on a sufficiently loaded CI runner -- observed on
+      ;; macOS. Retrying the await-leader! call itself (not restarting
+      ;; anything -- the remaining nodes are still up and still
+      ;; partitioned, so simply asking again is safe and sufficient here)
+      ;; is enough since nothing about the cluster's own state needs to
+      ;; change between attempts.
+      (define new-leader
+        (let loop ((tries 3))
+          (let ((got (raft-scheme-await-leader! others 40000)))
+            (cond (got got)
+                  ((> tries 1) (loop (- tries 1)))
+                  (else #f)))))
       (for-each (lambda (id) (raft-scheme-transport-heal! transport leader-id id)) other-ids)
       (define result (if new-leader #t #f))
       (for-each raft-scheme-stop! nodes)
@@ -174,11 +237,13 @@ describe "(creme raft-scheme)" do
             (lambda (data) (for-each (lambda (kv) (hash-table-set! store (car kv) (cdr kv))) data)))
           transport
           path
-          (raft-scheme-config 'election-timeout-min 30 'election-timeout-max 60 'heartbeat-interval 15)))
+          ;; Wider than a minimal dev-machine-tuned timeout on purpose -- see
+          ;; this file's cluster_setup comment for why.
+          (raft-scheme-config 'election-timeout-min 100 'election-timeout-max 200 'heartbeat-interval 40)))
 
       (define t1 (raft-scheme-transport-in-memory))
       (define node1 (raft-scheme-start! (make-kv-node "n1" '() t1)))
-      (raft-scheme-await-leader! (list node1) 3000)
+      (raft-scheme-await-leader! (list node1) 30000)
       (raft-scheme-propose! node1 '(set a 1))
       (raft-scheme-propose! node1 '(set b 2))
       (raft-scheme-snapshot! node1)
@@ -187,7 +252,7 @@ describe "(creme raft-scheme)" do
 
       (define t2 (raft-scheme-transport-in-memory))
       (define node2 (raft-scheme-start! (make-kv-node "n1" '() t2)))
-      (raft-scheme-await-leader! (list node2) 3000)
+      (raft-scheme-await-leader! (list node2) 30000)
       (define result (list (raft-scheme-read node2 '(get a))
                             (raft-scheme-read node2 '(get b))
                             (raft-scheme-read node2 '(get c))))

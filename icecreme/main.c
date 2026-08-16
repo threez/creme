@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "builtin_families.h"
 #include "profiler.h"
@@ -129,7 +130,7 @@ int main(int argc, char **argv) {
   VM *vm = creme_alloc_vm(creme_getenv_int("ICECREME_STACK_CAP"), creme_getenv_int("ICECREME_FRAMES_CAP"));
   if (!vm) {
     fprintf(stderr, "icecreme: out of memory allocating VM state\n");
-    return 1;
+    _exit(1); /* see the bottom of main() for why _exit, not return, here */
   }
   creme_set_current_vm(vm); /* lets creme_abort reach this VM's guard-handler stack */
 
@@ -168,5 +169,31 @@ int main(int argc, char **argv) {
     creme_profiler_report(vm);
   }
 
-  return 0;
+  /* _exit(0), NOT return/exit(0): a script (e.g. spec/creme/actor_spec.scm's
+   * TCP/'unix transport cases) can leave a background actor accept-loop
+   * pthread alive and blocked in accept() when the top-level program
+   * finishes -- deliberately, by design, matching native's own long-running-
+   * server case (see this file's own header comment). An ordinary exit()
+   * (which is what `return` from main does) runs libc/GC atexit and thread-
+   * teardown machinery that has to coordinate with every still-registered
+   * thread; actor.c's own header comment already documents a real, separate
+   * bug in this exact area on this project's FreeBSD boehm-gc-threaded
+   * 8.2.10 build (GC_unregister_my_thread() itself segfaults there, which is
+   * why actor threads deliberately never call it). A registered-but-never-
+   * unregistered thread parked in a blocking syscall at exit time is exactly
+   * the kind of state that GC/libc thread-teardown code on an already-buggy
+   * build can hang on. _exit() skips all of that and goes straight to the
+   * kernel's process-exit syscall, so a lingering thread can't block it.
+   *
+   * _exit() also skips stdio's own atexit-registered flush, unlike ordinary
+   * exit() -- genuinely load-bearing here since stdout is fully buffered
+   * (not line-buffered) whenever it's a pipe, exactly the case when this
+   * process is itself a process-run child (spec-runner.sld's own
+   * subprocess-per-spec-file model). Flush explicitly first so the last
+   * buffered chunk (almost always including spec-summary!'s own
+   * data-mode marker + value) actually reaches the pipe before the hard
+   * exit, instead of being silently dropped. */
+  fflush(stdout);
+  fflush(stderr);
+  _exit(0);
 }

@@ -20,7 +20,13 @@
       raft-noop-restore)
     (raft-transport-in-memory id)
     (raft-log-in-memory)
-    (raft-config '((election-timeout-min . 30) (election-timeout-max . 60) (heartbeat-interval . 15)))))
+    ;; Wider than a minimal dev-machine-tuned timeout on purpose -- 30/60/15ms
+    ;; was fine on an unloaded dev machine but flaky under CI scheduling
+    ;; jitter (e.g. a shared/virtualized runner), causing repeated split
+    ;; votes that never converged within the await-leader! deadline. See
+    ;; spec/scheme/modules/creme/raft_spec.cr's cluster_setup comment for
+    ;; the fuller story -- this example predates that fix and was missed.
+    (raft-config '((election-timeout-min . 100) (election-timeout-max . 200) (heartbeat-interval . 40)))))
 
 (raft-transport-in-memory-reset!)
 
@@ -28,7 +34,7 @@
 
 (for-each raft-start! nodes)
 
-(define leader (raft-await-leader! nodes 3000))
+(define leader (raft-await-leader! nodes 30000))
 
 (if (not leader)
     (error "kv-store: no leader elected within timeout")
