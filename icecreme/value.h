@@ -173,6 +173,7 @@ enum {
                               * PEM text, never a live EVP_PKEY/RSA/EC_KEY*) */
   BOX_KIND_X509_CERT = 19,   /* x509.c -- an X.509 certificate (PEM text) */
   BOX_KIND_X509_CSR = 20,    /* x509.c -- a certificate signing request (PEM text) */
+  BOX_KIND_RADIX_TREE = 21,  /* radix.c -- a (creme radix) RadixTree* */
 };
 
 typedef struct Value Value;

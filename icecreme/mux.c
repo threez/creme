@@ -77,10 +77,18 @@
  * (forcing `Connection: close` afterward — see conn_advance's own
  * comment on why), and HTTP/1.0-vs-1.1 keep-alive defaulting.
  *
- * Routing is a small linear-scanned table (":name" segments, matching
- * (creme mux)'s own path-param syntax that surf.sld already assumes),
- * which is plenty for an app with a handful of routes -- no radix tree
- * or other indexing needed at this scale.
+ * Routing is backed by (creme radix)'s own shared RadixTree core
+ * (radix.c/radix.h) -- a byte-radix trie, keyed per route as `"/" +
+ * METHOD + pattern` (mirroring native mux.cr's own `threez/mux.cr`
+ * shard, which keys its single underlying Radix::Tree the exact same
+ * way). ":name" segments (matching (creme mux)'s own path-param syntax
+ * that surf.sld already assumes) and "*name" catch-all segments are
+ * both supported; a static route always wins over an overlapping
+ * ":name"/"*name" one REGARDLESS of registration order (see radix.c's
+ * own header comment for why), and there is no route-count, path-depth,
+ * or per-segment length cap the way an earlier fixed-size-segment-array
+ * version of this file had (see git history) -- matching bounded only
+ * by actual request/pattern length.
  *
  * Deliberate simplification vs. the real mux.cr: middleware (mux-use!,
  * used only for surf.sld's request-logging middleware here) can OBSERVE
@@ -117,16 +125,18 @@
 
 #include "embed.h"
 #include "mux.h"
+#include "radix.h"
+
+/* One route's payload in the shared RadixTree (see mux.c's own header
+ * comment) -- boxed the same way radix.c's own Scheme-facing builtins
+ * box a plain Value, just with a Value-typed handler instead of an
+ * opaque one, since routing here always resolves to a Scheme closure. */
+typedef struct {
+  Value handler; /* (lambda (request) response-alist) */
+} RouteHandler;
 
 typedef struct {
-  char *method;   /* "GET", "POST", ... (uppercase, matches the incoming request line) */
-  char *pattern;  /* e.g. "/todos/:id/complete" */
-  Value handler;  /* (lambda (request) response-alist) */
-} MuxRoute;
-
-typedef struct {
-  MuxRoute *routes;
-  int n_routes, cap_routes;
+  RadixTree *routes; /* keyed "/" + METHOD + pattern -> RouteHandler* */
   Value *middlewares; /* each (lambda (request next) ...) */
   int n_middlewares, cap_middlewares;
 } MuxApp;
@@ -172,6 +182,7 @@ static Value bi_mux_router(VM *vm, Value *args, int nargs) {
   (void)args;
   (void)nargs;
   MuxApp *app = GC_MALLOC(sizeof(MuxApp));
+  app->routes = radix_tree_new();
   return v_box(app, BOX_KIND_MUX_ROUTER);
 }
 
@@ -181,20 +192,29 @@ static Value bi_mux_router_p(VM *vm, Value *args, int nargs) {
   return v_bool(args[0].tag == T_BOX && args[0].aux == BOX_KIND_MUX_ROUTER);
 }
 
+/* Builds the same `"/" + METHOD + pattern` synthetic key dispatch_request
+ * later looks up (mirroring native mux.cr's own `threez/mux.cr` shard,
+ * which keys its single Radix::Tree the identical way) and stores it in
+ * the app's shared RadixTree -- re-registering the exact same method+
+ * pattern just overwrites the earlier handler (see radix.c's own header
+ * comment), not an error. */
 static void register_route(VM *vm, Value *args, int nargs, const char *method) {
   (void)vm;
   creme_check_min_args(nargs, 3, "mux-route!");
   int pathlen;
   const char *path = creme_arg_bytes(args, nargs, 1, "mux-route!", &pathlen);
   MuxApp *app = as_mux_app(args[0], "mux-route!");
-  if (app->n_routes >= app->cap_routes) {
-    app->cap_routes = app->cap_routes ? app->cap_routes * 2 : 8;
-    app->routes = GC_REALLOC(app->routes, sizeof(MuxRoute) * (size_t)app->cap_routes);
-  }
-  MuxRoute *r = &app->routes[app->n_routes++];
-  r->method = (char *)method;
-  r->pattern = gc_strndup(path, (size_t)pathlen);
-  r->handler = args[2];
+
+  size_t method_len = strlen(method);
+  size_t key_len = 1 + method_len + (size_t)pathlen;
+  char *key = GC_MALLOC(key_len ? key_len : 1);
+  key[0] = '/';
+  memcpy(key + 1, method, method_len);
+  memcpy(key + 1 + method_len, path, (size_t)pathlen);
+
+  RouteHandler *rh = GC_MALLOC(sizeof(RouteHandler));
+  rh->handler = args[2];
+  radix_tree_add(app->routes, key, key_len, rh);
 }
 
 static Value bi_mux_get(VM *vm, Value *args, int nargs) { register_route(vm, args, nargs, "GET"); return v_nil(); }
@@ -214,48 +234,6 @@ static Value bi_mux_use(VM *vm, Value *args, int nargs) {
   }
   app->middlewares[app->n_middlewares++] = args[1];
   return v_nil();
-}
-
-/* ---- path matching: ":name" segments, mirroring surf.sld's own
- * surf-segment-literal comment ("matching (creme mux)'s own radix
- * path-param syntax"). Small fixed-size segment buffers -- routes in any
- * app this targets are short, fixed shapes (never user-controlled). ---- */
-
-#define MUX_MAX_SEGS 8
-#define MUX_SEG_LEN 64
-
-static int split_segments(const char *s, char segs[][MUX_SEG_LEN]) {
-  int n = 0;
-  const char *p = s;
-  if (*p == '/') p++;
-  while (*p && n < MUX_MAX_SEGS) {
-    const char *end = strchr(p, '/');
-    size_t len = end ? (size_t)(end - p) : strlen(p);
-    if (len >= MUX_SEG_LEN) len = MUX_SEG_LEN - 1;
-    memcpy(segs[n], p, len);
-    segs[n][len] = 0;
-    n++;
-    if (!end) break;
-    p = end + 1;
-  }
-  return n;
-}
-
-static int match_route(VM *vm, const MuxRoute *route, const char *path, Value *out_params) {
-  char psegs[MUX_MAX_SEGS][MUX_SEG_LEN], rsegs[MUX_MAX_SEGS][MUX_SEG_LEN];
-  int np = split_segments(route->pattern, psegs);
-  int nr = split_segments(path, rsegs);
-  if (np != nr) return 0;
-  Value params = v_nil();
-  for (int i = 0; i < np; i++) {
-    if (psegs[i][0] == ':') {
-      params = creme_cons(vm, creme_cons(vm, v_gcstr(psegs[i] + 1, strlen(psegs[i] + 1)), v_gcstr(rsegs[i], strlen(rsegs[i]))), params);
-    } else if (strcmp(psegs[i], rsegs[i]) != 0) {
-      return 0;
-    }
-  }
-  *out_params = params;
-  return 1;
 }
 
 /* ---- alist helpers ---- */
@@ -357,6 +335,11 @@ static const char *status_reason(int status) {
  * endless chunked stream) and exhaust memory. */
 #define MUX_MAX_HEADER_BYTES (64 * 1024)
 #define MUX_MAX_BODY_BYTES (64L * 1024 * 1024)
+/* Generous fixed cap on captured ":name"/"*name" route params per
+ * request -- same "small fixed shape, not adversarial" reasoning as
+ * MUX_MAX_HEADERS above; extra captures beyond this are silently
+ * dropped (radix_tree_find's own documented behavior). */
+#define MUX_MAX_PARAMS 32
 
 /* ---- request building ---- */
 
@@ -469,29 +452,33 @@ static Value bi_next_thunk(VM *vm, Value *args, int nargs) {
 static void dispatch_request(VM *vm, MuxApp *app, const char *method, size_t method_len, const char *path, size_t path_len,
                               const struct phr_header *headers, size_t num_headers, const char *body, size_t body_len,
                               const char *remote_addr, int keep_alive, sds *out) {
-  char path_buf[256];
-  size_t plen = path_len < sizeof(path_buf) - 1 ? path_len : sizeof(path_buf) - 1;
-  memcpy(path_buf, path, plen);
-  path_buf[plen] = 0;
+  /* Same synthetic "/" + METHOD + path key register_route built at
+   * registration time (see that function's own comment) -- GC_MALLOC'd
+   * rather than a fixed stack buffer since there's no path-length cap
+   * to bound it by any more (see this file's own header comment). */
+  size_t key_len = 1 + method_len + path_len;
+  char *key = GC_MALLOC(key_len ? key_len : 1);
+  key[0] = '/';
+  memcpy(key + 1, method, method_len);
+  memcpy(key + 1 + method_len, path, path_len);
 
-  const MuxRoute *matched = NULL;
-  Value path_params = v_nil();
-  for (int i = 0; i < app->n_routes; i++) {
-    size_t mlen = strlen(app->routes[i].method);
-    if (method_len != mlen || memcmp(method, app->routes[i].method, mlen) != 0) continue;
-    if (match_route(vm, &app->routes[i], path_buf, &path_params)) {
-      matched = &app->routes[i];
-      break;
-    }
-  }
+  RadixParam params[MUX_MAX_PARAMS];
+  int nparams;
+  RouteHandler *rh = radix_tree_find(app->routes, key, key_len, params, &nparams, MUX_MAX_PARAMS);
 
-  if (!matched) {
+  if (!rh) {
     write_status_response(out, 404, "Not Found", keep_alive);
     return;
   }
 
+  Value path_params = v_nil();
+  for (int i = 0; i < nparams; i++) {
+    path_params =
+        creme_cons(vm, creme_cons(vm, v_gcstr(params[i].name, params[i].name_len), v_gcstr(params[i].value, params[i].value_len)), path_params);
+  }
+
   Value request = build_request(vm, method, method_len, path, path_len, headers, num_headers, body, body_len, remote_addr, path_params);
-  Value response = creme_apply(vm, matched->handler, &request, 1);
+  Value response = creme_apply(vm, rh->handler, &request, 1);
 
   Value status_v = alist_ref(response, "status");
   g_next_status = (status_v.tag == T_INT) ? status_v : v_int(200);

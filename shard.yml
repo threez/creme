@@ -25,6 +25,8 @@ dependencies:
     github: threez/prof.cr
   mux:
     github: threez/mux.cr
+  radix:
+    github: luislavena/radix
   jose:
     github: threez/jose.cr
   raft:

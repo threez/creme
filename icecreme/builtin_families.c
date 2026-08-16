@@ -5,7 +5,7 @@
  * calls these exactly as before; nothing about the CLI's own behavior
  * changes here, this is a pure move.
  *
- * 18 of the table's entries below are wrapped in a `#if CREME_WITH_<NAME>`
+ * 19 of the table's entries below are wrapped in a `#if CREME_WITH_<NAME>`
  * (builtin_config.h) matching the same macro that wraps that family's own
  * .c file entirely — see that header's own doc comment for which families
  * are gateable this way vs. always-on. When a macro is 0, its row simply
@@ -37,6 +37,7 @@
 #include "zstd.h"
 #include "mux.h"
 #include "process.h"
+#include "radix.h"
 #include "regex.h"
 #include "sql.h"
 #include "strings.h"
@@ -85,6 +86,9 @@ static const struct {
 #endif
 #if CREME_WITH_TREELIST
     {"treelist", creme_register_treelist_builtins},
+#endif
+#if CREME_WITH_RADIX
+    {"radix", creme_register_radix_builtins},
 #endif
 #if CREME_WITH_ACTOR
     {"actor", creme_register_actor_builtins},
