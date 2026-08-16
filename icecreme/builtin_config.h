@@ -1,18 +1,25 @@
-/* Compile-time opt-out for the 18 native builtin families that live in
+/* Compile-time opt-out for the 19 native builtin families that live in
  * their own separate .c file with a real external-library (or at least
  * standalone-.o) footprint -- sql/http/cipher/pkey/x509/digest/secure-
  * random/actor (openssl-touching, several sharing -lcrypto), ffi
- * (libffi+dlopen), yaml (libyaml), and mux/csv/treelist/json/bigdecimal/
- * term/process/string (no extra external lib, but still their own .o).
- * Each `CREME_WITH_<NAME>` macro below defaults to 1 (included) --
- * matching every prior release's "everything always in" behavior -- and
- * can be set to 0 from the Makefile (`make lib CREME_WITH_SQL=0 ...`) to
- * drop that family's .c file down to an empty translation unit (no
- * external header even processed, so its `-dev` package needn't be
- * installed) and its BUILTIN_FAMILIES table row (builtin_families.c), so
- * the linker never pulls in the associated external library either. See
- * icecreme/README.md's "Embedding" section and examples/libcream/README.md
- * for the concrete minimal-dependency build this enables.
+ * (libffi+dlopen), yaml (libyaml), and mux/csv/treelist/radix/json/
+ * bigdecimal/term/process/string (no extra external lib, but still their
+ * own .o). Each `CREME_WITH_<NAME>` macro below defaults to 1
+ * (included) -- matching every prior release's "everything always in"
+ * behavior -- and can be set to 0 from the Makefile (`make lib
+ * CREME_WITH_SQL=0 ...`) to drop that family's .c file down to an empty
+ * translation unit (no external header even processed, so its `-dev`
+ * package needn't be installed) and its BUILTIN_FAMILIES table row
+ * (builtin_families.c), so the linker never pulls in the associated
+ * external library either. See icecreme/README.md's "Embedding" section
+ * and examples/libcream/README.md for the concrete minimal-dependency
+ * build this enables.
+ *
+ * CREME_WITH_RADIX is the one exception to "drops to an empty
+ * translation unit": radix.c's own core trie (radix_tree_new/add/find)
+ * stays compiled either way, since mux.c's own routing (CREME_WITH_MUX)
+ * depends on it directly -- this flag only gates the public (creme
+ * radix) Scheme builtins layered on top (see radix.c's own comment).
  *
  * Two other tiers of "family" deliberately have NO macro here:
  *
@@ -72,6 +79,13 @@
 #endif
 #ifndef CREME_WITH_TREELIST
 #define CREME_WITH_TREELIST 1 /* treelist.c -- no external lib */
+#endif
+#ifndef CREME_WITH_RADIX
+#define CREME_WITH_RADIX 1 /* radix.c -- no external lib; radix.c's own core
+                             * (radix_tree_new/add/find) is always compiled
+                             * regardless of this flag, since mux.c (CREME_WITH_MUX)
+                             * depends on it directly -- this only gates the
+                             * public (creme radix) Scheme builtins */
 #endif
 #ifndef CREME_WITH_JSON
 #define CREME_WITH_JSON 1 /* json.c -- no external lib */

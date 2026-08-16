@@ -86,6 +86,24 @@
          (mux-head! router "/head"
            (lambda (request)
              (list (cons "status" 200) (cons "body" ""))))
+         ;; Routing/radix-tree coverage (icecreme/radix.c, replacing what used
+         ;; to be a linear MUX_MAX_SEGS/MUX_SEG_LEN-bounded segment-array
+         ;; scan -- see mux.c's own header comment): "/users/me" is
+         ;; registered AFTER the overlapping "/users/:id" to prove a static
+         ;; route wins regardless of registration order, not just when
+         ;; registered first.
+         (mux-get! router "/users/:id"
+           (lambda (request)
+             (list (cons "status" 200) (cons "body" (string-append "param:" (cdr (assoc "id" (cdr (assoc "path-params" request)))))))))
+         (mux-get! router "/users/me"
+           (lambda (request)
+             (list (cons "status" 200) (cons "body" "static-me"))))
+         (mux-get! router "/files/*path"
+           (lambda (request)
+             (list (cons "status" 200) (cons "body" (string-append "glob:" (cdr (assoc "path" (cdr (assoc "path-params" request)))))))))
+         (mux-get! router "/a/b/c/d/e/f/g/h/i/j"
+           (lambda (request)
+             (list (cons "status" 200) (cons "body" "deep-ok"))))
          (mux-listen! router http-spec-port (list (cons "host" "127.0.0.1")))
          (display "unreachable: mux-listen! blocks its own thread forever")))
 
@@ -117,6 +135,16 @@
   (it "performs DELETE and HEAD"
     (should-equal? (cdr (assoc "status" (http-delete (url "/delete")))) 204)
     (should-equal? (cdr (assoc "status" (http-head (url "/head")))) 200))
+
+  (it "a static route wins over an overlapping :name route registered earlier"
+    (should-equal? (cdr (assoc "body" (http-get (url "/users/me")))) "static-me")
+    (should-equal? (cdr (assoc "body" (http-get (url "/users/42")))) "param:42"))
+
+  (it "a *name catch-all route captures the entire remaining path"
+    (should-equal? (cdr (assoc "body" (http-get (url "/files/a/b/c.txt")))) "glob:a/b/c.txt"))
+
+  (it "matches a path deeper than the old 8-segment cap"
+    (should-equal? (cdr (assoc "body" (http-get (url "/a/b/c/d/e/f/g/h/i/j")))) "deep-ok"))
 
   (it "supports the generic http-request builtin"
     (should-equal? (cdr (assoc "status" (http-request "POST" (url "/echo") '() "generic"))) 201))

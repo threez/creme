@@ -125,8 +125,17 @@ crystal/demo-todo/bin/app: $(CRYSTAL_TODO_SRCS) crystal/demo-todo/shard.yml crys
 go/demo-todo/bin/app: go/demo-todo/main.go go/demo-todo/go.mod go/demo-todo/go.sum
 	cd go/demo-todo && go build -o bin/app .
 
+# better-sqlite3's native addon builds via node-gyp, which only auto-detects
+# a plain `python3`/`python` on PATH -- FreeBSD ports installs versioned
+# binaries only (python3.11, python3.12, ...), so node-gyp finds nothing and
+# aborts with "Could not find any Python installation to use" even though a
+# perfectly usable interpreter is right there. Probing for the first
+# available candidate and exporting it as PYTHON (node-gyp's own override,
+# same as --python) fixes this without touching system state or hardcoding
+# one machine's own path; a plain `python3`/`python` (the common case
+# elsewhere) is preferred over a versioned fallback.
 node/demo-todo/node_modules: node/demo-todo/package.json node/demo-todo/package-lock.json
-	cd node/demo-todo && npm install
+	cd node/demo-todo && PYTHON="$$(command -v python3 || command -v python || command -v python3.12 || command -v python3.11)" npm install
 	touch node/demo-todo/node_modules
 
 # Delegates to c/demo-todo/Makefile, which already vendors+builds facil.io
@@ -150,11 +159,17 @@ c/demo-todo/bin/app:
 # unlike those: `bundle exec` (which bench.scm shells out to) does NOT
 # auto-install missing gems the way `npm install`/node_modules above does
 # -- it fails outright if the Gemfile's gems (e.g. the native sqlite3
-# extension) aren't already present for this exact Ruby. Same stamp-file
-# shape as node_modules: bundler installs into a shared per-Ruby-version
-# gem path, not a directory local to this project, so there's no directory
-# of our own whose mtime would track "is this installed" the way
-# node_modules's own does -- a touched stamp file fills that role instead.
+# extension) aren't already present for this exact Ruby. The recipe's own
+# `bundle config set --local path vendor/bundle` (writes gitignored
+# .bundle/config, idempotent, cheap to redo every run) points bundler at a
+# project-local vendor/bundle instead of the shared system Ruby gem path
+# -- that system path is root-owned on at least one dev box this has been
+# built on, and even where it isn't, a project-local path keeps this
+# twin's exact gem set from drifting against whatever else happens to be
+# installed system-wide. Same stamp-file shape as node_modules
+# regardless: vendor/bundle's own mtime doesn't reliably track "every
+# Gemfile.lock gem is actually present" the way node_modules's directory
+# mtime does for npm, so a touched stamp file fills that role instead.
 # BUNDLE_JOBS=1 -- Bundler's parallel installer (any @size > 1) sets up a
 # GNU-make-only jobserver (MAKEFLAGS=--jobserver-auth=R,W) around every
 # native-extension gem's own `make` invocation. BSD make (the default
@@ -167,7 +182,7 @@ c/demo-todo/bin/app:
 # chokes on. Serial install is a one-time, few-second cost here (this
 # Gemfile has ~15 gems), not worth trading for the platform breakage.
 ruby/demo-todo/.bundle-installed: ruby/demo-todo/Gemfile ruby/demo-todo/Gemfile.lock
-	cd ruby/demo-todo && BUNDLE_JOBS=1 bundle install
+	cd ruby/demo-todo && bundle config set --local path vendor/bundle && BUNDLE_JOBS=1 bundle install
 	touch ruby/demo-todo/.bundle-installed
 
 todo-app-binaries: creme icecreme \
@@ -178,5 +193,5 @@ todo-app-binaries: creme icecreme \
 clean:
 	rm -f $(ROOT)/bin/bench_cr $(ROOT)/bin/bench_go lua/bench/monotonic.so
 	rm -rf crystal/demo-todo/bin go/demo-todo/bin
-	rm -f ruby/demo-todo/.bundle-installed
+	rm -rf ruby/demo-todo/.bundle-installed ruby/demo-todo/vendor/bundle ruby/demo-todo/.bundle
 	$(MAKE) -C c/demo-todo clean

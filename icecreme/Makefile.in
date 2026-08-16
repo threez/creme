@@ -259,7 +259,7 @@ LDLIBS := -lm -lpthread $(GC_LIBS) $(PCRE2_LIBS) $(GMP_LIBS) $(ZSTD_LIBS) $(EXEC
 SDS_STAGE = sds-gc
 MAIN_SRC  = main.c
 EMBED_SRC = embedded_icecreme.c
-COMMON_SRCS = loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c zstd.c secure_random.c cipher.c pkey.c x509.c builtin_families.c \
+COMMON_SRCS = loader.c vm.c builtins.c hashtable.c sql.c mux.c strings.c profiler.c bootstrap.c regex.c process.c csv.c treelist.c radix.c actor.c digest.c json.c bigdecimal.c http.c term.c creme_ffi.c yaml.c zstd.c secure_random.c cipher.c pkey.c x509.c builtin_families.c \
               $(SDS_STAGE)/sds.c vendor/picohttpparser/picohttpparser.c
 SRCS = $(MAIN_SRC) $(COMMON_SRCS) $(EMBED_SRC)
 OBJS = $(SRCS:.c=.o)

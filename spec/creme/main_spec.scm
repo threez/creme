@@ -71,6 +71,7 @@
     "spec/creme/ports_spec.scm"
     "spec/creme/prim_call_spec.scm"
     "spec/creme/prim_quicken_spec.scm"
+    "spec/creme/radix_spec.scm"
     "spec/creme/raft_dispatch_spec.scm"
     "spec/creme/raft_scheme_spec.scm"
     "spec/creme/random_spec.scm"
