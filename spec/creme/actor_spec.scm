@@ -36,7 +36,7 @@
 ;;   ./icecreme/icecreme spec/creme/actor_spec.scm
 ;; ===========================================================================
 
-(import (scheme base) (scheme cxr) (scheme write) (creme actor) (creme spec))
+(import (scheme base) (scheme cxr) (scheme write) (creme actor) (creme spec) (creme random))
 
 ;; Used by the Phase 4 "record round-trips over a real tcp: socket" case
 ;; below -- a message decoded off the wire is only reconstructed as a
@@ -258,9 +258,20 @@
                  (send! main-ref (guard (e (#t #t)) (send! target 'hello) #f)))))
       (should-be-true? (receive!))))
 
+  ;; A fixed, shared /tmp path here would let a stale socket file survive a
+  ;; prior run this process never got to clean up (e.g. one killed by an
+  ;; external timeout, mid-test) and collide with a later run -- silently
+  ;; hanging THAT run forever instead of failing fast: start_unix_node's own
+  ;; `File.delete(path) rescue nil` swallows a leftover file it can't remove
+  ;; (e.g. owned by a different user on a shared CI runner) and proceeds to
+  ;; UNIXServer.new anyway, whose bind failure kills the spawned actor
+  ;; before it ever sends the 'ready message the test's main fiber is
+  ;; blocked on -- an actor dying with no monitor watching it leaves a
+  ;; receive! waiting forever, by design (this file's own actor model, not
+  ;; a bug). A random suffix makes that collision effectively impossible.
   (it "'unix transport: send!/receive! round-trip a value across a real unix domain socket"
     (define main-ref (self))
-    (define sock-path "/tmp/icecreme-actor-spec.sock")
+    (define sock-path (string-append "/tmp/icecreme-actor-spec-" (number->string (random-integer 1000000000)) ".sock"))
     (spawn (lambda ()
              (let* ((node (start-node 'unix sock-path "spec-unix-cookie"))
                     (worker (spawn (lambda ()
@@ -268,13 +279,17 @@
                                        (send! (car msg) (* (cdr msg) 3))))))
                     (registered (register! 'spec-unix-worker worker))
                     (sent-ready (send! main-ref 'ready)))
-               (receive!))))
+               (receive!)))) ;; keep the node's actor alive for the duration of this case -- sock-path is intentionally NOT cleaned up here (see the random-suffix comment above for why that's fine)
     (receive!) ;; wait for the server side's socket file to actually exist
     (spawn (lambda ()
              (let* ((node (start-node 'unix (string-append sock-path ".client") "spec-unix-cookie"))
                     (target (remote-ref (string-append "unix://spec-unix-worker@" sock-path)))
                     (sent (send! target (cons (self) 7))))
-               (send! main-ref (receive!)))))
+               (send! main-ref (receive!))
+               ;; Unlike the server node above, this one's job is done the
+               ;; moment the reply arrives -- stop it so its own socket file
+               ;; (via shutdown!'s unlink fix) doesn't linger either.
+               (stop-node! node))))
     (should-equal? (receive!) 21)))
 
 (spec-summary!)

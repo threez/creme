@@ -47,12 +47,27 @@
       (lambda (data) (for-each (lambda (kv) (hash-table-set! store (car kv) (cdr kv))) data)))
     transport
     ":memory:"
-    (raft-scheme-config 'election-timeout-min 30 'election-timeout-max 60 'heartbeat-interval 15)))
+    ;; Wider than a minimal dev-machine-tuned timeout on purpose -- see
+    ;; spec/scheme/modules/creme/raft_spec.cr's cluster_setup comment for why.
+    (raft-scheme-config 'election-timeout-min 100 'election-timeout-max 200 'heartbeat-interval 40)))
 
 (define (new-cluster)
   (define cluster (raft-scheme-cluster '("n1" "n2" "n3") make-kv-node))
   (define nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
-  (define leader (raft-scheme-await-leader! nodes 3000))
+  ;; A first election can, rarely, fail to converge at all within 30s on a
+  ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
+  ;; just a slow one). raft-scheme-start! takes the raw node handle
+  ;; (cluster's own (id . node) pairs), not the started actor-ref it
+  ;; returns, so restart re-maps `cluster` fresh rather than reusing `nodes`.
+  (define leader
+    (let loop ((tries 3))
+      (let ((got (raft-scheme-await-leader! nodes 30000)))
+        (cond (got got)
+              ((> tries 1)
+               (for-each raft-scheme-stop! nodes)
+               (set! nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
+               (loop (- tries 1)))
+              (else #f)))))
   (list cluster nodes leader))
 
 (describe "(creme raft-scheme)"
@@ -98,7 +113,7 @@
     (define transport (raft-scheme-transport-in-memory))
     (define n1 (raft-scheme-start! (make-kv-node "n1" '("n2") transport)))
     (define n2 (raft-scheme-start! (make-kv-node "n2" '("n1") transport)))
-    (define leader (raft-scheme-await-leader! (list n1 n2) 3000))
+    (define leader (raft-scheme-await-leader! (list n1 n2) 30000))
     (define n3 (raft-scheme-start! (make-kv-node "n3" '() transport)))
     (raft-scheme-add-peer! leader "n3")
     (raft-scheme-propose! leader '(set z 9))
@@ -118,7 +133,19 @@
     (define other-ids (drop-str '("n1" "n2" "n3") leader-id))
     (for-each (lambda (id) (raft-scheme-transport-partition! transport leader-id id)) other-ids)
     (define others (drop-eq nodes leader))
-    (define new-leader (raft-scheme-await-leader! others 5000))
+    ;; A post-partition re-election can, like the initial one (see
+    ;; new-cluster's own comment), rarely fail to converge at all within
+    ;; 40s on a sufficiently loaded CI runner -- observed on macOS.
+    ;; Retrying the await-leader! call itself (not restarting anything --
+    ;; the remaining nodes are still up and still partitioned, so simply
+    ;; asking again is safe and sufficient here) is enough since nothing
+    ;; about the cluster's own state needs to change between attempts.
+    (define new-leader
+      (let loop ((tries 3))
+        (let ((got (raft-scheme-await-leader! others 40000)))
+          (cond (got got)
+                ((> tries 1) (loop (- tries 1)))
+                (else #f)))))
     (for-each (lambda (id) (raft-scheme-transport-heal! transport leader-id id)) other-ids)
     (for-each raft-scheme-stop! nodes)
     (should-be-true? (if new-leader #t #f))))

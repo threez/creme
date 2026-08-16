@@ -312,6 +312,19 @@ module Creme
         @inbound_sockets.each { |socket| socket.close rescue nil }
         @inbound_sockets.clear
       end
+      # Closing a UNIXServer does NOT unlink its socket file from disk (a
+      # well-known Unix domain socket gotcha) -- without this, every 'unix
+      # node leaks a stale socket file on every stop-node!/process exit,
+      # which can then make a LATER start-node 'unix at the same path hang
+      # rather than fail fast (start_unix_node's own File.delete(path)
+      # rescue nil silently swallows a leftover it can't remove, e.g. one
+      # owned by a different user on a shared machine, then binds anyway;
+      # the resulting bind failure kills the accepting actor before it
+      # sends any 'ready message, leaving an unmonitored caller's receive!
+      # blocked forever -- by design of the actor model, not a bug there).
+      if path = @unix_path
+        File.delete(path) rescue nil
+      end
       if name = @local_node_name
         LocalNodeRegistry.unregister(name)
       end

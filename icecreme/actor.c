@@ -1801,6 +1801,17 @@ static Value bi_stop_node_bang(VM *vm, Value *args, int nargs) {
     close(sys->listener_fd);
     sys->listener_fd = -1;
   }
+  /* Closing a unix listener fd does NOT unlink its socket file from disk (a
+   * well-known Unix domain socket gotcha) -- without this, every 'unix node
+   * leaks a stale socket file on every stop-node!/process exit, which can
+   * then make a LATER start-node 'unix at the same path hang rather than
+   * fail fast (start_unix_node's own unlink()-before-bind silently ignores
+   * a leftover it can't remove, e.g. one owned by a different user on a
+   * shared machine, then binds anyway; the resulting bind failure kills the
+   * accepting actor before it ever signals ready, leaving an unmonitored
+   * caller blocked on receive! forever -- by design of the actor model, not
+   * a bug there). Mirrors native's own actor.cr ActorSystem#shutdown! fix. */
+  if (sys->unix_path) unlink(sys->unix_path);
   /* Take each conn's write_mutex before closing its fd and invalidate it, so a
    * concurrent send_remote (which holds only write_mutex, not sys->mutex) can't
    * write to a just-closed fd whose number may already be reused. Lock order is

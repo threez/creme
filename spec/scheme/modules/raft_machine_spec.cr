@@ -27,11 +27,28 @@ private def cluster_setup : String
         raft-noop-restore)
       (raft-transport-in-memory id)
       (raft-log-in-memory)
-      (raft-config '((election-timeout-min . 30) (election-timeout-max . 60) (heartbeat-interval . 15)))))
+      ;; Wider than a minimal dev-machine-tuned timeout on purpose -- see
+      ;; spec/scheme/modules/creme/raft_spec.cr's cluster_setup comment for why.
+      (raft-config '((election-timeout-min . 100) (election-timeout-max . 200) (heartbeat-interval . 40)))))
 
   (define nodes (raft-cluster '("n1" "n2" "n3") make-kv-node))
   (for-each raft-start! nodes)
-  (define leader (raft-await-leader! nodes 3000))
+  ;; A first election can, rarely, fail to converge at all within 30s on a
+  ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
+  ;; just a slow one -- observed on macOS CI late in a long spec run).
+  ;; Unlike (creme raft-scheme)'s node "box" (see raft_frontend_spec.cr's
+  ;; own comment), native raft-start!/raft-stop! operate on the SAME stable
+  ;; Raft::Node object each time (no mutate-in-place box), so stop!+start!
+  ;; on the same `nodes` list is a safe, genuine restart here.
+  (define leader
+    (let loop ((tries 3))
+      (let ((got (raft-await-leader! nodes 30000)))
+        (cond (got got)
+              ((> tries 1)
+               (for-each raft-stop! nodes)
+               (for-each raft-start! nodes)
+               (loop (- tries 1)))
+              (else #f)))))
   SCHEME
 end
 

@@ -9,6 +9,37 @@ private def w(src : String) : String
   run(src).write_string
 end
 
+# Transcendental results (sin/cos/tan/exp/log/asin/acos/atan/... of a real OR
+# a genuinely complex argument) are computed via the platform's own libm
+# (Math.sin/cos/exp/... in Crystal's stdlib), so the last one or two bits of
+# the mantissa can legitimately differ between platforms/architectures --
+# observed Linux glibc vs. macOS's libm disagreeing in the last digit of a
+# 17-significant-digit Float64#to_s across a rotating cast of specific cases
+# each CI run (acos(1+1i), exp(1+1i), sin(1+2i), cos(1+2i), asin(0.5), ...).
+# These are not creme bugs, just libm ULP-level differences in the
+# underlying transcendental -- rather than fix them one at a time as a new
+# one surfaces on a different platform, every transcendental assertion in
+# this describe block uses w_complex_close. Parse the written form -- either
+# a bare real "<real>" or complex "<real>[+-]<imag>i" -- back into Float64s
+# and compare each within a small epsilon instead of asserting exact string
+# equality.
+private def w_complex_close(src : String, expected : String, epsilon = 1e-9)
+  actual_re, actual_im = parse_complex_write_string(w(src))
+  expected_re, expected_im = parse_complex_write_string(expected)
+  actual_re.should be_close(expected_re, epsilon)
+  actual_im.should be_close(expected_im, epsilon)
+end
+
+private def parse_complex_write_string(s : String) : {Float64, Float64}
+  if m = s.match(/\A(-?[\d.]+(?:[eE][+-]?\d+)?)([+-][\d.]+(?:[eE][+-]?\d+)?)i\z/)
+    {m[1].to_f64, m[2].to_f64}
+  elsif m = s.match(/\A-?[\d.]+(?:[eE][+-]?\d+)?\z/)
+    {m[0].to_f64, 0.0}
+  else
+    raise "not a real/complex write_string: #{s.inspect}"
+  end
+end
+
 describe "(scheme complex)" do
   it "must be explicitly imported (not auto-imported like base)" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
@@ -134,10 +165,10 @@ describe "(scheme complex)" do
 
   describe "complex-aware transcendentals" do
     it "sin/cos/tan/exp accept a genuine complex argument" do
-      w("(import (creme math)) (sin 1+2i)").should eq("3.165778513216168+1.9596010414216063i")
-      w("(import (creme math)) (cos 1+2i)").should eq("2.0327230070196656-3.0518977991518i")
-      w("(import (creme math)) (tan 1+2i)").should eq("0.0338128260798966+1.0147936161466335i")
-      w("(import (creme math)) (exp 1+1i)").should eq("1.4686939399158854+2.2873552871788427i")
+      w_complex_close("(import (creme math)) (sin 1+2i)", "3.165778513216168+1.9596010414216063i")
+      w_complex_close("(import (creme math)) (cos 1+2i)", "2.0327230070196656-3.0518977991518i")
+      w_complex_close("(import (creme math)) (tan 1+2i)", "0.0338128260798966+1.0147936161466335i")
+      w_complex_close("(import (creme math)) (exp 1+1i)", "1.4686939399158854+2.2873552871788427i")
     end
 
     it "sqrt of a genuinely complex argument" do
@@ -145,22 +176,22 @@ describe "(scheme complex)" do
     end
 
     it "log of a genuinely complex argument, and of a negative real (domain extension)" do
-      w("(import (creme math)) (log 1+1i)").should eq("0.3465735902799727+0.7853981633974483i")
-      w("(import (creme math)) (log -4)").should eq("1.3862943611198906+3.141592653589793i")
+      w_complex_close("(import (creme math)) (log 1+1i)", "0.3465735902799727+0.7853981633974483i")
+      w_complex_close("(import (creme math)) (log -4)", "1.3862943611198906+3.141592653589793i")
       w("(import (creme math)) (log 0)").should eq("-inf.0")
     end
 
     it "asin/acos of an out-of-range real argument, and of a genuinely complex argument" do
-      w("(import (creme math)) (asin 2)").should eq("1.5707963267948966-1.3169578969248166i")
-      w("(import (creme math)) (acos 2)").should eq("0.0+1.3169578969248164i")
-      w("(import (creme math)) (asin 1+1i)").should eq("0.6662394324925153+1.0612750619050355i")
-      w("(import (creme math)) (acos 1+1i)").should eq("0.9045568943023814-1.0612750619050357i")
-      w("(import (creme math)) (asin 0.5)").should eq("0.5235987755982989")
+      w_complex_close("(import (creme math)) (asin 2)", "1.5707963267948966-1.3169578969248166i")
+      w_complex_close("(import (creme math)) (acos 2)", "0.0+1.3169578969248164i")
+      w_complex_close("(import (creme math)) (asin 1+1i)", "0.6662394324925153+1.0612750619050355i")
+      w_complex_close("(import (creme math)) (acos 1+1i)", "0.9045568943023814-1.0612750619050357i")
+      w_complex_close("(import (creme math)) (asin 0.5)", "0.5235987755982989")
     end
 
     it "atan of a genuinely complex argument, real atan unaffected" do
-      w("(import (creme math)) (atan 1+1i)").should eq("1.0172219678978514+0.4023594781085251i")
-      w("(import (creme math)) (atan 1)").should eq("0.7853981633974483")
+      w_complex_close("(import (creme math)) (atan 1+1i)", "1.0172219678978514+0.4023594781085251i")
+      w_complex_close("(import (creme math)) (atan 1)", "0.7853981633974483")
     end
 
     it "expt: negative real base with a non-integer exponent goes complex instead of NaN" do

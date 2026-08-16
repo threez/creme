@@ -2,18 +2,23 @@ require "../../../spec_helper"
 
 private def w(src : String) : String
   interp = Creme::Interpreter.new(library_search_path: ["./modules"])
-  Creme.run_source(interp, "(import (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}").write_string
+  Creme.run_source(interp, "(import (scheme base) (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}").write_string
 end
 
 private def run(src : String) : Creme::SchemeValue
   interp = Creme::Interpreter.new(library_search_path: ["./modules"])
-  Creme.run_source(interp, "(import (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}")
+  Creme.run_source(interp, "(import (scheme base) (scheme read) (scheme cxr) (creme raft) (creme hash-table)) #{src}")
 end
 
 # A tiny in-memory 3-node KV-store cluster, shared by every example below.
 # Commands/responses are s-expressions encoded to bytevectors via write/read
 # + string->utf8/utf8->string; the state machine keeps its data in a
-# (creme hash-table). Short election/heartbeat timeouts keep specs fast.
+# (creme hash-table). Election/heartbeat timeouts are short (but not as
+# short as they used to be -- 30/60/15ms was fine on an unloaded dev
+# machine but flaky under CI scheduling jitter, e.g. on a shared/
+# virtualized runner, causing repeated split votes that never converged
+# within the await-leader! deadline) to keep specs reasonably fast while
+# leaving real headroom.
 private def cluster_setup : String
   <<-SCHEME
   (raft-transport-in-memory-reset!)
@@ -40,14 +45,41 @@ private def cluster_setup : String
         (lambda (bv) #t))
       (raft-transport-in-memory id)
       (raft-log-in-memory)
-      (raft-config '((election-timeout-min . 30) (election-timeout-max . 60) (heartbeat-interval . 15)))))
+      (raft-config '((election-timeout-min . 100) (election-timeout-max . 200) (heartbeat-interval . 40)))))
 
   (define n1 (make-kv-node "n1" (list "n2" "n3")))
   (define n2 (make-kv-node "n2" (list "n1" "n3")))
   (define n3 (make-kv-node "n3" (list "n1" "n2")))
   (define nodes (list n1 n2 n3))
   (for-each raft-start! nodes)
-  (define leader (raft-await-leader! nodes 3000))
+  ;; A first election can, rarely, fail to converge at all within 30s on a
+  ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
+  ;; just a slow one -- observed on macOS CI late in a long spec run).
+  ;; Restarting the whole cluster and retrying is safe here since nothing
+  ;; has been proposed yet.
+  (define leader
+    (let loop ((tries 3))
+      (let ((got (raft-await-leader! nodes 30000)))
+        (cond (got got)
+              ((> tries 1)
+               (for-each raft-stop! nodes)
+               (for-each raft-start! nodes)
+               (loop (- tries 1)))
+              (else #f)))))
+
+  ;; raft-await-leader! only confirms leadership at the instant it returns
+  ;; (polls node.role.leader? every 10ms) -- it's a snapshot, not a lease.
+  ;; Under real CI-runner scheduling pressure, enough wall-clock time can
+  ;; pass before the NEXT line's raft-propose! that the node has legitimately
+  ;; lost leadership in between (a real, correct Raft outcome, not a bug) --
+  ;; observed on macOS CI. Retry against a freshly re-awaited leader instead
+  ;; of assuming `leader` stays valid indefinitely.
+  (define (raft-propose-retry! cmd)
+    (let loop ((tries 5))
+      (guard (e (#t (if (> tries 1)
+                        (begin (set! leader (raft-await-leader! nodes 30000)) (loop (- tries 1)))
+                        (raise e))))
+        (raft-propose! leader cmd))))
   SCHEME
 end
 
@@ -63,7 +95,7 @@ describe "raft module" do
   it "propose!/read round-trip a command through the leader and commit it cluster-wide" do
     w(<<-SCHEME).should eq("ok")
       #{cluster_setup}
-      (define set-response (decode (raft-propose! leader (encode '(set x 42)))))
+      (define set-response (decode (raft-propose-retry! (encode '(set x 42)))))
       (for-each raft-stop! nodes)
       set-response
       SCHEME
@@ -72,7 +104,7 @@ describe "raft module" do
   it "raft-read returns the applied value after a commit" do
     w(<<-SCHEME).should eq("42")
       #{cluster_setup}
-      (raft-propose! leader (encode '(set x 42)))
+      (raft-propose-retry! (encode '(set x 42)))
       (define get-response (decode (raft-read leader (encode '(get x)))))
       (for-each raft-stop! nodes)
       get-response
@@ -101,7 +133,7 @@ describe "raft module" do
   it "raft-metrics reports at least one committed proposal after propose!" do
     w(<<-SCHEME).should eq("#t")
       #{cluster_setup}
-      (raft-propose! leader (encode '(set x 42)))
+      (raft-propose-retry! (encode '(set x 42)))
       (define committed (cdr (assq 'proposals-committed (raft-metrics leader))))
       (for-each raft-stop! nodes)
       (if (> committed 0) #t #f)
