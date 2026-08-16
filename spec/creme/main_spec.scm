@@ -35,7 +35,8 @@
 ;; itself.
 ;; ===========================================================================
 
-(import (scheme base) (scheme write) (scheme process-context) (scheme eval) (creme spec) (creme spec-runner))
+(import (scheme base) (scheme write) (scheme process-context) (scheme eval) (scheme char)
+        (creme spec) (creme spec-runner))
 
 (define (bound? name) (guard (e (#t #f)) (eval name) #t))
 
@@ -169,11 +170,33 @@
           ((member "--self-hosted" args) '("./bin/creme" "--self-hosted"))
           (else '("./bin/creme"))))))
 
+;; CREME_SPEC_SKIP: a space-separated list of spec/creme/*_spec.scm paths to
+;; additionally exclude, on top of the backend-based lists above. Not used by
+;; default -- an escape hatch for a specific CI job to skip a file that's
+;; only ever unreliable on that one platform (e.g. real Raft
+;; election/replication timing under macOS's shared-runner scheduling
+;; pressure -- see .github/workflows/ci.yml's macos job), without touching
+;; the backend-based exclusion lists above and losing coverage on the
+;; platforms where the file passes reliably.
+(define (split-on-space s)
+  (let loop ((chars (string->list s)) (cur '()) (acc '()))
+    (cond ((null? chars)
+           (reverse (if (null? cur) acc (cons (list->string (reverse cur)) acc))))
+          ((char-whitespace? (car chars))
+           (loop (cdr chars) '() (if (null? cur) acc (cons (list->string (reverse cur)) acc))))
+          (else (loop (cdr chars) (cons (car chars) cur) acc)))))
+
+(define env-skip
+  (let ((v (get-environment-variable "CREME_SPEC_SKIP")))
+    (if v (split-on-space v) '())))
+
 (define exclude
-  (cond
-    ((equal? runner '("./icecreme/icecreme")) icecreme-excluded)
-    ((equal? runner '("./bin/creme" "--self-hosted")) (append native-excluded self-hosted-excluded))
-    (else native-excluded)))
+  (append
+    env-skip
+    (cond
+      ((equal? runner '("./icecreme/icecreme")) icecreme-excluded)
+      ((equal? runner '("./bin/creme" "--self-hosted")) (append native-excluded self-hosted-excluded))
+      (else native-excluded))))
 
 (for-each
   (lambda (f) (if (not (member f exclude)) (run-spec-file! runner f)))
