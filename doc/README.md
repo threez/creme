@@ -40,4 +40,4 @@ Other references:
 - [logo.md](logo.md) — image-generation prompts for a creme logo.
 - `r7rs.pdf` — the R7RS-small standard (bundled reference).
 - [../CHANGELOG.md](../CHANGELOG.md) — the change log.
-- [../benchmarks/](../benchmarks/) — generated, per-machine benchmark snapshots (`make bench-md`), one file per architecture+OS (e.g. `amd64_freebsd.md`).
+- [../benchmarks/](../benchmarks/) — generated, per-machine benchmark snapshots (`make bench-md`), one `.md` file per architecture+OS (e.g. `amd64_freebsd.md`) plus its per-workload `.svg` bar-chart files.

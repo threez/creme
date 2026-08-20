@@ -110,7 +110,7 @@
 (import (scheme base) (scheme write) (scheme cxr) (scheme char) (scheme process-context)
         (creme process) (creme regex) (creme string) (creme numfmt)
         (creme bench) (creme cli) (creme introspection) (creme hardware) (creme http)
-        (creme file) (creme wrk) (creme shell) (creme sort) (creme term)
+        (creme file) (creme wrk) (creme shell) (creme sort) (creme term) (creme svg)
         (only (creme extra) filter))
 
 (define opts
@@ -182,6 +182,22 @@
 (define (tool-version cmd args)
   (let ((out (process-run-safe cmd args)))
     (if out (first-line-trimmed out) "n/a")))
+
+; A workload/app label (e.g. "build-list(200000) length+reverse") turned
+; into a filename-safe slug ("build-list-200000-length-reverse") -- used
+; below to name the per-chart .svg files the --markdown snapshot writes
+; alongside itself. Lowercases, collapses any run of non-alphanumeric
+; characters to a single "-", and drops a leading/trailing one.
+(define (slugify s)
+  (list->string
+   (let loop ((chars (string->list (string-downcase s))) (at-dash #t) (acc '()))
+     (cond
+      ((null? chars)
+       (reverse (if (and (pair? acc) (char=? (car acc) #\-)) (cdr acc) acc)))
+      ((or (char-alphabetic? (car chars)) (char-numeric? (car chars)))
+       (loop (cdr chars) #f (cons (car chars) acc)))
+      (at-dash (loop (cdr chars) #t acc))
+      (else (loop (cdr chars) #t (cons #\- acc)))))))
 
 (define guile-cmd (freebsd-binary "guile" "guile3"))
 (define lua-cmd (freebsd-binary "lua" "lua55"))
@@ -422,6 +438,15 @@
       ; of every workload time in that column) trivially always the worst
       ; cell in its column regardless of how fast that variant actually is.
 
+      ;; Raw parsed times are seconds (see parse-elapsed-alist above); this
+      ;; workload set is almost entirely sub-hundredth-of-a-second, which
+      ;; reads as a wall of leading zeros in seconds -- displayed values
+      ;; (table cells, chart values/scaling) convert to milliseconds via
+      ;; this helper. measurement-value-table itself (below) stays in raw
+      ;; seconds -- it also feeds row-minmax's terminal color gradient,
+      ;; which is scale-invariant, so there's no need to convert it too.
+      (define (seconds->ms v) (and v (* v 1000)))
+
       (define measurement-headers (cons "workload" variant-names))
       (define measurement-headers-colored (cons "workload" (map colorize-header variant-names)))
       (define measurement-aligns (cons 'left (map (lambda (v) 'right) variant-names)))
@@ -430,16 +455,22 @@
         (map (lambda (label) (map (lambda (v) (lookup label (times-of v))) variant-names))
              workloads))
 
-      ; PLAIN -- unchanged shape, used for the --html path.
+      ; PLAIN -- unchanged shape, used for the --html path. Cells are
+      ; formatted in milliseconds (seconds->ms); 2 decimal places in ms
+      ; preserves the same effective resolution as the previous 5 decimals
+      ; in seconds (1e-5s = 0.01ms), so nothing that used to be
+      ; distinguishable now rounds away to 0.00.
       (define measurement-rows
-        (map (lambda (label vals) (cons label (map (lambda (v) (numfmt-fixed v 5)) vals)))
+        (map (lambda (label vals) (cons label (map (lambda (v) (numfmt-fixed (seconds->ms v) 2)) vals)))
              workloads measurement-value-table))
 
       ; Terminal-only: same cells, colorized against their own row's (min . max).
+      ; Colorized against the RAW (seconds) values -- gradient position is
+      ; scale-invariant, so this doesn't need its own ms conversion.
       (define measurement-rows-colored
         (map (lambda (label vals)
                (let ((mm (row-minmax vals)))
-                 (cons label (map (lambda (v) (colorize-value v mm (numfmt-fixed v 5))) vals))))
+                 (cons label (map (lambda (v) (colorize-value v mm (numfmt-fixed (seconds->ms v) 2))) vals))))
              workloads measurement-value-table))
 
       ; ---- table 2: comparison matrix (row / column, on total time) --------
@@ -480,20 +511,66 @@
 
       (display (string-append "bench (cross-language CPU workloads, single-threaded — 1 of "
                                (number->string hw-cpu-cores) " logical cores)\n"))
-      (display "measurements (seconds)\n")
+      (display "measurements (milliseconds)\n")
       (display (bench-table->string measurement-headers-colored measurement-rows-colored measurement-aligns 1))
       (newline)
       (display "comparison matrix (row's total time / column's total time — e.g. the \"creme\" row's \"crystal\" column is how many times slower creme is than crystal)\n")
       (display (bench-table->string matrix-headers-colored matrix-rows-colored matrix-aligns))
       (newline)
 
+      ; One grid SVG containing a small (vertical, left-to-right,
+      ; bottom-to-top) column chart PER workload (including "total"),
+      ; variants as columns, each in its own titled, rounded card, 2
+      ; cards per row -- one chart per test, side by side in a grid, is
+      ; easier to visually compare than a single dense combined chart (a
+      ; single stacked chart was tried and found hard to read). Every
+      ; column's language always gets the same pastel color across every
+      ; card (svg-bar-chart-grid keys color by label text, not position --
+      ; see its own header comment), so a language stays visually
+      ; identifiable card to card even though each card's own column
+      ; order can differ.
+      (define (workload-chart-items vals) (map (lambda (name v) (cons name (seconds->ms v))) variant-names vals))
+
+      ; Every chart's title documents which way is better directly on the
+      ; chart itself (not just in surrounding prose) -- every workload
+      ; here is an elapsed-time metric, so all 10 (9 workloads + "total")
+      ; are uniformly "smaller=better".
+      (define charts
+        (map (lambda (label vals) (cons (string-append label " (smaller=better)") (workload-chart-items vals)))
+             workloads measurement-value-table))
+
+      (define measurement-chart (svg-bar-chart-grid charts 2 380 140))
+
+      ; --html embeds the grid's <svg>...</svg> directly, inline, since
+      ; the whole document is one self-contained file already.
+      ;
+      ; --markdown has no good INLINE svg story (GitHub's own markdown
+      ; renderer strips raw <svg> tags, along with most other embedded raw
+      ; HTML, as an XSS precaution) -- so instead the grid is written out
+      ; as its own standalone .svg file, alongside the markdown snapshot
+      ; itself in benchmarks/, and referenced with a plain markdown image
+      ; link (an ordinary <img>-rendered file reference, unaffected by
+      ; that sanitizer). One file PER machine snapshot (arch_os-named,
+      ; e.g. benchmarks/amd64_freebsd_bench.svg) so re-running --markdown
+      ; on a second machine's snapshot can't clobber the first's chart.
+      (define measurement-chart-svg-filename
+        (string-append (string-downcase runtime-arch) "_" (string-downcase runtime-os) "_bench.svg"))
+
+      (define measurement-chart-markdown
+        (if want-markdown?
+            (begin
+              (file-write (string-append "benchmarks/" measurement-chart-svg-filename) measurement-chart)
+              (string-append "![bench chart](" measurement-chart-svg-filename ")\n\n"))
+            ""))
+
       (list
        (cons 'html
              (if want-html?
                  (string-append
-                  "<h2>bench: measurements (seconds)</h2>\n"
+                  "<h2>bench: measurements (milliseconds)</h2>\n"
                   "<p>single-threaded — 1 of " (number->string hw-cpu-cores) " logical cores</p>\n"
                   (bench-table->html measurement-headers measurement-rows measurement-aligns)
+                  measurement-chart
                   "<h2>bench: comparison matrix</h2>\n"
                   "<p>row's total time / column's total time</p>\n"
                   (bench-table->html matrix-headers matrix-rows matrix-aligns))
@@ -501,9 +578,10 @@
        (cons 'markdown
              (if want-markdown?
                  (string-append
-                  "## bench: measurements (seconds)\n\n"
+                  "## bench: measurements (milliseconds)\n\n"
                   "single-threaded — 1 of " (number->string hw-cpu-cores) " logical cores\n\n"
                   (bench-table->markdown measurement-headers measurement-rows measurement-aligns) "\n\n"
+                  measurement-chart-markdown
                   "## bench: comparison matrix\n\n"
                   "row's total time / column's total time\n\n"
                   (bench-table->markdown matrix-headers matrix-rows matrix-aligns) "\n")
@@ -598,6 +676,35 @@
 (define stats-avg cadr)
 (define stats-p90 caddr)
 (define stats-p99 cadddr)
+
+;; ---- combined req/s + latency chart -----------------------------------
+
+;; Every app-label here has a "<short name> / <stack details>" shape (see
+;; every bench-app! call site below) -- too long to fit as a chart
+;; column's own label, so only the short name before " / " is used there
+;; (the full label is still what every table/ranking above uses).
+(define (short-app-name label) (car (string-split label " / ")))
+
+;; (label . value) per app, in the same run order the tables above use.
+;; Not called until run-todo-app-suite! is well underway (after every
+;; bench-app! call has populated `results`) -- calling this before that
+;; would just map over an empty list.
+(define (todo-metric-items selector)
+  (map (lambda (row) (cons (short-app-name (car row)) (selector row))) (reverse results)))
+
+;; One combined grid, 4 cards: HTML/JSON req/s and HTML/JSON average
+;; latency -- only the average is charted (not p90/p99 too), since
+;; svg-bar-chart-grid's column model is one value per label and the
+;; latency TABLE above already covers avg/p90/p99 in full; this chart is
+;; a quick-glance companion, not a replacement. Each title documents
+;; which way is better directly on the chart itself: throughput is
+;; bigger=better, latency is smaller=better -- a single uniform
+;; "smaller is better" would be wrong for the two req/s charts.
+(define (todo-charts)
+  (list (cons "HTML Req/s (bigger=better)" (todo-metric-items (lambda (row) (stats-req (cadr row)))))
+        (cons "JSON Req/s (bigger=better)" (todo-metric-items (lambda (row) (stats-req (caddr row)))))
+        (cons "HTML Latency avg ms (smaller=better)" (todo-metric-items (lambda (row) (stats-avg (cadr row)))))
+        (cons "JSON Latency avg ms (smaller=better)" (todo-metric-items (lambda (row) (stats-avg (caddr row)))))))
 
 ;; ---- results table (throughput) ---------------------------------------------
 
@@ -861,6 +968,21 @@
   (print-latency-table!)
   (print-rankings!)
 
+  (define todo-chart (svg-bar-chart-grid (todo-charts) 2 380 140))
+
+  ; --markdown: same "GitHub strips inline <svg>" reasoning as the bench
+  ; suite's own chart -- write to its own file, parallel to
+  ; benchmarks/<arch>_<os>_bench.svg, referenced with one image link.
+  (define todo-chart-svg-filename
+    (string-append (string-downcase runtime-arch) "_" (string-downcase runtime-os) "_todo.svg"))
+
+  (define todo-chart-markdown
+    (if want-markdown?
+        (begin
+          (file-write (string-append "benchmarks/" todo-chart-svg-filename) todo-chart)
+          (string-append "![todo-app chart](" todo-chart-svg-filename ")\n\n"))
+        ""))
+
   (list
    (cons 'html
          (if want-html?
@@ -869,6 +991,7 @@
               (bench-table->html (results-table-headers) (results-table-rows) (results-table-aligns))
               "<h2>todo-app: latency (ms)</h2>\n"
               (bench-table->html (latency-table-headers) (latency-rows) (latency-table-aligns))
+              todo-chart
               "<h2>todo-app: ranked by HTML throughput</h2>\n"
               (bench-table->html (ranking-headers) (ranked-rows (lambda (row) (stats-req (cadr row)))) (ranking-aligns))
               "<h2>todo-app: ranked by JSON throughput</h2>\n"
@@ -881,6 +1004,7 @@
               (bench-table->markdown (results-table-headers) (results-table-rows) (results-table-aligns)) "\n\n"
               "## todo-app: latency (ms)\n\n"
               (bench-table->markdown (latency-table-headers) (latency-rows) (latency-table-aligns)) "\n\n"
+              todo-chart-markdown
               "## todo-app: ranked by HTML throughput\n\n"
               (bench-table->markdown (ranking-headers) (ranked-rows (lambda (row) (stats-req (cadr row)))) (ranking-aligns)) "\n\n"
               "## todo-app: ranked by JSON throughput\n\n"
