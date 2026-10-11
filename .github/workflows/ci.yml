@@ -164,14 +164,6 @@ jobs:
     # FreeBSD still runs everything else so regressions elsewhere are
     # visible, it just can't block the PR/merge.
     continue-on-error: true
-    # TEMPORARILY DISABLED: the FreeBSD 15.1 pkg repo currently has no
-    # crystal-1.20.2 package at all ("pkg: No packages available to install
-    # matching 'crystal-1.20.2' have been found in the repositories"), so the
-    # VM's `prepare` step fails before any of our code even runs -- not a
-    # regression from this branch's own changes. Flip this back to `true`
-    # (or just delete the `if:` line) once crystal-1.20.2 (or whatever
-    # version this job is pinned to by then) is available there again.
-    if: false
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -199,7 +191,13 @@ jobs:
           # three candidate paths -- symlink the real bundle into each of
           # them rather than guessing which one is load-bearing.
           prepare: |
-            pkg install -y crystal-1.20.2 shards git sqlite3 openssl libyaml \
+            # Not pinned to crystal-1.20.2 like the Linux/macOS jobs: the
+            # FreeBSD pkg repo doesn't reliably keep old exact-version
+            # packages available (it previously had no crystal-1.20.2 at
+            # all), so this job tracks whatever `crystal` currently resolves
+            # to there -- shard.yml's `crystal: '>= 1.19.0'` is the only
+            # real constraint this project has anyway.
+            pkg install -y crystal shards git sqlite3 openssl libyaml \
               libffi boehm-gc-threaded pcre2 gmp zstd ca_root_nss
             mkdir -p /etc/ssl /usr/local/etc/ssl /usr/local/openssl
             ln -sf /usr/local/share/certs/ca-root-nss.crt /etc/ssl/cert.pem
