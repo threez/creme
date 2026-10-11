@@ -26,7 +26,7 @@ module Creme::Builtins::BigDecimalLibrary
   def string_to_bigdecimal(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     s = bigdecimal_str_arg(args[0], "string->bigdecimal")
     SchemeBigDecimal.new(BigDecimal.new(s))
-  rescue ex : Exception
+  rescue Exception
     raise SchemeRuntimeError.new("string->bigdecimal: invalid decimal '#{s}'")
   end
 

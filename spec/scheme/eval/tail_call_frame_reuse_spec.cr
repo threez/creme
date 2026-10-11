@@ -26,7 +26,7 @@ describe "self-tail-recursive call-frame reuse" do
               (reverse acc)
               (loop (+ i 1) (cons (lambda () i) acc)))))
       (map (lambda (f) (f)) (make-closures 5))
-    SCM
+      SCM
   end
 
   it "computes a plain closure-free named-let loop correctly" do
@@ -38,7 +38,7 @@ describe "self-tail-recursive call-frame reuse" do
     w(<<-SCM).should eq("5000050000")
       (define (sum-to n acc) (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
       (sum-to 100000 0)
-    SCM
+      SCM
   end
 
   it "does not corrupt bindings for NON-tail self-recursion (naive fib)" do
@@ -49,7 +49,7 @@ describe "self-tail-recursive call-frame reuse" do
     w(<<-SCM).should eq("6765")
       (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
       (fib 20)
-    SCM
+      SCM
   end
 
   it "disables reuse once an internal define grows the loop's own frame" do
@@ -58,7 +58,7 @@ describe "self-tail-recursive call-frame reuse" do
         (define extra 1)
         (if (= n 0) acc (loop-with-define (- n 1) (+ acc extra))))
       (loop-with-define 10 0)
-    SCM
+      SCM
   end
 
   it "still lets call/cc escape a closure-free tail-recursive loop mid-iteration" do
@@ -73,6 +73,6 @@ describe "self-tail-recursive call-frame reuse" do
                      (return i)
                      (loop (+ i 1))))))))
       (find-first 100)
-    SCM
+      SCM
   end
 end

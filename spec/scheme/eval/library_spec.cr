@@ -56,7 +56,7 @@ describe "define-library / import" do
         (begin (define (add a b) (+ a b))))
       (import (test math-lib))
       (add 1 2)
-    SCM
+      SCM
   end
 
   it "keeps non-exported bindings invisible to the importer" do
@@ -70,7 +70,7 @@ describe "define-library / import" do
             (define (add a b) (helper (+ a b)))))
         (import (test hidden))
         helper
-      SCM
+        SCM
     end
   end
 
@@ -84,7 +84,7 @@ describe "define-library / import" do
           (define (sub a b) (- a b))))
       (import (only (test two-exports) add))
       (add 1 2)
-    SCM
+      SCM
 
     expect_raises(Creme::SchemeRuntimeError, /unbound variable: sub/) do
       run(<<-SCM)
@@ -96,7 +96,7 @@ describe "define-library / import" do
             (define (sub a b) (- a b))))
         (import (only (test two-exports-b) add))
         sub
-      SCM
+        SCM
     end
   end
 
@@ -111,7 +111,7 @@ describe "define-library / import" do
             (define (sub a b) (- a b))))
         (import (except (test except-lib) sub))
         sub
-      SCM
+        SCM
     end
   end
 
@@ -127,7 +127,7 @@ describe "define-library / import" do
         (begin (define (run x) (car x))))
       (import (test shadowed))
       (run 42)
-    SCM
+      SCM
   end
 
   it "supports (prefix ...) import sets" do
@@ -138,7 +138,7 @@ describe "define-library / import" do
         (begin (define (add a b) (+ a b))))
       (import (prefix (test prefix-lib) math-))
       (math-add 1 2)
-    SCM
+      SCM
   end
 
   it "supports (rename ...) import sets" do
@@ -149,7 +149,7 @@ describe "define-library / import" do
         (begin (define (add a b) (+ a b))))
       (import (rename (test rename-lib) (add plus)))
       (plus 1 2)
-    SCM
+      SCM
   end
 
   it "supports (export (rename internal external)) in the library itself" do
@@ -160,7 +160,7 @@ describe "define-library / import" do
         (begin (define (internal-add a b) (+ a b))))
       (import (test rename-export-lib))
       (add 1 2)
-    SCM
+      SCM
   end
 
   it "raises for an unknown library" do
@@ -182,7 +182,7 @@ describe "define-library / import" do
       (import (test idempotent-lib))
       (add 1 2)
       '(test idempotent-lib)
-    SCM
+      SCM
   end
 
   it "splices a matched cond-expand clause's declarations into the library body" do
@@ -192,7 +192,7 @@ describe "define-library / import" do
         (cond-expand (else (begin (define x 1)))))
       (import (test cond-expand-lib))
       x
-    SCM
+      SCM
   end
 
   it "reads and evaluates an included file's forms against the library's own Env" do
@@ -206,7 +206,7 @@ describe "define-library / import" do
           (include "x.scm"))
         (import (test include-lib))
         x
-      SCM
+        SCM
     end
   end
 
@@ -219,10 +219,10 @@ describe "define-library / import" do
             (export hello)
             (import (test base))
             (begin (define (hello name) (string-append "hi " name))))
-        SLD
+          SLD
         interp = new_interp
         interp.library_search_path = [dir]
-        result = Creme.run_source(interp, %[(import (greet hello)) (hello "Ada")])
+        result = Creme.run_source(interp, %((import (greet hello)) (hello "Ada")))
         result.write_string.should eq(%("hi Ada"))
       end
     end
@@ -234,7 +234,7 @@ describe "define-library / import" do
             (export x)
             (import (test base))
             (begin (define x 1)))
-        SLD
+          SLD
         interp = new_interp
         interp.library_search_path = [dir]
         expect_raises(Creme::SchemeRuntimeError, /expected \(mismatch\)/) do
@@ -251,7 +251,7 @@ describe "define-library / import" do
             (import (test base))
             (begin (define x 1)))
           (define y 2)
-        SLD
+          SLD
         interp = new_interp
         interp.library_search_path = [dir]
         expect_raises(Creme::SchemeRuntimeError, /expected exactly one \(define-library/) do
@@ -269,13 +269,13 @@ describe "define-library / import" do
             (export x)
             (import (b))
             (begin (define x 1)))
-        SLD
+          SLD
         File.write(File.join(dir, "b.sld"), <<-SLD)
           (define-library (b)
             (export y)
             (import (a))
             (begin (define y 2)))
-        SLD
+          SLD
         interp = new_interp
         interp.library_search_path = [dir]
         expect_raises(Creme::SchemeRuntimeError, /circular library dependency/) do

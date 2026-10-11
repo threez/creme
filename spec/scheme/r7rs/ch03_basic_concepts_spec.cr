@@ -61,7 +61,7 @@ describe "R7RS §3.5 Proper tail recursion" do
             'done
             (loop (- n 1))))
       (loop 1000000)
-    SCM
+      SCM
   end
 
   it "and/or/when/unless/cond/case tail-call their final branch (same constant-space guarantee)" do
@@ -70,7 +70,7 @@ describe "R7RS §3.5 Proper tail recursion" do
         (cond ((= n 0) 'done)
               (else (loop (- n 1)))))
       (loop 1000000)
-    SCM
+      SCM
   end
 
   it "named-let tail position also stays in constant space" do

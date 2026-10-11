@@ -22,7 +22,7 @@ describe "R7RS §6.10 Control features" do
       (import (scheme inexact))
       (define (compose f g) (lambda args (f (apply g args))))
       ((compose sqrt *) 12 75)
-    SCM
+      SCM
   end
 
   it "map applies proc element-wise to one or more lists, terminating on the shortest" do
@@ -36,7 +36,7 @@ describe "R7RS §6.10 Control features" do
       (define v (make-vector 5))
       (for-each (lambda (i) (vector-set! v i (* i i))) '(0 1 2 3 4))
       v
-    SCM
+      SCM
   end
 
   it "call-with-current-continuation packages the current continuation as an escape procedure" do
@@ -45,7 +45,7 @@ describe "R7RS §6.10 Control features" do
         (lambda (exit)
           (for-each (lambda (x) (if (negative? x) (exit x))) '(54 0 37 -3 245 19))
           #t))
-    SCM
+      SCM
   end
 
   it "call/cc is a synonym for call-with-current-continuation" do
@@ -59,7 +59,7 @@ describe "R7RS §6.10 Control features" do
                                 (else (return #f))))))
               (r obj)))))
       (list (list-length '(1 2 3 4)) (list-length '(a b . c)))
-    SCM
+      SCM
   end
 
   pending "call/cc implements escape continuations only, via a Crystal exception unwind — not full R7RS multi-shot/re-entrant continuations (see README Known caveats). Re-invoking a captured continuation after its call/cc has already returned raises 'continuation invoked outside its dynamic extent' instead of resuming: (define k #f) (+ 1 (call/cc (lambda (c) (set! k c) 1))) followed by (k 2) fails on the second call rather than re-entering and yielding 3"
@@ -81,7 +81,7 @@ describe "R7RS §6.10 Control features" do
         (lambda () 'body-result)
         (lambda () (set! log (cons 'exit log))))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "dynamic-wind's before/after also run around a call/cc escape past the dynamic-wind call" do
@@ -94,6 +94,6 @@ describe "R7RS §6.10 Control features" do
           (lambda () (k (begin (record! 'done) 'done)))
           (lambda () (record! 'exit)))))
       (reverse log)
-    SCM
+      SCM
   end
 end

@@ -63,7 +63,7 @@ module Creme::Builtins::ProfVM
     thunk = args[0]
     interval_steps = args.size == 2 ? int_arg(args[1], "profile-scheme").to_i32 : 1000
     interp.start_scheme_sampling(interval_steps)
-    counts = {} of Interpreter::SampleKey => Int32
+    counts : Hash(Interpreter::SampleKey, Int32)
     begin
       interp.apply(thunk, [] of SchemeValue)
     ensure

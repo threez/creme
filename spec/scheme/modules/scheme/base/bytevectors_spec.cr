@@ -25,7 +25,7 @@ describe "#u8(...) reader syntax" do
 
   it "raises for a non-integer element" do
     expect_raises(Creme::SchemeParseError, /must be integers/) { run("#u8(1.5)") }
-    expect_raises(Creme::SchemeParseError, /must be integers/) { run(%[#u8("x")]) }
+    expect_raises(Creme::SchemeParseError, /must be integers/) { run(%(#u8("x"))) }
   end
 end
 
@@ -102,7 +102,7 @@ end
 
 describe "utf8->string / string->utf8" do
   it "round-trips a string through UTF-8 bytes" do
-    w(%[(utf8->string (string->utf8 "hello"))]).should eq(%("hello"))
+    w(%((utf8->string (string->utf8 "hello")))).should eq(%("hello"))
   end
 
   it "supports a byte range" do
@@ -119,7 +119,7 @@ describe "byte ports" do
     w(<<-SCM).should eq("(1 1 2 3 #t)")
       (define p (open-input-bytevector (bytevector 1 2 3)))
       (list (peek-u8 p) (read-u8 p) (read-u8 p) (read-u8 p) (eof-object? (read-u8 p)))
-    SCM
+      SCM
   end
 
   it "open-output-bytevector / write-u8 / get-output-bytevector" do
@@ -128,7 +128,7 @@ describe "byte ports" do
       (write-u8 65 p)
       (write-u8 66 p)
       (get-output-bytevector p)
-    SCM
+      SCM
   end
 
   it "write-bytevector / read-bytevector round trip" do
@@ -136,10 +136,10 @@ describe "byte ports" do
       (define op (open-output-bytevector))
       (write-bytevector (bytevector 1 2 3) op)
       (get-output-bytevector op)
-    SCM
+      SCM
     w(<<-SCM).should eq("#u8(1 2)")
       (read-bytevector 2 (open-input-bytevector (bytevector 1 2 3)))
-    SCM
+      SCM
   end
 
   it "read-bytevector! reads into an existing bytevector and returns the count" do
@@ -147,7 +147,7 @@ describe "byte ports" do
       (define dst (bytevector 9 9 9 9 9))
       (define n (read-bytevector! dst (open-input-bytevector (bytevector 1 2)) 2 4))
       (list n dst)
-    SCM
+      SCM
   end
 
   it "u8-ready? reflects whether a byte is available" do
@@ -160,8 +160,8 @@ describe "port predicates" do
   it "binary-port?/textual-port? distinguish byte vs string ports" do
     w("(binary-port? (open-input-bytevector (bytevector 1)))").should eq("#t")
     w("(textual-port? (open-input-bytevector (bytevector 1)))").should eq("#f")
-    w(%[(binary-port? (open-input-string "hi"))]).should eq("#f")
-    w(%[(textual-port? (open-input-string "hi"))]).should eq("#t")
+    w(%((binary-port? (open-input-string "hi")))).should eq("#f")
+    w(%((textual-port? (open-input-string "hi")))).should eq("#t")
   end
 
   it "input-port-open?/output-port-open? reflect closed state" do
@@ -169,13 +169,13 @@ describe "port predicates" do
       (define p (open-input-bytevector (bytevector 1)))
       (close-port p)
       (input-port-open? p)
-    SCM
-    w(%[(output-port-open? (open-output-string))]).should eq("#t")
+      SCM
+    w(%((output-port-open? (open-output-string)))).should eq("#t")
   end
 
   it "char-ready? reflects data availability on an input port" do
-    w(%[(char-ready? (open-input-string "hi"))]).should eq("#t")
-    w(%[(char-ready? (open-input-string ""))]).should eq("#f")
+    w(%((char-ready? (open-input-string "hi")))).should eq("#t")
+    w(%((char-ready? (open-input-string "")))).should eq("#f")
   end
 end
 
@@ -185,7 +185,7 @@ describe "call-with-port" do
       (define p (open-input-bytevector (bytevector 1)))
       (define result (call-with-port p read-u8))
       (list result (input-port-open? p))
-    SCM
+      SCM
   end
 
   it "closes the port even if proc raises" do
@@ -193,6 +193,6 @@ describe "call-with-port" do
       (define p (open-input-bytevector (bytevector 1)))
       (guard (e (#t 'ignored)) (call-with-port p (lambda (port) (error "boom"))))
       (input-port-open? p)
-    SCM
+      SCM
   end
 end

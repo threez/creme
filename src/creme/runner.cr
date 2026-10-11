@@ -70,7 +70,7 @@ module Creme
   # the first datum's shape happens here; `import_into` raises its own
   # clear error for anything that isn't a legal import-set.
   def self.lang_header_data(src : String) : Array(SchemeValue)?
-    return nil unless src.starts_with?(LANG_HEADER_PREFIX)
+    return unless src.starts_with?(LANG_HEADER_PREFIX)
     line_end = src.index('\n') || src.size
     line_rest = src[LANG_HEADER_PREFIX.size...line_end]
     Reader.read_all(line_rest, "<#lang>")

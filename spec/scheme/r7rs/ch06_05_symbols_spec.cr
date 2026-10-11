@@ -13,7 +13,7 @@ describe "R7RS §6.5 Symbols" do
   it "symbol? is #t for symbols" do
     w("(symbol? 'foo)").should eq("#t")
     w("(symbol? (car '(a b)))").should eq("#t")
-    w(%[(symbol? "bar")]).should eq("#f")
+    w(%((symbol? "bar"))).should eq("#f")
     w("(symbol? '())").should eq("#f")
     w("(symbol? #f)").should eq("#f")
   end
@@ -29,8 +29,8 @@ describe "R7RS §6.5 Symbols" do
   end
 
   it "string->symbol returns the symbol whose name is the given string, without interpreting escapes" do
-    w(%[(string->symbol "mISSISSIppi")]).should eq("mISSISSIppi")
-    w(%[(eqv? 'bitBlt (string->symbol "bitBlt"))]).should eq("#t")
+    w(%((string->symbol "mISSISSIppi"))).should eq("mISSISSIppi")
+    w(%((eqv? 'bitBlt (string->symbol "bitBlt")))).should eq("#t")
   end
 
   it "symbol->string and string->symbol are inverses for round-tripping a symbol through a string" do
@@ -38,7 +38,7 @@ describe "R7RS §6.5 Symbols" do
   end
 
   it "string->symbol can create symbols whose names contain characters needing escapes when written" do
-    w(%[(string=? "K. Harper, M.D." (symbol->string (string->symbol "K. Harper, M.D.")))]).should eq("#t")
+    w(%((string=? "K. Harper, M.D." (symbol->string (string->symbol "K. Harper, M.D."))))).should eq("#t")
   end
 
   it "a symbol read/written via write round-trips back to the identical symbol, using |...| vertical-bar escaping for names containing special characters" do
@@ -46,13 +46,13 @@ describe "R7RS §6.5 Symbols" do
       (define op (open-output-string))
       (write (string->symbol "two words") op)
       (get-output-string op)
-    SCM
+      SCM
     w(<<-SCM).should eq("#t")
       (import (scheme read))
       (define s (string->symbol "two words"))
       (define p (open-output-string))
       (write s p)
       (eqv? s (read (open-input-string (get-output-string p))))
-    SCM
+      SCM
   end
 end

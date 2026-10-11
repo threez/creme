@@ -222,7 +222,7 @@ module Creme::Builtins::ProcessExtra
     return SchemeBool.of(false) unless ::Process.exists?(pid)
     begin
       ::Process.signal(sig, pid)
-    rescue ex : Exception
+    rescue Exception
       # Process already exited between the exists? check and the signal
       # (an inherent TOCTOU race with any external process) -- treat the
       # same as "nothing to kill", not an error, exactly like pkill would.

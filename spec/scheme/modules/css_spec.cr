@@ -100,9 +100,11 @@ describe "css module" do
     end
 
     it "matches css! for a fully static stylesheet" do
-      w(%((let ((port (open-output-string)))
-            (css-write! port ((body (font-family "sans-serif"))))
-            (get-output-string port))))
+      w(<<-SCM)
+        (let ((port (open-output-string)))
+          (css-write! port ((body (font-family "sans-serif"))))
+          (get-output-string port))
+        SCM
         .should eq(%("body {\\n  font-family: sans-serif;\\n}\\n"))
     end
   end

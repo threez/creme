@@ -18,7 +18,7 @@ describe "R7RS §6.11 Exceptions" do
             (lambda (x) (k (list "condition:" x)))
             (lambda ()
               (+ 1 (raise 'an-error))))))
-    SCM
+      SCM
   end
 
   it "raise-continuable invokes the handler, whose return value flows back as raise-continuable's result" do
@@ -27,7 +27,7 @@ describe "R7RS §6.11 Exceptions" do
         (lambda (con) 42)
         (lambda ()
           (+ (raise-continuable "should be a number") 23)))
-    SCM
+      SCM
   end
 
   it "raise invokes the current exception handler on obj, using a non-continuable exception" do
@@ -36,7 +36,7 @@ describe "R7RS §6.11 Exceptions" do
         (with-exception-handler
           (lambda (e) (k (string-append "caught: " e)))
           (lambda () (raise "boom")))))
-    SCM
+      SCM
   end
 
   it "guard evaluates cond-style clauses against the raised object" do
@@ -44,7 +44,7 @@ describe "R7RS §6.11 Exceptions" do
       (guard (condition ((assq 'a condition) (cdr (assq 'a condition)))
                          ((assq 'b condition)))
         (raise (list (cons 'a 42))))
-    SCM
+      SCM
   end
 
   it "a guard clause with only a test (no body) returns the test's own value, per cond semantics" do
@@ -52,7 +52,7 @@ describe "R7RS §6.11 Exceptions" do
       (guard (condition ((assq 'a condition) (cdr (assq 'a condition)))
                          ((assq 'b condition)))
         (raise (list (cons 'b 23))))
-    SCM
+      SCM
   end
 
   it "error raises an exception encapsulating a message and irritants" do
@@ -62,15 +62,15 @@ describe "R7RS §6.11 Exceptions" do
               ((null? l) #t)
               (else (error "null-list?: argument out of domain" l))))
       (guard (e (#t (error-object-message e))) (null-list? 5))
-    SCM
+      SCM
   end
 
   it "error-object-irritants returns the list of irritants passed to error" do
-    w(%[(guard (e (#t (error-object-irritants e))) (error "boom" 1 2 3))]).should eq("(1 2 3)")
+    w(%((guard (e (#t (error-object-irritants e))) (error "boom" 1 2 3)))).should eq("(1 2 3)")
   end
 
   it "error-object? is #t for objects created by error, #f for arbitrary raised objects" do
-    w(%[(guard (e ((error-object? e) 'is-obj) (#t 'is-not-obj)) (error "x"))]).should eq("is-obj")
+    w(%((guard (e ((error-object? e) 'is-obj) (#t 'is-not-obj)) (error "x")))).should eq("is-obj")
     w("(guard (e ((error-object? e) 'is-obj) (#t 'is-not-obj)) (raise 'my-symbol))").should eq("is-not-obj")
   end
 

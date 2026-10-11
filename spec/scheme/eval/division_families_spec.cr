@@ -50,6 +50,6 @@ end
 
 describe "syntax-error" do
   it "raises an error usable with guard, same as (error ...)" do
-    w(%[(guard (e (#t (list (error-object-message e) (error-object-irritants e)))) (syntax-error "bad form" 'x))]).should eq(%(("bad form" (x))))
+    w(%((guard (e (#t (list (error-object-message e) (error-object-irritants e)))) (syntax-error "bad form" 'x)))).should eq(%(("bad form" (x))))
   end
 end

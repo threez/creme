@@ -783,15 +783,13 @@ module Creme::Builtins::ActorLibrary
     handshake_initiate(socket, cookie)
     chan = Channel(Bytes).new(64)
     spawn(name: "actor-send-#{address.uri("*")}") do
-      begin
-        loop do
-          socket.write(chan.receive)
-          socket.flush
-        end
-      rescue Channel::ClosedError | IO::Error
-      ensure
-        socket.close rescue nil
+      loop do
+        socket.write(chan.receive)
+        socket.flush
       end
+    rescue Channel::ClosedError | IO::Error
+    ensure
+      socket.close rescue nil
     end
     chan
   end
@@ -895,6 +893,11 @@ module Creme::Builtins::ActorLibrary
   # resolve it — otherwise e.g. a (self) reply-to ref would be delivered as
   # an ambiguous "local to whichever system happens to receive this" ref
   # and silently resolve against the WRONG system's registry.
+  # A single recursive walk over every SchemeValue shape that can embed an
+  # actor ref (box, pair, vector, ...); each `when` is an independent,
+  # trivial case and the recursion itself is what needs to stay in one
+  # place for correctness.
+  # ameba:disable Metrics/CyclomaticComplexity
   private def localize_refs(v : SchemeValue, sender : ActorSystem) : SchemeValue
     case v
     when SchemeBox

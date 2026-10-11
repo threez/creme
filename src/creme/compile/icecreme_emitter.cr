@@ -113,9 +113,9 @@ module Creme
           # icecreme_rename's own doc comment) — every other library, and the
           # app's own top-level forms, analyze completely unaffected.
           internal_names = top_level_define_names(body_forms) - library.exports.values
-          interp.icecreme_rename = internal_names.empty? ? nil : internal_names.each_with_object({} of String => String) { |internal_name, rename|
+          interp.icecreme_rename = internal_names.empty? ? nil : internal_names.each_with_object({} of String => String) do |internal_name, rename|
             rename[internal_name] = "#{SchemeLibrary.library_name_string(name)} #{internal_name}"
-          }
+          end
           begin
             body_forms.each { |form| library_nodes << interp.analyze(form, library.env) }
           ensure

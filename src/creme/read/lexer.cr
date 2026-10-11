@@ -78,18 +78,18 @@ module Creme
     end
 
     private def peek : Char?
-      return nil if eof?
+      return if eof?
       @chars[@pos]
     end
 
     private def peek2 : Char?
-      return nil if @pos + 1 >= @chars.size
+      return if @pos + 1 >= @chars.size
       @chars[@pos + 1]
     end
 
     private def peek_at(offset : Int32) : Char?
       idx = @pos + offset
-      return nil if idx < 0 || idx >= @chars.size
+      return if idx < 0 || idx >= @chars.size
       @chars[idx]
     end
 
@@ -114,7 +114,6 @@ module Creme
       end
     end
 
-    # ameba:disable Metrics/CyclomaticComplexity
     private def next_token : Token
       skip_whitespace_and_comments
       line = @line
@@ -206,7 +205,6 @@ module Creme
       end
     end
 
-    # ameba:disable Metrics/CyclomaticComplexity
     private def lex_string(line : Int32, col : Int32) : Token
       advance # opening quote
       buf = String::Builder.new
@@ -397,9 +395,9 @@ module Creme
       # cares about lexical shape, not whether the value fits a machine
       # word.
       value = if radix == 10
-                (text.to_i64? || big_int_or_nil(text, 10) || text.to_f64?).as(Int64 | BigInt | Float64 | Nil)
+                (text.to_i64? || big_int_or_nil(text, 10) || text.to_f64?).as(Int64 | BigInt | Float64?)
               else
-                (text.to_i64?(radix) || big_int_or_nil(text, radix)).as(Int64 | BigInt | Float64 | Nil)
+                (text.to_i64?(radix) || big_int_or_nil(text, radix)).as(Int64 | BigInt | Float64?)
               end
       raise SchemeParseError.new("invalid numeric literal '#{text}' at #{line}:#{col}") unless value
 
@@ -492,7 +490,6 @@ module Creme
       "-nan.0" => Float64::NAN,
     }
 
-    # ameba:disable Metrics/CyclomaticComplexity
     private def lex_atom(line : Int32, col : Int32) : Token
       text = read_atom_text
       if text == "."

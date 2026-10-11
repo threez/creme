@@ -82,7 +82,7 @@ module Creme::Builtins::Rfc8439Library
       Cons.new(SchemeStr.new("aad"), SchemeBlob.new(aad)).as(SchemeValue),
       Cons.new(SchemeStr.new("plaintext"), SchemeBlob.new(io.to_slice.dup)).as(SchemeValue),
     ])
-  rescue ex : Crypto::TagException
+  rescue Crypto::TagException
     raise SchemeRuntimeError.new("rfc8439-decrypt: authentication failed (tag mismatch)")
   rescue ex : Exception
     raise SchemeRuntimeError.new("rfc8439-decrypt: #{ex.message}")

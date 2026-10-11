@@ -36,11 +36,11 @@ describe "bootstrap module" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     Creme.run_source(interp, "(import (creme bootstrap))")
     src = <<-SCM
-    (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
-    (define v (vector 1 2 3))
-    (vector-set! v 1 (fact 5))
-    (string-append "sum=" (number->string (+ (vector-ref v 0) (vector-ref v 1) (vector-ref v 2))))
-    SCM
+      (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+      (define v (vector 1 2 3))
+      (vector-set! v 1 (fact 5))
+      (string-append "sum=" (number->string (+ (vector-ref v 0) (vector-ref v 1) (vector-ref v 2))))
+      SCM
     blob = compiled_bytes(interp, interp.global, src)
     interp.global.define("chunk-bytes", blob)
     result = Creme.run_source(interp, "(load-chunk-bytes chunk-bytes)")

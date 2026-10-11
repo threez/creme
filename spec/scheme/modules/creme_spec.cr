@@ -17,12 +17,12 @@ describe "(creme ...) namespace" do
     # are evaluated) — the point is only that the (creme bigdecimal) name
     # itself isn't in scope without an explicit import.
     expect_raises(Creme::SchemeRuntimeError, /unbound variable: bigdecimal-add/) do
-      run(%[(bigdecimal-add 1 2)])
+      run(%((bigdecimal-add 1 2)))
     end
   end
 
   it "(creme bigdecimal) provides exact decimal arithmetic" do
-    w(%[(import (creme bigdecimal)) (bigdecimal->string (bigdecimal-add (string->bigdecimal "1.5") (string->bigdecimal "2.25")))]).should eq(%("3.75"))
+    w(%((import (creme bigdecimal)) (bigdecimal->string (bigdecimal-add (string->bigdecimal "1.5") (string->bigdecimal "2.25"))))).should eq(%("3.75"))
   end
 
   it "(creme math) is a superset of (scheme inexact), including log2/log10/atan2/pow/hypot/pi/e" do
@@ -32,11 +32,11 @@ describe "(creme ...) namespace" do
   end
 
   it "(creme regex) provides pattern matching" do
-    w(%[(import (creme regex)) (regexp-matches? (regexp "^[0-9]+$") "123")]).should eq("#t")
+    w(%((import (creme regex)) (regexp-matches? (regexp "^[0-9]+$") "123"))).should eq("#t")
   end
 
   it "(creme json) provides json-read/json-write" do
-    w(%[(import (creme json)) (json-write '(("a" . 1)))]).should eq(%("{\\"a\\":1}"))
+    w(%((import (creme json)) (json-write '(("a" . 1))))).should eq(%("{\\"a\\":1}"))
   end
 
   it "(creme time) is a superset of the old rich epoch/format time API, distinct from (scheme time)" do
@@ -45,11 +45,11 @@ describe "(creme ...) namespace" do
   end
 
   it "(creme string) provides extended string operations" do
-    w(%[(import (creme string)) (string-reverse "abc")]).should eq(%("cba"))
+    w(%((import (creme string)) (string-reverse "abc"))).should eq(%("cba"))
   end
 
   it "(creme format) provides format" do
-    w(%[(import (creme format)) (format #f "~a-~a" 1 2)]).should eq(%("1-2"))
+    w(%((import (creme format)) (format #f "~a-~a" 1 2))).should eq(%("1-2"))
   end
 
   it "(creme random) provides random-real/random-integer/etc" do
@@ -57,7 +57,7 @@ describe "(creme ...) namespace" do
   end
 
   it "(creme digest) provides hashing/base64" do
-    w(%[(import (creme digest)) (base64-encode "hi")]).should eq(%("aGk="))
+    w(%((import (creme digest)) (base64-encode "hi"))).should eq(%("aGk="))
   end
 
   it "(creme env) provides get-environment-variable(s)" do

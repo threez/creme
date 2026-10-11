@@ -15,8 +15,8 @@ module Creme
   # convert it one-directionally: reopen `module Creme` and add your own
   # `def self.to_scheme(v : YourType) : SchemeValue` overload, exactly like every
   # file under src/creme/modules/ already does to add builtins.
-  alias Convertible = Nil | Bool | Int64 | BigInt | Float64 | String | Bytes |
-                      Array(Convertible) | Hash(String, Convertible)
+  alias Convertible = (Bool | Int64 | BigInt | Float64 | String | Bytes |
+                       Array(Convertible) | Hash(String, Convertible))?
 
   # Crystal -> SchemeValue. Overloaded per concrete type (rather than a single
   # Convertible-typed parameter) so callers can pass whatever they already

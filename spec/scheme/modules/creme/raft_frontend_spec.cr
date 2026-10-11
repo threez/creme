@@ -36,74 +36,74 @@ end
 # raft_spec.cr's own cluster_setup comment for why.
 private def cluster_setup : String
   <<-SCHEME
-  (raft-transport-in-memory-reset!)
+    (raft-transport-in-memory-reset!)
 
-  (define (encode v)
-    (let ((p (open-output-string)))
-      (write v p)
-      (string->utf8 (get-output-string p))))
-  (define (decode bv) (read (open-input-string (utf8->string bv))))
+    (define (encode v)
+      (let ((p (open-output-string)))
+        (write v p)
+        (string->utf8 (get-output-string p))))
+    (define (decode bv) (read (open-input-string (utf8->string bv))))
 
-  (define (make-kv-node id peers)
-    (define store (make-hash-table))
-    (raft-node id peers
-      (raft-state-machine
-        (lambda (cmd)
-          (if (= (bytevector-length cmd) 0)
-              (encode 'noop)
-              (let ((form (decode cmd)))
-                (case (car form)
-                  ((set) (hash-table-set! store (cadr form) (caddr form)) (encode 'ok))
-                  ((get) (encode (hash-table-ref store (cadr form) (lambda () 'missing))))
-                  (else (encode 'unknown))))))
-        (lambda () (encode 'no-snapshot))
-        (lambda (bv) #t))
-      (raft-transport-in-memory id)
-      (raft-log-in-memory)
-      (raft-config '((election-timeout-min . 100) (election-timeout-max . 200) (heartbeat-interval . 40)))))
+    (define (make-kv-node id peers)
+      (define store (make-hash-table))
+      (raft-node id peers
+        (raft-state-machine
+          (lambda (cmd)
+            (if (= (bytevector-length cmd) 0)
+                (encode 'noop)
+                (let ((form (decode cmd)))
+                  (case (car form)
+                    ((set) (hash-table-set! store (cadr form) (caddr form)) (encode 'ok))
+                    ((get) (encode (hash-table-ref store (cadr form) (lambda () 'missing))))
+                    (else (encode 'unknown))))))
+          (lambda () (encode 'no-snapshot))
+          (lambda (bv) #t))
+        (raft-transport-in-memory id)
+        (raft-log-in-memory)
+        (raft-config '((election-timeout-min . 100) (election-timeout-max . 200) (heartbeat-interval . 40)))))
 
-  (define n1 (make-kv-node "n1" (list "n2" "n3")))
-  (define n2 (make-kv-node "n2" (list "n1" "n3")))
-  (define n3 (make-kv-node "n3" (list "n1" "n2")))
-  (define nodes (list n1 n2 n3))
-  (for-each raft-start! nodes)
-  ;; A first election can, rarely, fail to converge at all within 30s on a
-  ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
-  ;; just a slow one -- observed on macOS CI late in a long spec run).
-  ;; raft-start!'s node "box" is one-shot (mutates its own descriptor into
-  ;; the started actor-ref in place, see modules/creme/raft-scheme/
-  ;; frontend.scm's own comment) -- a used-up box can't be handed back to
-  ;; raft-start! again, so retrying rebuilds n1/n2/n3 (and `nodes`) from
-  ;; scratch via set!, rather than reusing the exhausted boxes.
-  (define leader
-    (let loop ((tries 3))
-      (let ((got (raft-await-leader! nodes 30000)))
-        (cond (got got)
-              ((> tries 1)
-               (for-each raft-stop! nodes)
-               (raft-transport-in-memory-reset!)
-               (set! n1 (make-kv-node "n1" (list "n2" "n3")))
-               (set! n2 (make-kv-node "n2" (list "n1" "n3")))
-               (set! n3 (make-kv-node "n3" (list "n1" "n2")))
-               (set! nodes (list n1 n2 n3))
-               (for-each raft-start! nodes)
-               (loop (- tries 1)))
-              (else #f)))))
+    (define n1 (make-kv-node "n1" (list "n2" "n3")))
+    (define n2 (make-kv-node "n2" (list "n1" "n3")))
+    (define n3 (make-kv-node "n3" (list "n1" "n2")))
+    (define nodes (list n1 n2 n3))
+    (for-each raft-start! nodes)
+    ;; A first election can, rarely, fail to converge at all within 30s on a
+    ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
+    ;; just a slow one -- observed on macOS CI late in a long spec run).
+    ;; raft-start!'s node "box" is one-shot (mutates its own descriptor into
+    ;; the started actor-ref in place, see modules/creme/raft-scheme/
+    ;; frontend.scm's own comment) -- a used-up box can't be handed back to
+    ;; raft-start! again, so retrying rebuilds n1/n2/n3 (and `nodes`) from
+    ;; scratch via set!, rather than reusing the exhausted boxes.
+    (define leader
+      (let loop ((tries 3))
+        (let ((got (raft-await-leader! nodes 30000)))
+          (cond (got got)
+                ((> tries 1)
+                 (for-each raft-stop! nodes)
+                 (raft-transport-in-memory-reset!)
+                 (set! n1 (make-kv-node "n1" (list "n2" "n3")))
+                 (set! n2 (make-kv-node "n2" (list "n1" "n3")))
+                 (set! n3 (make-kv-node "n3" (list "n1" "n2")))
+                 (set! nodes (list n1 n2 n3))
+                 (for-each raft-start! nodes)
+                 (loop (- tries 1)))
+                (else #f)))))
 
-  ;; raft-await-leader! only confirms leadership at the instant it returns --
-  ;; it's a snapshot, not a lease. Under real CI-runner scheduling pressure,
-  ;; enough wall-clock time can pass before the NEXT line's raft-propose!
-  ;; that the node has legitimately lost leadership in between (a real,
-  ;; correct Raft outcome, not a bug) -- observed on macOS CI. Retry against
-  ;; a freshly re-awaited leader instead of assuming `leader` stays valid
-  ;; indefinitely.
-  (define (raft-propose-retry! cmd)
-    (let loop ((tries 5))
-      (guard (e (#t (if (> tries 1)
-                        (begin (set! leader (raft-await-leader! nodes 30000)) (loop (- tries 1)))
-                        (raise e))))
-        (raft-propose! leader cmd))))
-  SCHEME
+    ;; raft-await-leader! only confirms leadership at the instant it returns --
+    ;; it's a snapshot, not a lease. Under real CI-runner scheduling pressure,
+    ;; enough wall-clock time can pass before the NEXT line's raft-propose!
+    ;; that the node has legitimately lost leadership in between (a real,
+    ;; correct Raft outcome, not a bug) -- observed on macOS CI. Retry against
+    ;; a freshly re-awaited leader instead of assuming `leader` stays valid
+    ;; indefinitely.
+    (define (raft-propose-retry! cmd)
+      (let loop ((tries 5))
+        (guard (e (#t (if (> tries 1)
+                          (begin (set! leader (raft-await-leader! nodes 30000)) (loop (- tries 1)))
+                          (raise e))))
+          (raft-propose! leader cmd))))
+    SCHEME
 end
 
 describe "(creme raft) pure-Scheme frontend (modules/creme/raft-scheme/frontend.scm)", tags: "raft" do

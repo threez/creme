@@ -11,19 +11,19 @@ end
 
 describe "guard" do
   it "catches an error and evaluates the matching clause" do
-    w(%[(guard (e (#t 'caught)) (error "boom"))]).should eq("caught")
+    w(%((guard (e (#t 'caught)) (error "boom")))).should eq("caught")
   end
 
   it "binds the condition to the guard variable" do
-    w(%[(guard (e (#t (error-object-message e))) (error "boom"))]).should eq(%("boom"))
+    w(%((guard (e (#t (error-object-message e))) (error "boom")))).should eq(%("boom"))
   end
 
   it "exposes structured irritants via error-object-irritants" do
-    w(%[(guard (e (#t (error-object-irritants e))) (error "boom" 1 2))]).should eq("(1 2)")
+    w(%((guard (e (#t (error-object-irritants e))) (error "boom" 1 2)))).should eq("(1 2)")
   end
 
   it "supports an else clause" do
-    w(%[(guard (e (else 'fallback)) (error "boom"))]).should eq("fallback")
+    w(%((guard (e (else 'fallback)) (error "boom")))).should eq("fallback")
   end
 
   it "supports multiple clauses, matching the first truthy test" do
@@ -38,7 +38,7 @@ describe "guard" do
 
   it "re-raises when no clause matches" do
     expect_raises(Creme::SchemeUserError, /boom/) do
-      run(%[(guard (e (#f 'never)) (error "boom"))])
+      run(%((guard (e (#f 'never)) (error "boom"))))
     end
   end
 
@@ -116,8 +116,8 @@ describe "guard" do
   end
 
   it "binds the raw raised object for (raise obj), not a synthesized error-object condition" do
-    w(%[(guard (e (#t e)) (raise 'my-symbol))]).should eq("my-symbol")
-    w(%[(guard (e (#t e)) (raise '(1 2 3)))]).should eq("(1 2 3)")
-    w(%[(guard (e (#t (error-object? e))) (raise 'my-symbol))]).should eq("#f")
+    w(%((guard (e (#t e)) (raise 'my-symbol)))).should eq("my-symbol")
+    w(%((guard (e (#t e)) (raise '(1 2 3))))).should eq("(1 2 3)")
+    w(%((guard (e (#t (error-object? e))) (raise 'my-symbol)))).should eq("#f")
   end
 end

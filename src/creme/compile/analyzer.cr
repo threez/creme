@@ -568,9 +568,9 @@ module Creme
     end
 
     private def analyze_cond_clause(clause : SchemeValue, env : Env, scope : AnalyzerScope) : CondClause?
-      return nil unless proper_list?(clause)
+      return unless proper_list?(clause)
       parts = Creme.list_to_a(clause)
-      return nil if parts.empty?
+      return if parts.empty?
       test = parts[0]
       if test.is_a?(SchemeSym) && test.name == "else"
         CondClause.new(nil, parts[1..].map { |sub| analyze(sub, env, scope) }, nil, true)
@@ -593,12 +593,12 @@ module Creme
     end
 
     private def analyze_case_clause(clause : SchemeValue, env : Env, scope : AnalyzerScope) : CaseClause?
-      return nil unless proper_list?(clause)
+      return unless proper_list?(clause)
       parts = Creme.list_to_a(clause)
-      return nil if parts.empty?
+      return if parts.empty?
       test = parts[0]
       is_else = test.is_a?(SchemeSym) && test.name == "else"
-      datums = is_else ? nil : (proper_list?(test) ? Creme.list_to_a(test) : return nil)
+      datums = is_else ? nil : (proper_list?(test) ? Creme.list_to_a(test) : return)
       if parts.size == 3 && (arrow = parts[1]).is_a?(SchemeSym) && arrow.name == "=>"
         CaseClause.new(datums, [] of Node, analyze(parts[2], env, scope), is_else)
       else
@@ -792,7 +792,6 @@ module Creme
       nodes
     end
 
-    # ameba:disable Metrics/CyclomaticComplexity
     private def analyze_app(form : Cons, env : Env, scope : AnalyzerScope) : Node
       head = form.car
       args = [] of Node

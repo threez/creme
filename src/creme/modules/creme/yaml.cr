@@ -40,7 +40,6 @@ module Creme::Builtins::YamlLibrary
     elems.all? { |e| e.is_a?(Cons) && e.car.is_a?(SchemeStr) }
   end
 
-  # ameba:disable Metrics/CyclomaticComplexity
   private def yaml_write(v : SchemeValue, yaml : YAML::Builder, who : String) : Nil
     case v
     when SchemeNil

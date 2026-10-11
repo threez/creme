@@ -122,7 +122,7 @@ describe Creme::Interpreter do
     end
 
     it "matches by eqv?, not equal? (distinct strings don't match)" do
-      w(%[(case "a" (("a") 'matched) (else 'no))]).should eq("no")
+      w(%((case "a" (("a") 'matched) (else 'no)))).should eq("no")
     end
 
     it "raises on an empty clause" do

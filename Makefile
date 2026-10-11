@@ -173,8 +173,12 @@ bench-md:
 	$(MAKE) -C competition build
 	./bin/creme competition/bench.scm --markdown
 
+# ameba 1.7.0 dropped its own postinstall build hook (previously `shards
+# build -Dpreview_mt`), so `shards install` alone no longer produces this
+# binary -- build it explicitly from its own shard.yml afterward.
 lib/ameba/bin/ameba:
 	shards install
+	cd lib/ameba && shards build ameba
 
 lint: lib/ameba/bin/ameba
 	lib/ameba/bin/ameba

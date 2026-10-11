@@ -63,7 +63,7 @@ describe "R7RS §4.1.4 Procedures (lambda)" do
           ((e) (range 0 e))
           ((b e) (do ((r '() (cons e r)) (e (- e 1) (- e 1))) ((< e b) r)))))
       (range 3)
-    SCM
+      SCM
   end
 end
 
@@ -95,7 +95,7 @@ describe "R7RS §4.1.7 Inclusion (include/include-ci)" do
       Creme.run_source(interp, <<-SCM).write_string.should eq("15")
         (include "triple.scm")
         (triple 5)
-      SCM
+        SCM
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -111,7 +111,7 @@ describe "R7RS §4.1.7 Inclusion (include/include-ci)" do
       Creme.run_source(interp, <<-SCM).write_string.should eq("25")
         (include-ci "square.scm")
         (square 5)
-      SCM
+        SCM
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -191,7 +191,7 @@ describe "R7RS §4.2.2 Binding constructs (let/let*/letrec/letrec*/let-values/le
       (letrec ((even? (lambda (n) (if (zero? n) #t (odd? (- n 1)))))
                (odd? (lambda (n) (if (zero? n) #f (even? (- n 1))))))
         (even? 88))
-    SCM
+      SCM
   end
 
   it "letrec* is like letrec but evaluates/assigns inits strictly left-to-right" do
@@ -201,7 +201,7 @@ describe "R7RS §4.2.2 Binding constructs (let/let*/letrec/letrec*/let-values/le
                 (x (p 5))
                 (y x))
         y)
-    SCM
+      SCM
   end
 
   it "let-values binds each formals-group to the values produced by its init" do
@@ -216,7 +216,7 @@ describe "R7RS §4.2.2 Binding constructs (let/let*/letrec/letrec*/let-values/le
     w(<<-SCM).should eq("(x y x y)")
       (let ((a 'a) (b 'b) (x 'x) (y 'y))
         (let*-values (((a b) (values x y)) ((x y) (values a b))) (list a b x y)))
-    SCM
+      SCM
   end
 
   it "named let is a variant of let providing a general looping construct" do
@@ -225,7 +225,7 @@ describe "R7RS §4.2.2 Binding constructs (let/let*/letrec/letrec*/let-values/le
         (cond ((null? numbers) (list nonneg neg))
               ((>= (car numbers) 0) (loop (cdr numbers) (cons (car numbers) nonneg) neg))
               ((< (car numbers) 0) (loop (cdr numbers) nonneg (cons (car numbers) neg)))))
-    SCM
+      SCM
   end
 end
 
@@ -241,7 +241,7 @@ describe "R7RS §4.2.4 Iteration (do)" do
       (do ((vec (make-vector 5)) (i 0 (+ i 1)))
           ((= i 5) vec)
         (vector-set! vec i i))
-    SCM
+      SCM
   end
 
   it "do with no result expression returns unspecified after the loop finishes" do
@@ -249,7 +249,7 @@ describe "R7RS §4.2.4 Iteration (do)" do
       (let ((x '(1 3 5 7 9)))
         (do ((x x (cdr x)) (sum 0 (+ sum (car x))))
             ((null? x) sum)))
-    SCM
+      SCM
   end
 end
 
@@ -277,7 +277,7 @@ describe "R7RS §4.2.6 Dynamic bindings (make-parameter/parameterize)" do
         (make-parameter 10 (lambda (x) (if (and (exact-integer? x) (<= 2 x 16)) x (error "invalid radix")))))
       (define (f n) (number->string n (radix)))
       (list (f 12) (parameterize ((radix 2)) (f 12)) (f 12))
-    SCM
+      SCM
   end
 end
 
@@ -286,7 +286,7 @@ describe "R7RS §4.2.7 Exception handling (guard)" do
     w(<<-SCM).should eq("42")
       (guard (condition ((assq 'a condition) (cdr (assq 'a condition))) ((assq 'b condition) (cdr (assq 'b condition))))
         (raise (list (cons 'a 42))))
-    SCM
+      SCM
   end
 
   it "an unmatched inner guard re-raises to the enclosing guard, whose own clause then matches" do
@@ -294,14 +294,14 @@ describe "R7RS §4.2.7 Exception handling (guard)" do
       (guard (condition ((assq 'b condition) (cdr (assq 'b condition))))
         (guard (condition ((assq 'a condition) (cdr (assq 'a condition))))
           (raise (list (cons 'b 23)))))
-    SCM
+      SCM
   end
 
   it "guard's cond-style (test => proc) arrow-clause form applies proc to the raised object's matched test value" do
     w(<<-SCM).should eq("42")
       (guard (condition ((assq 'a condition) => cdr) ((assq 'b condition)))
         (raise (list (cons 'a 42))))
-    SCM
+      SCM
   end
 end
 
@@ -334,7 +334,7 @@ describe "R7RS §4.3.1/4.3.2 Macros (define-syntax/let-syntax/letrec-syntax/synt
         (syntax-rules ()
           ((sequence expr ...) (begin expr ...))))
       (sequence 1 2 3 4)
-    SCM
+      SCM
   end
 
   it "the (... template) ellipsis-escape idiom lets a macro's own output contain a literal ... inside a generated syntax-rules macro" do
@@ -347,7 +347,7 @@ describe "R7RS §4.3.1/4.3.2 Macros (define-syntax/let-syntax/letrec-syntax/synt
                ((name expr (... ...)) (begin expr (... ...))))))))
       (be-like-begin sequence)
       (sequence 1 2 3 4)
-    SCM
+      SCM
   end
 
   it "let-syntax scopes a macro binding to its body (unhygienic: use-site shadowing wins, not definition-site — see README Known caveats)" do
@@ -355,7 +355,7 @@ describe "R7RS §4.3.1/4.3.2 Macros (define-syntax/let-syntax/letrec-syntax/synt
       (let ((x 'outer))
         (let-syntax ((m (syntax-rules () ((m) x))))
           (let ((x 'inner)) (m))))
-    SCM
+      SCM
   end
 
   it "letrec-syntax + hygiene stress test (R7RS's own my-or example, whose expansion binds temp/if/let) survives a use-site shadowing of those same names" do
@@ -376,7 +376,7 @@ describe "R7RS §4.3.1/4.3.2 Macros (define-syntax/let-syntax/letrec-syntax/synt
                        (if t t (my-or e2 ...)))))))
           (let ((t 'shadowed))
             (my-or #f 5))))
-    SCM
+      SCM
   end
 
   it "a simple-let macro using dotted/ellipsis patterns expands correctly on the non-error clause" do
@@ -388,7 +388,7 @@ describe "R7RS §4.3.1/4.3.2 Macros (define-syntax/let-syntax/letrec-syntax/synt
           ((_ ((name val) ...) body1 body2 ...)
            ((lambda (name ...) body1 body2 ...) val ...))))
       (simple-let ((x 1) (y 2)) (+ x y))
-    SCM
+      SCM
   end
 end
 
@@ -403,7 +403,7 @@ describe "R7RS §4.3.3 Signaling errors in macro transformers (syntax-error)" do
             ((_ ((name val) ...) body1 body2 ...)
              ((lambda (name ...) body1 body2 ...) val ...))))
         (simple-let ((3 . 4) 5))
-      SCM
+        SCM
     end
   end
 end

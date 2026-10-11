@@ -10,11 +10,12 @@ private def load_toolchain(interp : Creme::Interpreter) : Nil
   # of these same libraries has its source re-read and re-run a SECOND
   # time, corrupting an in-progress record type (e.g. (creme bytecode)'s
   # own <chunk>).
-  Creme.run_source(interp, %(
+  Creme.run_source(interp, <<-SCM)
     (mark-self-hosted-library-loaded! '(creme peg))
     (mark-self-hosted-library-loaded! '(creme bytecode))
     (mark-self-hosted-library-loaded! '(creme compiler reader))
-    (mark-self-hosted-library-loaded! '(creme compiler compiler))))
+    (mark-self-hosted-library-loaded! '(creme compiler compiler))
+    SCM
 end
 
 private def native_eval(source : String) : String
@@ -139,12 +140,18 @@ describe "bootstrap-compiler module" do
       # macro of the same name (and correctly un-shadowing it afterward),
       # sibling let-syntax forms not leaking into each other, and nested
       # let-syntax shadowing an enclosing let-syntax's own same-named macro.
-      %((define-syntax id (syntax-rules () ((_ x) (list 'outer x))))
-        (list (id 1) (let-syntax ((id (syntax-rules () ((_ x) (list 'inner x))))) (id 2)) (id 3))),
-      %((list (let-syntax ((tag (syntax-rules () ((_ x) (list 'a x))))) (tag 1))
-              (let-syntax ((tag (syntax-rules () ((_ x) (list 'b x))))) (tag 2)))),
-      %((let-syntax ((tag (syntax-rules () ((_ x) (list 'outer x)))))
-          (list (tag 1) (let-syntax ((tag (syntax-rules () ((_ x) (list 'inner x))))) (tag 2)) (tag 3)))),
+      <<-SCM,
+        (define-syntax id (syntax-rules () ((_ x) (list 'outer x))))
+        (list (id 1) (let-syntax ((id (syntax-rules () ((_ x) (list 'inner x))))) (id 2)) (id 3))
+        SCM
+      <<-SCM,
+        (list (let-syntax ((tag (syntax-rules () ((_ x) (list 'a x))))) (tag 1))
+              (let-syntax ((tag (syntax-rules () ((_ x) (list 'b x))))) (tag 2)))
+        SCM
+      <<-SCM,
+        (let-syntax ((tag (syntax-rules () ((_ x) (list 'outer x)))))
+          (list (tag 1) (let-syntax ((tag (syntax-rules () ((_ x) (list 'inner x))))) (tag 2)) (tag 3)))
+        SCM
       "(define (f) (display \"a\") (begin (define y 10)) (+ y 1)) (f)",
       %((let ((x 1)) `(a `(b ,(+ 1 2) ,,x)))),
       %((let ((name 'foo) (val 42)) `(define ,name ,val))),
@@ -317,15 +324,15 @@ describe "bootstrap-compiler module" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_toolchain(interp)
     src = <<-SCM
-    (define (h)
-      (define snap #f)
-      (let ((x 42)) (set! snap (lambda () x)))
-      (let ((y 1)) (set! y (+ y 1)))
-      (let ((z 2)) (set! z (* z 2)))
-      (let ((w 3)) (set! w (- w 1)))
-      (snap))
-    (h)
-    SCM
+      (define (h)
+        (define snap #f)
+        (let ((x 42)) (set! snap (lambda () x)))
+        (let ((y 1)) (set! y (+ y 1)))
+        (let ((z 2)) (set! z (* z 2)))
+        (let ((w 3)) (set! w (- w 1)))
+        (snap))
+      (h)
+      SCM
     bootstrap_eval(interp, src).should eq("42")
   end
 
@@ -354,17 +361,17 @@ describe "bootstrap-compiler module" do
   # makes it also work correctly under icecreme).
   it "loads a defmacro-exporting pure-Scheme library (creme dao) via the self-hosted loader" do
     src = <<-SCM
-    (import (scheme base) (creme sql) (creme dao))
-    (define conn (sql-open ":memory:"))
-    (define-dao todo conn
-      (id integer primary-key auto-increment)
-      (title text not-null)
-      (done bool not-null (default #f)))
-    (todo-create! 'title "hello" 'done #f)
-    (define result (todo-all))
-    (sql-close conn)
-    result
-    SCM
+      (import (scheme base) (creme sql) (creme dao))
+      (define conn (sql-open ":memory:"))
+      (define-dao todo conn
+        (id integer primary-key auto-increment)
+        (title text not-null)
+        (done bool not-null (default #f)))
+      (todo-create! 'title "hello" 'done #f)
+      (define result (todo-all))
+      (sql-close conn)
+      result
+      SCM
 
     # native_eval's own shared Interpreter has no library_search_path, so
     # (creme dao) -- a file-based library -- can't be found through it;
@@ -394,21 +401,21 @@ describe "bootstrap-compiler module" do
 
   it "expands an imported defmacro (sxql-select!) matching native evaluation" do
     src = <<-SCM
-    (import (creme sql) (creme sxql))
-    (define conn (sql-open ":memory:"))
-    (sql-execute conn "CREATE TABLE sale (region TEXT, amount REAL)")
-    (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('north', 120.0)")
-    (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('north', 80.0)")
-    (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('south', 45.0)")
-    (define result
-      (map (lambda (row) (cdr (assoc ':amount row)))
-           (sxql-select! conn (:amount)
-             (from :sale)
-             (where (:= :region "north"))
-             (order-by (:desc :amount)))))
-    (sql-close conn)
-    result
-    SCM
+      (import (creme sql) (creme sxql))
+      (define conn (sql-open ":memory:"))
+      (sql-execute conn "CREATE TABLE sale (region TEXT, amount REAL)")
+      (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('north', 120.0)")
+      (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('north', 80.0)")
+      (sql-execute conn "INSERT INTO sale (region, amount) VALUES ('south', 45.0)")
+      (define result
+        (map (lambda (row) (cdr (assoc ':amount row)))
+             (sxql-select! conn (:amount)
+               (from :sale)
+               (where (:= :region "north"))
+               (order-by (:desc :amount)))))
+      (sql-close conn)
+      result
+      SCM
 
     native = Creme::Interpreter.new(library_search_path: ["./modules"])
     native_result = Creme.run_source(native, src).write_string
@@ -470,17 +477,17 @@ describe "bootstrap-compiler module" do
   # like examples/26-import-generated-library.scm, which this mirrors.
   it "imports a library file written by an earlier form in the same program" do
     src = <<-SCM
-    (import (creme file))
-    (file-write "./modules/compiler-spec-generated.sld"
-      "(define-library (compiler-spec-generated)
-         (export greet)
-         (import (scheme base))
-         (begin (define (greet name) (string-append \\"hi \\" name))))")
-    (import (compiler-spec-generated))
-    (define result (greet "Ada"))
-    (delete-file "./modules/compiler-spec-generated.sld")
-    result
-    SCM
+      (import (creme file))
+      (file-write "./modules/compiler-spec-generated.sld"
+        "(define-library (compiler-spec-generated)
+           (export greet)
+           (import (scheme base))
+           (begin (define (greet name) (string-append \\"hi \\" name))))")
+      (import (compiler-spec-generated))
+      (define result (greet "Ada"))
+      (delete-file "./modules/compiler-spec-generated.sld")
+      result
+      SCM
 
     # Needs its own library_search_path on BOTH sides (unlike check()'s
     # shared native_eval helper, which has none) so the generated library
@@ -514,12 +521,12 @@ describe "bootstrap-compiler module" do
 
     test_source = %((define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (display (fact 5)) (newline) (define v #(1 2 3)) (write v))
     interp.global.define("nested-test-source", Creme::SchemeStr.new(test_source))
-    result = Creme.run_source(interp, <<-SCM)
-    (let ((forms (read-program nested-test-source))
-          (out (open-output-string)))
-      (for-each (lambda (f) (write f out) (write-char #\\newline out)) forms)
-      (get-output-string out))
-    SCM
+    result = Creme.run_source(interp, <<-'SCM')
+      (let ((forms (read-program nested-test-source))
+            (out (open-output-string)))
+        (for-each (lambda (f) (write f out) (write-char #\newline out)) forms)
+        (get-output-string out))
+      SCM
 
     expected = Creme::Reader.read_all(test_source).map(&.write_string).join("\n") + "\n"
     result.as(Creme::SchemeStr).value.should eq(expected)

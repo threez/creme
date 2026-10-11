@@ -112,7 +112,6 @@ module Creme::Builtins::Term
   # so a spec can drive this with a real IO::FileDescriptor (an IO.pipe, per
   # #read_byte_timeout's own comment) instead of the real terminal.
 
-  # ameba:disable Metrics/CyclomaticComplexity
   def read_key_event(io : IO = STDIN) : SchemeValue
     byte = io.read_byte
     return kind_alist("eof") if byte.nil?

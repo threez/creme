@@ -15,7 +15,7 @@ describe "prof-vm module" do
     w(<<-SCM).should eq("#t")
       (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
       (profile-scheme-report? (profile-scheme (lambda () (fib 22)) 50))
-    SCM
+      SCM
   end
 
   it "attributes samples across if/primitives/the call itself, not one entry" do
@@ -29,7 +29,7 @@ describe "prof-vm module" do
       (define names (map (lambda (e) (cdr (car e))) (profile-scheme-top report 20)))
       (and (> (length names) 3)
            (if (member "(fib (- n 1))" names) #t #f))
-    SCM
+      SCM
   end
 
   it "reconstructs source text, an instruction kind, and a file/line for a call site" do
@@ -46,7 +46,7 @@ describe "prof-vm module" do
            (string=? (cdr (assoc "instruction" call-entry string=?)) "call")
            (string? (cdr (assoc "file" call-entry string=?)))
            (integer? (cdr (assoc "line" call-entry string=?))))
-    SCM
+      SCM
   end
 
   it "labels a control construct's instruction in the language's own syntax" do
@@ -59,7 +59,7 @@ describe "prof-vm module" do
               ((string=? (cdr (assoc "instruction" (car es) string=?)) "if") (car es))
               (else (find-if (cdr es)))))
       (if (find-if entries) #t #f)
-    SCM
+      SCM
   end
 
   it "returns a valid report for a trivial thunk" do
@@ -77,7 +77,7 @@ describe "prof-vm module" do
     Creme.run_source(interp, <<-SCM).write_string.should eq("#t")
       (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
       (profile-scheme-report? (profile-scheme (lambda () (fib 20)) 50))
-    SCM
+      SCM
   end
 
   # Regression test: a child Interpreter spawned mid-sample via
@@ -97,7 +97,7 @@ describe "prof-vm module" do
       Creme::Reader.read_all(<<-SCM, "<child>"),
         (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 22)
-      SCM
+        SCM
       child.global)
     counts = parent.stop_scheme_sampling
     counts.values.sum.should be > 0
@@ -111,7 +111,7 @@ describe "prof-vm module" do
       Creme::Reader.read_all(<<-SCM, "<child>"),
         (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
         (fib 22)
-      SCM
+        SCM
       child.global)
     parent.stop_scheme_sampling.values.sum.should eq(0)
   end

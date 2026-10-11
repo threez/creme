@@ -129,7 +129,7 @@ describe "self-recursive global counted-loop fusion" do
       (define (outer)
         (define (sum-to n acc) (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
         (sum-to 100000 0))
-    SCM
+      SCM
     ops.should_not contain(Creme::Op::ForLoopGuardedDec)
   end
 
@@ -144,7 +144,7 @@ describe "self-recursive global counted-loop fusion" do
             (begin (set! sum-to (lambda (n acc) (+ 999999 n acc))) (sum-to (- n 1) (+ acc n)))
             (if (= n 0) acc (sum-to (- n 1) (+ acc n)))))
       (sum-to 10000000 0)
-    SCM
+      SCM
     run_program(src).write_string.should eq("37500013499998")
   end
 
@@ -161,7 +161,7 @@ describe "self-recursive global counted-loop fusion" do
               (sum-to (- n 1) (+ acc n)))
             (if (= n 0) acc (sum-to (- n 1) (+ acc n)))))
       (sum-to 1000000 0)
-    SCM
+      SCM
     run_program(src).write_string.should eq("500001500000")
   end
 end

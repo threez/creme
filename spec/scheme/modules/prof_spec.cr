@@ -11,6 +11,6 @@ describe "prof frontend module" do
       (define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
       (and (profile-scheme-report? (profile-scheme (lambda () (fib 20)) 50))
            (profile-report? (profile (lambda () (fib 20)) 5)))
-    SCM
+      SCM
   end
 end

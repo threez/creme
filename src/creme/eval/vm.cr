@@ -1792,7 +1792,7 @@ module Creme
     # same as any inline cache that never gets past megamorphic.
     # ameba:disable Metrics/CyclomaticComplexity
     private def quicken_callglobal_op(callee : SchemeValue, nargs : Int32) : Op?
-      return nil unless callee.is_a?(Builtin)
+      return unless callee.is_a?(Builtin)
       # cons/car/cdr have exactly one valid arity each (2/1/1, per R7RS) —
       # no N-ary form exists to generalize, so they stay gated to the
       # single nargs value they've always required.
@@ -2190,7 +2190,6 @@ module Creme
     # always exact (min_arity == max_arity == field_slots' constructor-
     # arg count), so ITS mismatch case reaches the same generic path too,
     # via the ordinary Builtin#fn every RecordConstructor still has.
-    # ameba:disable Metrics/CyclomaticComplexity
     private def dispatch_builtin_call(instr : Instruction, callee : SchemeValue, tail : Bool, caller_base : Int32, arg_base : Int32, nargs : Int32, pos : SourcePos?) : SchemeValue?
       if callee.is_a?(RecordAccessor) && nargs == 1
         rec = @stack.unsafe_fetch(arg_base)

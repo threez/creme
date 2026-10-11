@@ -11,13 +11,13 @@ end
 
 describe "raise" do
   it "unwinds to the nearest guard when no handler is installed" do
-    w(%[(guard (e (#t (list 'caught e))) (raise 'my-symbol))]).should eq("(caught my-symbol)")
+    w(%((guard (e (#t (list 'caught e))) (raise 'my-symbol)))).should eq("(caught my-symbol)")
   end
 
   it "carries an arbitrary raised object, not just an error-object condition" do
-    w(%[(guard (e (#t e)) (raise (list 1 2 3)))]).should eq("(1 2 3)")
-    w(%[(guard (e (#t e)) (raise "a string"))]).should eq(%("a string"))
-    w(%[(guard (e (#t e)) (raise 42))]).should eq("42")
+    w(%((guard (e (#t e)) (raise (list 1 2 3))))).should eq("(1 2 3)")
+    w(%((guard (e (#t e)) (raise "a string")))).should eq(%("a string"))
+    w(%((guard (e (#t e)) (raise 42)))).should eq("42")
   end
 
   it "propagates past an inner guard whose clauses don't match, to an outer guard" do
@@ -25,7 +25,7 @@ describe "raise" do
       (guard (e (#t 'outer))
         (guard (e ((symbol? e) 'inner))
           (raise "not a symbol")))
-    SCM
+      SCM
   end
 end
 
@@ -36,7 +36,7 @@ describe "with-exception-handler + raise (non-continuable)" do
         (with-exception-handler
           (lambda (e) (raise (list 'handled e)))
           (lambda () (raise 'boom))))
-    SCM
+      SCM
   end
 
   it "is an error if the handler returns normally instead of escaping" do
@@ -45,7 +45,7 @@ describe "with-exception-handler + raise (non-continuable)" do
         (with-exception-handler
           (lambda (e) 'ignored-return-value)
           (lambda () (raise 'boom))))
-    SCM
+      SCM
   end
 end
 
@@ -55,7 +55,7 @@ describe "raise-continuable" do
       (with-exception-handler
         (lambda (e) 100)
         (lambda () (+ 1 (raise-continuable 'oops))))
-    SCM
+      SCM
   end
 
   it "does not require the handler to escape" do
@@ -63,7 +63,7 @@ describe "raise-continuable" do
       (with-exception-handler
         (lambda (e) 3)
         (lambda () (list (raise-continuable 'x) 4 5)))
-    SCM
+      SCM
   end
 end
 
@@ -76,7 +76,7 @@ describe "nested with-exception-handler scoping" do
           (with-exception-handler
             (lambda (e) (raise-continuable (list 're-raised e)))
             (lambda () (raise-continuable 'inner)))))
-    SCM
+      SCM
   end
 
   it "the handler stack is restored after with-exception-handler returns normally" do
@@ -89,7 +89,7 @@ describe "nested with-exception-handler scoping" do
         (lambda (e) (set! log (cons 'second log)) 'ignored)
         (lambda () (raise-continuable 'b)))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "the handler stack does not leak state between independent guard/with-exception-handler blocks" do
@@ -105,7 +105,7 @@ describe "nested with-exception-handler scoping" do
         (guard (e (#t 'caught))
           (raise 'trigger)))
       (list first second)
-    SCM
+      SCM
   end
 end
 
@@ -115,15 +115,15 @@ describe "file-error?" do
       (import (creme file))
       (guard (e ((file-error? e) 'is-file-error) (#t 'other))
         (file-read "/no/such/file/at/all.txt"))
-    SCM
+      SCM
   end
 
   it "is false for an unrelated error" do
-    w(%[(guard (e ((file-error? e) 'is-file-error) (#t 'other)) (error "not a file error"))]).should eq("other")
+    w(%((guard (e ((file-error? e) 'is-file-error) (#t 'other)) (error "not a file error")))).should eq("other")
   end
 
   it "is false for a plain raised object" do
-    w(%[(guard (e ((file-error? e) 'is-file-error) (#t 'other)) (raise 'x))]).should eq("other")
+    w(%((guard (e ((file-error? e) 'is-file-error) (#t 'other)) (raise 'x)))).should eq("other")
   end
 end
 
@@ -133,11 +133,11 @@ describe "read-error?" do
       (import (scheme read))
       (guard (e ((read-error? e) 'is-read-error) (#t 'other))
         (read (open-input-string "(1 2")))
-    SCM
+      SCM
   end
 
   it "is false for an unrelated error" do
-    w(%[(guard (e ((read-error? e) 'is-read-error) (#t 'other)) (error "not a read error"))]).should eq("other")
+    w(%((guard (e ((read-error? e) 'is-read-error) (#t 'other)) (error "not a read error")))).should eq("other")
   end
 
   it "does not misfire for a script's own (unrelated) parse errors" do

@@ -20,9 +20,9 @@ describe "(scheme char)" do
     w("(import (scheme char)) (char-foldcase #\\A)").should eq(%(#\\a))
     w("(import (scheme char)) (digit-value #\\7)").should eq("7")
     w("(import (scheme char)) (digit-value #\\a)").should eq("#f")
-    w(%[(import (scheme char)) (string-ci=? "ABC" "abc")]).should eq("#t")
-    w(%[(import (scheme char)) (string-foldcase "HeLLo")]).should eq(%("hello"))
-    w(%[(import (scheme char)) (string-upcase "hi")]).should eq(%("HI"))
+    w(%((import (scheme char)) (string-ci=? "ABC" "abc"))).should eq("#t")
+    w(%((import (scheme char)) (string-foldcase "HeLLo"))).should eq(%("hello"))
+    w(%((import (scheme char)) (string-upcase "hi"))).should eq(%("HI"))
   end
 end
 
@@ -65,13 +65,13 @@ describe "(scheme lazy)" do
         (delay-force
           (if (= n 0) (delay 'done) (stream-of (- n 1)))))
       (force (stream-of 100000))
-    SCM
+      SCM
   end
 end
 
 describe "(scheme read)" do
   it "provides read" do
-    w(%[(import (scheme read) (scheme base)) (read (open-input-string "42"))]).should eq("42")
+    w(%((import (scheme read) (scheme base)) (read (open-input-string "42")))).should eq("42")
   end
 end
 

@@ -137,8 +137,8 @@ describe Creme::Csv do
 
   it "parses row by row" do
     parser = new_parser("hello,world\ngood,bye\n")
-    parser.next_row.should eq(%w(hello world))
-    parser.next_row.should eq(%w(good bye))
+    parser.next_row.should eq(%w[hello world])
+    parser.next_row.should eq(%w[good bye])
     parser.next_row.should be_nil
   end
 
@@ -272,17 +272,17 @@ describe Creme::Csv do
 
   describe "build" do
     it "builds two rows" do
-      build { |csv|
+      (build do |csv|
         csv.row { |row| row << "one"; row << "two" }
         csv.row { |row| row << "three"; row << "four" }
-      }.should eq("one,two\nthree,four\n")
+      end).should eq("one,two\nthree,four\n")
     end
 
     it "builds with numbers" do
-      build { |csv|
+      (build do |csv|
         csv.row { |row| row << 1; row << 2 }
         csv.row { |row| row << 3; row << 4 }
-      }.should eq("1,2\n3,4\n")
+      end).should eq("1,2\n3,4\n")
     end
 
     it "builds with commas" do
@@ -290,9 +290,9 @@ describe Creme::Csv do
     end
 
     it "builds with custom separator" do
-      build(separator: ';') { |csv|
+      (build(separator: ';') do |csv|
         csv.row { |row| row << "one"; row << "two"; row << "thr;ee" }
-      }.should eq(%(one;two;"thr;ee"\n))
+      end).should eq(%(one;two;"thr;ee"\n))
     end
 
     it "builds with quotes" do
@@ -300,9 +300,9 @@ describe Creme::Csv do
     end
 
     it "builds with custom quote character" do
-      build(quote_char: '\'') { |csv|
+      (build(quote_char: '\'') do |csv|
         csv.row { |row| row << %(he said 'no') }
-      }.should eq(%('he said ''no'''\n))
+      end).should eq(%('he said ''no'''\n))
     end
 
     it "builds row from enumerable" do
@@ -310,17 +310,17 @@ describe Creme::Csv do
     end
 
     it "builds with quoting" do
-      build(quoting: Creme::Csv::Builder::Quoting::NONE) { |csv|
+      (build(quoting: Creme::Csv::Builder::Quoting::NONE) do |csv|
         csv.row 1, "doesn't", " , ", %(he said "no")
-      }.should eq(%(1,doesn't, , ,he said "no"\n))
+      end).should eq(%(1,doesn't, , ,he said "no"\n))
 
-      build(quoting: Creme::Csv::Builder::Quoting::RFC) { |csv|
+      (build(quoting: Creme::Csv::Builder::Quoting::RFC) do |csv|
         csv.row 1, "doesn't", " , ", %(he said "no")
-      }.should eq(%(1,doesn't," , ","he said ""no"""\n))
+      end).should eq(%(1,doesn't," , ","he said ""no"""\n))
 
-      build(quoting: Creme::Csv::Builder::Quoting::ALL) { |csv|
+      (build(quoting: Creme::Csv::Builder::Quoting::ALL) do |csv|
         csv.row 1, "doesn't", " , ", %(he said "no")
-      }.should eq(%("1","doesn't"," , ","he said ""no"""\n))
+      end).should eq(%("1","doesn't"," , ","he said ""no"""\n))
     end
   end
 
@@ -365,7 +365,7 @@ describe Creme::Csv do
     while row = parser.next_row
       rows << row
     end
-    rows.should eq([%w(one two), %w(three four), %w(five six)])
+    rows.should eq([%w[one two], %w[three four], %w[five six]])
   end
 
   # Regression: `IO#read` is only obligated to return AT LEAST ONE byte
@@ -386,8 +386,8 @@ describe Creme::Csv do
       rows << row
     end
     rows.should eq([
-      %w(Antípodas 1857 1 1),
-      %w(Antípodas 1969 1 1),
+      %w[Antípodas 1857 1 1],
+      %w[Antípodas 1969 1 1],
     ])
   end
 

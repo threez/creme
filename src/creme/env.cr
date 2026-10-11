@@ -50,9 +50,9 @@ module Creme
     # root) or the slot doesn't exist yet, so the caller falls back to a
     # name-keyed lookup.
     def local_at?(index : Int32) : SchemeValue?
-      return nil if @hash
+      return if @hash
       vals = @values
-      return nil if vals.nil? || index >= vals.size
+      return if vals.nil? || index >= vals.size
       vals[index]
     end
 

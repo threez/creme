@@ -58,7 +58,7 @@ module Creme
     def get?(key : SchemeValue) : SchemeValue?
       @mutex.synchronize do
         bucket = @buckets[Creme.scheme_hash(key)]?
-        return nil unless bucket
+        return unless bucket
         idx = unsafe_index_in(bucket, key)
         idx ? bucket[idx][1] : nil
       end

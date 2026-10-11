@@ -336,7 +336,6 @@ module Creme::R7RS::Strings
     SchemeBool.of(ok)
   end
 
-  # ameba:disable Metrics/CyclomaticComplexity
   private def parse_number_string(txt : String, radix : Int32) : SchemeValue
     if radix != 10
       if parsed_int = txt.to_i64?(radix)

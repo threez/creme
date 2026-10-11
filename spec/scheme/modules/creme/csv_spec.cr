@@ -50,7 +50,7 @@ describe "csv module" do
   end
 
   it "streams rows through a writer and reads them back through a reader" do
-    result = w(%(
+    result = w(<<-SCM)
       (let ((out (open-output-string)))
         (let ((w (csv-writer-open out)))
           (csv-writer? w)
@@ -62,20 +62,20 @@ describe "csv module" do
                (row2 (csv-reader-read! r))
                (row3 (csv-reader-read! r)))
           (list (csv-reader? r) row1 row2 (eof-object? row3))))
-    ))
+      SCM
     result.should eq(%((#t #("a" "b") #("1" "2") #t)))
   end
 
   it "csv-reader-open accepts a tiny 4th chunk-size arg, forcing many internal refills, without affecting results" do
-    result = w(%(
-      (let* ((in (open-input-string "one,two\\nthree,four\\nfive,six"))
-             (r (csv-reader-open in #\\, #\\" 4))
+    result = w(<<-'SCM')
+      (let* ((in (open-input-string "one,two\nthree,four\nfive,six"))
+             (r (csv-reader-open in #\, #\" 4))
              (row1 (csv-reader-read! r))
              (row2 (csv-reader-read! r))
              (row3 (csv-reader-read! r))
              (row4 (csv-reader-read! r)))
         (list row1 row2 row3 (eof-object? row4)))
-    ))
+      SCM
     result.should eq(%((#("one" "two") #("three" "four") #("five" "six") #t)))
   end
 end

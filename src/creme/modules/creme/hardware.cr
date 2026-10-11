@@ -52,7 +52,7 @@ module Creme::Builtins::Hardware
   private def sysctl_value(name : String) : String?
     io = IO::Memory.new
     status = ::Process.run("sysctl", ["-n", name], output: io)
-    return nil unless status.success?
+    return unless status.success?
     value = io.to_s.strip
     value.empty? ? nil : value
   end
@@ -62,7 +62,6 @@ module Creme::Builtins::Hardware
     when "FreeBSD" then sysctl_value("hw.model")
     when "Darwin"  then sysctl_value("machdep.cpu.brand_string") || sysctl_value("hw.model")
     when "Linux"   then linux_cpu_model
-    else                nil
     end
   end
 
@@ -71,7 +70,6 @@ module Creme::Builtins::Hardware
     when "FreeBSD" then sysctl_value("hw.physmem").try(&.to_i64?)
     when "Darwin"  then sysctl_value("hw.memsize").try(&.to_i64?)
     when "Linux"   then linux_memory_total
-    else                nil
     end
   end
 
@@ -80,7 +78,7 @@ module Creme::Builtins::Hardware
   # "Hardware"/"Model" instead), so this can legitimately return nil on
   # Linux too, not just on non-Linux platforms.
   private def linux_cpu_model : String?
-    return nil unless File.exists?("/proc/cpuinfo")
+    return unless File.exists?("/proc/cpuinfo")
     File.each_line("/proc/cpuinfo") do |line|
       if line.starts_with?("model name")
         parts = line.split(':', 2)
@@ -97,7 +95,7 @@ module Creme::Builtins::Hardware
   # to match the sysctl-backed fields above (hw.physmem/hw.memsize are both
   # already byte counts).
   private def linux_memory_total : Int64?
-    return nil unless File.exists?("/proc/meminfo")
+    return unless File.exists?("/proc/meminfo")
     File.each_line("/proc/meminfo") do |line|
       if line.starts_with?("MemTotal:")
         digits = line.gsub(/[^0-9]/, "")

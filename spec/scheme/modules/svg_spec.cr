@@ -10,11 +10,11 @@ end
 
 private def two_charts
   <<-SCHEME
-  (svg-bar-chart-grid
-   (list (cons "fib" (list (cons "crystal" 1) (cons "ruby" 5)))
-         (cons "sum-to" (list (cons "crystal" 2) (cons "ruby" 6))))
-   2 100 40)
-  SCHEME
+    (svg-bar-chart-grid
+     (list (cons "fib" (list (cons "crystal" 1) (cons "ruby" 5)))
+           (cons "sum-to" (list (cons "crystal" 2) (cons "ruby" 6))))
+     2 100 40)
+    SCHEME
 end
 
 describe "svg module" do
@@ -45,22 +45,22 @@ describe "svg module" do
     out = r(two_charts)
     bars = out.scan(/<rect[^>]*class="bar"[^>]*>/)
     bars.size.should eq(4) # 2 charts x 2 bars each
-    bars.each do |m|
-      m[0].should match(/fill="hsl/)
-      m[0].should match(/stroke="hsl/)
+    bars.each do |match|
+      match[0].should match(/fill="hsl/)
+      match[0].should match(/stroke="hsl/)
     end
   end
 
   it "rounds coordinates to 2 decimal places" do
     out = r(two_charts)
-    out.scan(/\s(?:x|y|width|height)="([^"]+)"/).each do |m|
-      m[1].should match(/^-?\d+\.\d{2}$/)
+    out.scan(/\s(?:x|y|width|height)="([^"]+)"/).each do |match|
+      match[1].should match(/^-?\d+\.\d{2}$/)
     end
   end
 
   it "lays out the second chart's card to the right of the first (columns=2)" do
     out = r(two_charts)
-    card_xs = out.scan(/<rect[^>]*class="card"[^>]*>/).map { |tag| tag[0][/\bx="([\d.]+)"/, 1].to_f }
+    card_xs = out.scan(/<rect[^>]*class="card"[^>]*>/).map(&.[0].[/\bx="([\d.]+)"/, 1].to_f)
     card_xs.size.should eq(2)
     (card_xs[1] > card_xs[0]).should be_true
   end
@@ -71,16 +71,16 @@ describe "svg module" do
        (list (cons "a" (list (cons "x" 1))) (cons "b" (list (cons "x" 2))) (cons "c" (list (cons "x" 3))))
        2 100 40)
       SCHEME
-    ys = out.scan(/<rect[^>]*class="card"[^>]*>/).map { |tag| tag[0][/\by="([\d.]+)"/, 1].to_f }
-    xs = out.scan(/<rect[^>]*class="card"[^>]*>/).map { |tag| tag[0][/\bx="([\d.]+)"/, 1].to_f }
+    ys = out.scan(/<rect[^>]*class="card"[^>]*>/).map(&.[0].[/\by="([\d.]+)"/, 1].to_f)
+    xs = out.scan(/<rect[^>]*class="card"[^>]*>/).map(&.[0].[/\bx="([\d.]+)"/, 1].to_f)
     xs.size.should eq(3)
-    xs[2].should eq(xs[0]) # third card wraps back to column 0's x
+    xs[2].should eq(xs[0])         # third card wraps back to column 0's x
     (ys[2] > ys[0]).should be_true # but on a lower row
   end
 
   it "gives the SAME label the SAME fill color across two different charts" do
     out = r(two_charts)
-    fills = out.scan(/<rect[^>]*fill="(hsl[^"]+)"/).map { |m| m[1] }
+    fills = out.scan(/<rect[^>]*fill="(hsl[^"]+)"/).map { |match| match[1] }
     fills.size.should eq(4)
     # order: chart1/crystal, chart1/ruby, chart2/crystal, chart2/ruby
     fills[0].should eq(fills[2]) # crystal same color in both charts
