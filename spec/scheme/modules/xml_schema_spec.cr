@@ -66,42 +66,42 @@ private XSD_BOOK = <<-SCM
 describe "xml-schema module" do
   describe "S-expr DSL + validation" do
     it "accepts a document matching a sequence schema" do
-      with_note(%[(valid? note-schema (xml-read "<note id='1'><to>a</to><from>b</from></note>"))])
+      with_note(%((valid? note-schema (xml-read "<note id='1'><to>a</to><from>b</from></note>"))))
         .should eq("#t")
     end
 
     it "accepts optional and unbounded occurrences" do
-      with_note(%[(valid? note-schema (xml-read "<note id='1'><to>a</to><from>b</from><body>hi</body><n>1</n><n>2</n></note>"))])
+      with_note(%((valid? note-schema (xml-read "<note id='1'><to>a</to><from>b</from><body>hi</body><n>1</n><n>2</n></note>"))))
         .should eq("#t")
     end
 
     it "rejects children in the wrong order (content-model error)" do
-      with_note(%[(map validation-error-kind (validate note-schema (xml-read "<note id='1'><from>b</from><to>a</to></note>")))])
+      with_note(%((map validation-error-kind (validate note-schema (xml-read "<note id='1'><from>b</from><to>a</to></note>")))))
         .should eq("(content-model)")
     end
 
     it "reports a missing required attribute" do
-      with_note(%[(map validation-error-kind (validate note-schema (xml-read "<note><to>a</to><from>b</from></note>")))])
+      with_note(%((map validation-error-kind (validate note-schema (xml-read "<note><to>a</to><from>b</from></note>")))))
         .should eq("(missing-attribute)")
     end
 
     it "rejects an attribute value outside its enumeration" do
-      with_note(%[(map validation-error-kind (validate note-schema (xml-read "<note id='1' kind='z'><to>a</to><from>b</from></note>")))])
+      with_note(%((map validation-error-kind (validate note-schema (xml-read "<note id='1' kind='z'><to>a</to><from>b</from></note>")))))
         .should eq("(bad-attribute)")
     end
 
     it "rejects a bad datatype in element text" do
-      with_note(%[(map validation-error-kind (validate note-schema (xml-read "<note id='1'><to>a</to><from>b</from><n>xx</n></note>")))])
+      with_note(%((map validation-error-kind (validate note-schema (xml-read "<note id='1'><to>a</to><from>b</from><n>xx</n></note>")))))
         .should eq("(datatype)")
     end
 
     it "rejects child elements inside simple content" do
-      with_note(%[(map validation-error-kind (validate note-schema (xml-read "<note id='1'><to><x/></to><from>b</from></note>")))])
+      with_note(%((map validation-error-kind (validate note-schema (xml-read "<note id='1'><to><x/></to><from>b</from></note>")))))
         .should eq("(unexpected-element)")
     end
 
     it "flags an undeclared root element" do
-      with_note(%[(map validation-error-kind (validate note-schema (xml-read "<other/>")))])
+      with_note(%((map validation-error-kind (validate note-schema (xml-read "<other/>")))))
         .should eq("(undeclared)")
     end
   end
@@ -124,59 +124,71 @@ describe "xml-schema module" do
       SCM
 
     it "accepts either branch of a choice" do
-      w(%[#{catalog} (list (valid? cat (xml-read "<catalog><book><title>T</title><year>2000</year></book></catalog>"))
-                            (valid? cat (xml-read "<catalog><book><untitled>U</untitled><year>1999</year></book></catalog>")))])
+      w(<<-SCM)
+        #{catalog} (list (valid? cat (xml-read "<catalog><book><title>T</title><year>2000</year></book></catalog>"))
+                          (valid? cat (xml-read "<catalog><book><untitled>U</untitled><year>1999</year></book></catalog>")))
+        SCM
         .should eq("(#t #t)")
     end
 
     it "validates arbitrarily deep recursion via a self-referential ref" do
-      w(%[#{catalog} (valid? cat (xml-read "<catalog><book><title>T</title><year>2000</year><section><head>h1</head><section><head>h2</head></section></section></book></catalog>"))])
+      w(%(#{catalog} (valid? cat (xml-read "<catalog><book><title>T</title><year>2000</year><section><head>h1</head><section><head>h2</head></section></section></book></catalog>"))))
         .should eq("#t")
     end
 
     it "applies facets from a named simple type" do
-      w(%[#{catalog} (map validation-error-kind (validate cat (xml-read "<catalog><book><title>T</title><year>1000</year></book></catalog>")))])
+      w(%(#{catalog} (map validation-error-kind (validate cat (xml-read "<catalog><book><title>T</title><year>1000</year></book></catalog>")))))
         .should eq("(datatype)")
     end
 
     it "requires at least one occurrence (empty parent fails)" do
-      w(%[#{catalog} (valid? cat (xml-read "<catalog></catalog>"))]).should eq("#f")
+      w(%(#{catalog} (valid? cat (xml-read "<catalog></catalog>")))).should eq("#f")
     end
   end
 
   describe "content models (NFA matcher)" do
     it "validates mixed content (text interspersed with a repeated choice)" do
-      w(%[(define m (dsl->schema '(schema (element p (complex (choice (element b (type string)) (element i (type string)) (occurs 0 unbounded)) mixed)))))
-          (list (valid? m (xml-read "<p>hello <b>x</b> world <i>y</i></p>"))
-                (valid? m (xml-read "<p>only text</p>")))])
+      w(<<-SCM)
+        (define m (dsl->schema '(schema (element p (complex (choice (element b (type string)) (element i (type string)) (occurs 0 unbounded)) mixed)))))
+        (list (valid? m (xml-read "<p>hello <b>x</b> world <i>y</i></p>"))
+              (valid? m (xml-read "<p>only text</p>")))
+        SCM
         .should eq("(#t #t)")
     end
 
     it "enforces empty content" do
-      w(%[(define e (dsl->schema '(schema (element br (complex empty)))))
-          (list (valid? e (xml-read "<br/>")) (valid? e (xml-read "<br>x</br>")))])
+      w(<<-SCM)
+        (define e (dsl->schema '(schema (element br (complex empty)))))
+        (list (valid? e (xml-read "<br/>")) (valid? e (xml-read "<br>x</br>")))
+        SCM
         .should eq("(#t #f)")
     end
 
     it "accepts any element under a wildcard" do
-      w(%[(define wc (dsl->schema '(schema (element wrap (complex (sequence (any (occurs 0 unbounded))))))))
-          (valid? wc (xml-read "<wrap><anything/><whatever>x</whatever></wrap>"))])
+      w(<<-SCM)
+        (define wc (dsl->schema '(schema (element wrap (complex (sequence (any (occurs 0 unbounded))))))))
+        (valid? wc (xml-read "<wrap><anything/><whatever>x</whatever></wrap>"))
+        SCM
         .should eq("#t")
     end
 
     it "matches xs:all in any order, once each, rejecting dups/missing" do
-      w(%[(define a (dsl->schema '(schema (element rec (complex (all (element head (type string)) (element body (type string))))))))
-          (list (valid? a (xml-read "<rec><head>h</head><body>b</body></rec>"))
-                (valid? a (xml-read "<rec><body>b</body><head>h</head></rec>"))
-                (valid? a (xml-read "<rec><head>h</head><head>h2</head></rec>"))
-                (valid? a (xml-read "<rec><head>h</head></rec>")))])
+      w(<<-SCM)
+        (define a (dsl->schema '(schema (element rec (complex (all (element head (type string)) (element body (type string))))))))
+        (list (valid? a (xml-read "<rec><head>h</head><body>b</body></rec>"))
+              (valid? a (xml-read "<rec><body>b</body><head>h</head></rec>"))
+              (valid? a (xml-read "<rec><head>h</head><head>h2</head></rec>"))
+              (valid? a (xml-read "<rec><head>h</head></rec>")))
+        SCM
         .should eq("(#t #t #f #f)")
     end
 
     it "handles a nested-unbounded model over many children without blowup" do
-      w(%[(define s (dsl->schema '(schema (element r (complex (sequence (sequence (element a (type string) (occurs 0 1)) (occurs 0 unbounded)) (occurs 0 unbounded)))))))
-          (define doc (string-append "<r>" (apply string-append (map (lambda (i) "<a>x</a>") (iota 300))) "</r>"))
-          (valid? s (xml-read doc))])
+      w(<<-SCM)
+        (define s (dsl->schema '(schema (element r (complex (sequence (sequence (element a (type string) (occurs 0 1)) (occurs 0 unbounded)) (occurs 0 unbounded)))))))
+        (define doc (string-append "<r>" (apply string-append (map (lambda (i) "<a>x</a>") (iota 300))) "</r>"))
+        (valid? s (xml-read doc))
+        SCM
         .should eq("#t")
     end
   end
@@ -192,79 +204,95 @@ describe "xml-schema module" do
       SCM
 
     it "validates a document against ELEMENT/ATTLIST declarations" do
-      wd(%[#{dtd} (list
-             (valid? dtd-schema (xml-read "<note id='n1'><to>a</to><from>b</from><body>hi</body><n>x</n></note>"))
-             (valid? dtd-schema (xml-read "<note id='n1'><to>a</to><from>b</from></note>")))])
+      wd(<<-SCM)
+        #{dtd} (list
+               (valid? dtd-schema (xml-read "<note id='n1'><to>a</to><from>b</from><body>hi</body><n>x</n></note>"))
+               (valid? dtd-schema (xml-read "<note id='n1'><to>a</to><from>b</from></note>")))
+        SCM
         .should eq("(#t #t)")
     end
 
     it "reports content-model, required-ID, enumerated and #FIXED violations" do
-      wd(%[#{dtd} (list
-             (map validation-error-kind (validate dtd-schema (xml-read "<note id='n1'><from>b</from><to>a</to></note>")))
-             (map validation-error-kind (validate dtd-schema (xml-read "<note><to>a</to><from>b</from></note>")))
-             (map validation-error-kind (validate dtd-schema (xml-read "<note id='n1' kind='z'><to>a</to><from>b</from></note>")))
-             (map validation-error-kind (validate dtd-schema (xml-read "<note id='n1' ver='2.0'><to>a</to><from>b</from></note>"))))])
+      wd(<<-SCM)
+        #{dtd} (list
+               (map validation-error-kind (validate dtd-schema (xml-read "<note id='n1'><from>b</from><to>a</to></note>")))
+               (map validation-error-kind (validate dtd-schema (xml-read "<note><to>a</to><from>b</from></note>")))
+               (map validation-error-kind (validate dtd-schema (xml-read "<note id='n1' kind='z'><to>a</to><from>b</from></note>")))
+               (map validation-error-kind (validate dtd-schema (xml-read "<note id='n1' ver='2.0'><to>a</to><from>b</from></note>"))))
+        SCM
         .should eq("((content-model) (missing-attribute) (bad-attribute) (bad-attribute))")
     end
 
     it "expands parameter entities inside a mixed content model" do
-      wd(%[(define s (dtd-read (string-append
-              "<!ENTITY % inline \\"b|i\\">"
-              "<!ELEMENT p (#PCDATA|%inline;)*>"
-              "<!ELEMENT b (#PCDATA)> <!ELEMENT i (#PCDATA)>")))
-           (valid? s (xml-read "<p>hi <b>x</b> yo <i>y</i></p>"))])
+      wd(<<-SCM)
+        (define s (dtd-read (string-append
+                "<!ENTITY % inline \\"b|i\\">"
+                "<!ELEMENT p (#PCDATA|%inline;)*>"
+                "<!ELEMENT b (#PCDATA)> <!ELEMENT i (#PCDATA)>")))
+        (valid? s (xml-read "<p>hi <b>x</b> yo <i>y</i></p>"))
+        SCM
         .should eq("#t")
     end
   end
 
   describe "datatypes and facets (validate-simple)" do
     it "validates builtin lexical spaces" do
-      w(%[(map (lambda (p) (null? (validate-simple (car p) (cadr p))))
-               (list (list 'integer "42") (list 'integer "4.5")
-                     (list 'decimal "3.14") (list 'boolean "true") (list 'boolean "yes")
-                     (list 'date "2026-08-08") (list 'date "2026-8-8")
-                     (list 'nonNegativeInteger "0") (list 'nonNegativeInteger "-1")
-                     (list 'NCName "foo-bar") (list 'NCName "a:b")))])
+      w(<<-SCM)
+        (map (lambda (p) (null? (validate-simple (car p) (cadr p))))
+             (list (list 'integer "42") (list 'integer "4.5")
+                   (list 'decimal "3.14") (list 'boolean "true") (list 'boolean "yes")
+                   (list 'date "2026-08-08") (list 'date "2026-8-8")
+                   (list 'nonNegativeInteger "0") (list 'nonNegativeInteger "-1")
+                   (list 'NCName "foo-bar") (list 'NCName "a:b")))
+        SCM
         .should eq("(#t #f #t #t #f #t #f #t #f #t #f)")
     end
 
     it "applies pattern, length, range and enumeration facets" do
-      w(%[(define (mk base facets) (make-simple-type #f 'atomic base facets #f '()))
-          (list
-            (null? (validate-simple (mk 'string (list (make-facet 'pattern "[A-Z]{3}" #f))) "ABC"))
-            (null? (validate-simple (mk 'string (list (make-facet 'pattern "[A-Z]{3}" #f))) "abcd"))
-            (null? (validate-simple (mk 'integer (list (make-facet 'min-inclusive 1 #f) (make-facet 'max-inclusive 10 #f))) "5"))
-            (null? (validate-simple (mk 'integer (list (make-facet 'max-inclusive 10 #f))) "11"))
-            (null? (validate-simple (mk 'string (list (make-facet 'enumeration (list "red" "green") #f))) "blue")))])
+      w(<<-SCM)
+        (define (mk base facets) (make-simple-type #f 'atomic base facets #f '()))
+        (list
+          (null? (validate-simple (mk 'string (list (make-facet 'pattern "[A-Z]{3}" #f))) "ABC"))
+          (null? (validate-simple (mk 'string (list (make-facet 'pattern "[A-Z]{3}" #f))) "abcd"))
+          (null? (validate-simple (mk 'integer (list (make-facet 'min-inclusive 1 #f) (make-facet 'max-inclusive 10 #f))) "5"))
+          (null? (validate-simple (mk 'integer (list (make-facet 'max-inclusive 10 #f))) "11"))
+          (null? (validate-simple (mk 'string (list (make-facet 'enumeration (list "red" "green") #f))) "blue")))
+        SCM
         .should eq("(#t #f #t #f #f)")
     end
 
     it "handles whiteSpace collapse, list and union varieties" do
-      w(%[(list
-            (null? (validate-simple (make-simple-type #f 'atomic 'string
-                     (list (make-facet 'white-space 'collapse #f) (make-facet 'enumeration (list "a b") #f)) #f '())
-                     "   a    b   "))
-            (null? (validate-simple (make-simple-type #f 'list 'string '() 'integer '()) "1 2 3"))
-            (null? (validate-simple (make-simple-type #f 'list 'string '() 'integer '()) "1 x 3"))
-            (null? (validate-simple (make-simple-type #f 'union 'string '() #f (list 'integer 'boolean)) "true")))])
+      w(<<-SCM)
+        (list
+          (null? (validate-simple (make-simple-type #f 'atomic 'string
+                   (list (make-facet 'white-space 'collapse #f) (make-facet 'enumeration (list "a b") #f)) #f '())
+                   "   a    b   "))
+          (null? (validate-simple (make-simple-type #f 'list 'string '() 'integer '()) "1 2 3"))
+          (null? (validate-simple (make-simple-type #f 'list 'string '() 'integer '()) "1 x 3"))
+          (null? (validate-simple (make-simple-type #f 'union 'string '() #f (list 'integer 'boolean)) "true")))
+        SCM
         .should eq("(#t #t #f #t)")
     end
   end
 
   describe "XSD reader" do
     it "validates against anonymous types, facets and simpleContent extension" do
-      wx(%[#{XSD_BOOK} (list
-             (valid? book-xsd (xml-read "<book isbn='x'><title>T</title><author>A1</author><author>A2</author><year>2000</year><price currency='USD'>9.99</price></book>"))
-             (valid? book-xsd (xml-read "<book isbn='x'><title>T</title><author>A</author><year>2000</year></book>")))])
+      wx(<<-SCM)
+        #{XSD_BOOK} (list
+               (valid? book-xsd (xml-read "<book isbn='x'><title>T</title><author>A1</author><author>A2</author><year>2000</year><price currency='USD'>9.99</price></book>"))
+               (valid? book-xsd (xml-read "<book isbn='x'><title>T</title><author>A</author><year>2000</year></book>")))
+        SCM
         .should eq("(#t #t)")
     end
 
     it "reports missing attr, out-of-range facet, bad order and bad decimal" do
-      wx(%[#{XSD_BOOK} (list
-             (map validation-error-kind (validate book-xsd (xml-read "<book><title>T</title><author>A</author><year>2000</year></book>")))
-             (map validation-error-kind (validate book-xsd (xml-read "<book isbn='x'><title>T</title><author>A</author><year>1000</year></book>")))
-             (map validation-error-kind (validate book-xsd (xml-read "<book isbn='x'><author>A</author><title>T</title><year>2000</year></book>")))
-             (map validation-error-kind (validate book-xsd (xml-read "<book isbn='x'><title>T</title><author>A</author><year>2000</year><price currency='USD'>abc</price></book>"))))])
+      wx(<<-SCM)
+        #{XSD_BOOK} (list
+               (map validation-error-kind (validate book-xsd (xml-read "<book><title>T</title><author>A</author><year>2000</year></book>")))
+               (map validation-error-kind (validate book-xsd (xml-read "<book isbn='x'><title>T</title><author>A</author><year>1000</year></book>")))
+               (map validation-error-kind (validate book-xsd (xml-read "<book isbn='x'><author>A</author><title>T</title><year>2000</year></book>")))
+               (map validation-error-kind (validate book-xsd (xml-read "<book isbn='x'><title>T</title><author>A</author><year>2000</year><price currency='USD'>abc</price></book>"))))
+        SCM
         .should eq("((missing-attribute) (datatype) (content-model) (datatype))")
     end
 
@@ -280,75 +308,85 @@ describe "xml-schema module" do
           "    <xs:element name='email' type='xs:string'/><xs:element name='phone' type='xs:string'/></xs:choice></xs:sequence>"
           "  <xs:attributeGroup ref='idattrs'/></xs:extension></xs:complexContent></xs:complexType></xs:element></xs:schema>")))
         SCM
-      wx(%[#{grp} (list
-             (valid? s (xml-read "<person id='p'><id>x</id><first>A</first><last>B</last><email>e</email></person>"))
-             (valid? s (xml-read "<person><id>x</id><first>A</first><last>B</last><email>e</email></person>"))
-             (valid? s (xml-read "<person id='p'><id>x</id><first>A</first><email>e</email></person>")))])
+      wx(<<-SCM)
+        #{grp} (list
+               (valid? s (xml-read "<person id='p'><id>x</id><first>A</first><last>B</last><email>e</email></person>"))
+               (valid? s (xml-read "<person><id>x</id><first>A</first><last>B</last><email>e</email></person>"))
+               (valid? s (xml-read "<person id='p'><id>x</id><first>A</first><email>e</email></person>")))
+        SCM
         .should eq("(#t #f #f)")
     end
 
     it "validates namespaced documents (prefixed and default) via targetNamespace" do
-      wx(%[(define s (xsd-read (string-append
-              "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema' targetNamespace='urn:b'>"
-              "<xs:element name='book'><xs:complexType><xs:sequence>"
-              "<xs:element name='title' type='xs:string'/></xs:sequence></xs:complexType></xs:element></xs:schema>")))
-           (list (valid? s (xml-read "<b:book xmlns:b='urn:b'><b:title>T</b:title></b:book>"))
-                 (valid? s (xml-read "<book xmlns='urn:b'><title>T</title></book>"))
-                 (valid? s (xml-read "<book xmlns='urn:b'><nope>T</nope></book>")))])
+      wx(<<-SCM)
+        (define s (xsd-read (string-append
+                "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema' targetNamespace='urn:b'>"
+                "<xs:element name='book'><xs:complexType><xs:sequence>"
+                "<xs:element name='title' type='xs:string'/></xs:sequence></xs:complexType></xs:element></xs:schema>")))
+        (list (valid? s (xml-read "<b:book xmlns:b='urn:b'><b:title>T</b:title></b:book>"))
+              (valid? s (xml-read "<book xmlns='urn:b'><title>T</title></book>"))
+              (valid? s (xml-read "<book xmlns='urn:b'><nope>T</nope></book>")))
+        SCM
         .should eq("(#t #t #f)")
     end
 
     it "matches substitution-group members" do
-      wx(%[(define s (xsd-read (string-append
-              "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
-              "<xs:element name='contact' type='xs:string'/>"
-              "<xs:element name='email' type='xs:string' substitutionGroup='contact'/>"
-              "<xs:element name='card'><xs:complexType><xs:sequence>"
-              "<xs:element ref='contact'/></xs:sequence></xs:complexType></xs:element></xs:schema>")))
-           (list (valid? s (xml-read "<card><contact>c</contact></card>"))
-                 (valid? s (xml-read "<card><email>e</email></card>"))
-                 (valid? s (xml-read "<card><phone>p</phone></card>")))])
+      wx(<<-SCM)
+        (define s (xsd-read (string-append
+                "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+                "<xs:element name='contact' type='xs:string'/>"
+                "<xs:element name='email' type='xs:string' substitutionGroup='contact'/>"
+                "<xs:element name='card'><xs:complexType><xs:sequence>"
+                "<xs:element ref='contact'/></xs:sequence></xs:complexType></xs:element></xs:schema>")))
+        (list (valid? s (xml-read "<card><contact>c</contact></card>"))
+              (valid? s (xml-read "<card><email>e</email></card>"))
+              (valid? s (xml-read "<card><phone>p</phone></card>")))
+        SCM
         .should eq("(#t #t #f)")
     end
   end
 
   describe "ID/IDREF cross-checks and include" do
     it "enforces ID uniqueness and IDREF resolution (via a DTD)" do
-      wd(%[(define s (dtd-read (string-append
-              "<!ELEMENT root (item*)>"
-              "<!ELEMENT item (#PCDATA)>"
-              "<!ATTLIST item key ID #REQUIRED refs IDREFS #IMPLIED>")))
-           (list
-             (map validation-error-kind (validate s (xml-read "<root><item key='a'/><item key='b' refs='a'/></root>")))
-             (map validation-error-kind (validate s (xml-read "<root><item key='a'/><item key='a'/></root>")))
-             (map validation-error-kind (validate s (xml-read "<root><item key='a' refs='a zzz'/></root>"))))])
+      wd(<<-SCM)
+        (define s (dtd-read (string-append
+                "<!ELEMENT root (item*)>"
+                "<!ELEMENT item (#PCDATA)>"
+                "<!ATTLIST item key ID #REQUIRED refs IDREFS #IMPLIED>")))
+        (list
+          (map validation-error-kind (validate s (xml-read "<root><item key='a'/><item key='b' refs='a'/></root>")))
+          (map validation-error-kind (validate s (xml-read "<root><item key='a'/><item key='a'/></root>")))
+          (map validation-error-kind (validate s (xml-read "<root><item key='a' refs='a zzz'/></root>"))))
+        SCM
         .should eq("(() (id-conflict) (idref-dangling))")
     end
 
     it "merges an included schema through an in-memory resolver" do
-      wx(%[(define types-xsd (string-append
-              "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
-              "<xs:element name='title' type='xs:string'/>"
-              "<xs:complexType name='Money'><xs:simpleContent><xs:extension base='xs:decimal'>"
-              "<xs:attribute name='cur' type='xs:string' use='required'/></xs:extension></xs:simpleContent></xs:complexType>"
-              "</xs:schema>"))
-           (define (resolver loc) types-xsd)
-           (define s (xsd-read (string-append
-              "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
-              "<xs:include schemaLocation='types.xsd'/>"
-              "<xs:element name='book'><xs:complexType><xs:sequence>"
-              "<xs:element ref='title'/><xs:element name='price' type='Money'/>"
-              "</xs:sequence></xs:complexType></xs:element></xs:schema>") resolver))
-           (list (valid? s (xml-read "<book><title>T</title><price cur='USD'>9.99</price></book>"))
-                 (valid? s (xml-read "<book><title>T</title><price cur='USD'>abc</price></book>"))
-                 (valid? s (xml-read "<book><title>T</title><price>9.99</price></book>")))])
+      wx(<<-SCM)
+        (define types-xsd (string-append
+                "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+                "<xs:element name='title' type='xs:string'/>"
+                "<xs:complexType name='Money'><xs:simpleContent><xs:extension base='xs:decimal'>"
+                "<xs:attribute name='cur' type='xs:string' use='required'/></xs:extension></xs:simpleContent></xs:complexType>"
+                "</xs:schema>"))
+        (define (resolver loc) types-xsd)
+        (define s (xsd-read (string-append
+                "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+                "<xs:include schemaLocation='types.xsd'/>"
+                "<xs:element name='book'><xs:complexType><xs:sequence>"
+                "<xs:element ref='title'/><xs:element name='price' type='Money'/>"
+                "</xs:sequence></xs:complexType></xs:element></xs:schema>") resolver))
+        (list (valid? s (xml-read "<book><title>T</title><price cur='USD'>9.99</price></book>"))
+              (valid? s (xml-read "<book><title>T</title><price cur='USD'>abc</price></book>"))
+              (valid? s (xml-read "<book><title>T</title><price>9.99</price></book>")))
+        SCM
         .should eq("(#t #f #f)")
     end
   end
 
   describe "validate/raise" do
     it "returns #t for a valid document" do
-      with_note(%[(validate/raise note-schema (xml-read "<note id='1'><to>a</to><from>b</from></note>"))])
+      with_note(%((validate/raise note-schema (xml-read "<note id='1'><to>a</to><from>b</from></note>"))))
         .should eq("#t")
     end
 

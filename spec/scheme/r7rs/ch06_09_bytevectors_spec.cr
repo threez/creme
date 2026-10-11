@@ -42,14 +42,14 @@ describe "R7RS §6.9 Bytevectors" do
       (define bv (bytevector 1 2 3 4))
       (bytevector-u8-set! bv 1 3)
       (bytevector-u8-ref bv 1)
-    SCM
+      SCM
   end
 
   it "bytevector-copy returns a newly allocated bytevector containing the given byte range" do
     w(<<-SCM).should eq("(3 4)")
       (define bv (bytevector-copy #u8(1 2 3 4 5) 2 4))
       (list (bytevector-u8-ref bv 0) (bytevector-u8-ref bv 1))
-    SCM
+      SCM
   end
 
   it "bytevector-copy! copies a range of bytes from one bytevector into another at a given offset" do
@@ -57,7 +57,7 @@ describe "R7RS §6.9 Bytevectors" do
       (define bv (bytevector 1 2 3 4 5))
       (bytevector-copy! bv 1 (bytevector 10 20 30 40 50) 0 2)
       (list (bytevector-u8-ref bv 0) (bytevector-u8-ref bv 1) (bytevector-u8-ref bv 2) (bytevector-u8-ref bv 3) (bytevector-u8-ref bv 4))
-    SCM
+      SCM
   end
 
   it "bytevector-append returns a newly allocated concatenation of its bytevector arguments" do
@@ -65,7 +65,7 @@ describe "R7RS §6.9 Bytevectors" do
       (define bv (bytevector-append #u8(0 1 2) #u8(3 4 5)))
       (list (bytevector-u8-ref bv 0) (bytevector-u8-ref bv 1) (bytevector-u8-ref bv 2)
             (bytevector-u8-ref bv 3) (bytevector-u8-ref bv 4) (bytevector-u8-ref bv 5))
-    SCM
+      SCM
   end
 
   it "utf8->string/string->utf8 translate between a bytevector and a string via UTF-8" do

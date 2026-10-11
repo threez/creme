@@ -18,25 +18,25 @@ module Creme
   # detected errors surface only when reached" convention.
   def self.record_type_names(form : Cons) : Array(String)?
     parts = Creme.list_to_a(form.cdr)
-    return nil unless parts.size >= 3
+    return unless parts.size >= 3
     type_name_form = parts[0]
     type_name = type_name_form.is_a?(SchemeSym) ? type_name_form.name : type_name_form.write_string
     ctor_spec = Creme.list_to_a(parts[1])
-    return nil if ctor_spec.empty?
+    return if ctor_spec.empty?
     ctor_name = ctor_spec[0]
-    return nil unless ctor_name.is_a?(SchemeSym)
+    return unless ctor_name.is_a?(SchemeSym)
     pred_name = parts[2]
-    return nil unless pred_name.is_a?(SchemeSym)
+    return unless pred_name.is_a?(SchemeSym)
     names = [type_name, ctor_name.name, pred_name.name]
     parts[3..].each do |spec|
       spec_parts = Creme.list_to_a(spec)
-      return nil unless spec_parts.size == 2 || spec_parts.size == 3
+      return unless spec_parts.size == 2 || spec_parts.size == 3
       accessor = spec_parts[1]
-      return nil unless accessor.is_a?(SchemeSym)
+      return unless accessor.is_a?(SchemeSym)
       names << accessor.name
       if spec_parts.size == 3
         mutator = spec_parts[2]
-        return nil unless mutator.is_a?(SchemeSym)
+        return unless mutator.is_a?(SchemeSym)
         names << mutator.name
       end
     end
@@ -173,6 +173,12 @@ module Creme
     # accessor/mutator directly into env, the same way `define` does — this
     # form fully evaluates (no tail position concern, it's a batch of
     # defines), so its HelperFormNode just calls this helper and returns.
+    # One (define-record-type ...) form expands into several closely
+    # related pieces (type descriptor, constructor, predicate, every
+    # accessor/mutator); splitting that single cohesive expansion across
+    # multiple methods would make it harder, not easier, to see that it
+    # implements the R7RS form correctly.
+    # ameba:disable Metrics/CyclomaticComplexity
     def eval_define_record_type(expr : Cons, env : Env) : SchemeValue
       parts = Creme.list_to_a(expr.cdr)
       raise SchemeRuntimeError.new("define-record-type: malformed") unless parts.size >= 3

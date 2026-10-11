@@ -74,7 +74,7 @@ describe "Creme.from_scheme" do
 
   it "distinguishes NIL from #f" do
     Creme.from_scheme(Creme::NIL).should be_nil
-    Creme.from_scheme(Creme::FALSE).should eq(false)
+    Creme.from_scheme(Creme::FALSE).should be_false
   end
 
   it "converts scalars" do
@@ -82,7 +82,7 @@ describe "Creme.from_scheme" do
     Creme.from_scheme(Creme::SchemeFloat.new(1.5)).should eq(1.5)
     Creme.from_scheme(Creme::SchemeStr.new("hi")).should eq("hi")
     Creme.from_scheme(Creme::SchemeChar.new('x')).should eq("x")
-    Creme.from_scheme(Creme::TRUE).should eq(true)
+    Creme.from_scheme(Creme::TRUE).should be_true
   end
 
   it "converts a SchemeVector to an Array, recursively" do

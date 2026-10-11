@@ -91,7 +91,6 @@ module Creme
       case binding
       when Macro             then expand_defmacro(binding, form)
       when SchemeSyntaxRules then expand_syntax_rules(binding, form)
-      else                        nil
       end
     end
   end

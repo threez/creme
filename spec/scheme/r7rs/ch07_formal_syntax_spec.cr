@@ -15,7 +15,7 @@ describe "R7RS §7.1 Formal syntax" do
       (import (scheme read))
       (define p (open-input-string "(+ 2 6)"))
       (list (read p) (+ 2 6))
-    SCM
+      SCM
   end
 
   pending "the formal <body> grammar (§7.1.1) requires all <definition>s to precede every <expression> within a body — this implementation allows a definition to follow an expression in a body without error, e.g. (let () (display \"x\") (define y 1) y) succeeds here instead of being rejected"

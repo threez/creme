@@ -55,7 +55,7 @@ describe "Appendix A Standard Libraries" do
     Dir.mkdir_p(dir)
     begin
       path = File.join(dir, "probe.txt")
-      w(%[(import (scheme file)) (file-exists? "#{path}")]).should eq("#f")
+      w(%((import (scheme file)) (file-exists? "#{path}"))).should eq("#f")
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -80,7 +80,7 @@ describe "Appendix A Standard Libraries" do
         (import (scheme load))
         (load "answer.scm")
         answer
-      SCM
+        SCM
     ensure
       FileUtils.rm_rf(dir)
     end

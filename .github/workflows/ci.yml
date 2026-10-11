@@ -29,6 +29,13 @@ jobs:
       - name: Install shards
         run: shards install
 
+      # ameba 1.7.0 dropped its own postinstall build hook (previously
+      # `shards build -Dpreview_mt`), so a fresh `shards install` no longer
+      # produces lib/ameba/bin/ameba on its own -- build it explicitly so
+      # the Lint step below has a binary to run.
+      - name: Build ameba
+        run: cd lib/ameba && shards build ameba
+
       # Lint/format are static checks independent of OS -- only need to run
       # once, here on Linux, rather than redundantly on every platform.
       - name: Check formatting

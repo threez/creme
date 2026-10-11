@@ -162,10 +162,11 @@ describe "sql module" do
 
   it "csv-import! reports the imported row count" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "a,b\n1,2\n3,4\n5,6\n" }.path
-    w(%[
+    w(<<-SCHEME).should eq("3")
       (let ((conn (sql-open ":memory:")))
         (csv-import! conn "t" #{path.inspect}))
-    ]).should eq("3")
+      SCHEME
+
   ensure
     File.delete?(path) if path
   end
@@ -211,12 +212,12 @@ describe "sql module" do
   it "csv-import! raises when 'types is combined with 'columns" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "eng\t1\n" }.path
     expect_raises(Creme::SchemeRuntimeError, /'types cannot be combined with 'columns/) do
-      run(%[
+      run(<<-SCHEME)
         (csv-import! (sql-open ":memory:") "t" #{path.inspect}
                      'columns (list (cons "dept" "TEXT") (cons "n" "INTEGER"))
                      'types (list (cons "n" "INTEGER"))
                      'separator #\\tab)
-      ])
+        SCHEME
     end
   ensure
     File.delete?(path) if path
@@ -238,10 +239,10 @@ describe "sql module" do
   it "csv-import!'s custom 'create-table's own constraints are actually enforced (not just accepted verbatim)" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,-1\n" }.path
     expect_raises(Creme::SchemeRuntimeError, /CHECK constraint failed/) do
-      run(%[
+      run(<<-SCHEME)
         (csv-import! (sql-open ":memory:") "t" #{path.inspect}
                      'create-table "CREATE TABLE t (dept TEXT NOT NULL, n INTEGER CHECK (n > 0))")
-      ])
+        SCHEME
     end
   ensure
     File.delete?(path) if path
@@ -250,11 +251,11 @@ describe "sql module" do
   it "csv-import! raises when 'types is combined with 'create-table" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "dept,n\neng,1\n" }.path
     expect_raises(Creme::SchemeRuntimeError, /'types cannot be combined with 'create-table/) do
-      run(%[
+      run(<<-SCHEME)
         (csv-import! (sql-open ":memory:") "t" #{path.inspect}
                      'create-table "CREATE TABLE t (dept TEXT, n INTEGER)"
                      'types (list (cons "n" "INTEGER")))
-      ])
+        SCHEME
     end
   ensure
     File.delete?(path) if path
@@ -263,7 +264,7 @@ describe "sql module" do
   it "csv-import! raises on an empty file with no explicit columns" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |_| }.path
     expect_raises(Creme::SchemeRuntimeError, /empty CSV file/) do
-      run(%[(csv-import! (sql-open ":memory:") "t" #{path.inspect})])
+      run(%((csv-import! (sql-open ":memory:") "t" #{path.inspect})))
     end
   ensure
     File.delete?(path) if path
@@ -284,7 +285,7 @@ describe "sql module" do
   it "csv-import! raises on an unknown keyword" do
     path = File.tempfile("csvquery-sql-import", ".csv") { |file| file.print "a\n1\n" }.path
     expect_raises(Creme::SchemeRuntimeError, /unknown keyword/) do
-      run(%[(csv-import! (sql-open ":memory:") "t" #{path.inspect} 'bogus 1)])
+      run(%((csv-import! (sql-open ":memory:") "t" #{path.inspect} 'bogus 1)))
     end
   ensure
     File.delete?(path) if path

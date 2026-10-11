@@ -161,18 +161,22 @@ describe "html module" do
     end
 
     it "matches html! for a fully static template" do
-      w(%((let ((port (open-output-string)))
-            (html-write! port (div (@ (class "x")) (p "hi")))
-            (get-output-string port))))
+      w(<<-SCM)
+        (let ((port (open-output-string)))
+          (html-write! port (div (@ (class "x")) (p "hi")))
+          (get-output-string port))
+        SCM
         .should eq("\"<div class=\\\"x\\\"><p>hi</p></div>\"")
     end
   end
 
   describe "html-document-write! (writing a full document into an existing port)" do
     it "matches html-document->string" do
-      w(%((let ((port (open-output-string)))
-            (html-document-write! port "Report" "body { color: red }" '(h1 "Hi"))
-            (get-output-string port))))
+      w(<<-SCM)
+        (let ((port (open-output-string)))
+          (html-document-write! port "Report" "body { color: red }" '(h1 "Hi"))
+          (get-output-string port))
+        SCM
         .should eq("\"<!DOCTYPE html><html><head><meta charset=\\\"utf-8\\\"><title>Report</title><style>body { color: red }</style></head><body><h1>Hi</h1></body></html>\"")
     end
   end

@@ -6,12 +6,12 @@ end
 
 private def bootstrap_read(interp : Creme::Interpreter, source : String) : String
   interp.global.define("bootstrap-test-source", Creme::SchemeStr.new(source))
-  result = Creme.run_source(interp, <<-SCM)
-  (let ((forms (read-program bootstrap-test-source))
-        (out (open-output-string)))
-    (for-each (lambda (f) (write f out) (write-char #\\newline out)) forms)
-    (get-output-string out))
-  SCM
+  result = Creme.run_source(interp, <<-'SCM')
+    (let ((forms (read-program bootstrap-test-source))
+          (out (open-output-string)))
+      (for-each (lambda (f) (write f out) (write-char #\newline out)) forms)
+      (get-output-string out))
+    SCM
   result.as(Creme::SchemeStr).value
 end
 
@@ -60,11 +60,11 @@ describe "bootstrap-reader module" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     load_reader(interp)
     src = <<-SCM
-    (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
-    ; a comment
-    (define v #(1 2 3))
-    (display (fact 5))
-    SCM
+      (define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+      ; a comment
+      (define v #(1 2 3))
+      (display (fact 5))
+      SCM
     check(interp, src)
   end
 

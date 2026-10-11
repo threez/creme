@@ -267,7 +267,7 @@ module Creme
         candidate = File.join(dir, relative)
         break candidate if File.exists?(candidate)
       end
-      return nil unless path.is_a?(String)
+      return unless path.is_a?(String)
       resolved = File.realpath(path)
 
       raise SchemeRuntimeError.new("import: circular library dependency: (#{SchemeLibrary.library_name_string(name)})") if @libraries_loading.includes?(name)
@@ -337,15 +337,15 @@ module Creme
         candidate = File.join(dir, relative)
         break candidate if File.exists?(candidate)
       end
-      return nil unless path.is_a?(String)
+      return unless path.is_a?(String)
       resolved = File.realpath(path)
 
       forms = Reader.read_all(File.read(resolved), resolved)
-      return nil unless forms.size == 1
+      return unless forms.size == 1
       form = forms[0]
-      return nil unless form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && head.name == "define-library"
+      return unless form.is_a?(Cons) && (head = form.car).is_a?(SchemeSym) && head.name == "define-library"
       parts = Creme.list_to_a(form.cdr)
-      return nil if parts.empty?
+      return if parts.empty?
 
       # An `include`/`include-ci` declaration below resolves its filename
       # relative to the CURRENT top of @load_dirs (read_include_file's own

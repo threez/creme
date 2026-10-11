@@ -200,13 +200,15 @@ describe "BytecodeCompiler + VM" do
     # register up front, in one batch, before compiling any argument's
     # own expression (see bytecode_compiler.cr's compile_app).
     it "keeps later call arguments in their own registers when an earlier, non-leaf argument captures one internally" do
-      w(%((define (full-name n names)
-             (string-append
-               (let loop ((names names))
-                 (if (null? (cdr names)) (car names) (string-append (car names) " > " (loop (cdr names)))))
-               " -- "
-               n))
-           (full-name "leaf" (list "a" "b" "c")))).should eq(%("a > b > c -- leaf"))
+      w(<<-SCM).should eq(%("a > b > c -- leaf"))
+        (define (full-name n names)
+          (string-append
+            (let loop ((names names))
+              (if (null? (cdr names)) (car names) (string-append (car names) " > " (loop (cdr names)))))
+            " -- "
+            n))
+        (full-name "leaf" (list "a" "b" "c"))
+        SCM
     end
   end
 
@@ -345,7 +347,7 @@ describe "BytecodeCompiler + VM" do
           ((4 5) 'four-or-five)
           ((6 7) 'six-or-seven)
           (else 'other))
-      SCM
+        SCM
       w("(define n 0) #{big}").should eq("zero-or-one")  # match on first clause
       w("(define n 7) #{big}").should eq("six-or-seven") # match on last clause
       w("(define n 42) #{big}").should eq("other")       # no match, has else
@@ -353,7 +355,7 @@ describe "BytecodeCompiler + VM" do
       no_else = <<-SCM
         (case n
           ((0 1) 'a) ((2 3) 'b) ((4 5) 'c) ((6 7) 'd))
-      SCM
+        SCM
       w("(define n 42) #{no_else}").should eq("()") # no match, no else -> NIL
     end
 
@@ -366,19 +368,19 @@ describe "BytecodeCompiler + VM" do
     end
 
     it "hash-dispatch: distinguishes datum types that could otherwise collide" do
-      w(<<-SCM
-        (case #\\a
+      w(<<-'SCM'
+        (case #\a
           ((0 1) 'int-zero-or-one)
-          ((#\\a #\\b) 'char-a-or-b)
+          ((#\a #\b) 'char-a-or-b)
           ((foo bar) 'sym)
           ((#t #f) 'bool)
           (else 'none))
         SCM
       ).should eq("char-a-or-b")
-      w(<<-SCM
+      w(<<-'SCM'
         (case #f
           ((0 1) 'int-zero-or-one)
-          ((#\\a #\\b) 'char-a-or-b)
+          ((#\a #\b) 'char-a-or-b)
           ((foo bar) 'sym)
           ((#t #f) 'bool)
           (else 'none))

@@ -73,7 +73,7 @@ describe "R7RS §2.4 Datum labels" do
       (import (scheme read))
       (define x (read (open-input-string "#0=(1 2 . #0#)")))
       (list (car x) (car (cdr x)) (eq? x (cdr (cdr x))))
-    SCM
+      SCM
   end
 
   it "a datum label's scope is only the outermost datum it appears in — reusing the same label number in a later top-level form is not an error" do
@@ -81,6 +81,6 @@ describe "R7RS §2.4 Datum labels" do
       (import (scheme read))
       (define p (open-input-string "#0=a #0=b"))
       (list (read p) (read p))
-    SCM
+      SCM
   end
 end

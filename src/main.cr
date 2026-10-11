@@ -45,99 +45,99 @@ end
 
 def usage : Nil
   puts <<-USAGE
-  creme — a Scheme interpreter (Crystal)
+    creme — a Scheme interpreter (Crystal)
 
-  Usage:
-    creme                        Start the interactive REPL
-    creme <file.scm>             Execute a Scheme source file
-    creme -- <file.scm> [args...]
-                                 Same as `creme <file.scm> [args...]`, but
-                                 guarantees <file.scm> is treated as a
-                                 plain script path even if it happens to
-                                 look like one of creme's own flags below
-                                 (e.g. a script literally named
-                                 "--profile"). Only ever needed for the
-                                 path itself — an ordinary arg like
-                                 "--profile" appearing after the path
-                                 already reaches the script untouched.
-    creme -S | --dump-bytecode [--strict] [--static] <file.scm>
-                                 Compile a script and print its bytecode
-                                 disassembly (one dump per top-level form,
-                                 including nested closures) instead of
-                                 running it. (scheme base)/(scheme write) are
-                                 auto-imported by default (matching the REPL,
-                                 and what a real run of the script would
-                                 fuse) — pass --strict for the plain-R7RS
-                                 behavior of requiring the script's own
-                                 (import ...), e.g. to see exactly what an
-                                 unfused/not-yet-imported form compiles to.
-                                 Pass --static to instead disassemble the
-                                 single whole-program chunk --emit-icecreme
-                                 would produce (library bodies inlined) —
-                                 the emitted-file view, without a temp file
-    creme --disassemble <file.ice>
-                                 Disassemble an ALREADY-COMPILED ICE file
-                                 (e.g. one written by --emit-icecreme, or
-                                 compiled by the self-hosted (creme
-                                 compiler compiler)'s own compile-source-
-                                 to-bytes) — unlike -S/--dump-bytecode
-                                 above, does not recompile from source; it
-                                 reads the file's own raw bytes through the
-                                 exact same deserializer load-chunk-bytes
-                                 and icecreme both use, so what it prints is
-                                 exactly what would actually run
-    creme --profile table <file.scm> [args...]
-                                 Run a script exactly as `creme <file.scm>
-                                 [args...]` would, but with the whole run
-                                 wrapped in (creme bench)'s profiling —
-                                 both of (creme prof)'s samplers (a native
-                                 SIGPROF sampler and the interpreter's own
-                                 cooperative step-counted one), nested in
-                                 one execution the same way (creme bench)'s
-                                 own profile-workload does — printing the
-                                 combined report to stdout right after the
-                                 script naturally finishes (e.g. after a
-                                 server's own (read-line) unblocks). "table"
-                                 is currently the only supported report
-                                 format (a future format, e.g. "html", could
-                                 be added as another value here without
-                                 changing this flag's shape)
-    creme --emit-icecreme <file.scm> <out.ice>
-                                 Compile a script and serialize its bytecode
-                                 to <out.ice> for the standalone C11
-                                 prototype VM in icecreme/ (see icecreme/README.md) —
-                                 a narrow experiment, not a general target;
-                                 currently only bench/creme.scm is verified
-                                 to work with it.
-    creme --icecreme <file.scm>
-                                 Shorthand for --emit-icecreme to a throwaway
-                                 file followed by `icecreme/icecreme <that file>` —
-                                 compiles <file.scm> and runs it under the
-                                 standalone C prototype VM in one step,
-                                 cleaning up the intermediate .ice file
-                                 afterward. Must be run from the repo root
-                                 with icecreme/icecreme already built (`make -C icecreme`),
-                                 matching bench/bench.scm's own convention
-                                 for locating it.
-    creme --profile --icecreme <file.scm>
-                                 Same as --icecreme above, but runs
-                                 `icecreme/icecreme --profile <that file>` (see
-                                 icecreme/README.md's "Profiling" section)
-                                 instead of a plain run.
-    creme --self-hosted <file.scm>
-                                 Run <file.scm> exactly like plain `creme
-                                 <file.scm>`, but compiled by the self-
-                                 hosted Scheme-to-bytecode compiler
-                                 ((creme compiler compiler), see modules/
-                                 creme/compiler/compiler.sld) instead of
-                                 the native Crystal BytecodeCompiler, then
-                                 run on the SAME real Crystal VM either
-                                 way — an opt-in way to exercise/benchmark
-                                 the self-hosted compiler on a real script
-                                 without it being the interpreter's
-                                 default execution path.
-    creme --help | -h            Show this help
-  USAGE
+    Usage:
+      creme                        Start the interactive REPL
+      creme <file.scm>             Execute a Scheme source file
+      creme -- <file.scm> [args...]
+                                   Same as `creme <file.scm> [args...]`, but
+                                   guarantees <file.scm> is treated as a
+                                   plain script path even if it happens to
+                                   look like one of creme's own flags below
+                                   (e.g. a script literally named
+                                   "--profile"). Only ever needed for the
+                                   path itself — an ordinary arg like
+                                   "--profile" appearing after the path
+                                   already reaches the script untouched.
+      creme -S | --dump-bytecode [--strict] [--static] <file.scm>
+                                   Compile a script and print its bytecode
+                                   disassembly (one dump per top-level form,
+                                   including nested closures) instead of
+                                   running it. (scheme base)/(scheme write) are
+                                   auto-imported by default (matching the REPL,
+                                   and what a real run of the script would
+                                   fuse) — pass --strict for the plain-R7RS
+                                   behavior of requiring the script's own
+                                   (import ...), e.g. to see exactly what an
+                                   unfused/not-yet-imported form compiles to.
+                                   Pass --static to instead disassemble the
+                                   single whole-program chunk --emit-icecreme
+                                   would produce (library bodies inlined) —
+                                   the emitted-file view, without a temp file
+      creme --disassemble <file.ice>
+                                   Disassemble an ALREADY-COMPILED ICE file
+                                   (e.g. one written by --emit-icecreme, or
+                                   compiled by the self-hosted (creme
+                                   compiler compiler)'s own compile-source-
+                                   to-bytes) — unlike -S/--dump-bytecode
+                                   above, does not recompile from source; it
+                                   reads the file's own raw bytes through the
+                                   exact same deserializer load-chunk-bytes
+                                   and icecreme both use, so what it prints is
+                                   exactly what would actually run
+      creme --profile table <file.scm> [args...]
+                                   Run a script exactly as `creme <file.scm>
+                                   [args...]` would, but with the whole run
+                                   wrapped in (creme bench)'s profiling —
+                                   both of (creme prof)'s samplers (a native
+                                   SIGPROF sampler and the interpreter's own
+                                   cooperative step-counted one), nested in
+                                   one execution the same way (creme bench)'s
+                                   own profile-workload does — printing the
+                                   combined report to stdout right after the
+                                   script naturally finishes (e.g. after a
+                                   server's own (read-line) unblocks). "table"
+                                   is currently the only supported report
+                                   format (a future format, e.g. "html", could
+                                   be added as another value here without
+                                   changing this flag's shape)
+      creme --emit-icecreme <file.scm> <out.ice>
+                                   Compile a script and serialize its bytecode
+                                   to <out.ice> for the standalone C11
+                                   prototype VM in icecreme/ (see icecreme/README.md) —
+                                   a narrow experiment, not a general target;
+                                   currently only bench/creme.scm is verified
+                                   to work with it.
+      creme --icecreme <file.scm>
+                                   Shorthand for --emit-icecreme to a throwaway
+                                   file followed by `icecreme/icecreme <that file>` —
+                                   compiles <file.scm> and runs it under the
+                                   standalone C prototype VM in one step,
+                                   cleaning up the intermediate .ice file
+                                   afterward. Must be run from the repo root
+                                   with icecreme/icecreme already built (`make -C icecreme`),
+                                   matching bench/bench.scm's own convention
+                                   for locating it.
+      creme --profile --icecreme <file.scm>
+                                   Same as --icecreme above, but runs
+                                   `icecreme/icecreme --profile <that file>` (see
+                                   icecreme/README.md's "Profiling" section)
+                                   instead of a plain run.
+      creme --self-hosted <file.scm>
+                                   Run <file.scm> exactly like plain `creme
+                                   <file.scm>`, but compiled by the self-
+                                   hosted Scheme-to-bytecode compiler
+                                   ((creme compiler compiler), see modules/
+                                   creme/compiler/compiler.sld) instead of
+                                   the native Crystal BytecodeCompiler, then
+                                   run on the SAME real Crystal VM either
+                                   way — an opt-in way to exercise/benchmark
+                                   the self-hosted compiler on a real script
+                                   without it being the interpreter's
+                                   default execution path.
+      creme --help | -h            Show this help
+    USAGE
 end
 
 # Compiles and runs each top-level form of `path`, printing its bytecode
@@ -214,11 +214,13 @@ end
 # (sql/sxql/mux/...) can still raise "unknown builtin" here — a real,
 # accepted limitation of disassembling a file with no record of its own
 # original import list, not a bug.
-KITCHEN_SINK_IMPORT = %((import (scheme base) (scheme write) (scheme cxr) (scheme complex)
-                                 (scheme inexact) (scheme char) (scheme lazy) (scheme eval)
-                                 (scheme time) (scheme process-context) (scheme file)
-                                 (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
-                                 (creme compiler reader) (creme compiler compiler)))
+KITCHEN_SINK_IMPORT = <<-SCM
+  (import (scheme base) (scheme write) (scheme cxr) (scheme complex)
+          (scheme inexact) (scheme char) (scheme lazy) (scheme eval)
+          (scheme time) (scheme process-context) (scheme file)
+          (creme peg) (creme regex) (creme bytecode) (creme bootstrap)
+          (creme compiler reader) (creme compiler compiler))
+  SCM
 
 def disassemble_ice1(path : String) : Nil
   bytes = File.read(path).to_slice
@@ -513,11 +515,12 @@ SELF_HOSTED_TOOLCHAIN_IMPORT = %((import (scheme lazy) (scheme eval) (scheme cxr
 # original, natively-loaded generation. (scheme lazy)/(scheme eval)/
 # (scheme cxr)/(creme bootstrap)/(creme regex) need no entry -- none has
 # a .sld file on disk, so the loader already no-ops for them regardless.
-SELF_HOSTED_TOOLCHAIN_MARK_LOADED = %(
+SELF_HOSTED_TOOLCHAIN_MARK_LOADED = <<-SCM
   (mark-self-hosted-library-loaded! '(creme peg))
   (mark-self-hosted-library-loaded! '(creme bytecode))
   (mark-self-hosted-library-loaded! '(creme compiler reader))
-  (mark-self-hosted-library-loaded! '(creme compiler compiler)))
+  (mark-self-hosted-library-loaded! '(creme compiler compiler))
+  SCM
 
 # Runs `path` through the self-hosted (creme compiler compiler) instead
 # of the native Crystal BytecodeCompiler run_script/Creme.run_file uses —

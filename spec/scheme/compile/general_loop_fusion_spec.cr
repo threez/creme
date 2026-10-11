@@ -53,7 +53,7 @@ describe "general (non-counted) loop closure elimination" do
                 (else (scan (cdr entries))))))
       (define al (make-alist 20))
       (list (assoc-scan 5 al) (assoc-scan 19 al) (assoc-scan 999 al))
-    SCM
+      SCM
   end
 
   it "no longer allocates a nested Closure for that motivating shape" do
@@ -63,7 +63,7 @@ describe "general (non-counted) loop closure elimination" do
           (cond ((null? entries) 0)
                 ((= (caar entries) k) (cdar entries))
                 (else (scan (cdr entries))))))
-    SCM
+      SCM
     chunk.protos.should be_empty
     chunk.instructions.none? { |i| i.op == Creme::Op::Closure }.should be_true
   end
@@ -74,7 +74,7 @@ describe "general (non-counted) loop closure elimination" do
         (let loop ((l lst) (n 0))
           (if (null? l) n (loop (cdr l) (+ n 1)))))
       (count-list '(a b c d e))
-    SCM
+      SCM
   end
 
   it "no longer allocates a nested Closure for the no-accumulator shape" do
@@ -82,7 +82,7 @@ describe "general (non-counted) loop closure elimination" do
       (define (count-list lst)
         (let loop ((l lst) (n 0))
           (if (null? l) n (loop (cdr l) (+ n 1)))))
-    SCM
+      SCM
     chunk.protos.should be_empty
     chunk.instructions.none? { |i| i.op == Creme::Op::Closure }.should be_true
   end
@@ -97,7 +97,7 @@ describe "general (non-counted) loop closure elimination" do
                   (loop (cdr l) (cons (car l) evens) odds)
                   (loop (cdr l) evens (cons (car l) odds))))))
       (split-evens-odds '(1 2 3 4 5 6 7 8 9 10))
-    SCM
+      SCM
   end
 
   it "computes correctly when step expressions cross-reference each other's OLD values (needs_temp path)" do
@@ -106,7 +106,7 @@ describe "general (non-counted) loop closure elimination" do
         (let loop ((l lst) (a a) (b b))
           (if (null? l) (list a b) (loop (cdr l) b a))))
       (swap-walk '(x y z) 'first 'second)
-    SCM
+      SCM
   end
 
   it "computes correctly with an early return in the recurse-in-conseq position" do
@@ -117,7 +117,7 @@ describe "general (non-counted) loop closure elimination" do
               #f
               (if (pred (car l)) (car l) (loop (cdr l))))))
       (list (find-first even? '(1 3 5 6 7)) (find-first even? '(1 3 5 7)))
-    SCM
+      SCM
   end
 
   it "still gives each closure captured inside the loop its own binding (escape check isn't over-eager)" do
@@ -128,7 +128,7 @@ describe "general (non-counted) loop closure elimination" do
               (lambda () acc)
               (loop (+ i 1) (cons (lambda () i) acc)))))
       (map (lambda (f) (f)) ((make-escaping-loop 5)))
-    SCM
+      SCM
   end
 
   it "the escaping-loop shape still allocates a real Closure (the escape check correctly declines)" do
@@ -138,7 +138,7 @@ describe "general (non-counted) loop closure elimination" do
           (if (= i n)
               (lambda () acc)
               (loop (+ i 1) (cons (lambda () i) acc)))))
-    SCM
+      SCM
     chunk.instructions.any? { |i| i.op == Creme::Op::Closure }.should be_true
   end
 
@@ -148,7 +148,7 @@ describe "general (non-counted) loop closure elimination" do
         (do ((l lst (cdr l)) (n 0 (+ n 1)))
             ((null? l) n)))
       (count-list-do '(a b c d e f))
-    SCM
+      SCM
   end
 
   it "no longer allocates a nested Closure for the do-loop shape" do
@@ -156,7 +156,7 @@ describe "general (non-counted) loop closure elimination" do
       (define (count-list-do lst)
         (do ((l lst (cdr l)) (n 0 (+ n 1)))
             ((null? l) n)))
-    SCM
+      SCM
     chunk.protos.should be_empty
     chunk.instructions.none? { |i| i.op == Creme::Op::Closure }.should be_true
   end
@@ -166,6 +166,6 @@ describe "general (non-counted) loop closure elimination" do
       (define (build-chain n) (let loop ((i 0) (acc '())) (if (= i n) acc (loop (+ i 1) (cons i acc)))))
       (define (sum-via-cdr-walk lst) (let loop ((l lst) (acc 0)) (if (null? l) acc (loop (cdr l) (+ acc (car l))))))
       (sum-via-cdr-walk (build-chain 1000))
-    SCM
+      SCM
   end
 end

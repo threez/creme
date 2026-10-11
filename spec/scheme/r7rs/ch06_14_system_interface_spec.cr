@@ -22,7 +22,7 @@ describe "R7RS §6.14 System interface" do
         (import (scheme load))
         (load "triple.scm")
         (triple 5)
-      SCM
+        SCM
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -43,7 +43,7 @@ describe "R7RS §6.14 System interface" do
         (define after-write (file-exists? path))
         (delete-file path)
         (list before after-write (file-exists? path))
-      SCM
+        SCM
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -61,7 +61,7 @@ describe "R7RS §6.14 System interface" do
   end
 
   it "get-environment-variable returns #f for a name that is not set" do
-    w(%[(import (scheme process-context)) (get-environment-variable "NONEXISTENT_VAR_XYZ")]).should eq("#f")
+    w(%((import (scheme process-context)) (get-environment-variable "NONEXISTENT_VAR_XYZ"))).should eq("#f")
   end
 
   it "get-environment-variables returns an alist of all environment variable name/value pairs" do

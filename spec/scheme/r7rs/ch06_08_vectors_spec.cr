@@ -35,7 +35,7 @@ describe "R7RS §6.8 Vectors" do
       (define vec (vector 0 '(2 2 2) "Anna"))
       (vector-set! vec 1 '("Sue" "Sue"))
       vec
-    SCM
+      SCM
   end
 
   it "vector->list/list->vector convert between a vector and a list, preserving order, with optional start" do
@@ -45,7 +45,7 @@ describe "R7RS §6.8 Vectors" do
 
   it "vector->string/string->vector convert between a vector of characters and a string" do
     w("(vector->string #(#\\1 #\\2 #\\3))").should eq(%("123"))
-    w(%[(string->vector "ABC")]).should eq("#(#\\A #\\B #\\C)")
+    w(%((string->vector "ABC"))).should eq("#(#\\A #\\B #\\C)")
   end
 
   it "vector-copy returns a newly allocated copy of the given range" do
@@ -58,7 +58,7 @@ describe "R7RS §6.8 Vectors" do
       (define b (vector 10 20 30 40 50))
       (vector-copy! b 1 a 0 2)
       b
-    SCM
+      SCM
   end
 
   it "vector-append returns a newly allocated concatenation of its vector arguments" do
@@ -79,6 +79,6 @@ describe "R7RS §6.8 Vectors" do
       (define v (make-vector 5))
       (vector-for-each (lambda (i) (vector-set! v i (* i i))) #(0 1 2 3 4))
       v
-    SCM
+      SCM
   end
 end

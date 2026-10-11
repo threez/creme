@@ -36,7 +36,7 @@ describe "R7RS §6.1 Equivalence predicates (eqv?)" do
         (let ((n 0)) (lambda () (set! n (+ n 1)) n)))
       (define g (gen-counter))
       (eqv? g g)
-    SCM
+      SCM
     w("(define (gen-counter) (let ((n 0)) (lambda () (set! n (+ n 1)) n))) (eqv? (gen-counter) (gen-counter))").should eq("#f")
   end
 
@@ -61,7 +61,7 @@ describe "R7RS §6.1 Equivalence predicates (equal?)" do
   it "recursively compares pairs/vectors/strings/bytevectors as ordered trees" do
     w("(equal? 'a 'a)").should eq("#t")
     w("(equal? '(a (b) c) '(a (b) c))").should eq("#t")
-    w(%[(equal? "abc" "abc")]).should eq("#t")
+    w(%((equal? "abc" "abc"))).should eq("#t")
     w("(equal? 2 2)").should eq("#t")
     w("(equal? (make-vector 5 'a) (make-vector 5 'a))").should eq("#t")
   end
@@ -78,7 +78,7 @@ describe "R7RS §6.1 Equivalence predicates (equal?)" do
       (define b (list 1 2))
       (set-cdr! (cdr b) b)
       (equal? a b)
-    SCM
+      SCM
   end
 
   it "terminates on circular structures with differing content, correctly comparing them unequal" do
@@ -88,6 +88,6 @@ describe "R7RS §6.1 Equivalence predicates (equal?)" do
       (define b (list 1 3))
       (set-cdr! (cdr b) b)
       (equal? a b)
-    SCM
+      SCM
   end
 end

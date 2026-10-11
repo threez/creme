@@ -85,7 +85,7 @@ describe "R7RS §6.4 Pairs and lists" do
   end
 
   it "member accepts an optional third comparison-predicate argument" do
-    w(%[(import (scheme char)) (member "B" '("a" "b" "c") string-ci=?)]).should eq(%(("b" "c")))
+    w(%((import (scheme char)) (member "B" '("a" "b" "c") string-ci=?))).should eq(%(("b" "c")))
   end
 
   it "assq/assv/assoc find the first pair in an alist whose car matches obj" do

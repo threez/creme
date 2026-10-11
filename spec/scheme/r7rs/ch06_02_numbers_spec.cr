@@ -176,6 +176,6 @@ describe "R7RS §6.2.7 Numerical input and output" do
   end
 
   it "string->number returns #f on a string that is not a syntactically valid number" do
-    w(%[(string->number "not-a-number")]).should eq("#f")
+    w(%((string->number "not-a-number"))).should eq("#f")
   end
 end

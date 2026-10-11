@@ -36,7 +36,6 @@ module Creme::Builtins::JsonLibrary
     elems.all? { |e| e.is_a?(Cons) && e.car.is_a?(SchemeStr) }
   end
 
-  # ameba:disable Metrics/CyclomaticComplexity
   private def json_write(v : SchemeValue, json : JSON::Builder, who : String) : Nil
     case v
     when SchemeNil

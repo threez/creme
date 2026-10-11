@@ -69,7 +69,7 @@ describe "R7RS §5.3 Variable definitions" do
         (define foo (lambda (y) (bar x y)))
         (define bar (lambda (a b) (+ (* a b) a)))
         (foo (+ x 3)))
-    SCM
+      SCM
   end
 end
 
@@ -84,7 +84,7 @@ describe "R7RS §5.4 Syntax definitions" do
       (define y 2)
       (swap! x y)
       (list x y)
-    SCM
+      SCM
   end
 
   it "an internal syntax definition is local to the body it's defined in" do
@@ -93,7 +93,7 @@ describe "R7RS §5.4 Syntax definitions" do
       (let ()
         (define-syntax double (syntax-rules () ((double e) (* 2 e))))
         (+ (double 3) 1))
-    SCM
+      SCM
   end
 end
 
@@ -109,7 +109,7 @@ describe "R7RS §5.5 Record-type definitions (define-record-type)" do
       (define k (kons 1 2))
       (set-kar! k 3)
       (list (pare? k) (pare? (cons 1 2)) 1 2 (kar k))
-    SCM
+      SCM
   end
 
   it "each define-record-type use creates a new, distinct record type even with the same field names" do
@@ -118,7 +118,7 @@ describe "R7RS §5.5 Record-type definitions (define-record-type)" do
       (define-record-type point (make-point x y) point? (x point-x) (y point-y))
       (define-record-type point2 (make-point2 x y) point2? (x point2-x) (y point2-y))
       (point? (make-point2 1 2))
-    SCM
+      SCM
   end
 end
 
@@ -131,7 +131,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
         (begin (define (triple x) (* x 3))))
       (import (test triple-lib))
       (triple 2)
-    SCM
+      SCM
   end
 
   it "export supports (rename internal external) to expose a binding under a different external name" do
@@ -142,7 +142,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
         (begin (define (internal-add a b) (+ a b))))
       (import (test rename-lib))
       (public-add 2 3)
-    SCM
+      SCM
   end
 
   it "a library body sees only what it explicitly imports, not the importer's own bindings" do
@@ -154,7 +154,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
           (begin (define (broken) (+ 1 2))))
         (import (test no-implicit-base))
         (broken)
-      SCM
+        SCM
     end
   end
 
@@ -172,7 +172,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
           (include "triple.scm"))
         (import (test include-lib))
         (triple 2)
-      SCM
+        SCM
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -192,7 +192,7 @@ describe "R7RS §5.6 Libraries (define-library)" do
           (include-ci "quad.scm"))
         (import (test include-ci-lib))
         (quadruple 2)
-      SCM
+        SCM
     ensure
       FileUtils.rm_rf(dir)
     end
@@ -208,6 +208,6 @@ describe "R7RS §5.6 Libraries (define-library)" do
           (else (begin (define (foo) 'no)))))
       (import (test cond-expand-lib))
       (foo)
-    SCM
+      SCM
   end
 end

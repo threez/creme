@@ -21,11 +21,8 @@ class Todo < Granite::Base
   connection sqlite
   table todos
 
-  # ameba:disable Lint/UselessAssign
   column id : Int64, primary: true
-  # ameba:disable Lint/UselessAssign
   column title : String
-  # ameba:disable Lint/UselessAssign
   column done : Bool = false
 end
 

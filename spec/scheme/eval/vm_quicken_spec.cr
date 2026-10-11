@@ -51,7 +51,7 @@ describe "native VM call-site quickening (Op::QCallGlobal*)" do
       (define (loop-add n acc) (if (= n 0) acc (loop-add (- n 1) (+ acc n))))
       (set! + real+)
       (loop-add 100000 0)
-    SCM
+      SCM
   end
 
   it "computes -/*/cons/car/cdr correctly across many repeated calls" do
@@ -78,7 +78,7 @@ describe "native VM call-site quickening (Op::QCallGlobal*)" do
 
       (define built (loop-cons 5 '()))
       (list (loop-sub 1000 0) (loop-mul 1000 1) built (car (pick-car built)) (car (pick-cdr built)))
-    SCM
+      SCM
   end
 
   it "deopts a quickened + call site to a runtime redefinition, and re-quickens once restored" do
@@ -92,7 +92,7 @@ describe "native VM call-site quickening (Op::QCallGlobal*)" do
       (define shadowed-result (loop-add 1 0))
       (set! + real+)
       (list shadowed-result (loop-add 5 0))
-    SCM
+      SCM
   end
 
   it "deopts a quickened car call site to a runtime redefinition, and re-quickens once restored" do
@@ -106,7 +106,7 @@ describe "native VM call-site quickening (Op::QCallGlobal*)" do
       (define shadowed-result (pick-car (cons 9 8)))
       (set! car real-car)
       (list shadowed-result (pick-car (cons 9 8)))
-    SCM
+      SCM
   end
 
   it "deopts a quickened cons call site to redefinition with a genuine Scheme closure (not another builtin), and re-quickens once restored" do
@@ -120,7 +120,7 @@ describe "native VM call-site quickening (Op::QCallGlobal*)" do
       (define shadowed-result (loop-cons 1 '()))
       (set! cons real-cons)
       (list shadowed-result (loop-cons 1 '()))
-    SCM
+      SCM
   end
 
   it "still raises on a wrong-type argument, both before and after the call site has quickened" do
@@ -134,6 +134,6 @@ describe "native VM call-site quickening (Op::QCallGlobal*)" do
       (safe-car (cons 3 4))
       (define second-try (safe-car 5))
       (list first-try second-try)
-    SCM
+      SCM
   end
 end

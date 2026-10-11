@@ -28,7 +28,7 @@ describe "env module" do
     ENV[key] = "present"
     begin
       interp = Creme::Interpreter.new(library_search_path: ["./modules"])
-      result = Creme.run_source(interp, %[(import (creme env)) (assoc "#{key}" (get-environment-variables))])
+      result = Creme.run_source(interp, %((import (creme env)) (assoc "#{key}" (get-environment-variables))))
       result.should be_a(Creme::Cons)
       result.as(Creme::Cons).cdr.as(Creme::SchemeStr).value.should eq("present")
     ensure

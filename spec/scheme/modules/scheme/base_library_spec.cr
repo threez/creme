@@ -38,7 +38,7 @@ describe "(scheme base)" do
         (begin (define (triple x) (* x 3))))
       (import (test uses-base))
       (triple 2)
-    SCM
+      SCM
   end
 end
 
@@ -46,7 +46,7 @@ describe "(scheme write)" do
   it "display/write are auto-imported: work with zero import lines" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.stdout = out = IO::Memory.new
-    Creme.run_source(interp, %[(display "hi") (write "hi")])
+    Creme.run_source(interp, %((display "hi") (write "hi")))
     out.to_s.should eq(%(hi"hi"))
   end
 
@@ -60,7 +60,7 @@ describe "(scheme write)" do
   it "explicitly importing (scheme write) is a harmless no-op" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     interp.stdout = out = IO::Memory.new
-    Creme.run_source(interp, %[(import (scheme write)) (display "ok")])
+    Creme.run_source(interp, %((import (scheme write)) (display "ok")))
     out.to_s.should eq("ok")
   end
 end

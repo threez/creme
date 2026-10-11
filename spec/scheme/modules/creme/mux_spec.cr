@@ -33,7 +33,7 @@ describe "mux module" do
       (define post-result (http-post (string-append base-url "/echo") "payload"))
       (mux-close! server)
       (list get-result post-result)
-    SCM
+      SCM
 
     pair = Creme.list_to_a(result)
     get_alist = Creme.list_to_a(pair[0]).map { |cons| cons.as(Creme::Cons) }
@@ -57,7 +57,7 @@ describe "mux module" do
       (define result (cdr (assoc "status" (http-get (string-append base-url "/nope")))))
       (mux-close! server)
       result
-    SCM
+      SCM
 
     result = run(<<-SCM)
       (define router (mux-router))
@@ -67,7 +67,7 @@ describe "mux module" do
       (define response (http-get (string-append base-url "/boom")))
       (mux-close! server)
       response
-    SCM
+      SCM
     alist = Creme.list_to_a(result).map { |cons| cons.as(Creme::Cons) }
     alist.find! { |cons| cons.car.as(Creme::SchemeStr).value == "status" }.cdr.write_string.should eq("500")
   end
@@ -80,7 +80,7 @@ describe "mux module" do
       (define port (cdr (assoc "port" addr)))
       (mux-close! server)
       (and (string? (cdr (assoc "host" addr))) (integer? port) (> port 0))
-    SCM
+      SCM
   end
 
   it "recognizes mux-router?" do

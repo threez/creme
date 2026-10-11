@@ -182,7 +182,7 @@ describe "treelist module" do
               (treelist-ref big 2500)
               (treelist-ref big 4999)
               (treelist-length big))
-      SCM
+        SCM
     end
 
     it "concatenates two large treelists correctly" do
@@ -196,7 +196,7 @@ describe "treelist module" do
               (treelist-ref c 2999)
               (treelist-ref c 3000)
               (treelist-ref c 5999))
-      SCM
+        SCM
     end
 
     it "take/drop then append reconstructs a large treelist" do
@@ -205,7 +205,7 @@ describe "treelist module" do
                       (let loop ((i 0) (acc '()))
                         (if (= i 2000) (reverse acc) (loop (+ i 1) (cons i acc))))))
         (equal? src (treelist-append (treelist-take src 777) (treelist-drop src 777)))
-      SCM
+        SCM
     end
   end
 end

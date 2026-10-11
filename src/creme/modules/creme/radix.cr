@@ -39,7 +39,7 @@ module Creme
 
     def match(path : String) : {SchemeValue, Hash(String, String)}?
       result = @tree.find(path)
-      return nil unless result.found?
+      return unless result.found?
       {result.payload, result.params}
     end
 

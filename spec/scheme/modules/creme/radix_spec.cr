@@ -21,7 +21,7 @@ describe "radix module" do
         (define t (radix-tree))
         (radix-tree-set! t "/hello" 'greeting)
         (cons (radix-tree-ref t "/hello") (radix-tree-count t))
-      SCM
+        SCM
       w(%((radix-tree-ref (radix-tree) "/nope"))).should eq("#f")
     end
 
@@ -31,7 +31,7 @@ describe "radix module" do
         (radix-tree-set! t "/hello" 'first)
         (radix-tree-set! t "/hello" 'second)
         (cons (radix-tree-ref t "/hello") (radix-tree-count t))
-      SCM
+        SCM
     end
   end
 
@@ -42,7 +42,7 @@ describe "radix module" do
         (radix-tree-set! t "/users/:id" 'user-by-id)
         (define result (radix-tree-match t "/users/42"))
         (cons (car result) (cdr (assoc "id" (cdr result))))
-      SCM
+        SCM
     end
 
     it "captures multiple named params in one path" do
@@ -51,7 +51,7 @@ describe "radix module" do
         (radix-tree-set! t "/orgs/:org/repos/:repo" 'repo-page)
         (define result (radix-tree-match t "/orgs/threez/repos/creme"))
         (cons (cdr (assoc "org" (cdr result))) (cdr (assoc "repo" (cdr result))))
-      SCM
+        SCM
     end
   end
 
@@ -61,7 +61,7 @@ describe "radix module" do
         (define t (radix-tree))
         (radix-tree-set! t "/files/*path" 'file-catchall)
         (cdr (assoc "path" (cdr (radix-tree-match t "/files/a/b/c.txt"))))
-      SCM
+        SCM
     end
   end
 
@@ -72,7 +72,7 @@ describe "radix module" do
         (radix-tree-set! t "/users/:id" 'user-by-id)
         (radix-tree-set! t "/users/me" 'current-user)
         (cons (radix-tree-ref t "/users/me") (radix-tree-ref t "/users/42"))
-      SCM
+        SCM
     end
 
     it "a :name route wins over an overlapping *name route regardless of registration order" do
@@ -81,7 +81,7 @@ describe "radix module" do
         (radix-tree-set! t "/files/*rest" 'file-catchall)
         (radix-tree-set! t "/files/:name" 'single-file)
         (cons (radix-tree-ref t "/files/report.pdf") (radix-tree-ref t "/files/a/b/c.txt"))
-      SCM
+        SCM
     end
   end
 
@@ -92,16 +92,16 @@ describe "radix module" do
         (define deep "/a/b/c/d/e/f/g/h/i/j/k/l")
         (radix-tree-set! t deep 'deep-route)
         (radix-tree-ref t deep)
-      SCM
+        SCM
     end
 
     it "matches a segment longer than the old 64-byte cap" do
-      w(<<-SCM).should eq("long-route")
+      w(<<-'SCM').should eq("long-route")
         (define t (radix-tree))
-        (define pattern (string-append "/" (make-string 200 #\\a)))
+        (define pattern (string-append "/" (make-string 200 #\a)))
         (radix-tree-set! t pattern 'long-route)
         (radix-tree-ref t pattern)
-      SCM
+        SCM
     end
   end
 
@@ -111,7 +111,7 @@ describe "radix module" do
         (define t (radix-tree))
         (radix-tree-set! t "/hello" 'greeting)
         (cons (radix-tree-ref t "/goodbye") (radix-tree-match t "/goodbye"))
-      SCM
+        SCM
     end
   end
 end

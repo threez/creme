@@ -139,6 +139,9 @@ module Creme::Builtins::PKeyLibrary
   def pem_to_pkey(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     pem = string_arg(args[0], "pem->pkey")
 
+    # `rsa` IS used below, in the nested begin/ensure's RSA_free(rsa) call;
+    # ameba's usage analysis doesn't see through that ensure block.
+    # ameba:disable Lint/UselessAssign
     if rsa = pem_try_rsa_private(pem)
       begin
         return pkey_box(PKeyHandle.new(PKeyKind::Rsa, true, pem))
@@ -146,6 +149,7 @@ module Creme::Builtins::PKeyLibrary
         LibCryptoJose.RSA_free(rsa)
       end
     end
+    # ameba:disable Lint/UselessAssign -- see the identical case just above.
     if rsa = pem_try_rsa_public(pem)
       begin
         return pkey_box(PKeyHandle.new(PKeyKind::Rsa, false, pem))
@@ -153,6 +157,9 @@ module Creme::Builtins::PKeyLibrary
         LibCryptoJose.RSA_free(rsa)
       end
     end
+    # `ec` IS used below, in the nested begin/ensure's ec_key_free(ec) call;
+    # ameba's usage analysis doesn't see through that ensure block.
+    # ameba:disable Lint/UselessAssign
     if ec = pem_try_ec_private(pem)
       begin
         return pkey_box(PKeyHandle.new(PKeyKind::Ec, true, pem))
@@ -160,6 +167,7 @@ module Creme::Builtins::PKeyLibrary
         LibCrypto.ec_key_free(ec)
       end
     end
+    # ameba:disable Lint/UselessAssign -- see the identical case just above.
     if ec = pem_try_ec_public(pem)
       begin
         return pkey_box(PKeyHandle.new(PKeyKind::Ec, false, pem))
@@ -285,7 +293,7 @@ module Creme::Builtins::PKeyLibrary
           raise SchemeRuntimeError.new("#{who}: failed to set MGF1 digest")
         end
         outlen = LibC::SizeT.new(0)
-        out_buf = Bytes.empty
+        out_buf : Bytes
         if encrypt
           LibCryptoJose.EVP_PKEY_encrypt(ctx, Pointer(UInt8).null, pointerof(outlen), input, input.size)
           out_buf = Bytes.new(outlen)

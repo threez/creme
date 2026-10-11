@@ -168,9 +168,9 @@ module Creme::Builtins::MuxLibrary
   end
 
   {% for method in ["get", "head", "post", "put", "delete", "patch"] %}
-    @[Creme::SchemeFn("mux-{{method.id}}!", min: 3, max: 3)]
-    def mux_{{method.id}}(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
-      register_route(interp, args, {{method}}, "mux-{{method.id}}!")
+    @[Creme::SchemeFn("mux-{{ method.id }}!", min: 3, max: 3)]
+    def mux_{{ method.id }}(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
+      register_route(interp, args, {{ method }}, "mux-{{ method.id }}!")
     end
   {% end %}
 

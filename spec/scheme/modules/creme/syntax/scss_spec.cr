@@ -23,7 +23,7 @@ end
 
 describe "(creme syntax scss)" do
   it "parses a flat declaration" do
-    rules_data("a { color: red; }").should eq(%[(("a" (color "red")))])
+    rules_data("a { color: red; }").should eq(%((("a" (color "red")))))
   end
 
   it "nests rules, letting (creme css) combine selectors with a descendant combinator" do
@@ -41,7 +41,7 @@ describe "(creme syntax scss)" do
   end
 
   it "splits a comma-separated selector group" do
-    rules_data("a, b { color: red; }").should eq(%[((("a" "b") (color "red")))])
+    rules_data("a, b { color: red; }").should eq(%(((("a" "b") (color "red")))))
   end
 
   it "skips // and /* */ comments between statements" do
@@ -51,14 +51,14 @@ describe "(creme syntax scss)" do
   it "raises on an undefined variable" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     expect_raises(Creme::SchemeRuntimeError, /undefined variable/) do
-      Creme.run_source(interp, %[(import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { color: $nope; }" "t" (quote ()))])
+      Creme.run_source(interp, %((import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { color: $nope; }" "t" (quote ()))))
     end
   end
 
   it "raises on a declaration missing a ':'" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     expect_raises(Creme::SchemeRuntimeError, /expected ':'/) do
-      Creme.run_source(interp, %[(import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { oops; }" "t" (quote ()))])
+      Creme.run_source(interp, %((import (scheme base) (scheme cxr) (creme syntax scss)) (read-program "a { oops; }" "t" (quote ()))))
     end
   end
 end

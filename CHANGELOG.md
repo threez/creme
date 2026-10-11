@@ -15,6 +15,42 @@ both reaching their current shape) — not itemized individually here;
 
 ## [Unreleased]
 
+### Ameba 1.7.0, dependency refresh, and a pre-existing formatting fix
+
+- `shard.yml`: bumped `ameba` from `~> 1.6.0` to `~> 1.7.0`, and refreshed
+  the unpinned `rfc8439`, `prof`, `mux`, `jose`, and `raft` dependencies to
+  their latest tagged releases (1.2.0, 0.2.1, 0.1.1, 1.3.3, and 0.2.1
+  respectively). No API break from any of the five; `rfc8439` 1.2.0 purely
+  adds a new one-shot `encrypt`/`decrypt` AEAD API alongside its existing
+  surface.
+- Ameba 1.7.0 dropped its own `postinstall` build hook (previously `shards
+  build -Dpreview_mt`), so a plain `shards install` no longer produces
+  `lib/ameba/bin/ameba` on a fresh checkout. Fixed by building it
+  explicitly right after `shards install`: a new "Build ameba" CI step in
+  the `linux` job (the only job that runs formatting/lint — see that
+  job's own comment) in `.github/workflows/ci.yml`, and the same fix in
+  the `Makefile`'s `lib/ameba/bin/ameba` target.
+- Fixed a pre-existing `crystal tool format --check` failure on `main`
+  (`spec/scheme/modules/svg_spec.cr`) that had been breaking CI since
+  before this work, unrelated to the ameba upgrade itself.
+- Fixed every violation ameba 1.7.0's new/stricter rules newly flag across
+  `src/`, `spec/`, and `competition/`: converted multi-line `%()`-style
+  string literals to heredocs (`Style/MultilineStringLiteral`), switched a
+  handful of heredocs with embedded Scheme-char/control-char escapes to
+  the escaped `<<-'TAG'` marker form (`Style/HeredocEscape`), replaced
+  redundant `else nil` case/if branches and `return nil` guards with their
+  implicit-nil equivalents (`Lint/ElseNil`, `Style/RedundantNilInControl
+  Expression`), switched multi-line curly blocks to `do`...`end`
+  (`Style/MultilineCurlyBlock`), removed a few now-genuinely-unused
+  `rescue` variables and useless assignments, dropped several `# ameba:
+  disable Metrics/CyclomaticComplexity` comments that 1.7.0 no longer
+  needs, and renamed a few non-descriptive block parameters. A handful of
+  false positives (an ameba `Lint/UselessAssign` that doesn't see through
+  a `begin/ensure` using the variable, and one `%q{}` percent-literal
+  whose content has deliberately unbalanced parens) are documented with a
+  narrow, per-line `# ameba:disable` comment instead of being "fixed" into
+  something incorrect.
+
 ### `libcreme.a`: an embeddable static library, plus `examples/libcream/`
 
 - `make -C icecreme lib` builds `libcreme.a`, a static library an external C

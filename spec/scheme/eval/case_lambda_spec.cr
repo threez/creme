@@ -16,7 +16,7 @@ describe "case-lambda" do
         ((x) (list 'one x))
         ((x y) (list 'two x y))
         ((x y . rest) (list 'many x y rest))))
-    SCM
+      SCM
     w("#{src} (f 1)").should eq("(one 1)")
     w("#{src} (f 1 2)").should eq("(two 1 2)")
     w("#{src} (f 1 2 3 4)").should eq("(many 1 2 (3 4))")
@@ -34,13 +34,13 @@ describe "case-lambda" do
         ((n) (count n 0))
         ((n acc) (if (= n 0) acc (count (- n 1) (+ acc n))))))
       (count 1000000)
-    SCM
+      SCM
   end
 
   it "is a real procedure value usable with apply/map" do
     w(<<-SCM).should eq("(1 4)")
       (define f (case-lambda ((x) x) ((x y) (* x y))))
       (list (apply f '(1)) (apply f '(2 2)))
-    SCM
+      SCM
   end
 end

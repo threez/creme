@@ -30,7 +30,7 @@ describe "hash-table module" do
   end
 
   it "string keys work via equal?" do
-    src = %[(define h (make-hash-table)) (hash-table-set! h "k" 1) (hash-table-ref h "k")]
+    src = %((define h (make-hash-table)) (hash-table-set! h "k" 1) (hash-table-ref h "k"))
     w(src).should eq("1")
   end
 

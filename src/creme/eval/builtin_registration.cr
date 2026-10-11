@@ -79,10 +79,10 @@ module Creme
       {% for method in mod.resolve.methods %}
         {% ann = method.annotation(Creme::SchemeFn) %}
         {% if ann %}
-          {{env}}.define({{ann[0]}}, Builtin.new({{ann[0]}}, {{ann[:min]}}, {{ann[:max]}}) do |args|
-            {{mod}}.{{method.name}}(self, {{env}}, args)
+          {{ env }}.define({{ ann[0] }}, Builtin.new({{ ann[0] }}, {{ ann[:min] }}, {{ ann[:max] }}) do |args|
+            {{ mod }}.{{ method.name }}(self, {{ env }}, args)
           end)
-          %names << {{ann[0]}}
+          %names << {{ ann[0] }}
         {% end %}
       {% end %}
       %names
@@ -112,9 +112,9 @@ module Creme
              mod = entry[1]
              block = entry[2] %}
           {% if mod %}
-            register_pending_library({{name}}) { |env| register_module({{mod}}, env) }
+            register_pending_library({{ name }}) { |env| register_module({{ mod }}, env) }
           {% else %}
-            register_pending_library({{name}}) {{block}}
+            register_pending_library({{ name }}) {{ block }}
           {% end %}
         {% end %}
       end
@@ -150,7 +150,7 @@ module Creme
         return library
       end
       ctor = @pending_libraries.delete(name)
-      return nil unless ctor
+      return unless ctor
       register_computed_library(name, &ctor)
     end
   end

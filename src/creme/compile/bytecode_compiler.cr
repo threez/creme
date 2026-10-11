@@ -351,7 +351,7 @@ module Creme
 
     private def resolve_upvalue(fc : FunctionCompiler, name : String) : Int32?
       parent = fc.enclosing
-      return nil unless parent
+      return unless parent
       if reg = parent.resolve_local(name)
         parent.captured_registers.add(reg)
         return add_upvalue(fc, true, reg, name)
@@ -543,7 +543,7 @@ module Creme
     # own PrimOp->Op mapping for exactly the 6 comparison-shaped ops
     # (the 5 numeric comparisons plus eq?).
     private def comparison_op_of(node : Node) : Op?
-      return nil unless node.is_a?(PrimCallNode) && node.args.size == 2
+      return unless node.is_a?(PrimCallNode) && node.args.size == 2
       case node.op
       when PrimOp::NumLt then Op::NumLt
       when PrimOp::NumLe then Op::NumLe
@@ -551,7 +551,6 @@ module Creme
       when PrimOp::NumGe then Op::NumGe
       when PrimOp::NumEq then Op::NumEq
       when PrimOp::IsEq  then Op::IsEq
-      else                    nil
       end
     end
 
@@ -563,7 +562,6 @@ module Creme
       when Op::NumGe then Op::TestGe
       when Op::NumEq then Op::TestEq
       when Op::IsEq  then Op::TestIsEq
-      else                nil
       end
     end
 
@@ -575,7 +573,6 @@ module Creme
       when Op::NumGe then Op::TestGeImm
       when Op::NumEq then Op::TestEqImm
       when Op::IsEq  then Op::TestIsEqImm
-      else                nil
       end
     end
 
@@ -587,7 +584,6 @@ module Creme
       when Op::NumGe then Op::TestGeUp
       when Op::NumEq then Op::TestEqUp
       when Op::IsEq  then Op::TestIsEqUp
-      else                nil
       end
     end
 
@@ -602,7 +598,7 @@ module Creme
     # BE the clause's own result (a bodyless clause, or a `=>` arrow).
     private def compile_fused_test(fc : FunctionCompiler, test : Node, tag : String) : Int32?
       op = comparison_op_of(test)
-      return nil unless op
+      return unless op
       node = test.as(PrimCallNode)
       prim_src = node.src.write_string
       if (imm_op = test_imm_op_for(op)) && (imm = imm_operand?(node.args[1]))
@@ -630,7 +626,7 @@ module Creme
         return jmp
       end
       base_op = test_op_for(op)
-      return nil unless base_op
+      return unless base_op
       mark = fc.next_reg
       all_leaves = node.args.all? { |arg| leaf_node?(arg) }
       arg_regs = node.args.map do |arg|
@@ -822,11 +818,11 @@ module Creme
       prefix = [] of Node
       last = branch
       if branch.is_a?(BeginNode)
-        return nil if branch.body.empty?
+        return if branch.body.empty?
         prefix = branch.body[0...-1]
         last = branch.body.last
       end
-      return nil unless last.is_a?(AppNode)
+      return unless last.is_a?(AppNode)
       # A named-let/do's own recursive reference to its loop name is
       # lexically addressed (analyzer.cr's analyze_named_let extends the
       # scope with loop_name as its own one-name frame), so it resolves to
@@ -845,10 +841,10 @@ module Creme
                     when VarRefNode    then callee.name
                     when LocalRefNode  then callee.name
                     when GlobalRefNode then callee.name
-                    else                    return nil
+                    else                    return
                     end
-      return nil unless callee_name == loop_name
-      return nil unless last.args.size == arity
+      return unless callee_name == loop_name
+      return unless last.args.size == arity
       CountedLoopCall.new(prefix, last)
     end
 
@@ -857,25 +853,29 @@ module Creme
     # recursive call advances `counter_name` by (negative for `-`) — else
     # nil, telling the recognizer this param isn't (or isn't provably) a
     # simple constant-step counter.
+    # A flat chain of early-return guard clauses recognizing one specific
+    # node shape; each branch is independently trivial and splitting it up
+    # would only scatter the single recognizer across several smaller,
+    # harder-to-follow methods.
+    # ameba:disable Metrics/CyclomaticComplexity
     private def step_delta(arg : Node, counter_name : String) : Int32?
-      return nil unless arg.is_a?(PrimCallNode) && arg.args.size == 2
+      return unless arg.is_a?(PrimCallNode) && arg.args.size == 2
       first = arg.args[0]
       name = case first
              when VarRefNode   then first.name
              when LocalRefNode then first.name
-             else                   return nil
+             else                   return
              end
-      return nil unless name == counter_name
+      return unless name == counter_name
       second = arg.args[1]
-      return nil unless second.is_a?(LiteralNode)
+      return unless second.is_a?(LiteralNode)
       value = second.value
-      return nil unless value.is_a?(SchemeInt)
+      return unless value.is_a?(SchemeInt)
       k = value.value
-      return nil if k == 0 || k > Int32::MAX.to_i64 || k < Int32::MIN.to_i64
+      return if k == 0 || k > Int32::MAX.to_i64 || k < Int32::MIN.to_i64
       case arg.op
       when PrimOp::Add then k.to_i32
       when PrimOp::Sub then -k.to_i32
-      else                  nil
       end
     end
 
@@ -914,7 +914,7 @@ module Creme
     # understand.
     # ameba:disable Metrics/CyclomaticComplexity
     private def detect_counted_loop_shape(loop_name : String, params : Array(String), body : Array(Node)) : CountedLoopShape?
-      return nil unless body.size == 1 && body[0].is_a?(IfNode)
+      return unless body.size == 1 && body[0].is_a?(IfNode)
       if_node = body[0].as(IfNode)
       # A missing alt (`(if test conseq)`, no else) means "evaluate to NIL" —
       # the common no-accumulator "for-each"-style loop shape (e.g.
@@ -928,19 +928,19 @@ module Creme
       else_branch = inverted ? if_node.conseq : alt
 
       cmp_op = comparison_op_of(test)
-      return nil unless cmp_op && cmp_op != Op::IsEq
+      return unless cmp_op && cmp_op != Op::IsEq
       cmp = test.as(PrimCallNode)
       counter_candidate = cmp.args[0]
       counter_name = case counter_candidate
                      when VarRefNode   then counter_candidate.name
                      when LocalRefNode then counter_candidate.name
-                     else                   return nil
+                     else                   return
                      end
       counter_index = params.index(counter_name)
-      return nil unless counter_index
+      return unless counter_index
       bound_node = cmp.args[1]
-      return nil if params.any? { |param| references_name?(bound_node, param) }
-      return nil if contains_lambda?(bound_node)
+      return if params.any? { |param| references_name?(bound_node, param) }
+      return if contains_lambda?(bound_node)
 
       recurse_in_conseq, split, base_branch =
         if s = split_tail_self_call(then_branch, loop_name, params.size)
@@ -948,19 +948,19 @@ module Creme
         elsif s = split_tail_self_call(else_branch, loop_name, params.size)
           {false, s, then_branch}
         else
-          return nil
+          return
         end
 
-      return nil if contains_lambda?(base_branch) || references_name?(base_branch, loop_name)
+      return if contains_lambda?(base_branch) || references_name?(base_branch, loop_name)
       split.prefix.each do |stmt|
-        return nil if contains_lambda?(stmt) || references_name?(stmt, loop_name)
+        return if contains_lambda?(stmt) || references_name?(stmt, loop_name)
       end
       split.call.args.each do |arg|
-        return nil if contains_lambda?(arg) || references_name?(arg, loop_name)
+        return if contains_lambda?(arg) || references_name?(arg, loop_name)
       end
 
       step = step_delta(split.call.args[counter_index], counter_name)
-      return nil unless step && step != 0
+      return unless step && step != 0
 
       # Translate whatever the source test means into Op::ForPrep/Op::ForLoop's
       # own INCLUSIVE-of-limit convention (see opcode.cr's doc comment) — the
@@ -969,25 +969,25 @@ module Creme
       # iteration count.
       limit_delta = if recurse_in_conseq
                       case cmp_op
-                      when Op::NumLt then return nil unless step > 0
+                      when Op::NumLt then return unless step > 0
                       -1
-                      when Op::NumLe then return nil unless step > 0
+                      when Op::NumLe then return unless step > 0
                       0
-                      when Op::NumGt then return nil unless step < 0
+                      when Op::NumGt then return unless step < 0
                       1
-                      when Op::NumGe then return nil unless step < 0
+                      when Op::NumGe then return unless step < 0
                       0
-                      else return nil
+                      else return
                       end
                     else
                       case cmp_op
-                      when Op::NumGe then return nil unless step > 0
+                      when Op::NumGe then return unless step > 0
                       -1
-                      when Op::NumLe then return nil unless step < 0
+                      when Op::NumLe then return unless step < 0
                       1
-                      when Op::NumEq then return nil unless step == 1 || step == -1
+                      when Op::NumEq then return unless step == 1 || step == -1
                       step > 0 ? -1 : 1
-                      else return nil
+                      else return
                       end
                     end
 
@@ -1015,7 +1015,8 @@ module Creme
       limit_tmp = fc.alloc_reg
       compile_expr(fc, shape.bound_node, limit_tmp, false)
       fc.reclaim_to(mark2)
-      limit_reg = fc.declare_local("%for-limit-#{@loop_counter += 1}")
+      @loop_counter += 1
+      limit_reg = fc.declare_local("%for-limit-#{@loop_counter}")
       fc.emit(Op::Move, limit_reg, limit_tmp) unless limit_reg == limit_tmp
       fc.emit(Op::AddImm, limit_reg, limit_reg, shape.limit_delta) unless shape.limit_delta == 0
 
@@ -1168,7 +1169,7 @@ module Creme
     # detect_counted_loop_shape.
     # ameba:disable Metrics/CyclomaticComplexity
     private def detect_general_loop_shape(loop_name : String, params : Array(String), body : Array(Node)) : GeneralLoopShape?
-      return nil unless body.size == 1 && body[0].is_a?(IfNode)
+      return unless body.size == 1 && body[0].is_a?(IfNode)
       if_node = body[0].as(IfNode)
       alt : Node = if_node.alt || LiteralNode.new(NIL)
 
@@ -1176,7 +1177,7 @@ module Creme
       then_branch = inverted ? alt : if_node.conseq
       else_branch = inverted ? if_node.conseq : alt
 
-      return nil if contains_lambda?(test) || references_name?(test, loop_name)
+      return if contains_lambda?(test) || references_name?(test, loop_name)
 
       recurse_in_conseq, split, base_branch =
         if s = split_tail_self_call(then_branch, loop_name, params.size)
@@ -1184,15 +1185,15 @@ module Creme
         elsif s = split_tail_self_call(else_branch, loop_name, params.size)
           {false, s, then_branch}
         else
-          return nil
+          return
         end
 
-      return nil if contains_lambda?(base_branch) || references_name?(base_branch, loop_name)
+      return if contains_lambda?(base_branch) || references_name?(base_branch, loop_name)
       split.prefix.each do |stmt|
-        return nil if contains_lambda?(stmt) || references_name?(stmt, loop_name)
+        return if contains_lambda?(stmt) || references_name?(stmt, loop_name)
       end
       split.call.args.each do |arg|
-        return nil if contains_lambda?(arg) || references_name?(arg, loop_name)
+        return if contains_lambda?(arg) || references_name?(arg, loop_name)
       end
 
       GeneralLoopShape.new(test, recurse_in_conseq, split, base_branch)
@@ -1307,30 +1308,30 @@ module Creme
 
     # ameba:disable Metrics/CyclomaticComplexity
     private def detect_general_cond_loop_shape(loop_name : String, params : Array(String), body : Array(Node)) : GeneralCondLoopShape?
-      return nil unless body.size == 1 && body[0].is_a?(CondNode)
+      return unless body.size == 1 && body[0].is_a?(CondNode)
       node = body[0].as(CondNode)
-      return nil if node.clauses.empty?
+      return if node.clauses.empty?
       last = node.clauses.last
-      return nil if last.arrow || last.throw_msg || last.body.empty?
+      return if last.arrow || last.throw_msg || last.body.empty?
       # An earlier `else` would make the final (possibly-recursive) clause
       # unreachable dead code — reject rather than risk silently dropping
       # the recursion (shouldn't normally parse this way anyway).
       earlier = node.clauses[0...-1]
-      return nil if earlier.any? { |clause| clause.test.nil? }
+      return if earlier.any? { |clause| clause.test.nil? }
 
       last_branch : Node = last.body.size == 1 ? last.body[0] : BeginNode.new(last.body)
-      return nil unless split = split_tail_self_call(last_branch, loop_name, params.size)
+      return unless split = split_tail_self_call(last_branch, loop_name, params.size)
 
       if t = last.test
-        return nil if contains_lambda?(t) || references_name?(t, loop_name)
+        return if contains_lambda?(t) || references_name?(t, loop_name)
       end
       split.prefix.each do |stmt|
-        return nil if contains_lambda?(stmt) || references_name?(stmt, loop_name)
+        return if contains_lambda?(stmt) || references_name?(stmt, loop_name)
       end
       split.call.args.each do |arg|
-        return nil if contains_lambda?(arg) || references_name?(arg, loop_name)
+        return if contains_lambda?(arg) || references_name?(arg, loop_name)
       end
-      return nil unless earlier.all? { |clause| cond_clause_safe_for_loop?(clause, loop_name) }
+      return unless earlier.all? { |clause| cond_clause_safe_for_loop?(clause, loop_name) }
 
       GeneralCondLoopShape.new(earlier, last.test, split)
     end
@@ -1623,7 +1624,6 @@ module Creme
       when SchemeSym  then CaseDispatchKey.for_sym(datum.name)
       when SchemeBool then CaseDispatchKey.for_bool(datum.value?)
       when SchemeNil  then CaseDispatchKey::NIL
-      else                 nil
       end
     end
 
@@ -2268,12 +2268,12 @@ module Creme
     # nil for anything else (globals/upvalues still need GetGlobal/GetUpval
     # to materialize a value; there's no register to alias for those).
     private def local_register_of?(fc : FunctionCompiler, node : Node) : Int32?
-      return nil if node.is_a?(GlobalRefNode) && node.forced?
+      return if node.is_a?(GlobalRefNode) && node.forced?
       name = case node
              when VarRefNode    then node.name
              when LocalRefNode  then node.name
              when GlobalRefNode then node.name
-             else                    return nil
+             else                    return
              end
       kind, idx = resolve_variable(fc, name)
       kind == :local ? idx : nil
@@ -2370,9 +2370,9 @@ module Creme
     # non-integer literal, or a literal integer too large for Int32) falls
     # back to the ordinary LoadK-then-register path.
     private def imm_operand?(arg : Node) : Int32?
-      return nil unless arg.is_a?(LiteralNode)
+      return unless arg.is_a?(LiteralNode)
       value = arg.value
-      return nil unless value.is_a?(SchemeInt)
+      return unless value.is_a?(SchemeInt)
       value.value.to_i32
     rescue OverflowError
       nil
@@ -2392,7 +2392,6 @@ module Creme
       when Op::NumGe then Op::NumGeImm
       when Op::NumEq then Op::NumEqImm
       when Op::IsEq  then Op::IsEqImm
-      else                nil
       end
     end
 
@@ -2400,12 +2399,12 @@ module Creme
     # the mirror image of local_register_of?, for a variable resolving to
     # :upvalue instead of :local. Used by both Up-family fusions below.
     private def up_operand?(fc : FunctionCompiler, node : Node) : Int32?
-      return nil if node.is_a?(GlobalRefNode) && node.forced?
+      return if node.is_a?(GlobalRefNode) && node.forced?
       name = case node
              when VarRefNode    then node.name
              when LocalRefNode  then node.name
              when GlobalRefNode then node.name
-             else                    return nil
+             else                    return
              end
       kind, idx = resolve_variable(fc, name)
       kind == :upvalue ? idx : nil
@@ -2425,7 +2424,6 @@ module Creme
       when Op::NumGe then Op::NumGeUp
       when Op::NumEq then Op::NumEqUp
       when Op::IsEq  then Op::IsEqUp
-      else                nil
       end
     end
 
@@ -2442,7 +2440,6 @@ module Creme
       when Op::StrSet then Op::StrSetUp
       when Op::BvRef  then Op::BvRefUp
       when Op::BvSet  then Op::BvSetUp
-      else                 nil
       end
     end
 
@@ -2455,7 +2452,6 @@ module Creme
       when Op::VecRef then Op::VecRefImm
       when Op::StrRef then Op::StrRefImm
       when Op::BvRef  then Op::BvRefImm
-      else                 nil
       end
     end
 
@@ -2464,7 +2460,6 @@ module Creme
       when Op::VecSet then Op::VecSetImm
       when Op::StrSet then Op::StrSetImm
       when Op::BvSet  then Op::BvSetImm
-      else                 nil
       end
     end
 
@@ -2483,7 +2478,6 @@ module Creme
       when Op::NumGe then Op::NumGeReturn
       when Op::NumEq then Op::NumEqReturn
       when Op::IsEq  then Op::IsEqReturn
-      else                nil
       end
     end
 
@@ -2767,7 +2761,7 @@ module Creme
              when VarRefNode    then node.name
              when LocalRefNode  then node.name
              when GlobalRefNode then node.name
-             else                    return nil
+             else                    return
              end
       # A hygiene-forced GlobalRefNode (see its own doc comment) must skip
       # resolve_variable here too — same reasoning as compile_name_read —

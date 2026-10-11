@@ -18,7 +18,7 @@ describe "dynamic-wind" do
         (lambda () (set! log (cons 'during log)))
         (lambda () (set! log (cons 'after log))))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "returns the thunk's value" do
@@ -34,14 +34,14 @@ describe "dynamic-wind" do
           (lambda () (error "boom"))
           (lambda () (set! log (cons 'after log)))))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "the error still reaches guard after after runs" do
     w(<<-SCM).should eq("caught")
       (guard (e (#t 'caught))
         (dynamic-wind (lambda () 'b) (lambda () (error "boom")) (lambda () 'a)))
-    SCM
+      SCM
   end
 
   it "runs after when the thunk escapes via a call/cc continuation invoked from inside" do
@@ -53,7 +53,7 @@ describe "dynamic-wind" do
           (lambda () (k 'escaped) (set! log (cons 'never log)))
           (lambda () (set! log (cons 'after log))))))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "runs after for every dynamic-wind frame a continuation escapes past, innermost first" do
@@ -69,7 +69,7 @@ describe "dynamic-wind" do
               (lambda () (set! log (cons 'inner-after log)))))
           (lambda () (set! log (cons 'outer-after log))))))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "nests in correct LIFO order for normal (non-escaping) execution" do
@@ -84,7 +84,7 @@ describe "dynamic-wind" do
             (lambda () (set! log (cons 'b-after log)))))
         (lambda () (set! log (cons 'a-after log))))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "interacts correctly with raise/with-exception-handler: after runs, handler stack stays consistent" do
@@ -99,7 +99,7 @@ describe "dynamic-wind" do
               (lambda () (raise-continuable 'oops))
               (lambda () (set! log (cons 'after log)))))))
       (reverse log)
-    SCM
+      SCM
   end
 
   it "known limitation: invoking a continuation captured inside, after dynamic-wind already returned, raises a clean error rather than re-entering" do
@@ -110,7 +110,7 @@ describe "dynamic-wind" do
         (lambda () (call/cc (lambda (k) (set! saved-k k))))
         (lambda () 'after))
       (guard (e (#t 'clean-error)) (saved-k 'reenter))
-    SCM
+      SCM
   end
 
   it "raises for the wrong number of arguments" do

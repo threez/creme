@@ -12,13 +12,13 @@ end
 
 private def fresh_widget_dao : String
   <<-SCM
-  (define conn (sql-open ":memory:"))
-  (define-dao widget conn
-    (id integer primary-key auto-increment)
-    (name text not-null)
-    (qty integer not-null (default 0))
-    (active bool not-null (default #f)))
-  SCM
+    (define conn (sql-open ":memory:"))
+    (define-dao widget conn
+      (id integer primary-key auto-increment)
+      (name text not-null)
+      (qty integer not-null (default 0))
+      (active bool not-null (default #f)))
+    SCM
 end
 
 describe "dao module" do

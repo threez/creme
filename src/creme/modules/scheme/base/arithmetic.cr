@@ -143,7 +143,6 @@ module Creme::R7RS::Arithmetic
   # falling back to float power. Neither path can overflow anymore —
   # expt_int_pow escalates to BigInt itself.
   @[Creme::SchemeFn("expt", min: 2, max: 2)]
-  # ameba:disable Metrics/CyclomaticComplexity
   def expt(interp : Interpreter, env : Env, args : Array(SchemeValue)) : SchemeValue
     base = args[0]
     ex = args[1]

@@ -29,10 +29,10 @@ describe "(creme syntax ruby)" do
   end
 
   it "if/else and string interpolation" do
-    run_ruby(<<-RUBY).should eq(%("Hello, World!\\nHello, stranger\\n"))
+    run_ruby(<<-'RUBY').should eq(%("Hello, World!\\nHello, stranger\\n"))
       def greet(name)
         if name
-          puts "Hello, \#{name}!"
+          puts "Hello, #{name}!"
         else
           puts "Hello, stranger"
         end

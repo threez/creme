@@ -176,9 +176,9 @@ module Creme
   # another define-syntax/syntax-rules form). Returns the escaped
   # sub-template, or nil if `template` isn't in that shape.
   private def self.ellipsis_escape?(template : Cons) : SchemeValue?
-    return nil unless (head = template.car).is_a?(SchemeSym) && head.name == ELLIPSIS
+    return unless (head = template.car).is_a?(SchemeSym) && head.name == ELLIPSIS
     rest = template.cdr
-    return nil unless rest.is_a?(Cons) && rest.cdr.is_a?(SchemeNil)
+    return unless rest.is_a?(Cons) && rest.cdr.is_a?(SchemeNil)
     rest.car
   end
 

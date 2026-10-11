@@ -200,7 +200,7 @@ describe "primitive call specialization" do
             (let loop ((i 0) (acc 0))
               (if (= i n) acc (loop (+ i 1) (+ acc (vector-ref v i)))))))
         (vector-sum-test 5)
-      SCM
+        SCM
     end
 
     it "falls back to the numeric tower for a non-integer captured operand" do
@@ -247,7 +247,7 @@ describe "primitive call specialization" do
                      (vector-set! v (begin (set! v (vector 99 99 99)) 0) x)
                      v)))
             (f 5)))
-      SCM
+        SCM
     end
 
     it "still deopts to a runtime redefinition" do
@@ -309,9 +309,9 @@ describe "primitive call specialization" do
     end
 
     it "still snapshots the string before a later argument's side effect mutates it (string-set!)" do
-      w(<<-SCM).should eq("\"zzz\"")
-        (let ((s (make-string 3 #\\a)))
-          (string-set! s 0 (begin (set! s (make-string 3 #\\z)) #\\q))
+      w(<<-'SCM').should eq("\"zzz\"")
+        (let ((s (make-string 3 #\a)))
+          (string-set! s 0 (begin (set! s (make-string 3 #\z)) #\q))
           s)
         SCM
     end
@@ -391,7 +391,7 @@ describe "primitive call specialization" do
             (let loop ((i 0) (acc 0))
               (if (= i n) acc (loop (+ i 1) (+ acc (vector-ref v i)))))))
         (vector-sum-test 5)
-      SCM
+        SCM
     end
 
     it "works the same for when/unless (negated test)" do
@@ -583,7 +583,7 @@ describe "primitive call specialization" do
                 ((eq? (caar alist) key) (cdar alist))
                 (else (get-list (cdr alist) key))))
         (get-list (list (cons 'a 'a-val) (cons 'b 'b)) 'b)
-      SCM
+        SCM
     end
 
     it "fuses a plain 2-register-operand tail call (IsEqReturn)" do

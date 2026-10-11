@@ -19,57 +19,57 @@ end
 # never converged within the await-leader! deadline.
 private def cluster_setup : String
   <<-SCHEME
-  (define (make-kv-node id peers transport)
-    (define store (make-hash-table))
-    (raft-scheme-node id peers
-      (raft-scheme-state-machine
-        (lambda (cmd)
-          (if (eq? cmd 'noop)
-              'noop
-              (case (car cmd)
-                ((set) (hash-table-set! store (cadr cmd) (caddr cmd)) 'ok)
-                ((get) (hash-table-ref store (cadr cmd) (lambda () 'missing))))))
-        (lambda () (hash-table->alist store))
-        (lambda (data) (for-each (lambda (kv) (hash-table-set! store (car kv) (cdr kv))) data)))
-      transport
-      ":memory:"
-      ;; Wider than a minimal dev-machine-tuned timeout on purpose -- see
-      ;; this file's cluster_setup comment for why.
-      (raft-scheme-config 'election-timeout-min 100 'election-timeout-max 200 'heartbeat-interval 40)))
+    (define (make-kv-node id peers transport)
+      (define store (make-hash-table))
+      (raft-scheme-node id peers
+        (raft-scheme-state-machine
+          (lambda (cmd)
+            (if (eq? cmd 'noop)
+                'noop
+                (case (car cmd)
+                  ((set) (hash-table-set! store (cadr cmd) (caddr cmd)) 'ok)
+                  ((get) (hash-table-ref store (cadr cmd) (lambda () 'missing))))))
+          (lambda () (hash-table->alist store))
+          (lambda (data) (for-each (lambda (kv) (hash-table-set! store (car kv) (cdr kv))) data)))
+        transport
+        ":memory:"
+        ;; Wider than a minimal dev-machine-tuned timeout on purpose -- see
+        ;; this file's cluster_setup comment for why.
+        (raft-scheme-config 'election-timeout-min 100 'election-timeout-max 200 'heartbeat-interval 40)))
 
-  (define cluster (raft-scheme-cluster '("n1" "n2" "n3") make-kv-node))
-  (define nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
-  ;; A first election can, rarely, fail to converge at all within 30s on a
-  ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
-  ;; just a slow one -- observed on macOS CI late in a long spec run).
-  ;; Restarting the whole cluster and retrying is safe here since nothing
-  ;; has been proposed yet. raft-scheme-start! takes the raw node handle
-  ;; (cluster's own (id . node) pairs), not the started actor-ref it
-  ;; returns, so restart re-maps `cluster` fresh rather than reusing `nodes`.
-  (define leader
-    (let loop ((tries 3))
-      (let ((got (raft-scheme-await-leader! nodes 30000)))
-        (cond (got got)
-              ((> tries 1)
-               (for-each raft-scheme-stop! nodes)
-               (set! nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
-               (loop (- tries 1)))
-              (else #f)))))
+    (define cluster (raft-scheme-cluster '("n1" "n2" "n3") make-kv-node))
+    (define nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
+    ;; A first election can, rarely, fail to converge at all within 30s on a
+    ;; sufficiently loaded CI runner (a genuinely wedged split-vote cycle, not
+    ;; just a slow one -- observed on macOS CI late in a long spec run).
+    ;; Restarting the whole cluster and retrying is safe here since nothing
+    ;; has been proposed yet. raft-scheme-start! takes the raw node handle
+    ;; (cluster's own (id . node) pairs), not the started actor-ref it
+    ;; returns, so restart re-maps `cluster` fresh rather than reusing `nodes`.
+    (define leader
+      (let loop ((tries 3))
+        (let ((got (raft-scheme-await-leader! nodes 30000)))
+          (cond (got got)
+                ((> tries 1)
+                 (for-each raft-scheme-stop! nodes)
+                 (set! nodes (map (lambda (id.node) (raft-scheme-start! (cdr id.node))) cluster))
+                 (loop (- tries 1)))
+                (else #f)))))
 
-  ;; raft-scheme-await-leader! only confirms leadership at the instant it
-  ;; returns -- it's a snapshot, not a lease. Under real CI-runner scheduling
-  ;; pressure, enough wall-clock time can pass before the NEXT line's
-  ;; raft-scheme-propose! that the node has legitimately lost leadership in
-  ;; between (a real, correct Raft outcome, not a bug) -- observed on macOS
-  ;; CI. Retry against a freshly re-awaited leader instead of assuming
-  ;; `leader` stays valid indefinitely.
-  (define (raft-scheme-propose-retry! cmd)
-    (let loop ((tries 5))
-      (guard (e (#t (if (> tries 1)
-                        (begin (set! leader (raft-scheme-await-leader! nodes 30000)) (loop (- tries 1)))
-                        (raise e))))
-        (raft-scheme-propose! leader cmd))))
-  SCHEME
+    ;; raft-scheme-await-leader! only confirms leadership at the instant it
+    ;; returns -- it's a snapshot, not a lease. Under real CI-runner scheduling
+    ;; pressure, enough wall-clock time can pass before the NEXT line's
+    ;; raft-scheme-propose! that the node has legitimately lost leadership in
+    ;; between (a real, correct Raft outcome, not a bug) -- observed on macOS
+    ;; CI. Retry against a freshly re-awaited leader instead of assuming
+    ;; `leader` stays valid indefinitely.
+    (define (raft-scheme-propose-retry! cmd)
+      (let loop ((tries 5))
+        (guard (e (#t (if (> tries 1)
+                          (begin (set! leader (raft-scheme-await-leader! nodes 30000)) (loop (- tries 1)))
+                          (raise e))))
+          (raft-scheme-propose! leader cmd))))
+    SCHEME
 end
 
 describe "(creme raft-scheme)", tags: "raft" do

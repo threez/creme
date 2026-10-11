@@ -46,21 +46,25 @@ describe "file module" do
   end
 
   it "a missing-file error satisfies file-error?, catchable via guard" do
-    w(%[(guard (e ((file-error? e) 'is-file-error) (#t 'other)) (file-read "/no/such/path/scheme-spec"))]).should eq("is-file-error")
+    w(%((guard (e ((file-error? e) 'is-file-error) (#t 'other)) (file-read "/no/such/path/scheme-spec")))).should eq("is-file-error")
   end
 
   it "opens a port for writing, closes it, then reads it back via an input port" do
     path = File.tempname("scheme_file_spec_ports")
     begin
-      w(%((let ((p (open-output-file "#{path}")))
-             (write-string "line1" p)
-             (write-char #\\newline p)
-             (close-port p)
-             (output-port? p)))).should eq("#t")
-      w(%((let ((p (open-input-file "#{path}")))
-             (let ((line (read-line p)))
-               (close-port p)
-               line)))).should eq(%("line1"))
+      w(<<-SCM).should eq("#t")
+        (let ((p (open-output-file "#{path}")))
+          (write-string "line1" p)
+          (write-char #\\newline p)
+          (close-port p)
+          (output-port? p))
+        SCM
+      w(<<-SCM).should eq(%("line1"))
+        (let ((p (open-input-file "#{path}")))
+          (let ((line (read-line p)))
+            (close-port p)
+            line))
+        SCM
     ensure
       File.delete(path) if File.exists?(path)
     end
@@ -70,10 +74,12 @@ describe "file module" do
     path = File.tempname("scheme_file_spec_eof")
     File.write(path, "")
     begin
-      w(%((let ((p (open-input-file "#{path}")))
-             (let ((r (eof-object? (read-line p))))
-               (close-port p)
-               r)))).should eq("#t")
+      w(<<-SCM).should eq("#t")
+        (let ((p (open-input-file "#{path}")))
+          (let ((r (eof-object? (read-line p))))
+            (close-port p)
+            r))
+        SCM
     ensure
       File.delete(path)
     end

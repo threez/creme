@@ -26,7 +26,7 @@ describe "make-parameter/parameterize" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     Creme.run_source(interp, "(define p (make-parameter 10))")
     expect_raises(Creme::SchemeUserError) do
-      Creme.run_source(interp, %[(parameterize ((p 20)) (error "boom"))])
+      Creme.run_source(interp, %((parameterize ((p 20)) (error "boom"))))
     end
     Creme.run_source(interp, "(p)").write_string.should eq("10")
   end

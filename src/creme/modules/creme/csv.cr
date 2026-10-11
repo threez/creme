@@ -415,7 +415,7 @@ module Creme::Csv
     # and then re-mapped into the wanted type afterward. `nil` at EOF.
     def next_row(& : String -> U) : Array(U)? forall U
       token = @lexer.next_token
-      return nil if token.kind.eof?
+      return if token.kind.eof?
 
       cells = Array(U).new(@max_row_size)
       loop do
@@ -513,7 +513,7 @@ module Creme::Csv
         end
       end
 
-      def <<(value : Nil | Bool | Number) : Nil
+      def <<(value : Bool | Number?) : Nil
         case @quoting
         when .all?
           @builder.cell { |io| io << @quote_char; io << value; io << @quote_char }
@@ -661,7 +661,7 @@ module Creme::Builtins::CsvLibrary
     end
   end
 
-  private def csv_cell_value(v : SchemeValue, who : String) : String | Bool | Int64 | Float64 | Nil
+  private def csv_cell_value(v : SchemeValue, who : String) : String | Bool | Int64 | Float64?
     case v
     when SchemeStr    then v.value
     when SchemeChar   then v.value.to_s

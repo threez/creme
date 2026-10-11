@@ -74,11 +74,12 @@ private def load_toolchain(interp : Creme::Interpreter) : Nil
   # -- needed now that compiler.sld's own file-read genuinely works
   # reentrant here too, to avoid re-reading/re-executing one of these
   # same libraries' own source a second time.
-  Creme.run_source(interp, %(
+  Creme.run_source(interp, <<-SCM)
     (mark-self-hosted-library-loaded! '(creme peg))
     (mark-self-hosted-library-loaded! '(creme bytecode))
     (mark-self-hosted-library-loaded! '(creme compiler reader))
-    (mark-self-hosted-library-loaded! '(creme compiler compiler))))
+    (mark-self-hosted-library-loaded! '(creme compiler compiler))
+    SCM
 end
 
 private def run_native(path : String) : String

@@ -46,6 +46,6 @@ describe "R7RS §6.12 Environments and evaluation" do
       (import (scheme eval))
       (let ((f (eval '(lambda (f x) (f x x)) (environment '(scheme base)))))
         (f + 10))
-    SCM
+      SCM
   end
 end

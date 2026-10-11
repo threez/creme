@@ -125,7 +125,7 @@ module Creme
       else
         node = node.as(Branch)
         child = fast_push(node.children[-1], v)
-        return nil if child.nil?
+        return if child.nil?
         children = node.children.dup
         children[-1] = child
         sizes = node.sizes.dup
@@ -142,7 +142,7 @@ module Creme
       else
         node = node.as(Branch)
         child = fast_cons(node.children[0], v)
-        return nil if child.nil?
+        return if child.nil?
         children = node.children.dup
         children[0] = child
         sizes = node.sizes.map { |cum| cum + 1 }

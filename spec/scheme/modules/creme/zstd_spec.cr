@@ -18,7 +18,7 @@ private PRELUDE = <<-SCM
         (if (eof-object? chunk) acc (loop (bytevector-append acc chunk))))))
   (define (zstream-compress bytes) (let ((ob (open-output-bytevector))) (let ((zp (zstd-open-output-port ob))) (write-bytevector bytes zp) (close-port zp)) (get-output-bytevector ob)))
   (define (zstream-decompress frame) (read-all (zstd-open-input-port (open-input-bytevector frame))))
-SCM
+  SCM
 
 private def ws(src : String) : String
   run("#{PRELUDE} #{src}").write_string
@@ -56,11 +56,13 @@ describe "zstd module" do
   end
 
   it "stacks compress-over-compress and cascades close" do
-    ws(%((let ((ob (open-output-bytevector)))
-            (let ((zp (zstd-open-output-port (zstd-open-output-port ob))))
-              (write-bytevector (string->utf8 "stacked") zp)
-              (close-port zp))
-            (utf8->string (read-all (zstd-open-input-port (zstd-open-input-port (open-input-bytevector (get-output-bytevector ob))))))))).should eq(%("stacked"))
+    ws(<<-SCM).should eq(%("stacked"))
+      (let ((ob (open-output-bytevector)))
+        (let ((zp (zstd-open-output-port (zstd-open-output-port ob))))
+          (write-bytevector (string->utf8 "stacked") zp)
+          (close-port zp))
+        (utf8->string (read-all (zstd-open-input-port (zstd-open-input-port (open-input-bytevector (get-output-bytevector ob)))))))
+      SCM
   end
 
   it "streams a large multi-chunk payload" do
@@ -72,8 +74,10 @@ describe "zstd module" do
   end
 
   it "the wrapping ports are real binary ports" do
-    w(%((list (output-port? (zstd-open-output-port (open-output-bytevector)))
-              (binary-port? (zstd-open-output-port (open-output-bytevector)))))).should eq("(#t #t)")
+    w(<<-SCM).should eq("(#t #t)")
+      (list (output-port? (zstd-open-output-port (open-output-bytevector)))
+            (binary-port? (zstd-open-output-port (open-output-bytevector))))
+      SCM
   end
 
   it "raises opening an output port over an input port" do

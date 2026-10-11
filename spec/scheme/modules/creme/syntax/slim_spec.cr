@@ -48,7 +48,7 @@ describe "(creme syntax slim)" do
   it "raises when a '=' line has children" do
     interp = Creme::Interpreter.new(library_search_path: ["./modules"])
     expect_raises(Creme::SchemeRuntimeError, /cannot have children/) do
-      Creme.run_source(interp, %[(import (scheme base) (creme syntax slim)) (read-program "= 1\\n  li a" "t" (quote ()))])
+      Creme.run_source(interp, %((import (scheme base) (creme syntax slim)) (read-program "= 1\\n  li a" "t" (quote ()))))
     end
   end
 end
