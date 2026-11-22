@@ -62,6 +62,7 @@
 # so there's nothing to configure on this backend for that key.
 # ===========================================================================
 
+require "http/server"
 require "mux"
 
 # Caches the request body on the context itself: with middleware in front
